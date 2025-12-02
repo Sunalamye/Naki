@@ -1,9 +1,19 @@
 //
 //  WebViewModel.swift
-//  akagi
+//  Naki - 雀魂麻將 AI 助手
 //
 //  Created by Suoie on 2025/11/29.
-//  Updated: 2025/11/30 - 移除 Python 依賴，純 Swift 實現
+//
+//  核心視圖模型，負責：
+//  - 遊戲狀態管理 (GameState, BotStatus)
+//  - Bot 控制 (NativeBotController + MortalSwift)
+//  - 自動打牌邏輯 (AutoPlayController)
+//  - Debug Server (HTTP API)
+//  - WebView 整合 (JavaScript Bridge)
+//
+//  更新日誌:
+//  - 2025/11/30: 移除 Python 依賴，純 Swift 實現
+//  - 2025/12/02: v1.1.2 重構 - 提取重複代碼，清理未使用變數
 //
 
 import MortalSwift
@@ -58,6 +68,13 @@ class WebViewModel {
     private var lastAutoPlayTriggerTime: Date = .distantPast
     private var lastAutoPlayActionType: Recommendation.ActionType?
 
+    /// 當前正在執行的動作ID（用於追蹤而非阻擋）
+    private var currentExecutionId: UUID?
+
+    /// 上次觸發的動作和時間（防抖動）
+    private var lastTriggerKey: String?
+    private var lastTriggerTime: Date?
+
     init() {
         // 初始化 WebPage（用於簡單顯示）
         webPage = WebPage()
@@ -90,132 +107,90 @@ class WebViewModel {
         statusMessage = "Bot 已創建 (Player \(playerId))"
     }
 
-    /// 使用原生 Bot 處理 MJAI 事件
-    /// ⭐ MortalBot 是 actor，內部自動在背景執行 Core ML 推理
+    /// 處理單一 MJAI 事件
     func processNativeEvent(_ event: [String: Any]) async throws -> [String: Any]? {
         guard let controller = nativeBotController else {
             throw NativeBotError.botNotInitialized
         }
-
-        // ⭐ NativeBotController.react() 現在是 async
-        // MortalBot actor 內部會自動在背景執行 Core ML 推理
         let response = try await controller.react(event: event)
-
-        // 獲取狀態
-        let newGameState = controller.gameState
-        let newBotStatus = controller.botState
-        let newTehaiTiles = controller.tehaiMjai
-        let newTsumoTile = controller.lastTsumo
-        let newRecommendations = controller.lastRecommendations
-
-        // 獲取自動打牌所需資料
-        let lastAction = controller.lastAction
-        let tehaiForAutoPlay = controller.tehai
-        let tsumoForAutoPlay = controller.tsumo
-
-        // 更新 UI 狀態（在主線程）
-        await MainActor.run {
-            self.gameState = newGameState
-            self.botStatus = newBotStatus
-            self.tehaiTiles = newTehaiTiles
-            self.tsumoTile = newTsumoTile
-            self.recommendations = newRecommendations
-            self.recommendationCount = newRecommendations.count
-
-            if let firstRec = newRecommendations.first {
-                self.highlightedTile = firstRec.displayTile
-            }
-
-            // ⭐ 觸發自動打牌（全自動模式下使用 JS 查找正確的牌索引）
-            let autoMode = self.autoPlayController?.state.mode
-            let hasRecs = !newRecommendations.isEmpty
-            self.debugServer?.addLog("AutoCheck: mode=\(autoMode?.rawValue ?? "nil"), hasRecs=\(hasRecs), count=\(newRecommendations.count)")
-
-            if autoMode == .auto, hasRecs {
-                // ⭐ 根據動作類型決定延遲時間
-                let firstAction = newRecommendations.first?.actionType
-                let delay: TimeInterval
-                // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
-                switch firstAction {
-                case .hora:
-                    delay = 1.0  // 和牌: 等待遊戲 oplist 更新
-                case .chi, .pon, .kan:
-                    delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
-                case .some(.none):
-                    delay = 0.1  // 跳過: 要很快，否則遊戲會自動跳過
-                default:
-                    delay = 1.8  // 打牌: 較長延遲確保穩定
-                }
-                self.debugServer?.addLog("Auto-triggering \(firstAction?.rawValue ?? "?") (delay: \(delay)s)...")
-                self.triggerAutoPlayNow(delay: delay)
-            }
-        }
-
+        await MainActor.run { updateUIAfterBotResponse(from: controller) }
         return response
     }
 
-    /// 批量處理 MJAI 事件
-    /// ⭐ MortalBot 是 actor，內部自動在背景執行 Core ML 推理
+    /// 批量處理多個 MJAI 事件
     func processNativeEvents(_ events: [[String: Any]]) async throws -> [String: Any]? {
         guard let controller = nativeBotController else {
             throw NativeBotError.botNotInitialized
         }
-
-        // ⭐ NativeBotController.react() 現在是 async
-        // MortalBot actor 內部會自動在背景執行 Core ML 推理
         let response = try await controller.react(events: events)
+        await MainActor.run { updateUIAfterBotResponse(from: controller) }
+        return response
+    }
 
-        // 獲取狀態
-        let newGameState = controller.gameState
-        let newBotStatus = controller.botState
-        let newTehaiTiles = controller.tehaiMjai
-        let newTsumoTile = controller.lastTsumo
-        let newRecommendations = controller.lastRecommendations
+    /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
+    private func updateUIAfterBotResponse(from controller: NativeBotController) {
+        // 更新遊戲狀態
+        gameState = controller.gameState
+        botStatus = controller.botState
+        tehaiTiles = controller.tehaiMjai
+        tsumoTile = controller.lastTsumo
+        recommendations = controller.lastRecommendations
+        recommendationCount = recommendations.count
 
-        // 獲取自動打牌所需資料
-        let lastAction = controller.lastAction
-        let tehaiForAutoPlay = controller.tehai
-        let tsumoForAutoPlay = controller.tsumo
-
-        // 更新 UI 狀態（在主線程）
-        await MainActor.run {
-            self.gameState = newGameState
-            self.botStatus = newBotStatus
-            self.tehaiTiles = newTehaiTiles
-            self.tsumoTile = newTsumoTile
-            self.recommendations = newRecommendations
-            self.recommendationCount = newRecommendations.count
-
-            if let firstRec = newRecommendations.first {
-                self.highlightedTile = firstRec.displayTile
-            }
-
-            // ⭐ 觸發自動打牌（全自動模式下使用 JS 查找正確的牌索引）
-            let autoMode = self.autoPlayController?.state.mode
-            let hasRecs = !newRecommendations.isEmpty
-            self.debugServer?.addLog("AutoCheck2: mode=\(autoMode?.rawValue ?? "nil"), hasRecs=\(hasRecs), count=\(newRecommendations.count)")
-
-            if autoMode == .auto, hasRecs {
-                // ⭐ 根據動作類型決定延遲時間
-                let firstAction = newRecommendations.first?.actionType
-                let delay: TimeInterval
-                // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
-                switch firstAction {
-                case .hora:
-                    delay = 1.0  // 和牌: 等待遊戲 oplist 更新
-                case .chi, .pon, .kan:
-                    delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
-                case .some(.none):
-                    delay = 0.1  // 跳過: 要很快，否則遊戲會自動跳過
-                default:
-                    delay = 1.8  // 打牌: 較長延遲確保穩定
-                }
-                self.debugServer?.addLog("Auto-triggering2 \(firstAction?.rawValue ?? "?") (delay: \(delay)s)...")
-                self.triggerAutoPlayNow(delay: delay)
-            }
+        // 更新高亮牌
+        if let firstRec = recommendations.first {
+            highlightedTile = firstRec.displayTile
         }
 
-        return response
+        // 觸發自動打牌
+        triggerAutoPlayIfNeeded()
+    }
+
+    /// 根據當前推薦觸發自動打牌
+    private func triggerAutoPlayIfNeeded() {
+        let autoMode = autoPlayController?.state.mode
+        let hasRecs = !recommendations.isEmpty
+
+        guard autoMode == .auto, hasRecs else { return }
+
+        // 根據動作類型決定延遲時間
+        guard let firstRec = recommendations.first else { return }
+        let firstAction = firstRec.actionType
+        let tileName = firstRec.displayTile
+        let delay: TimeInterval = calculateDelay(for: firstAction)
+
+        // ⭐ 防抖動：如果同一個動作在短時間內已經觸發過，跳過
+        let triggerKey = "\(firstAction.rawValue)-\(tileName)"
+        let now = Date()
+        if let lastKey = lastTriggerKey,
+           let lastTime = lastTriggerTime,
+           lastKey == triggerKey,
+           now.timeIntervalSince(lastTime) < delay + 0.5 {
+            // 同一個動作在 delay + 0.5 秒內已觸發過，跳過
+            return
+        }
+
+        // 記錄這次觸發
+        lastTriggerKey = triggerKey
+        lastTriggerTime = now
+
+        debugServer?.addLog("AutoCheck: \(firstAction.rawValue)-\(tileName) (delay: \(delay)s)")
+        triggerAutoPlayNow(delay: delay)
+    }
+
+    /// 計算動作延遲時間
+    private func calculateDelay(for actionType: Recommendation.ActionType?) -> TimeInterval {
+        // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
+        switch actionType {
+        case .hora:
+            return 1.0   // 和牌: 等待遊戲 oplist 更新
+        case .chi, .pon, .kan:
+            return 1.5   // 副露: 等待遊戲 UI 完全準備好
+        case .some(.none):
+            return 0.1   // 跳過: 要很快，否則遊戲會自動跳過
+        default:
+            return 1.8   // 打牌: 較長延遲確保穩定
+        }
     }
 
     /// 刪除原生 Bot
@@ -283,17 +258,29 @@ class WebViewModel {
         let actionType = firstRec.actionType
         let tileName = firstRec.displayTile
 
+        // 生成執行 ID 用於追蹤
+        let executionId = UUID()
+        currentExecutionId = executionId
+
         bridgeLog("[WebViewModel] Triggering: \(actionType.rawValue) - \(tileName) (delay: \(delay)s)")
         debugServer?.addLog("Trigger: \(actionType.rawValue) - \(tileName)")
 
         // 延遲執行避免太快
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+
+            // 檢查是否被更新的觸發取代
+            if self.currentExecutionId != executionId {
+                self.debugServer?.addLog("Skip: superseded by newer trigger")
+                return
+            }
+
             // ⭐ hora 不使用重試機制，直接執行（時間窗口很短）
             if actionType == .hora {
-                self?.debugServer?.addLog("Hora: direct exec (no retry)")
-                self?.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+                self.debugServer?.addLog("Hora: direct exec (no retry)")
+                self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
             } else {
-                self?.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: 1)
+                self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: 1, executionId: executionId)
             }
         }
     }
@@ -308,7 +295,14 @@ class WebViewModel {
     ///   - actionType: 動作類型
     ///   - tileName: 牌名
     ///   - attempt: 當前嘗試次數
-    private func executeAutoPlayActionWithRetry(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int) {
+    ///   - executionId: 執行 ID，用於檢查是否被取代
+    private func executeAutoPlayActionWithRetry(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+
+        // ⭐ 檢查是否被新的觸發取代
+        if currentExecutionId != executionId {
+            debugServer?.addLog("⏭️ Retry cancelled: superseded (attempt \(attempt))")
+            return
+        }
 
         // 先檢查是否還有操作可執行
         let checkScript = """
@@ -326,6 +320,12 @@ class WebViewModel {
         webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
             guard let self = self else { return }
 
+            // ⭐ 再次檢查是否被取代（JS 回調後）
+            if self.currentExecutionId != executionId {
+                self.debugServer?.addLog("⏭️ Retry cancelled after JS: superseded")
+                return
+            }
+
             // 解析結果
             if let dict = result as? [String: Any],
                let hasOp = dict["hasOp"] as? Bool {
@@ -341,7 +341,7 @@ class WebViewModel {
                             self.debugServer?.addLog("Wait oplist \(attempt)/\(self.maxRetryAttempts) (\(reason))")
                         }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                            self?.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1)
+                            self?.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
                         }
                     } else {
                         // 超過最大嘗試次數
@@ -359,7 +359,7 @@ class WebViewModel {
 
                 // 0.1 秒後檢查是否成功
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                    self?.checkAndRetryIfNeeded(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt)
+                    self?.checkAndRetryIfNeeded(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
                 }
             } else {
                 // 無法解析，直接執行一次
@@ -371,7 +371,13 @@ class WebViewModel {
 
     /// 檢查動作是否成功，失敗則重試
     /// ⭐ 改進版：檢查畫面狀態而不只是 oplist
-    private func checkAndRetryIfNeeded(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int) {
+    private func checkAndRetryIfNeeded(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+
+        // ⭐ 檢查是否被新的觸發取代
+        if currentExecutionId != executionId {
+            debugServer?.addLog("⏭️ Check cancelled: superseded")
+            return
+        }
 
         // 根據動作類型使用不同的驗證腳本
         let checkScript = """
@@ -444,7 +450,7 @@ class WebViewModel {
 
                 // 重試
                 self.debugServer?.addLog("Retry \(attempt + 1): ops still present \(opInfo)")
-                self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1)
+                self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
             }
         }
     }
@@ -803,13 +809,13 @@ class WebViewModel {
                 ]
             }
 
-            var result: [String: Any] = [
+            let result: [String: Any] = [
                 "botStatus": [
                     "isActive": self.botStatus.isActive,
                     "playerId": self.botStatus.playerId
                 ],
                 "gameState": [
-                    "bakaze": self.gameState.bakazeDisplay,  // 用 String 而不是 enum
+                    "bakaze": self.gameState.bakazeDisplay,
                     "kyoku": self.gameState.kyoku,
                     "honba": self.gameState.honba
                 ],
