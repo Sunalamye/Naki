@@ -1,7 +1,7 @@
 # Naki (鳴き) - 雀魂麻將 AI 助手
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.1.1-green" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.1.2-green" alt="Version">
   <img src="https://img.shields.io/badge/Platform-macOS%2013+-blue" alt="Platform">
   <img src="https://img.shields.io/badge/Swift-5.9+-orange" alt="Swift">
   <img src="https://img.shields.io/badge/License-AGPL--3.0%20with%20Commons%20Clause-blue" alt="License">
@@ -230,6 +230,28 @@ tail -f /var/folders/.../T/akagi_websocket.log | grep -E "(Bridge|Bot|MJAI)"
 | [libriichi](../mortal-src/libriichi) | Mortal 遊戲邏輯庫 |
 | mortal.mlmodelc | Core ML 格式的 AI 模型 |
 
+## 📋 更新日誌
+
+### v1.1.2 (2025-12-02)
+- ✅ 改進自動打牌穩定性：加入 oplist 輪詢等待機制
+- ✅ 修復跳過 (Pass) 執行失敗的問題
+- ✅ 改進動作驗證邏輯：針對每種動作類型檢查對應的 oplist 操作
+- ✅ 優化延遲設定：跳過動作延遲從 0.5s 縮短至 0.1s
+
+### v1.1.1 (2025-12-02)
+- ✅ 修復自動和牌 (Hora) 執行順序問題
+- ✅ 調整各動作延遲時間
+
+### v1.1.0 (2025-12-02)
+- ✅ 新增自動打牌重試機制
+- ✅ 改進動作執行可靠性
+
+### v1.0.0 (2025-12-01)
+- 🎉 首次公開發布
+- ✅ 完整自動打牌功能（打牌/吃/碰/槓/立直/和牌/跳過）
+- ✅ Core ML 原生推理
+- ✅ Debug HTTP Server
+
 ## 📋 TODO / Roadmap
 
 ### 自動打牌功能
@@ -240,6 +262,8 @@ tail -f /var/folders/.../T/akagi_websocket.log | grep -E "(Bridge|Bot|MJAI)"
 - [x] 自動槓 (Kan)
 - [x] 自動和牌 (Hora)
 - [x] 自動跳過 (Pass)
+- [x] oplist 輪詢等待機制
+- [x] 動作執行驗證與重試
 
 ### 介面優化
 - [ ] 輪到自己時閃爍提示 + 出牌時高亮動畫

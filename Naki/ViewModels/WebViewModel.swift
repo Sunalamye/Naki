@@ -142,7 +142,7 @@ class WebViewModel {
                 case .chi, .pon, .kan:
                     delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
                 case .some(.none):
-                    delay = 0.5  // 跳過: 不能太慢，會被遊戲自動跳過
+                    delay = 0.1  // 跳過: 要很快，否則遊戲會自動跳過
                 default:
                     delay = 1.8  // 打牌: 較長延遲確保穩定
                 }
@@ -206,7 +206,7 @@ class WebViewModel {
                 case .chi, .pon, .kan:
                     delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
                 case .some(.none):
-                    delay = 0.5  // 跳過: 不能太慢，會被遊戲自動跳過
+                    delay = 0.1  // 跳過: 要很快，否則遊戲會自動跳過
                 default:
                     delay = 1.8  // 打牌: 較長延遲確保穩定
                 }
@@ -302,6 +302,7 @@ class WebViewModel {
     private let maxRetryAttempts = 30  // 30 次 x 0.1s = 最多等 3 秒
 
     /// 帶重試的自動打牌執行
+    /// ⭐ 改進版：如果 oplist 還沒準備好，會等待並重試
     /// - Parameters:
     ///   - webView: WKWebView 實例
     ///   - actionType: 動作類型
@@ -330,9 +331,22 @@ class WebViewModel {
                let hasOp = dict["hasOp"] as? Bool {
 
                 if !hasOp {
-                    // 沒有操作可執行了，可能已經成功或狀態改變
+                    // ⭐ 沒有 oplist，但可能是還沒準備好
+                    // 對於 pass/chi/pon/kan/hora，等待 oplist 出現
                     let reason = dict["reason"] as? String ?? "unknown"
-                    self.debugServer?.addLog("Retry check: no op (\(reason)), stopping")
+
+                    if attempt < self.maxRetryAttempts {
+                        // 繼續等待 oplist
+                        if attempt == 1 || attempt % 10 == 0 {
+                            self.debugServer?.addLog("Wait oplist \(attempt)/\(self.maxRetryAttempts) (\(reason))")
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                            self?.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1)
+                        }
+                    } else {
+                        // 超過最大嘗試次數
+                        self.debugServer?.addLog("❌ No oplist after \(attempt) attempts, giving up")
+                    }
                     return
                 }
 
@@ -356,17 +370,55 @@ class WebViewModel {
     }
 
     /// 檢查動作是否成功，失敗則重試
+    /// ⭐ 改進版：檢查畫面狀態而不只是 oplist
     private func checkAndRetryIfNeeded(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int) {
 
+        // 根據動作類型使用不同的驗證腳本
         let checkScript = """
         (function() {
             var dm = window.view.DesktopMgr.Inst;
             if (!dm) return {success: true, reason: 'no dm'};
-            if (!dm.oplist || dm.oplist.length === 0) return {success: true, reason: 'oplist cleared'};
 
-            // 還有操作，表示上次可能沒成功
-            var opTypes = dm.oplist.map(o => o.type);
-            return {success: false, opTypes: opTypes, count: dm.oplist.length};
+            var actionType = '\(actionType.rawValue)';
+            var tileName = '\(tileName)';
+
+            // ⭐ 檢查 oplist 是否還有我們要執行的操作
+            if (dm.oplist && dm.oplist.length > 0) {
+                var opTypes = dm.oplist.map(o => o.type);
+
+                // 根據動作類型檢查
+                if (actionType === 'discard') {
+                    // 打牌：檢查是否還有 type 1 (dapai)
+                    if (opTypes.includes(1)) {
+                        return {success: false, reason: 'discard op still present', opTypes: opTypes};
+                    }
+                } else if (actionType === 'chi') {
+                    if (opTypes.includes(2)) {
+                        return {success: false, reason: 'chi op still present', opTypes: opTypes};
+                    }
+                } else if (actionType === 'pon') {
+                    if (opTypes.includes(3)) {
+                        return {success: false, reason: 'pon op still present', opTypes: opTypes};
+                    }
+                } else if (actionType === 'kan') {
+                    if (opTypes.includes(4) || opTypes.includes(5) || opTypes.includes(6)) {
+                        return {success: false, reason: 'kan op still present', opTypes: opTypes};
+                    }
+                } else if (actionType === 'hora') {
+                    if (opTypes.includes(8) || opTypes.includes(9)) {
+                        return {success: false, reason: 'hora op still present', opTypes: opTypes};
+                    }
+                } else if (actionType === 'none') {
+                    // 跳過：如果還有吃碰槓和的選項，表示還沒跳過
+                    var hasCallOp = opTypes.some(t => t >= 2 && t <= 9);
+                    if (hasCallOp) {
+                        return {success: false, reason: 'call ops still present', opTypes: opTypes};
+                    }
+                }
+            }
+
+            // oplist 空了或不包含我們的操作，認為成功
+            return {success: true, reason: 'oplist cleared or action done'};
         })()
         """
 
