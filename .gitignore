@@ -1,0 +1,103 @@
+# Xcode
+#
+# gitignore contributors: remember to update Global/Xcode.gitignore, Objective-C.gitignore & Swift.gitignore
+
+## User settings
+xcuserdata/
+
+## Compatibility with Xcode 8 and earlier (Xcode 9 Workspaces)
+*.xcscmblueprint
+*.xccheckout
+
+## Build generated
+build/
+DerivedData/
+
+## Obj-C/Swift specific
+*.hmap
+
+## App packaging
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+## Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+## Swift Package Manager
+#
+# Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
+Packages/
+Package.pins
+Package.resolved
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+.swiftpm/
+.build/
+
+## CocoaPods
+#
+# Pods/
+# Podfile.lock
+# *.xcworkspace
+
+## Carthage
+#
+# Carthage/Build/
+# Carthage/Checkouts/
+
+## Accio dependency management
+Dependencies/
+.accio/
+
+## fastlane
+#
+# It is recommended to not store the screenshots in the git repo.
+# Instead, use fastlane to re-generate the screenshots whenever they are needed.
+# For more information about the recommended setup visit:
+# https://docs.fastlane.tools/best-practices/source-control/#source-control
+
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+## Code Injection
+#
+# After new calculation of VirtualAlias using injection you can clean previous injection files
+iOSInjectionProject/
+
+# Temporary files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE
+.idea/
+*.sublime-*
+.vscode/
+
+# Logs
+*.log
+
+# Core ML Models (too large for git)
+# Uncomment if you want to exclude models
+# *.mlmodelc/
+# *.mlpackage/
+
+# Secrets and credentials
+*.pem
+*.p12
+*.key
+.env
+.env.*
+
+# Archives
+*.xcarchive/
+
+# Build artifacts
+dist/
+
+# Video files
+*.mp4

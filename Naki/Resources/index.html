@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🀄️ 麻将 AI 助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            overflow: hidden;
+        }
+
+        .container {
+            max-width: 100%;
+            height: calc(100vh - 40px);
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.danger {
+            background: linear-gradient(135deg, #f56565 0%, #c53030 100%);
+        }
+
+        button.success {
+            background: linear-gradient(135deg, #48bb78 0%, #2f855a 100%);
+        }
+
+        .main-content {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .output-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .output {
+            background: #1a202c;
+            color: #68d391;
+            border-radius: 8px;
+            padding: 20px;
+            flex: 1;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+
+        .output::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .output::-webkit-scrollbar-track {
+            background: #2d3748;
+            border-radius: 4px;
+        }
+
+        .output::-webkit-scrollbar-thumb {
+            background: #4a5568;
+            border-radius: 4px;
+        }
+
+        .output::-webkit-scrollbar-thumb:hover {
+            background: #667eea;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+        }
+
+        .log-time {
+            color: #a0aec0;
+            margin-right: 8px;
+        }
+
+        .log-type-info {
+            color: #68d391;
+        }
+
+        .log-type-error {
+            color: #fc8181;
+        }
+
+        .log-type-success {
+            color: #4fd1c5;
+        }
+
+        .game-state {
+            flex: 1;
+            background: #f7fafc;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .player-info {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .player-info h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding: 8px;
+            background: #f7fafc;
+            border-radius: 4px;
+        }
+
+        .info-label {
+            color: #718096;
+            font-weight: 500;
+        }
+
+        .info-value {
+            color: #2d3748;
+            font-weight: 600;
+        }
+
+        .tile {
+            display: inline-block;
+            background: white;
+            border: 2px solid #cbd5e0;
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin: 2px;
+            font-weight: 700;
+            font-size: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s;
+        }
+
+        .tile:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .tile.red {
+            color: #e53e3e;
+            border-color: #e53e3e;
+        }
+
+        .recommendations {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #48bb78;
+        }
+
+        .recommendations h3 {
+            color: #48bb78;
+            margin-bottom: 10px;
+        }
+
+        .recommendation-item {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            background: #f7fafc;
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+
+        .recommendation-rank {
+            background: #667eea;
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            margin-right: 12px;
+        }
+
+        .recommendation-action {
+            flex: 1;
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .recommendation-score {
+            color: #667eea;
+            font-weight: 700;
+            font-family: 'Monaco', monospace;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🀄️ 麻将 AI 助手 Naki</h1>
+
+        <div class="controls">
+            <button onclick="createBot()" class="success">🤖 创建 Bot</button>
+            <button onclick="startGame()">🎮 开始游戏</button>
+            <button onclick="sendStartKyoku()">🎲 开始局</button>
+            <button onclick="sendTsumo()">🎴 摸牌 (1m)</button>
+            <button onclick="clearLog()">🗑️ 清空日志</button>
+            <button onclick="deleteBot()" class="danger">❌ 删除 Bot</button>
+        </div>
+
+        <div class="main-content">
+            <div class="output-panel">
+                <div class="output" id="output">
+                    <div class="log-entry">
+                        <span class="log-time">[系统]</span>
+                        <span class="log-type-info">欢迎使用麻将 AI 助手！请先点击"创建 Bot"</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="game-state" id="gameState">
+                <div class="player-info">
+                    <h3>📊 游戏状态</h3>
+                    <div class="info-row">
+                        <span class="info-label">状态</span>
+                        <span class="info-value">等待开始</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPlayerId = 0;
+        let gameHistory = [];
+        let botCreated = false;
+
+        // ============================================
+        // Swift Bridge - 调用 Swift 方法 (macOS 26 原生 WebView API)
+        // ============================================
+
+        function sendToSwift(messageName, params) {
+            // macOS 26 原生 WebView 使用统一的消息格式
+            window.webkit.messageHandlers.swiftBridge.postMessage({
+                name: messageName,
+                params: params
+            });
+        }
+
+        function createBot() {
+            log('正在创建 Bot...', 'info');
+            sendToSwift('createBot', {
+                playerId: currentPlayerId
+            });
+        }
+
+        function sendEvent(event) {
+            if (!botCreated) {
+                log('请先创建 Bot！', 'error');
+                return;
+            }
+
+            sendToSwift('sendEvent', {
+                playerId: currentPlayerId,
+                event: event
+            });
+            gameHistory.push(event);
+        }
+
+        function deleteBot() {
+            log('正在删除 Bot...', 'info');
+            sendToSwift('deleteBot', {
+                playerId: currentPlayerId
+            });
+        }
+
+        function nativeLog(message) {
+            sendToSwift('log', {
+                message: message
+            });
+        }
+
+        // ============================================
+        // Swift 回调函数 - 由 Swift 调用
+        // ============================================
+
+        function onBotCreated(data) {
+            botCreated = true;
+            log('✅ Bot 创建成功！Player ID: ' + data.playerId, 'success');
+            updateGameState({
+                status: 'Bot 已就绪',
+                playerId: data.playerId
+            });
+        }
+
+        function onBotAction(data) {
+            log('🎯 Bot 响应: ' + JSON.stringify(data.action, null, 2), 'success');
+
+            if (data.action) {
+                displayAction(data.action);
+            } else {
+                log('Bot 无动作 (状态更新)', 'info');
+            }
+        }
+
+        function onBotDeleted(data) {
+            botCreated = false;
+            log('✅ Bot 已删除', 'success');
+            gameHistory = [];
+            clearGameState();
+        }
+
+        function onError(data) {
+            log('❌ 错误: ' + data.message, 'error');
+        }
+
+        // ============================================
+        // 游戏逻辑
+        // ============================================
+
+        function startGame() {
+            const event = {
+                type: 'start_game',
+                names: ['Alice', 'Bob', 'Carol', 'Dave'],
+                id: currentPlayerId
+            };
+
+            log('📤 发送: start_game', 'info');
+            sendEvent(event);
+        }
+
+        function sendStartKyoku() {
+            const event = {
+                type: 'start_kyoku',
+                bakaze: 'E',
+                dora_marker: '5p',
+                kyoku: 1,
+                honba: 0,
+                kyotaku: 0,
+                oya: 0,
+                scores: [25000, 25000, 25000, 25000],
+                tehais: [
+                    ['1m','2m','3m','4m','5m','6m','7m','8m','9m','1p','2p','3p','4p'],
+                    ['?','?','?','?','?','?','?','?','?','?','?','?','?'],
+                    ['?','?','?','?','?','?','?','?','?','?','?','?','?'],
+                    ['?','?','?','?','?','?','?','?','?','?','?','?','?']
+                ]
+            };
+
+            log('📤 发送: start_kyoku', 'info');
+            sendEvent(event);
+        }
+
+        function sendTsumo() {
+            const event = {
+                type: 'tsumo',
+                actor: currentPlayerId,
+                pai: '1m'
+            };
+
+            log('📤 发送: tsumo (1m)', 'info');
+            sendEvent(event);
+        }
+
+        // ============================================
+        // UI 辅助函数
+        // ============================================
+
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">[${timestamp}]</span>
+                <span class="log-type-${type}">${message}</span>
+            `;
+
+            output.appendChild(entry);
+            output.scrollTop = output.scrollHeight;
+
+            // 通知 Swift
+            nativeLog(`[${type}] ${message}`);
+        }
+
+        function clearLog() {
+            document.getElementById('output').innerHTML = '';
+            log('日志已清空', 'info');
+        }
+
+        function updateGameState(state) {
+            const gameState = document.getElementById('gameState');
+
+            let html = '<div class="player-info"><h3>📊 游戏状态</h3>';
+
+            for (const [key, value] of Object.entries(state)) {
+                html += `
+                    <div class="info-row">
+                        <span class="info-label">${key}</span>
+                        <span class="info-value">${value}</span>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            gameState.innerHTML = html;
+        }
+
+        function clearGameState() {
+            updateGameState({ status: '等待开始' });
+        }
+
+        function displayAction(action) {
+            const gameState = document.getElementById('gameState');
+
+            let html = '<div class="player-info">';
+            html += `<h3>🎯 最新动作</h3>`;
+
+            html += `
+                <div class="info-row">
+                    <span class="info-label">类型</span>
+                    <span class="info-value">${action.type}</span>
+                </div>
+            `;
+
+            if (action.pai) {
+                html += `
+                    <div class="info-row">
+                        <span class="info-label">牌</span>
+                        <span class="info-value"><span class="tile">${action.pai}</span></span>
+                    </div>
+                `;
+            }
+
+            if (action.actor !== undefined) {
+                html += `
+                    <div class="info-row">
+                        <span class="info-label">玩家</span>
+                        <span class="info-value">${action.actor}</span>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+
+            // 显示 Q 值推荐
+            if (action.meta && action.meta.q_values) {
+                html += '<div class="recommendations">';
+                html += '<h3>💡 AI 推荐</h3>';
+
+                const qValues = action.meta.q_values;
+                const topN = 5;
+
+                // 找出前 N 个最高的 Q 值
+                const indexed = qValues.map((val, idx) => ({ val, idx }));
+                indexed.sort((a, b) => b.val - a.val);
+
+                for (let i = 0; i < Math.min(topN, indexed.length); i++) {
+                    const item = indexed[i];
+                    html += `
+                        <div class="recommendation-item">
+                            <div class="recommendation-rank">${i + 1}</div>
+                            <div class="recommendation-action">Action ${item.idx}</div>
+                            <div class="recommendation-score">${item.val.toFixed(4)}</div>
+                        </div>
+                    `;
+                }
+
+                html += '</div>';
+
+                // 显示统计信息
+                if (action.meta.eval_time_ns) {
+                    html += '<div class="stats">';
+                    html += `
+                        <div class="stat-card">
+                            <div class="stat-value">${(action.meta.eval_time_ns / 1000000).toFixed(2)}</div>
+                            <div class="stat-label">评估耗时 (ms)</div>
+                        </div>
+                    `;
+                    html += `
+                        <div class="stat-card">
+                            <div class="stat-value">${qValues.length}</div>
+                            <div class="stat-label">动作空间</div>
+                        </div>
+                    `;
+                    html += `
+                        <div class="stat-card">
+                            <div class="stat-value">${action.meta.is_greedy ? '是' : '否'}</div>
+                            <div class="stat-label">贪心策略</div>
+                        </div>
+                    `;
+                    html += '</div>';
+                }
+            }
+
+            gameState.innerHTML = html;
+        }
+
+        // 初始化
+        log('🚀 界面已加载，准备就绪', 'success');
+    </script>
+</body>
+</html>
