@@ -138,11 +138,11 @@ class WebViewModel {
                 // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
                 switch firstAction {
                 case .hora:
-                    delay = 0.05  // 和牌: 盡快執行，不能錯過
+                    delay = 1.0  // 和牌: 等待遊戲 oplist 更新
                 case .chi, .pon, .kan:
                     delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
                 case .some(.none):
-                    delay = 1.2  // 跳過: 等待其他玩家動作完成
+                    delay = 0.5  // 跳過: 不能太慢，會被遊戲自動跳過
                 default:
                     delay = 1.8  // 打牌: 較長延遲確保穩定
                 }
@@ -202,11 +202,11 @@ class WebViewModel {
                 // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
                 switch firstAction {
                 case .hora:
-                    delay = 0.05  // 和牌: 盡快執行，不能錯過
+                    delay = 1.0  // 和牌: 等待遊戲 oplist 更新
                 case .chi, .pon, .kan:
                     delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
                 case .some(.none):
-                    delay = 1.2  // 跳過: 等待其他玩家動作完成
+                    delay = 0.5  // 跳過: 不能太慢，會被遊戲自動跳過
                 default:
                     delay = 1.8  // 打牌: 較長延遲確保穩定
                 }
@@ -243,7 +243,7 @@ class WebViewModel {
             // 注意：.none 會跟 Optional.none 衝突，所以要用完整類型名
             switch firstAction {
             case .hora:
-                delay = 0.05  // 和牌: 盡快執行，不能錯過
+                delay = 0  // 和牌: 立即執行，時間窗口極短
             case .chi, .pon, .kan:
                 delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
             case .some(.none):
