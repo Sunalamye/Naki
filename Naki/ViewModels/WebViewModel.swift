@@ -138,13 +138,13 @@ class WebViewModel {
                 // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
                 switch firstAction {
                 case .hora:
-                    delay = 0.1  // 和牌: 快速執行，不能錯過
+                    delay = 0.05  // 和牌: 盡快執行，不能錯過
                 case .chi, .pon, .kan:
-                    delay = 0.8  // 副露: 稍等一下讓遊戲 UI 準備好
+                    delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
                 case .some(.none):
-                    delay = 0.5  // 跳過: 中等延遲
+                    delay = 1.2  // 跳過: 等待其他玩家動作完成
                 default:
-                    delay = 1.0  // 打牌: 稍長延遲
+                    delay = 1.8  // 打牌: 較長延遲確保穩定
                 }
                 self.debugServer?.addLog("Auto-triggering \(firstAction?.rawValue ?? "?") (delay: \(delay)s)...")
                 self.triggerAutoPlayNow(delay: delay)
@@ -202,13 +202,13 @@ class WebViewModel {
                 // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
                 switch firstAction {
                 case .hora:
-                    delay = 0.1  // 和牌: 快速執行
+                    delay = 0.05  // 和牌: 盡快執行，不能錯過
                 case .chi, .pon, .kan:
-                    delay = 0.8  // 副露: 稍等一下
+                    delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
                 case .some(.none):
-                    delay = 0.5  // 跳過: 中等延遲
+                    delay = 1.2  // 跳過: 等待其他玩家動作完成
                 default:
-                    delay = 1.0  // 打牌: 稍長延遲
+                    delay = 1.8  // 打牌: 較長延遲確保穩定
                 }
                 self.debugServer?.addLog("Auto-triggering2 \(firstAction?.rawValue ?? "?") (delay: \(delay)s)...")
                 self.triggerAutoPlayNow(delay: delay)
@@ -243,13 +243,13 @@ class WebViewModel {
             // 注意：.none 會跟 Optional.none 衝突，所以要用完整類型名
             switch firstAction {
             case .hora:
-                delay = 0.1  // 和牌: 快速執行
+                delay = 0.05  // 和牌: 盡快執行，不能錯過
             case .chi, .pon, .kan:
-                delay = 0.8  // 副露: 稍等一下
+                delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
             case .some(.none):
-                delay = 0.5  // 跳過
+                delay = 1.2  // 跳過: 等待其他玩家動作完成
             default:
-                delay = 1.0  // 打牌
+                delay = 1.8  // 打牌: 較長延遲確保穩定
             }
             debugServer?.addLog("Auto-triggering on mode change: \(firstAction?.rawValue ?? "?") (delay: \(delay)s)")
             triggerAutoPlayNow(delay: delay)
@@ -288,7 +288,112 @@ class WebViewModel {
 
         // 延遲執行避免太快
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+            // ⭐ hora 不使用重試機制，直接執行（時間窗口很短）
+            if actionType == .hora {
+                self?.debugServer?.addLog("Hora: direct exec (no retry)")
+                self?.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+            } else {
+                self?.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: 1)
+            }
+        }
+    }
+
+    /// 最大重試次數
+    private let maxRetryAttempts = 30  // 30 次 x 0.1s = 最多等 3 秒
+
+    /// 帶重試的自動打牌執行
+    /// - Parameters:
+    ///   - webView: WKWebView 實例
+    ///   - actionType: 動作類型
+    ///   - tileName: 牌名
+    ///   - attempt: 當前嘗試次數
+    private func executeAutoPlayActionWithRetry(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int) {
+
+        // 先檢查是否還有操作可執行
+        let checkScript = """
+        (function() {
+            var dm = window.view.DesktopMgr.Inst;
+            if (!dm) return {hasOp: false, reason: 'no dm'};
+            if (!dm.oplist || dm.oplist.length === 0) return {hasOp: false, reason: 'no oplist'};
+
+            // 檢查是否還有待處理的操作
+            var opTypes = dm.oplist.map(o => o.type);
+            return {hasOp: true, opTypes: opTypes, count: dm.oplist.length};
+        })()
+        """
+
+        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
+            guard let self = self else { return }
+
+            // 解析結果
+            if let dict = result as? [String: Any],
+               let hasOp = dict["hasOp"] as? Bool {
+
+                if !hasOp {
+                    // 沒有操作可執行了，可能已經成功或狀態改變
+                    let reason = dict["reason"] as? String ?? "unknown"
+                    self.debugServer?.addLog("Retry check: no op (\(reason)), stopping")
+                    return
+                }
+
+                // 還有操作，執行動作
+                let opInfo = dict["opTypes"] as? [Int] ?? []
+                self.debugServer?.addLog("Attempt \(attempt): ops=\(opInfo)")
+
+                // 執行動作
+                self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+
+                // 0.1 秒後檢查是否成功
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.checkAndRetryIfNeeded(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt)
+                }
+            } else {
+                // 無法解析，直接執行一次
+                self.debugServer?.addLog("Attempt \(attempt): check failed, exec anyway")
+                self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+            }
+        }
+    }
+
+    /// 檢查動作是否成功，失敗則重試
+    private func checkAndRetryIfNeeded(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int) {
+
+        let checkScript = """
+        (function() {
+            var dm = window.view.DesktopMgr.Inst;
+            if (!dm) return {success: true, reason: 'no dm'};
+            if (!dm.oplist || dm.oplist.length === 0) return {success: true, reason: 'oplist cleared'};
+
+            // 還有操作，表示上次可能沒成功
+            var opTypes = dm.oplist.map(o => o.type);
+            return {success: false, opTypes: opTypes, count: dm.oplist.length};
+        })()
+        """
+
+        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
+            guard let self = self else { return }
+
+            if let dict = result as? [String: Any],
+               let success = dict["success"] as? Bool {
+
+                if success {
+                    let reason = dict["reason"] as? String ?? "ok"
+                    self.debugServer?.addLog("✅ Action success after \(attempt) attempts (\(reason))")
+                    return
+                }
+
+                // 失敗，需要重試
+                let opInfo = dict["opTypes"] as? [Int] ?? []
+
+                if attempt >= self.maxRetryAttempts {
+                    self.debugServer?.addLog("❌ Max retries reached (\(attempt)), ops=\(opInfo)")
+                    return
+                }
+
+                // 重試
+                self.debugServer?.addLog("Retry \(attempt + 1): ops still present \(opInfo)")
+                self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1)
+            }
         }
     }
 

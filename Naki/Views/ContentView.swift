@@ -367,37 +367,12 @@ struct SettingsPanel: View {
 
                             Divider()
 
-                            // 測試按鈕
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Button("測試點擊位置") {
-                                        viewModel.testAutoPlayIndicators()
-                                    }
-                                    .buttonStyle(.bordered)
-
-                                    Button("測試單擊") {
-                                        viewModel.testSingleClick()
-                                    }
-                                    .buttonStyle(.bordered)
+                            // 測試按鈕（僅保留必要的）
+                            HStack {
+                                Button("測試點擊位置") {
+                                    viewModel.testAutoPlayIndicators()
                                 }
-
-                                HStack {
-                                    Button("🔍 探測 API") {
-                                        viewModel.detectGameAPI()
-                                    }
-                                    .buttonStyle(.bordered)
-
-                                    Button("🔬 深度探索") {
-                                        viewModel.exploreGameObjects()
-                                    }
-                                    .buttonStyle(.bordered)
-
-                                    Button("🎯 找手牌") {
-                                        viewModel.findHandTiles()
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
-                                .help("搜尋遊戲內部 API 以自動計算座標")
+                                .buttonStyle(.bordered)
                             }
                             .font(.caption)
                         }

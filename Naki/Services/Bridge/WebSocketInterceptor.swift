@@ -1013,6 +1013,30 @@ class WebSocketInterceptor {
                             return false;
                         }
 
+                        if (!window.app || !window.app.NetAgent) {
+                            console.error('[Naki API] NetAgent not available');
+                            return false;
+                        }
+
+                        // ⭐ 自摸/榮和 (type 8/9) 優先處理 - 使用 inputOperation
+                        // 因為 hora 需要從 oplist 中動態偵測是 tsumo(8) 還是 ron(9)
+                        if (opType === 8 || opType === 9) {
+                            // 找 oplist 中的 hora 操作 (可能是 8 或 9)
+                            const horaOp = dm.oplist.find(o => o.type === 8 || o.type === 9);
+                            if (!horaOp) {
+                                console.error('[Naki API] No hora operation in oplist');
+                                console.log('[Naki API] Available ops:', dm.oplist.map(o => o.type));
+                                return false;
+                            }
+                            const actualType = horaOp.type;
+                            window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
+                                type: actualType,
+                                timeuse: 1
+                            });
+                            console.log('[Naki API] Sent hora:', { type: actualType, typeName: actualType === 8 ? 'tsumo' : 'ron' });
+                            return true;
+                        }
+
                         // 找到對應的操作
                         const opIndex = dm.oplist.findIndex(o => o.type === opType);
                         if (opIndex < 0) {
@@ -1023,11 +1047,6 @@ class WebSocketInterceptor {
 
                         const op = dm.oplist[opIndex];
                         console.log('[Naki API] Found operation:', opType, 'at index', opIndex, 'combination:', op.combination);
-
-                        if (!window.app || !window.app.NetAgent) {
-                            console.error('[Naki API] NetAgent not available');
-                            return false;
-                        }
 
                         // ⭐ 立直 (type 7) 使用 inputOperation
                         if (opType === 7) {
@@ -1047,20 +1066,6 @@ class WebSocketInterceptor {
                                 timeuse: 1
                             });
                             console.log('[Naki API] Sent riichi:', { tile, moqie: isMoqie });
-                            return true;
-                        }
-
-                        // ⭐ 自摸/榮和 (type 8/9) 使用 inputOperation
-                        // 直接從 oplist 找到和牌操作的 type，不依賴傳入的 opType
-                        if (opType === 8 || opType === 9) {
-                            // 找 oplist 中的 hora 操作 (可能是 8 或 9)
-                            const horaOp = dm.oplist.find(o => o.type === 8 || o.type === 9);
-                            const actualType = horaOp ? horaOp.type : opType;
-                            window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
-                                type: actualType,
-                                timeuse: 1
-                            });
-                            console.log('[Naki API] Sent hora:', { type: actualType, originalOpType: opType });
                             return true;
                         }
 
@@ -1223,17 +1228,24 @@ class WebSocketInterceptor {
                                 case 'hora':
                                     // ⭐ 和牌：自動偵測是 tsumo(8) 還是 ron(9)
                                     const dm2 = window.view.DesktopMgr.Inst;
-                                    if (dm2 && dm2.oplist) {
+                                    console.log('[Naki API] hora: dm2=', !!dm2, 'oplist=', dm2?.oplist?.map(o => o.type));
+                                    if (dm2 && dm2.oplist && dm2.oplist.length > 0) {
                                         const horaOp = dm2.oplist.find(o => o.type === 8 || o.type === 9);
+                                        console.log('[Naki API] hora: found horaOp=', horaOp?.type);
                                         if (horaOp) {
                                             const horaType = horaOp.type;
                                             console.log('[Naki API] Detected hora type:', horaType, horaType === 8 ? 'tsumo' : 'ron');
                                             success = this.executeOperation(horaType);
-                                            console.log('[Naki API] hora result:', success);
-                                            if (success) return true;
+                                            console.log('[Naki API] hora executeOperation result:', success);
+                                            if (success) return {executed: true, type: horaType};
                                         } else {
-                                            console.log('[Naki API] No hora operation in oplist');
+                                            console.log('[Naki API] No hora operation in oplist, types:', dm2.oplist.map(o => o.type));
+                                            // 嘗試備用方案：直接點擊和牌按鈕
+                                            return {executed: false, fallback: 'clicking', types: dm2.oplist.map(o => o.type)};
                                         }
+                                    } else {
+                                        console.log('[Naki API] hora: no oplist available');
+                                        return {executed: false, error: 'no oplist'};
                                     }
                                     break;
 
