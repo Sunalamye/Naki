@@ -1,7 +1,7 @@
 # Naki (鳴き) - 雀魂麻將 AI 助手
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.1.2-green" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.1.3-green" alt="Version">
   <img src="https://img.shields.io/badge/Platform-macOS%2013+-blue" alt="Platform">
   <img src="https://img.shields.io/badge/Swift-5.9+-orange" alt="Swift">
   <img src="https://img.shields.io/badge/License-AGPL--3.0%20with%20Commons%20Clause-blue" alt="License">
@@ -231,6 +231,11 @@ tail -f /var/folders/.../T/akagi_websocket.log | grep -E "(Bridge|Bot|MJAI)"
 | mortal.mlmodelc | Core ML 格式的 AI 模型 |
 
 ## 📋 更新日誌
+
+### v1.1.3 (2025-12-02)
+- ✅ 修復自動打牌並發問題：舊動作重試循環現在會正確退出
+- ✅ 加入防抖動機制：避免同一動作在短時間內重複觸發
+- ✅ 優化 log 輸出：減少重複訊息
 
 ### v1.1.2 (2025-12-02)
 - ✅ 改進自動打牌穩定性：加入 oplist 輪詢等待機制
