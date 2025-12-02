@@ -357,7 +357,21 @@ class WebViewModel {
                 // 執行動作
                 self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
 
-                // 0.1 秒後檢查是否成功
+                // ⭐ pass 操作：較長間隔 (0.5s)，最多重試 5 次
+                if actionType == .none {
+                    let maxPassRetries = 5
+                    if attempt >= maxPassRetries {
+                        self.debugServer?.addLog("✅ Pass sent (\(attempt) attempts)")
+                        return
+                    }
+                    // 0.5 秒後檢查，給伺服器足夠時間處理
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        self?.checkAndRetryIfNeeded(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
+                    }
+                    return
+                }
+
+                // 其他操作：0.1 秒後檢查是否成功
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                     self?.checkAndRetryIfNeeded(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
                 }
@@ -593,6 +607,20 @@ class WebViewModel {
 
         case .chi:
             // ⭐ 吃操作：chi_0=chiLow(被吃牌最小), chi_1=chiMid(中間), chi_2=chiHigh(最大)
+            //
+            // Mortal 的 chi 類型定義：
+            //   chi_0 (chiLow)  = 被吃的牌在順子中最小 (例如吃 1，用 2-3 組成 1-2-3)
+            //   chi_1 (chiMid)  = 被吃的牌在順子中間 (例如吃 2，用 1-3 組成 1-2-3)
+            //   chi_2 (chiHigh) = 被吃的牌在順子中最大 (例如吃 3，用 1-2 組成 1-2-3)
+            //
+            // 遊戲的 combination 陣列按手牌順序排列（從小到大）：
+            //   例如吃 3p，combinations = ["1p|2p", "2p|4p", "4p|5p"]
+            //   - index 0: 1p|2p → 1-2-3，被吃牌 3 是最大 → chi_2
+            //   - index 1: 2p|4p → 2-3-4，被吃牌 3 是中間 → chi_1
+            //   - index 2: 4p|5p → 3-4-5，被吃牌 3 是最小 → chi_0
+            //
+            // 所以映射是反轉的：gameIndex = count - 1 - chiType
+            //
             var chiType = 0  // 0=low, 1=mid, 2=high
             if tileName.hasPrefix("chi_"), let idx = Int(String(tileName.dropFirst(4))) {
                 chiType = idx
@@ -605,7 +633,7 @@ class WebViewModel {
                 var chiOp = dm.oplist.find(o => o.type === 2);
                 if (!chiOp) return {available: false, error: 'no chi op'};
 
-                // 組合格式: ["3p|4p", "4p|6p"] 表示可用的手牌組合
+                // 組合格式: ["1p|2p", "2p|4p", "4p|5p"] 表示可用的手牌組合（按數值從小到大）
                 var combinations = chiOp.combination || [];
 
                 // 獲取被吃的牌 (上家打出的牌)
@@ -630,10 +658,17 @@ class WebViewModel {
                     return
                 }
 
+                // ⭐ 反轉映射：chi_0 → 最後一個，chi_2 → 第一個
                 // 如果只有一個組合，直接用 0
-                let combIndex = combinations.count == 1 ? 0 : chiType
+                let combIndex: Int
+                if combinations.count == 1 {
+                    combIndex = 0
+                } else {
+                    // gameIndex = count - 1 - chiType
+                    combIndex = max(0, combinations.count - 1 - chiType)
+                }
                 let combInfo = combinations.isEmpty ? "" : " [\(combinations.joined(separator: ", "))]"
-                self?.debugServer?.addLog("Chi: type=\(chiType) combIdx=\(combIndex)\(combInfo)")
+                self?.debugServer?.addLog("Chi: mortal=chi_\(chiType) → gameIdx=\(combIndex)\(combInfo)")
 
                 // 執行吃操作
                 let script = "window.__nakiGameAPI.smartExecute('chi', {chiIndex: \(combIndex)})"
@@ -664,6 +699,8 @@ class WebViewModel {
             webView.evaluateJavaScript(script) { [weak self] result, error in
                 if let error = error {
                     self?.debugServer?.addLog("pass error: \(error.localizedDescription)")
+                } else if let resultNum = result as? Int, resultNum > 0 {
+                    self?.debugServer?.addLog("pass OK")
                 } else {
                     self?.debugServer?.addLog("pass result: \(String(describing: result))")
                 }

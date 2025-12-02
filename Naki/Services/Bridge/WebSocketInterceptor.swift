@@ -975,23 +975,26 @@ class WebSocketInterceptor {
                     }
                 },
 
-                // ⭐ 執行跳過操作 - 使用 NetAgent API
+                // ⭐ 執行跳過操作 - 使用 cancel_operation API
                 pass: function() {
                     try {
                         const dm = window.view.DesktopMgr.Inst;
+                        if (!dm) {
+                            console.error('[Naki API] No DesktopMgr');
+                            return false;
+                        }
 
                         // 先檢查是否有操作可以跳過
                         console.log('[Naki API] Pass check - oplist:', dm.oplist ? dm.oplist.map(o => o.type) : 'none');
 
-                        // ⭐ 使用 NetAgent.sendReq2MJ 發送跳過請求
-                        // 正確的 API 是 cancel_operation: true
+                        // ⭐ 使用 NetAgent cancel_operation (對吃/碰/槓機會有效)
                         if (window.app && window.app.NetAgent) {
                             window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
                                 cancel_operation: true,
                                 timeuse: 1
                             });
                             console.log('[Naki API] Sent pass via cancel_operation');
-                            return true;
+                            return 1;
                         }
 
                         console.error('[Naki API] NetAgent not available');

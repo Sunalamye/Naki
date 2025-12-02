@@ -26,9 +26,9 @@ class DebugServer {
     /// 日誌回調
     var onLog: ((String) -> Void)?
 
-    /// ⭐ 日誌存儲（最多保留 100 條）
+    /// ⭐ 日誌存儲（最多保留 10000 條）
     private var logBuffer: [String] = []
-    private let maxLogCount = 100
+    private let maxLogCount = 10000
 
     /// ⭐ 獲取 Bot 狀態的回調
     var getBotStatus: (() -> [String: Any])?
