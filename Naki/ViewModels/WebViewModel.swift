@@ -75,6 +75,9 @@ class WebViewModel {
     private var lastTriggerKey: String?
     private var lastTriggerTime: Date?
 
+    /// 定期檢查計時器
+    private var autoPlayCheckTimer: Timer?
+
     init() {
         // 初始化 WebPage（用於簡單顯示）
         webPage = WebPage()
@@ -91,7 +94,44 @@ class WebViewModel {
         // ⭐ 自動設置全自動打牌模式
         autoPlayController?.setMode(.auto)
 
+        // ⭐ 啟動定期檢查計時器（每 2 秒檢查一次）
+        startAutoPlayCheckTimer()
+
         statusMessage = "準備就緒 (全自動模式)"
+    }
+
+    /// 啟動定期檢查計時器
+    private func startAutoPlayCheckTimer() {
+        autoPlayCheckTimer?.invalidate()
+        autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.checkAndRetriggerAutoPlay()
+        }
+    }
+
+    /// 定期檢查：如果有推薦且沒有正在執行的動作，重新觸發
+    private func checkAndRetriggerAutoPlay() {
+        guard autoPlayController?.state.mode == .auto,
+              !recommendations.isEmpty,
+              currentExecutionId == nil,  // 沒有正在執行的動作
+              let webView = wkWebView else { return }
+
+        // 檢查遊戲是否有可用操作
+        let checkScript = """
+        (function() {
+            var dm = window.view.DesktopMgr.Inst;
+            if (!dm || !dm.oplist || dm.oplist.length === 0) return false;
+            return true;
+        })()
+        """
+
+        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
+            guard let self = self,
+                  let hasOp = result as? Bool, hasOp else { return }
+
+            // 有 oplist 且有推薦，重新觸發
+            self.debugServer?.addLog("⏰ Timer: retrigger auto-play")
+            self.triggerAutoPlayNow(delay: 0.1)  // 短延遲立即執行
+        }
     }
 
     // MARK: - Native Bot Methods
@@ -160,9 +200,13 @@ class WebViewModel {
         let delay: TimeInterval = calculateDelay(for: firstAction)
 
         // ⭐ 防抖動：如果同一個動作在短時間內已經觸發過，跳過
+        // 但對於 none (pass) 動作，不使用防抖動，因為每次有新的副露機會都需要響應
         let triggerKey = "\(firstAction.rawValue)-\(tileName)"
         let now = Date()
-        if let lastKey = lastTriggerKey,
+        let isPassAction = firstAction == .none
+
+        if !isPassAction,  // pass 動作不受防抖動限制
+           let lastKey = lastTriggerKey,
            let lastTime = lastTriggerTime,
            lastKey == triggerKey,
            now.timeIntervalSince(lastTime) < delay + 0.5 {
@@ -187,7 +231,7 @@ class WebViewModel {
         case .chi, .pon, .kan:
             return 1.5   // 副露: 等待遊戲 UI 完全準備好
         case .some(.none):
-            return 0.1   // 跳過: 要很快，否則遊戲會自動跳過
+            return 1.0   // 跳過: 等待遊戲 oplist 準備好（太短會在 oplist 出現前執行）
         default:
             return 1.8   // 打牌: 較長延遲確保穩定
         }
@@ -286,7 +330,7 @@ class WebViewModel {
     }
 
     /// 最大重試次數
-    private let maxRetryAttempts = 30  // 30 次 x 0.1s = 最多等 3 秒
+    private let maxRetryAttempts = 50  // 50 次 x 0.1s = 最多等 5 秒
 
     /// 帶重試的自動打牌執行
     /// ⭐ 改進版：如果 oplist 還沒準備好，會等待並重試
@@ -331,10 +375,23 @@ class WebViewModel {
                let hasOp = dict["hasOp"] as? Bool {
 
                 if !hasOp {
-                    // ⭐ 沒有 oplist，但可能是還沒準備好
-                    // 對於 pass/chi/pon/kan/hora，等待 oplist 出現
+                    // ⭐ 沒有 oplist
                     let reason = dict["reason"] as? String ?? "unknown"
 
+                    // ⭐ 打牌 (discard) 不需要等待 oplist，直接執行
+                    // 因為打牌只需要輪到自己，不需要特定的 oplist
+                    if actionType == .discard {
+                        self.debugServer?.addLog("Discard: no oplist, exec directly")
+                        self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+                        // 檢查是否成功（延遲後檢查 oplist 是否清空）
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                            self?.debugServer?.addLog("✅ Discard sent")
+                            self?.currentExecutionId = nil
+                        }
+                        return
+                    }
+
+                    // ⭐ 其他動作（pass/chi/pon/kan/hora/riichi）需要等待 oplist
                     if attempt < self.maxRetryAttempts {
                         // 繼續等待 oplist
                         if attempt == 1 || attempt % 10 == 0 {
@@ -345,7 +402,14 @@ class WebViewModel {
                         }
                     } else {
                         // 超過最大嘗試次數
-                        self.debugServer?.addLog("❌ No oplist after \(attempt) attempts, giving up")
+                        // 對於 pass，如果等了很久還沒有 oplist，可能真的沒有機會
+                        if actionType == .none {
+                            self.debugServer?.addLog("✅ Pass: no oplist after \(attempt) attempts, no opportunity")
+                        } else {
+                            self.debugServer?.addLog("❌ No oplist after \(attempt) attempts, giving up")
+                        }
+                        // ⭐ 清除執行 ID，讓定期檢查可以重新觸發
+                        self.currentExecutionId = nil
                     }
                     return
                 }
@@ -451,6 +515,7 @@ class WebViewModel {
                 if success {
                     let reason = dict["reason"] as? String ?? "ok"
                     self.debugServer?.addLog("✅ Action success after \(attempt) attempts (\(reason))")
+                    self.currentExecutionId = nil  // ⭐ 清除執行 ID
                     return
                 }
 
@@ -459,6 +524,7 @@ class WebViewModel {
 
                 if attempt >= self.maxRetryAttempts {
                     self.debugServer?.addLog("❌ Max retries reached (\(attempt)), ops=\(opInfo)")
+                    self.currentExecutionId = nil  // ⭐ 清除執行 ID
                     return
                 }
 
