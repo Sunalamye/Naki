@@ -727,6 +727,34 @@ class NativeBotController {
         }
     }
 
+    /// 判斷丟 5 牌時是否應該丟紅寶牌
+    /// 邏輯：如果手牌中只有紅寶牌（沒有普通的 5），才丟紅寶牌
+    /// 如果有普通的 5，優先丟普通的（保留紅寶牌的價值）
+    private func shouldDiscardRedDora(suit: String) -> Bool {
+        // 收集手牌 + 自摸牌中所有指定花色的 5
+        var allTiles = tehai
+        if let t = tsumo { allTiles.append(t) }
+
+        var hasRed = false
+        var hasNormal = false
+
+        for tile in allTiles {
+            switch (tile, suit) {
+            case (.man(5, let red), "m"):
+                if red { hasRed = true } else { hasNormal = true }
+            case (.pin(5, let red), "p"):
+                if red { hasRed = true } else { hasNormal = true }
+            case (.sou(5, let red), "s"):
+                if red { hasRed = true } else { hasNormal = true }
+            default:
+                continue
+            }
+        }
+
+        // 只有在「有紅寶牌」且「沒有普通牌」的情況下才丟紅寶牌
+        return hasRed && !hasNormal
+    }
+
     private func actionIndexToRecommendation(_ index: Int, probability: Double) -> Recommendation? {
         guard let action = MahjongAction(rawValue: index) else { return nil }
 
@@ -734,16 +762,31 @@ class NativeBotController {
         case .discard1m, .discard2m, .discard3m, .discard4m, .discard5m,
              .discard6m, .discard7m, .discard8m, .discard9m:
             let num = index + 1
+            // 特殊處理 5m：優先丟普通牌，只有在只有紅寶牌時才丟紅寶牌
+            if num == 5 {
+                let tileStr = shouldDiscardRedDora(suit: "m") ? "5mr" : "5m"
+                return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+            }
             return Recommendation(tile: "\(num)m", probability: probability, actionType: .discard)
 
         case .discard1p, .discard2p, .discard3p, .discard4p, .discard5p,
              .discard6p, .discard7p, .discard8p, .discard9p:
             let num = index - 8
+            // 特殊處理 5p：優先丟普通牌，只有在只有紅寶牌時才丟紅寶牌
+            if num == 5 {
+                let tileStr = shouldDiscardRedDora(suit: "p") ? "5pr" : "5p"
+                return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+            }
             return Recommendation(tile: "\(num)p", probability: probability, actionType: .discard)
 
         case .discard1s, .discard2s, .discard3s, .discard4s, .discard5s,
              .discard6s, .discard7s, .discard8s, .discard9s:
             let num = index - 17
+            // 特殊處理 5s：優先丟普通牌，只有在只有紅寶牌時才丟紅寶牌
+            if num == 5 {
+                let tileStr = shouldDiscardRedDora(suit: "s") ? "5sr" : "5s"
+                return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+            }
             return Recommendation(tile: "\(num)s", probability: probability, actionType: .discard)
 
         case .discardEast:

@@ -319,13 +319,9 @@ class WebViewModel {
                 return
             }
 
-            // ⭐ hora 不使用重試機制，直接執行（時間窗口很短）
-            if actionType == .hora {
-                self.debugServer?.addLog("Hora: direct exec (no retry)")
-                self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
-            } else {
-                self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: 1, executionId: executionId)
-            }
+            // ⭐ 所有動作都使用重試機制（包括 hora）
+            // hora 之前不重試導致 oplist 還沒準備好時失敗
+            self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: 1, executionId: executionId)
         }
     }
 
