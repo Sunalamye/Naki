@@ -1,9 +1,9 @@
 //
 //  ContentView.swift
-//  akagi
+//  Naki
 //
 //  Created by Suoie on 2025/11/29.
-//  升級到 macOS 26 - 使用 Observation 框架和原生 WebView
+//  Updated: 2025/12/03 - 控制項移至原生 Toolbar
 //
 
 import SwiftUI
@@ -11,45 +11,130 @@ import WebKit
 
 struct ContentView: View {
     @State private var viewModel = WebViewModel()
-    @State private var showSettings = false
     @State private var showGamePanel = true
+    @State private var showAdvancedSettings = false
+    @State private var showLog = false
+
+    // 自動打牌控制
+    @State private var autoPlayMode: AutoPlayMode = .auto
+    @State private var actionDelay: Double = 1.0
 
     var body: some View {
-        HStack(spacing: 0) {
-            // 側邊欄（設定面板）
-            if showSettings {
-                SettingsPanel(viewModel: viewModel)
-                    .frame(width: 280)
-                    .transition(.move(edge: .leading))
-            }
+        HSplitView {
+            // WebView
+            NakiWebView(viewModel: viewModel)
+                .frame(minWidth: 600)
 
-            // 主內容區
-            VStack(spacing: 0) {
-                // 頂部工具列
-                TopToolbar(viewModel: viewModel, showSettings: $showSettings, showGamePanel: $showGamePanel)
-
-                Divider()
-
-                // 主體內容
-                HSplitView {
-                    // WebView
-                    NakiWebView(viewModel: viewModel)
-                        .frame(minWidth: 600)
-
-                    // 遊戲面板（右側）
-                    if showGamePanel {
-                        GamePanel(viewModel: viewModel)
-                            .frame(width: 320)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // 狀態列
-                StatusBar(viewModel: viewModel)
+            // 遊戲面板（右側）
+            if showGamePanel {
+                GamePanel(viewModel: viewModel, showLog: $showLog)
+                    .frame(width: 320)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: showSettings)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom) {
+            StatusBar(viewModel: viewModel)
+        }
         .animation(.easeInOut(duration: 0.2), value: showGamePanel)
+        .sheet(isPresented: $showAdvancedSettings) {
+            AdvancedSettingsSheet(viewModel: viewModel)
+        }
+        .toolbar {
+            
+
+            // 進階設定
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { showAdvancedSettings = true }) {
+                    Image(systemName: "gearshape")
+                }
+                .help("進階設定")
+            }
+            // 左側：自動打牌模式
+            ToolbarItem(placement: .navigation) {
+                Picker("", selection: $autoPlayMode) {
+                    Text("關").tag(AutoPlayMode.off)
+                    Text("提示").tag(AutoPlayMode.recommend)
+                    Text("自動").tag(AutoPlayMode.auto)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+                .onChange(of: autoPlayMode) { _, newValue in
+                    viewModel.setAutoPlayMode(newValue)
+                }
+                .help("自動打牌模式")
+            }
+
+            // 延遲調整
+            ToolbarItem(placement: .navigation) {
+                if autoPlayMode != .off {
+                    HStack(spacing: 10) {
+                        Text("\(actionDelay, specifier: "%.1f")s")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+
+                        Stepper("", value: $actionDelay, in: 0.5...3.0, step: 0.5)
+                            .labelsHidden()
+                            .onChange(of: actionDelay) { _, newValue in
+                                viewModel.setAutoPlayDelay(newValue)
+                            }
+                    }
+                    .frame(width: 80)
+                    .help("動作延遲")
+                }
+            }
+
+            // Debug Server
+            ToolbarItem(placement: .navigation) {
+                Button(action: { viewModel.toggleDebugServer() }) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack{
+                            Circle()
+                                .fill(viewModel.isDebugServerRunning ? Color.green : Color.gray)
+                                .frame(width: 6, height: 6)
+                            
+                            Text("\(viewModel.debugServerPort)")
+                                .font(.system(.caption, design: .monospaced))
+                            
+                        }
+                        Text("Debug Server")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(width: 80)
+                .help(viewModel.isDebugServerRunning ? "Debug Server 運行中" : "Debug Server 已停止")
+            }
+
+            // 連接狀態
+            ToolbarItem(placement: .navigation) {
+                ConnectionIndicator(viewModel: viewModel)
+                    .frame(width: 80)
+            }
+
+            // 重新載入
+            ToolbarItem(placement: .destructiveAction) {
+                Button(action: { viewModel.wkWebView?.reload() }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("重新載入")
+            }
+
+            // 右側：日誌切換
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { showLog.toggle() }) {
+                    Image(systemName: showLog ? "terminal.fill" : "terminal")
+                }
+                .help("顯示/隱藏日誌")
+            }
+
+            // 遊戲面板切換
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: { showGamePanel.toggle() }) {
+                    Image(systemName: showGamePanel ? "sidebar.trailing" : "sidebar.right")
+                }
+                .help("顯示/隱藏遊戲面板")
+            }
+        }
     }
 }
 
@@ -57,7 +142,7 @@ struct ContentView: View {
 
 struct GamePanel: View {
     var viewModel: WebViewModel
-    @State private var showLog = false
+    @Binding var showLog: Bool
 
     var body: some View {
         VSplitView {
@@ -90,65 +175,6 @@ struct GamePanel: View {
             }
         }
         .background(Color(NSColor.windowBackgroundColor))
-        .toolbar {
-            ToolbarItem {
-                Button(action: { showLog.toggle() }) {
-                    Image(systemName: showLog ? "terminal.fill" : "terminal")
-                }
-                .help("顯示/隱藏日誌")
-            }
-        }
-    }
-}
-
-// MARK: - Tehai Bar (底部手牌欄)
-
-// MARK: - Top Toolbar
-
-struct TopToolbar: View {
-    var viewModel: WebViewModel
-    @Binding var showSettings: Bool
-    @Binding var showGamePanel: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // 設定按鈕
-            Button(action: { showSettings.toggle() }) {
-                Image(systemName: showSettings ? "sidebar.left" : "sidebar.right")
-            }
-            .help("顯示/隱藏設定")
-
-            Text("Naki")
-                .font(.headline)
-
-            // 連接狀態指示器
-            ConnectionIndicator(viewModel: viewModel)
-
-            Spacer()
-
-            Divider()
-                .frame(height: 20)
-
-            // 重新載入按鈕
-            Button(action: {
-                viewModel.wkWebView?.reload()
-            }) {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("重新載入")
-
-            Divider()
-                .frame(height: 20)
-
-            // 遊戲面板切換
-            Button(action: { showGamePanel.toggle() }) {
-                Image(systemName: showGamePanel ? "sidebar.trailing" : "sidebar.right")
-            }
-            .help("顯示/隱藏遊戲面板")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(NSColor.windowBackgroundColor))
     }
 }
 
@@ -158,68 +184,155 @@ struct ConnectionIndicator: View {
     var viewModel: WebViewModel
 
     var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(viewModel.isConnected ? Color.green : Color.red)
-                .frame(width: 8, height: 8)
-            Text(viewModel.isConnected ? "已連接" : "未連接")
-                .font(.caption)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(viewModel.isConnected ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                Text(viewModel.isConnected ? "已連接" : "未連接")
+                    .font(.caption2)
+            }
+            Text("WebSocket")
+                .font(.system(size: 8))
                 .foregroundColor(.secondary)
         }
     }
 }
 
-// MARK: - Settings Panel
+// MARK: - Advanced Settings Sheet
 
-struct SettingsPanel: View {
+struct AdvancedSettingsSheet: View {
     var viewModel: WebViewModel
-    @State private var selectedModel = "mortal"
-    @State private var autoSwitch = true
-    @State private var temperature = 0.3
-    @State private var autoPlayMode: AutoPlayMode = .auto  // 預設開啟全自動
-    @State private var actionDelay: Double = 1.0
-    // 點擊位置校準 (預設值已根據實測調整)
-    @State private var tileSpacing: Double = 96.0     // 手牌間距
-    @State private var offsetX: Double = -200.0       // 水平偏移
-    @State private var offsetY: Double = 0.0          // 垂直偏移
+    @Environment(\.dismiss) private var dismiss
+
+    // AI 設定
+    @State private var temperature: Double = 0.3
+
+    // 位置校準
+    @State private var tileSpacing: Double = 96.0
+    @State private var offsetX: Double = -200.0
+    @State private var offsetY: Double = 0.0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // 標題
+        VStack(spacing: 0) {
+            // 標題列
             HStack {
-                Image(systemName: "gearshape.fill")
-                Text("設定")
+                Text("進階設定")
                     .font(.headline)
+                Spacer()
+                Button("完成") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
             }
             .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(NSColor.controlBackgroundColor))
 
             Divider()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Bot 引擎設定
-                    GroupBox("Bot 引擎") {
+                    // AI 設定
+                    GroupBox {
                         VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Image(systemName: "cpu")
-                                Text("原生 Core ML")
-                                    .font(.headline)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("推薦溫度")
+                                    Spacer()
+                                    Text("\(temperature, specifier: "%.2f")")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(value: $temperature, in: 0.1...2.0, step: 0.1)
                             }
 
-                            Text("使用 MortalSwift + Core ML，無需 Python")
+                            Text("較低溫度 = 更確定性的推薦，較高溫度 = 更多樣化的推薦")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    } label: {
+                        Label("AI 設定", systemImage: "brain")
+                    }
+
+                    // 位置校準
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 12) {
+                            // 手牌間距
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("手牌間距")
+                                    Spacer()
+                                    Text("\(Int(tileSpacing)) px")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(value: $tileSpacing, in: 50...100, step: 1)
+                                    .onChange(of: tileSpacing) { _, _ in
+                                        updateCalibration()
+                                    }
+                            }
+
+                            // 水平偏移
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("水平偏移")
+                                    Spacer()
+                                    Text("\(Int(offsetX)) px")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(value: $offsetX, in: -200...200, step: 5)
+                                    .onChange(of: offsetX) { _, _ in
+                                        updateCalibration()
+                                    }
+                            }
+
+                            // 垂直偏移
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text("垂直偏移")
+                                    Spacer()
+                                    Text("\(Int(offsetY)) px")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(value: $offsetY, in: -200...200, step: 5)
+                                    .onChange(of: offsetY) { _, _ in
+                                        updateCalibration()
+                                    }
+                            }
+
+                            Divider()
+
+                            // 按鈕
+                            HStack {
+                                Button("重置預設") {
+                                    tileSpacing = 96.0
+                                    offsetX = -200.0
+                                    offsetY = 0.0
+                                    updateCalibration()
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button("測試點擊") {
+                                    viewModel.testAutoPlayIndicators()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    } label: {
+                        Label("位置校準", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+
+                    // Bot 管理
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Bot 會在遊戲開始時自動創建，通常不需要手動管理。")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
                             HStack {
-                                Button("創建 Bot") {
+                                Button("重建 Bot") {
                                     Task {
-                                        do {
-                                            try await viewModel.createNativeBot(playerId: 0)
-                                        } catch {
-                                            viewModel.statusMessage = "創建失敗: \(error.localizedDescription)"
-                                        }
+                                        viewModel.deleteNativeBot()
+                                        try? await Task.sleep(nanoseconds: 100_000_000)
+                                        try? await viewModel.createNativeBot(playerId: 0)
                                     }
                                 }
                                 .buttonStyle(.bordered)
@@ -228,183 +341,21 @@ struct SettingsPanel: View {
                                     viewModel.deleteNativeBot()
                                 }
                                 .buttonStyle(.bordered)
-                                .foregroundColor(.red)
+                                .tint(.red)
                             }
                         }
-                        .padding(.vertical, 4)
-                    }
-
-                    // 自動打牌設定 (實驗性功能)
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Image(systemName: "play.circle.fill")
-                                    .foregroundColor(.orange)
-                                Text("自動打牌")
-                                    .font(.headline)
-                                Text("實驗性")
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.orange.opacity(0.2))
-                                    .foregroundColor(.orange)
-                                    .cornerRadius(4)
-                            }
-
-                            Picker("模式:", selection: $autoPlayMode) {
-                                ForEach(AutoPlayMode.allCases, id: \.self) { mode in
-                                    Text(mode.rawValue).tag(mode)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .onChange(of: autoPlayMode) { _, newValue in
-                                viewModel.setAutoPlayMode(newValue)
-                            }
-
-                            if autoPlayMode != .off {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("動作延遲: \(actionDelay, specifier: "%.1f") 秒")
-                                        .font(.caption)
-                                    Slider(value: $actionDelay, in: 0.5...5.0, step: 0.5)
-                                        .onChange(of: actionDelay) { _, newValue in
-                                            viewModel.setAutoPlayDelay(newValue)
-                                        }
-                                }
-                            }
-
-                            if autoPlayMode == .auto {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundColor(.yellow)
-                                    Text("全自動模式會自動執行推薦動作")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-
-                            Divider()
-
-                            // 位置校準
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("位置校準")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-
-                                // 手牌間距
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack {
-                                        Text("手牌間距:")
-                                            .font(.caption)
-                                        Spacer()
-                                        Text("\(Int(tileSpacing)) px")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Slider(value: $tileSpacing, in: 50...100, step: 1)
-                                        .onChange(of: tileSpacing) { _, newValue in
-                                            viewModel.updateClickCalibration(
-                                                tileSpacing: newValue,
-                                                offsetX: offsetX,
-                                                offsetY: offsetY
-                                            )
-                                        }
-                                }
-
-                                // 水平偏移
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack {
-                                        Text("水平偏移 (←→):")
-                                            .font(.caption)
-                                        Spacer()
-                                        Text("\(Int(offsetX)) px")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Slider(value: $offsetX, in: -200...200, step: 5)
-                                        .onChange(of: offsetX) { _, newValue in
-                                            viewModel.updateClickCalibration(
-                                                tileSpacing: tileSpacing,
-                                                offsetX: newValue,
-                                                offsetY: offsetY
-                                            )
-                                        }
-                                }
-
-                                // 垂直偏移
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack {
-                                        Text("垂直偏移 (↑↓):")
-                                            .font(.caption)
-                                        Spacer()
-                                        Text("\(Int(offsetY)) px")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Slider(value: $offsetY, in: -200...200, step: 5)
-                                        .onChange(of: offsetY) { _, newValue in
-                                            viewModel.updateClickCalibration(
-                                                tileSpacing: tileSpacing,
-                                                offsetX: offsetX,
-                                                offsetY: newValue
-                                            )
-                                        }
-                                }
-
-                                // 重置按鈕
-                                Button("重置為預設") {
-                                    tileSpacing = 96.0
-                                    offsetX = -200.0
-                                    offsetY = 0.0
-                                    viewModel.updateClickCalibration(
-                                        tileSpacing: 96.0,
-                                        offsetX: -200.0,
-                                        offsetY: 0.0
-                                    )
-                                }
-                                .font(.caption)
-                                .buttonStyle(.bordered)
-                            }
-
-                            Divider()
-
-                            // 測試按鈕（僅保留必要的）
-                            HStack {
-                                Button("測試點擊位置") {
-                                    viewModel.testAutoPlayIndicators()
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                            .font(.caption)
-                        }
-                        .padding(.vertical, 4)
                     } label: {
-                        HStack {
-                            Text("自動打牌")
-                            Spacer()
-                            if autoPlayMode != .off {
-                                Circle()
-                                    .fill(Color.green)
-                                    .frame(width: 8, height: 8)
-                            }
-                        }
+                        Label("Bot 管理", systemImage: "cpu")
                     }
 
                     // Debug Server
                     GroupBox {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Image(systemName: "server.rack")
-                                    .foregroundColor(.purple)
-                                Text("Debug Server")
-                                    .font(.headline)
-                            }
-
-                            HStack {
                                 Circle()
                                     .fill(viewModel.isDebugServerRunning ? Color.green : Color.gray)
                                     .frame(width: 8, height: 8)
                                 Text(viewModel.isDebugServerRunning ? "運行中" : "已停止")
-                                    .font(.caption)
 
                                 Spacer()
 
@@ -416,69 +367,34 @@ struct SettingsPanel: View {
                             }
 
                             if viewModel.isDebugServerRunning {
-                                Text("http://localhost:\(viewModel.debugServerPort)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .textSelection(.enabled)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("http://localhost:\(viewModel.debugServerPort)")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .textSelection(.enabled)
 
-                                Text("curl http://localhost:\(viewModel.debugServerPort)/detect")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .textSelection(.enabled)
+                                    Text("curl http://localhost:\(viewModel.debugServerPort)/logs")
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                        .textSelection(.enabled)
+                                }
                             }
                         }
-                        .padding(.vertical, 4)
                     } label: {
-                        HStack {
-                            Text("Debug Server")
-                            Spacer()
-                            if viewModel.isDebugServerRunning {
-                                Circle()
-                                    .fill(Color.green)
-                                    .frame(width: 8, height: 8)
-                            }
-                        }
-                    }
-
-                    // 模型設定
-                    GroupBox("AI 模型") {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Picker("模型:", selection: $selectedModel) {
-                                Text("Mortal (4P)").tag("mortal")
-                                Text("Mortal3p (3P)").tag("mortal3p")
-                            }
-                            .pickerStyle(.radioGroup)
-
-                            Toggle("自動切換 (4P/3P)", isOn: $autoSwitch)
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("推薦溫度: \(temperature, specifier: "%.2f")")
-                                Slider(value: $temperature, in: 0.1...2.0, step: 0.1)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-
-                    // 狀態顯示
-                    GroupBox("狀態") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Circle()
-                                    .fill(viewModel.isConnected ? Color.green : Color.red)
-                                    .frame(width: 8, height: 8)
-                                Text(viewModel.isConnected ? "已連接" : "未連接")
-                            }
-                            Text(viewModel.statusMessage)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 4)
+                        Label("Debug Server", systemImage: "server.rack")
                     }
                 }
                 .padding()
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .frame(width: 400, height: 550)
+    }
+
+    private func updateCalibration() {
+        viewModel.updateClickCalibration(
+            tileSpacing: tileSpacing,
+            offsetX: offsetX,
+            offsetY: offsetY
+        )
     }
 }
 
@@ -489,7 +405,6 @@ struct StatusBar: View {
 
     var body: some View {
         if !viewModel.statusMessage.isEmpty {
-            Divider()
             HStack(spacing: 8) {
                 Image(systemName: statusIcon)
                     .foregroundColor(statusColor)
