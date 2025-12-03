@@ -91,6 +91,9 @@ struct NakiWebView: NSViewRepresentable {
         /// WebSocket 消息處理器
         let websocketHandler = WebSocketMessageHandler()
 
+        /// MJAI 事件流管理器
+        let eventStream = MJAIEventStream()
+
         init(_ parent: NakiWebView) {
             self.parent = parent
         }
@@ -117,20 +120,26 @@ struct NakiWebView: NSViewRepresentable {
                         : "已斷開連接"
 
                     if connected {
-                        // 連接時重置橋接器和 Bot
+                        // 連接時重置橋接器
                         self.websocketHandler.reset()
-                        self.parent.viewModel.deleteNativeBot()
-                        self.parent.viewModel.recommendations = []
-                        self.parent.viewModel.tehaiTiles = []
-                        self.parent.viewModel.tsumoTile = nil
-                        print("[Coordinator] Reset state on WebSocket connect")
+
+                        // ⭐ 嘗試重新同步 Bot
+                        // 如果是頁面 reload，eventStream 已被清空，canResync() 返回 false
+                        if self.eventStream.canResync() {
+                            print("[Coordinator] WebSocket reconnected, attempting to resync bot...")
+                            await self.resyncBot()
+                        } else {
+                            // 沒有進行中的遊戲，正常重置
+                            self.parent.viewModel.deleteNativeBot()
+                            self.parent.viewModel.recommendations = []
+                            self.parent.viewModel.tehaiTiles = []
+                            self.parent.viewModel.tsumoTile = nil
+                            print("[Coordinator] Reset state on WebSocket connect (no game in progress)")
+                        }
                     } else {
-                        // 斷開連接時清理 Bot 狀態
-                        self.parent.viewModel.deleteNativeBot()
-                        self.parent.viewModel.recommendations = []
-                        self.parent.viewModel.tehaiTiles = []
-                        self.parent.viewModel.tsumoTile = nil
-                        print("[Coordinator] Reset state on WebSocket disconnect")
+                        // 斷開連接時停止消費者（但保留歷史以便重連時重放）
+                        self.eventStream.stopConsumer()
+                        print("[Coordinator] WebSocket disconnected, consumer stopped (history preserved)")
                     }
                 }
             }
@@ -145,59 +154,45 @@ struct NakiWebView: NSViewRepresentable {
             // 根據事件類型處理
             switch eventType {
             case "start_game":
-                // ⭐ 開始遊戲，每次都重建 Bot（匹配 Python 行為）
-                if let playerId = event["id"] as? Int {
-                    bridgeLog("[Coordinator] start_game: (re)creating bot for player \(playerId)")
-                    do {
-                        // ⭐ 關鍵：先刪除舊 Bot，再創建新的
-                        // Python 每次 start_game 都會 model = model.load_model()
-                        parent.viewModel.deleteNativeBot()
-
-                        try await parent.viewModel.createNativeBot(playerId: playerId)
-                        parent.viewModel.statusMessage = "Bot 已創建 (Player \(playerId))"
-
-                        // 將 start_game 事件也發送給 Bot
-                        _ = try await parent.viewModel.processNativeEvent(event)
-                        bridgeLog("[Coordinator] start_game: bot created and event sent")
-                    } catch {
-                        bridgeLog("[Coordinator] ERROR: Failed to create bot: \(error)")
-                    }
-                } else {
+                // ⭐ 開始遊戲，每次都重建 Bot
+                guard let playerId = event["id"] as? Int else {
                     bridgeLog("[Coordinator] ERROR: start_game has no id field!")
+                    return
                 }
 
-            case "start_kyoku":
-                // 開始新一局，判斷是否為三麻
-                bridgeLog("[Coordinator] start_kyoku: processing new kyoku")
-                if let scores = event["scores"] as? [Int] {
-                    let is3P = scores.count == 3 ||
-                               (scores.count == 4 && scores[3] == 0)
+                bridgeLog("[Coordinator] start_game: starting new game for player \(playerId)")
 
-                    if is3P {
-                        parent.viewModel.statusMessage = "三麻模式"
-                    }
-                }
-                // 將 start_kyoku 發送給 Bot 處理
+                // 1. 清空舊的 EventStream 並開始新遊戲
+                eventStream.startNewGame()
+
+                // 2. 發送 start_game 事件到 stream
+                eventStream.emit(event)
+
+                // 3. 刪除舊 Bot，創建新 Bot
+                parent.viewModel.deleteNativeBot()
+
                 do {
-                    bridgeLog("[Coordinator] Sending start_kyoku to bot")
-                    if let response = try await parent.viewModel.processNativeEvent(event) {
-                        bridgeLog("[Coordinator] Bot Response: \(response)")
-                        // UI 已通過 viewModel 的 @Observable 屬性自動更新
-                    } else {
-                        bridgeLog("[Coordinator] Bot returned nil for start_kyoku")
-                    }
+                    try await parent.viewModel.createNativeBot(playerId: playerId)
+                    parent.viewModel.statusMessage = "Bot 已創建 (Player \(playerId))"
+                    bridgeLog("[Coordinator] Bot created for player \(playerId)")
+
+                    // 4. 啟動 Consumer，開始消費事件
+                    startEventConsumer()
                 } catch {
-                    bridgeLog("[Coordinator] ERROR: Bot react error: \(error)")
+                    bridgeLog("[Coordinator] ERROR: Failed to create bot: \(error)")
                 }
 
             case "end_game":
-                // ⭐ 遊戲結束，發送事件給 Bot 然後刪除 Bot
-                bridgeLog("[Coordinator] end_game: cleaning up bot")
-                do {
-                    _ = try await parent.viewModel.processNativeEvent(event)
-                } catch {
-                    bridgeLog("[Coordinator] ERROR: Failed to process end_game: \(error)")
-                }
+                // ⭐ 遊戲結束，發送事件給 Bot 然後清理
+                bridgeLog("[Coordinator] end_game: cleaning up")
+
+                // 發送 end_game 事件到 stream
+                eventStream.emit(event)
+
+                // 結束遊戲（cancel Task, 清空歷史）
+                eventStream.endGame()
+
+                // 清理 Bot 和 UI 狀態
                 parent.viewModel.deleteNativeBot()
                 parent.viewModel.recommendations = []
                 parent.viewModel.tehaiTiles = []
@@ -205,19 +200,54 @@ struct NakiWebView: NSViewRepresentable {
                 parent.viewModel.statusMessage = "遊戲結束"
 
             default:
-                // 將事件發送給 Bot 處理
+                // 其他事件直接發送到 stream
+                eventStream.emit(event)
+            }
+        }
+
+        /// 啟動事件消費者
+        private func startEventConsumer() {
+            bridgeLog("[Coordinator] Starting event consumer...")
+
+            eventStream.startConsumer { [weak self] event in
+                guard let self = self else { return }
+
+                let eventType = event["type"] as? String ?? "unknown"
+
                 do {
-                    bridgeLog("[Coordinator] Sending \(eventType) to bot")
-                    if let response = try await parent.viewModel.processNativeEvent(event) {
-                        // 有動作回應，可以在這裡處理 autoplay
-                        bridgeLog("[Coordinator] Bot Response: \(response)")
-                        // UI 已通過 viewModel 的 @Observable 屬性自動更新
+                    if let response = try await self.parent.viewModel.processNativeEvent(event) {
+                        bridgeLog("[Consumer] \(eventType) → response: \(response)")
                     } else {
-                        bridgeLog("[Coordinator] Bot returned nil for \(eventType)")
+                        bridgeLog("[Consumer] \(eventType) → response: none")
                     }
                 } catch {
-                    bridgeLog("[Coordinator] ERROR: Bot react error: \(error)")
+                    bridgeLog("[Consumer] ERROR processing \(eventType): \(error)")
                 }
+            }
+        }
+
+        /// 重新同步 Bot（WebSocket 重連時使用）
+        private func resyncBot() async {
+            guard let playerId = eventStream.getPlayerId() else {
+                bridgeLog("[Coordinator] Cannot resync: no playerId found in history")
+                return
+            }
+
+            bridgeLog("[Coordinator] Resyncing bot for player \(playerId) with \(eventStream.eventCount) historical events")
+
+            // 刪除舊 Bot，創建新 Bot
+            parent.viewModel.deleteNativeBot()
+
+            do {
+                try await parent.viewModel.createNativeBot(playerId: playerId)
+                parent.viewModel.statusMessage = "Bot 已重新同步 (Player \(playerId))"
+
+                // 啟動 Consumer（會自動重放歷史事件）
+                startEventConsumer()
+
+                bridgeLog("[Coordinator] Bot resynced successfully")
+            } catch {
+                bridgeLog("[Coordinator] ERROR: Failed to resync bot: \(error)")
             }
         }
 
@@ -307,14 +337,16 @@ struct NakiWebView: NSViewRepresentable {
             print("[WebView] Started loading...")
             parent.viewModel.statusMessage = "正在加載雀魂..."
 
-            // 頁面重新載入時完整重置狀態（包括 accountId）
+            // 頁面重新載入時完整重置狀態（包括 accountId 和 EventStream）
+            // ⭐ 清空 eventStream，之後 canResync() 會返回 false，不會觸發重放
             websocketHandler.fullReset()
+            eventStream.endGame()
             parent.viewModel.deleteNativeBot()
             parent.viewModel.recommendations = []
             parent.viewModel.tehaiTiles = []
             parent.viewModel.tsumoTile = nil
             parent.viewModel.isConnected = false
-            print("[Coordinator] Full reset on page reload")
+            print("[Coordinator] Full reset on page reload (including EventStream)")
         }
     }
 }
