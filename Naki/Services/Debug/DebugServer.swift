@@ -17,14 +17,19 @@ class DebugServer {
     // MARK: - Properties
 
     private var listener: NWListener?
-    private let port: UInt16
+    private let preferredPort: UInt16
+    private(set) var actualPort: UInt16 = 0
     private var isRunning = false
+    private let maxPortRetries = 10
 
     /// WebView 執行 JavaScript 的回調
     var executeJavaScript: ((String, @escaping (Any?, Error?) -> Void) -> Void)?
 
     /// 日誌回調
     var onLog: ((String) -> Void)?
+
+    /// 端口變更回調
+    var onPortChanged: ((UInt16) -> Void)?
 
     /// ⭐ 日誌存儲（最多保留 10000 條）
     private var logBuffer: [String] = []
@@ -42,15 +47,25 @@ class DebugServer {
     // MARK: - Initialization
 
     init(port: UInt16 = 8765) {
-        self.port = port
+        self.preferredPort = port
+        self.actualPort = port
     }
 
     // MARK: - Server Control
 
-    /// 啟動 Server
+    /// 啟動 Server（會自動嘗試其他端口如果被佔用）
     func start() {
         guard !isRunning else {
-            log("Server already running on port \(port)")
+            log("Server already running on port \(actualPort)")
+            return
+        }
+
+        startWithPort(preferredPort, retryCount: 0)
+    }
+
+    private func startWithPort(_ port: UInt16, retryCount: Int) {
+        guard retryCount < maxPortRetries else {
+            log("Failed to start server after \(maxPortRetries) attempts")
             return
         }
 
@@ -58,18 +73,31 @@ class DebugServer {
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
 
-            listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
+            guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+                log("Invalid port: \(port)")
+                return
+            }
+
+            listener = try NWListener(using: parameters, on: nwPort)
             listener?.stateUpdateHandler = { [weak self] state in
+                guard let self = self else { return }
                 switch state {
                 case .ready:
-                    self?.log("Debug Server started on http://localhost:\(self?.port ?? 0)")
-                    self?.isRunning = true
+                    self.actualPort = port
+                    self.isRunning = true
+                    self.log("Debug Server started on http://localhost:\(port)")
+                    self.onPortChanged?(port)
                 case .failed(let error):
-                    self?.log("Server failed: \(error)")
-                    self?.isRunning = false
+                    self.log("Server failed on port \(port): \(error)")
+                    self.listener?.cancel()
+                    self.listener = nil
+                    // 嘗試下一個端口
+                    let nextPort = port + 1
+                    self.log("Trying port \(nextPort)...")
+                    self.startWithPort(nextPort, retryCount: retryCount + 1)
                 case .cancelled:
-                    self?.log("Server cancelled")
-                    self?.isRunning = false
+                    self.log("Server cancelled")
+                    self.isRunning = false
                 default:
                     break
                 }
@@ -82,7 +110,11 @@ class DebugServer {
             listener?.start(queue: .main)
 
         } catch {
-            log("Failed to start server: \(error)")
+            log("Failed to start server on port \(port): \(error)")
+            // 嘗試下一個端口
+            let nextPort = port + 1
+            log("Trying port \(nextPort)...")
+            startWithPort(nextPort, retryCount: retryCount + 1)
         }
     }
 
@@ -245,14 +277,14 @@ class DebugServer {
             <li><code>POST /bot/pon</code> - Test pon operation</li>
         </ul>
         <h2>Quick Test:</h2>
-        <pre>curl http://localhost:\(port)/status</pre>
-        <pre>curl http://localhost:\(port)/bot/status</pre>
-        <pre>curl http://localhost:\(port)/logs</pre>
-        <pre>curl -X POST http://localhost:\(port)/bot/trigger</pre>
+        <pre>curl http://localhost:\(actualPort)/status</pre>
+        <pre>curl http://localhost:\(actualPort)/bot/status</pre>
+        <pre>curl http://localhost:\(actualPort)/logs</pre>
+        <pre>curl -X POST http://localhost:\(actualPort)/bot/trigger</pre>
         <h2>Naki Test (when opportunity available):</h2>
-        <pre>curl http://localhost:\(port)/bot/deep</pre>
-        <pre>curl -X POST http://localhost:\(port)/bot/chi</pre>
-        <pre>curl -X POST http://localhost:\(port)/bot/pon</pre>
+        <pre>curl http://localhost:\(actualPort)/bot/deep</pre>
+        <pre>curl -X POST http://localhost:\(actualPort)/bot/chi</pre>
+        <pre>curl -X POST http://localhost:\(actualPort)/bot/pon</pre>
         </body>
         </html>
         """
@@ -262,7 +294,7 @@ class DebugServer {
     private func handleStatus(connection: NWConnection) {
         let status: [String: Any] = [
             "status": "running",
-            "port": port,
+            "port": actualPort,
             "timestamp": ISO8601DateFormatter().string(from: Date())
         ]
         sendJSON(connection: connection, data: status)

@@ -973,9 +973,16 @@ class WebViewModel {
             webView.evaluateJavaScript(script, completionHandler: completion)
         }
 
+        // 端口變更回調（當端口被佔用時會自動切換）
+        debugServer?.onPortChanged = { [weak self] newPort in
+            DispatchQueue.main.async {
+                self?.debugServerPort = newPort
+                self?.isDebugServerRunning = true
+                self?.statusMessage = "Debug Server 已啟動: http://localhost:\(newPort)"
+            }
+        }
+
         debugServer?.start()
-        isDebugServerRunning = true
-        statusMessage = "Debug Server 已啟動: http://localhost:\(debugServerPort)"
     }
 
     /// 停止 Debug Server
