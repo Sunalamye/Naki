@@ -4,16 +4,15 @@
 //
 //  Created by Suoie on 2025/11/29.
 //
-//  核心視圖模型，負責：
-//  - 遊戲狀態管理 (GameState, BotStatus)
+//  核心視圖模型（協調器），負責：
+//  - 協調各服務 (AutoPlayService, DebugServer, GameStateManager)
 //  - Bot 控制 (NativeBotController + MortalSwift)
-//  - 自動打牌邏輯 (AutoPlayController)
-//  - Debug Server (HTTP API)
 //  - WebView 整合 (JavaScript Bridge)
 //
 //  更新日誌:
 //  - 2025/11/30: 移除 Python 依賴，純 Swift 實現
 //  - 2025/12/02: v1.1.2 重構 - 提取重複代碼，清理未使用變數
+//  - 2025/12/03: v1.2.0 服務化重構 - 提取 AutoPlayService, GameStateManager
 //
 
 import MortalSwift
@@ -36,10 +35,18 @@ class WebViewModel {
     var tsumoTile: String?
     var highlightedTile: String?
 
+    // MARK: - Services
+
+    /// 遊戲狀態管理器（集中管理狀態和推薦）
+    private(set) var gameStateManager = GameStateManager()
+
+    /// 自動打牌服務（協調重試機制）
+    private var autoPlayService = AutoPlayService()
+
     // 原生 Bot 控制器 (MortalSwift)
     private var nativeBotController: NativeBotController?
 
-    // 自動打牌控制器
+    // 自動打牌控制器（UI 自動化）
     private var autoPlayController: AutoPlayController?
 
     // Debug Server
@@ -53,9 +60,10 @@ class WebViewModel {
     // 方案 2: WKWebView（完整功能 + JavaScript Bridge）
     var wkWebView: WKWebView? {
         didSet {
-            // 當 WKWebView 設置時，也設置給 AutoPlayController
+            // 當 WKWebView 設置時，也設置給服務
             if let webView = wkWebView {
                 autoPlayController?.setWebView(webView)
+                autoPlayService.setWebView(webView)
             }
         }
     }
@@ -87,6 +95,9 @@ class WebViewModel {
 
         // 初始化自動打牌控制器
         autoPlayController = AutoPlayController()
+
+        // 設置 AutoPlayService 委託
+        autoPlayService.delegate = self
 
         // ⭐ 自動啟動 Debug Server
         startDebugServer()
@@ -176,6 +187,9 @@ class WebViewModel {
         tsumoTile = controller.lastTsumo
         recommendations = controller.lastRecommendations
         recommendationCount = recommendations.count
+
+        // 同步到 GameStateManager（供 UI 響應式更新）
+        gameStateManager.syncFrom(controller: controller)
 
         // 更新高亮牌
         if let firstRec = recommendations.first {
@@ -1114,5 +1128,28 @@ class WebViewModel {
     func deleteBot(playerId: Int) async -> Result<Void, Error> {
         deleteNativeBot()
         return .success(())
+    }
+}
+
+// MARK: - AutoPlayServiceDelegate
+
+extension WebViewModel: AutoPlayServiceDelegate {
+    func autoPlayService(_ service: AutoPlayService, didLog message: String) {
+        debugServer?.addLog(message)
+    }
+
+    func autoPlayService(_ service: AutoPlayService, didComplete actionType: Recommendation.ActionType) {
+        bridgeLog("[WebViewModel] AutoPlayService completed: \(actionType.rawValue)")
+        // 動作完成後可以更新 UI 狀態
+        DispatchQueue.main.async { [weak self] in
+            self?.statusMessage = "動作完成: \(actionType.displayName)"
+        }
+    }
+
+    func autoPlayService(_ service: AutoPlayService, didFail actionType: Recommendation.ActionType, error: String) {
+        bridgeLog("[WebViewModel] AutoPlayService failed: \(actionType.rawValue) - \(error)")
+        DispatchQueue.main.async { [weak self] in
+            self?.statusMessage = "動作失敗: \(error)"
+        }
     }
 }

@@ -5,6 +5,7 @@
 //  Created by Suoie on 2025/11/30.
 //  WebSocket 攔截器 - 通過 JavaScript 注入監聽雀魂的 WebSocket 通訊
 //  Updated: 2025/12/01 - 添加自動打牌支援
+//  Updated: 2025/12/03 - 重構為從外部 JS 文件載入
 //
 
 import Foundation
@@ -18,10 +19,55 @@ import os.log
 /// WebSocket 攔截器，用於監聽 WKWebView 中的 WebSocket 通訊
 class WebSocketInterceptor {
 
-    /// 注入到網頁的 JavaScript 代碼
-    /// 這段代碼會監聽 WebSocket 消息，但不干擾原始行為
-    /// 同時提供發送消息的能力（用於自動打牌）
+    /// JavaScript 模組文件名稱（按載入順序）
+    private static let jsModules = [
+        "naki-core",
+        "naki-autoplay",
+        "naki-game-api",
+        "naki-websocket"
+    ]
+
+    /// 從 Bundle 載入 JavaScript 文件
+    private static func loadJavaScript(named filename: String) -> String? {
+        // 嘗試從 Resources/JavaScript 子目錄載入
+        if let url = Bundle.main.url(forResource: filename, withExtension: "js", subdirectory: "Resources/JavaScript") {
+            return try? String(contentsOf: url, encoding: .utf8)
+        }
+        // 嘗試直接從 bundle 根目錄載入
+        if let url = Bundle.main.url(forResource: filename, withExtension: "js") {
+            return try? String(contentsOf: url, encoding: .utf8)
+        }
+        wsLog("[JS] Failed to find \(filename).js in bundle")
+        return nil
+    }
+
+    /// 注入到網頁的 JavaScript 代碼（從外部文件載入，回退到內嵌腳本）
     static var injectionScript: String {
+        var scripts: [String] = []
+
+        for module in jsModules {
+            if let script = loadJavaScript(named: module) {
+                scripts.append("// === \(module).js ===")
+                scripts.append(script)
+                wsLog("[JS] Loaded module: \(module).js")
+            } else {
+                wsLog("[JS] Warning: Could not load \(module).js")
+            }
+        }
+
+        // 如果成功載入任何模組，使用外部文件
+        if !scripts.isEmpty {
+            wsLog("[JS] Using external JavaScript modules (\(scripts.count / 2) loaded)")
+            return scripts.joined(separator: "\n\n")
+        }
+
+        // 回退：使用內嵌腳本
+        wsLog("[JS] Warning: No JavaScript modules loaded, using fallback inline script")
+        return inlineScript
+    }
+
+    /// 內嵌腳本（回退用）- 保留原有功能
+    private static var inlineScript: String {
         """
         (function() {
             'use strict';
