@@ -870,6 +870,88 @@ createCustomDoraEffect(tile, {
 });
 ```
 
+### 雙層旋轉 Bling 效果 ⭐
+
+Naki 推薦高亮使用的是雙層旋轉 Bling 效果，比單層 RunUV 更醒目。
+
+#### 效果特點
+
+- **雙層疊加**: 90° 和 180° 兩層效果疊加
+- **持續旋轉**: 每 30ms 旋轉 3 度
+- **Bling 閃爍**: tick=300 快速閃爍
+- **顏色區分**: 綠色 (>50%) / 紅色 (20-50%)
+
+#### 完整實現代碼
+
+```javascript
+function createDualRotatingEffect(tile, color) {
+  const mgr = window.view.DesktopMgr.Inst;
+  const effects = [];
+  const blings = [];
+
+  // 創建兩層效果 (90° 和 180°)
+  [90, 180].forEach(rotation => {
+    const effect = mgr.effect_doraPlane.clone();
+    tile.mySelf.addChild(effect);
+
+    effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+    effect.transform.localRotationEuler = new Laya.Vector3(0, 0, rotation);
+    effect.transform.localScale = new Laya.Vector3(1, 1, 1);
+    effect.active = true;
+
+    // 添加 Bling 動畫（比 RunUV 更容易控制速度）
+    const child = effect.getChildAt(0);
+    const bling = child.addComponent(anim.Bling);
+    bling.tick = 300;  // 快速閃爍
+
+    // 設置顏色
+    if (color && bling.mat) {
+      const c = bling.mat.albedoColor;
+      c.x = color.r;
+      c.y = color.g;
+      c.z = color.b;
+      c.w = color.a;
+      bling.mat.albedoColor = c;
+    }
+
+    effects.push(effect);
+    blings.push(bling);
+  });
+
+  return { effects, blings };
+}
+
+// 啟動旋轉動畫
+function startRotation(effects) {
+  return setInterval(() => {
+    effects.forEach(effect => {
+      if (effect && effect.transform) {
+        const z = effect.transform.localRotationEuler.z + 3;
+        effect.transform.localRotationEuler = new Laya.Vector3(0, 0, z);
+      }
+    });
+  }, 30);
+}
+
+// 使用示例
+const tile = window.view.DesktopMgr.Inst.mainrole.hand[0];
+const { effects, blings } = createDualRotatingEffect(tile, { r: 0, g: 2, b: 0, a: 2 });
+const intervalId = startRotation(effects);
+
+// 清除
+// clearInterval(intervalId);
+// effects.forEach(e => e.destroy());
+```
+
+#### 顏色配置
+
+```javascript
+const colors = {
+  green: { r: 0, g: 2, b: 0, a: 2 },  // 高機率推薦 (>50%)
+  red:   { r: 2, g: 0, b: 0, a: 2 }   // 中機率推薦 (20-50%)
+};
+```
+
 ### ⚠️ 常見錯誤
 
 | 錯誤做法 | 正確做法 | 結果 |
