@@ -799,5 +799,99 @@
         }
     };
 
+    // ========================================
+    // 🎯 Dora Shimmer Effect 追踪 Hook
+    // ========================================
+    /**
+     * 拦截 effect_dora3D.visible 的修改
+     * 用于追踪游戏何时调用原生闪光效果
+     */
+    window.__nakiDoraHook = {
+        hooked: false,
+        callHistory: [],
+        maxHistory: 100,
+
+        /**
+         * 启动 Hook - 拦截 effect_dora3D.visible 的 set/get
+         */
+        hook: function() {
+            try {
+                const inst = window.view?.DesktopMgr?.Inst;
+                if (!inst || !inst.effect_dora3D) {
+                    console.log('[Naki Dora Hook] DesktopMgr or effect_dora3D not available yet');
+                    return false;
+                }
+
+                const effect = inst.effect_dora3D;
+                let _visible = effect.visible;
+
+                Object.defineProperty(effect, 'visible', {
+                    get() {
+                        return _visible;
+                    },
+                    set(val) {
+                        const timestamp = new Date().toISOString();
+                        const stack = new Error().stack;
+                        const caller = stack?.split('\n')[2]?.trim() || 'unknown';
+
+                        const entry = {
+                            timestamp,
+                            value: val,
+                            caller,
+                            alpha: effect.alpha
+                        };
+
+                        this.callHistory.push(entry);
+                        if (this.callHistory.length > this.maxHistory) {
+                            this.callHistory.shift();
+                        }
+
+                        console.log(`[Naki Dora Hook] effect_dora3D.visible set to: ${val}`, {
+                            timestamp,
+                            alpha: effect.alpha,
+                            caller
+                        });
+
+                        _visible = val;
+                    }
+                });
+
+                this.hooked = true;
+                console.log('[Naki Dora Hook] Successfully hooked effect_dora3D.visible');
+                return true;
+
+            } catch (e) {
+                console.error('[Naki Dora Hook] Failed to hook:', e.message);
+                return false;
+            }
+        },
+
+        /**
+         * 获取调用历史
+         */
+        getHistory: function() {
+            return {
+                hooked: this.hooked,
+                count: this.callHistory.length,
+                history: this.callHistory
+            };
+        },
+
+        /**
+         * 清空历史
+         */
+        clearHistory: function() {
+            this.callHistory = [];
+            console.log('[Naki Dora Hook] History cleared');
+        }
+    };
+
+    // 尝试立即启动 Hook（如果游戏已经初始化）
+    setTimeout(() => {
+        if (window.__nakiDoraHook.hook()) {
+            console.log('[Naki] Dora Hook initialized on game load');
+        }
+    }, 500);
+
     console.log('[Naki] Game API module loaded');
 })();

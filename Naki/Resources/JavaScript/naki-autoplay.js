@@ -456,5 +456,91 @@
         window.__nakiAutoPlay.showClickIndicator(x, y, label || 'TEST');
     };
 
+    // ========================================
+    // 🌟 推薦高亮管理模組
+    // ========================================
+    /**
+     * 管理推薦牌的視覺高亮效果
+     * 基於 Majsoul 的 effect_recommend 機制
+     */
+    window.__nakiRecommendHighlight = {
+        isActive: false,
+        highlightTileIndex: -1,
+
+        /**
+         * 顯示推薦牌的高亮
+         * @param {number} tileIndex - 牌在手中的位置 (0-13)
+         * @returns {boolean} 成功或失敗
+         */
+        show: function(tileIndex) {
+            try {
+                const inst = window.view?.DesktopMgr?.Inst;
+                if (!inst || !inst.effect_recommend) {
+                    console.log('[Naki Highlight] effect_recommend not available');
+                    return false;
+                }
+
+                // 激活推薦效果
+                inst.effect_recommend.active = true;
+                this.isActive = true;
+                this.highlightTileIndex = tileIndex;
+
+                console.log('[Naki Highlight] 顯示推薦高亮於牌位置:', tileIndex);
+                return true;
+
+            } catch (e) {
+                console.error('[Naki Highlight] 顯示高亮失敗:', e);
+                return false;
+            }
+        },
+
+        /**
+         * 隱藏推薦牌的高亮
+         * @returns {boolean} 成功或失敗
+         */
+        hide: function() {
+            try {
+                const inst = window.view?.DesktopMgr?.Inst;
+                if (!inst || !inst.effect_recommend) {
+                    return false;
+                }
+
+                // 停用推薦效果
+                inst.effect_recommend.active = false;
+                this.isActive = false;
+                this.highlightTileIndex = -1;
+
+                console.log('[Naki Highlight] 隱藏推薦高亮');
+                return true;
+
+            } catch (e) {
+                console.error('[Naki Highlight] 隱藏高亮失敗:', e);
+                return false;
+            }
+        },
+
+        /**
+         * 切換推薦高亮
+         */
+        toggle: function(tileIndex) {
+            if (this.isActive) {
+                return this.hide();
+            } else {
+                return this.show(tileIndex || 0);
+            }
+        },
+
+        /**
+         * 獲取當前狀態
+         */
+        getStatus: function() {
+            return {
+                isActive: this.isActive,
+                highlightTileIndex: this.highlightTileIndex,
+                hasEffect: !!window.view?.DesktopMgr?.Inst?.effect_recommend
+            };
+        }
+    };
+
     console.log('[Naki] AutoPlay module loaded');
 })();

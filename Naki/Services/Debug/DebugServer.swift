@@ -835,7 +835,12 @@ class DebugServer {
 
     private func sendJSON(connection: NWConnection, data: [String: Any]) {
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: data, options: .prettyPrinted)
+            if data.isEmpty {
+                throw NSError(domain: "DebugServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty JSON data"])
+            }
+            
+            let sanitized = sanitizeForJSON(data) as! [String: Any]
+            let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: .prettyPrinted)
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
             sendResponse(connection: connection, status: 200, body: body, contentType: "application/json")
         } catch {
@@ -843,6 +848,26 @@ class DebugServer {
         }
     }
 
+    private func sanitizeForJSON(_ value: Any) -> Any {
+        switch value {
+        case let dict as [String: Any]:
+            return dict.mapValues { sanitizeForJSON($0) }
+        case let array as [Any]:
+            return array.map { sanitizeForJSON($0) }
+        case let d as Double where d.isNaN || d.isInfinite:
+            return NSNull()
+        case let f as Float where f.isNaN || f.isInfinite:
+            return NSNull()
+        case let n as NSNumber:
+            let d = n.doubleValue
+            if d.isNaN || d.isInfinite {
+                return NSNull()
+            }
+            return n
+        default:
+            return value
+        }
+    }
     // MARK: - Logging
 
     private func log(_ message: String) {

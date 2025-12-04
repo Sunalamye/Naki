@@ -14,6 +14,8 @@
 4. [关键着色器](#关键着色器)
 5. [完整资源列表](#完整资源列表)
 6. [实现对比](#实现对比)
+7. [牌对象的效果机制（新发现）](#牌对象的效果机制新发现)
+8. [推荐高亮实现](#推荐高亮实现)
 
 ---
 
@@ -706,21 +708,181 @@ Naki:
 }
 ```
 
+---
+
+## 牌对象的效果机制（新发现）
+
+### 🎯 关键发现：每张牌都有独立的效果对象
+
+通过反向工程，发现了每张牌对象 (`tile`) 上都有独立的效果属性，这是真正控制闪光的机制：
+
+```javascript
+// 手牌数组结构（通过 Debug Server 实时查询）
+window.view.DesktopMgr.Inst.mainrole.hand = [
+  {
+    // 牌的基本信息
+    val: { type: 0, index: 3 },  // 4m
+    index: 0,                      // 在手中的位置
+    isDora: false,                 // 是否是宝牌
+
+    // 👇 关键：效果对象
+    _doraeffect: Sprite3D,        // 宝牌闪光效果
+    _recommendeffect: Sprite3D,   // 推荐高亮效果（可能的）
+
+    // 其他属性
+    pos_x: 0,
+    // ... 其他属性
+  },
+  // ... 更多手牌
+]
+```
+
+### 宝牌效果的真实控制方式
+
+**之前的误解**：以为通过 `effect_dora3D.visible` 来控制
+**实际机制**：通过每张牌的 `_doraeffect.active` 属性
+
+```javascript
+// ✅ 宝牌闪光的真实激活方式
+const tile = window.view.DesktopMgr.Inst.mainrole.hand[1]; // 红宝牌 5p
+
+if (tile._doraeffect) {
+  tile._doraeffect.active = true;   // 激活闪光
+  // 或者
+  tile._doraeffect.visible = true;  // 另一种可能的方式
+}
+```
+
+### effect_dora3D 的实际角色
+
+经过详细测试，发现：
+- **`effect_dora3D` 不是用来控制单张牌的闪光的**
+- 它的 `visible` 属性有 getter/setter，但 **`configurable: false`**（无法被拦截）
+- 游戏从启动到现在从未修改过此属性
+- 可能用于全局宝牌效果的管理，但具体作用需要进一步研究
+
+### 牌对象属性完整列表
+
+通过 JavaScript 直接查询获取的牌对象完整属性：
+
+```javascript
+[
+  "_destroyed",
+  "_id", "_enable", "_owner",
+  "started", "_events",
+  "mySelf", "bei",
+  "acitve", "val", "valid",
+  "_clickeffect",
+  "anim", "anim_start_time", "anim_life_time",
+  "isDora",        // ✅ 宝牌标记
+  "ispaopai",      // 白牌标记
+  "isGap",         // 间隔标记
+  "is_open",       // 打开状态
+  "huansanzhangEnabled",
+  "index",         // 在手中的位置
+  "pos_x",         // X 坐标
+  "_recommendeffect",  // 推荐效果对象
+  "_doraeffect",   // ✅ 宝牌闪光效果对象
+  "z",             // Z 深度
+  "bedraged",
+  "origin_mat",
+  "$_GID"
+]
+```
+
+---
+
+## 推荐高亮实现
+
+### 全局推荐效果对象
+
+Majsoul 游戏提供了一个全局的推荐效果对象，用于显示 AI 推荐的高亮：
+
+```javascript
+// 推荐效果对象位置
+const recommendEffect = window.view.DesktopMgr.Inst.effect_recommend;
+
+// 属性
+{
+  name: "effect_recommend",       // 对象名称
+  active: false,                  // 当前激活状态
+  _activeInHierarchy: false,      // 在层级中的激活状态
+  _childs: [ Sprite3D ],          // 包含 1 个子对象（可能是高亮框）
+  // ... 其他 Laya 引擎属性
+}
+```
+
+### 激活推荐高亮的方式
+
+```javascript
+// ✅ 显示推荐高亮
+effect_recommend.active = true;
+
+// ❌ 隐藏推荐高亮
+effect_recommend.active = false;
+```
+
+### Naki 中的推荐高亮管理模块
+
+在 `naki-autoplay.js` 中实现了推荐高亮管理器：
+
+```javascript
+window.__nakiRecommendHighlight = {
+  // 显示推荐牌的高亮（参数为牌在手中的位置 0-13）
+  show(tileIndex) { ... },
+
+  // 隐藏推荐高亮
+  hide() { ... },
+
+  // 切换高亮状态
+  toggle(tileIndex) { ... },
+
+  // 获取当前状态
+  getStatus() {
+    return {
+      isActive: boolean,
+      highlightTileIndex: number,
+      hasEffect: boolean
+    };
+  }
+}
+```
+
+### 使用示例
+
+```javascript
+// 在推荐出牌时显示高亮
+__nakiRecommendHighlight.show(recommendedTileIndex);
+
+// 执行动作后隐藏高亮
+__nakiRecommendHighlight.hide();
+
+// 查询当前状态
+const status = __nakiRecommendHighlight.getStatus();
+console.log(status.isActive);  // 是否正在显示高亮
+```
+
+---
+
 ### 后续优化方向
 
 对于 Naki 的实现：
 
 1. **性能优化**
-   - 考虑使用 WebGL Canvas 而非 2D Canvas
-   - 将闪光效果移到主 3D 渲染管线
+   - ✅ 已改用原生 `effect_recommend` 而非 2D Canvas
+   - 将闪光效果完全集成到 3D 渲染管线
 
-2. **视觉改进**
-   - 提取 Majsoul 的 `dora_shine.png` 纹理用在 Canvas 上
-   - 实现更接近原生的渐变闪光效果
+2. **精确定位**
+   - 研究 `effect_recommend._childs[0]` 的位置配置
+   - 使其精确对应推荐的牌位置
 
-3. **交互改进**
+3. **多效果支持**
+   - 同时支持宝牌闪光和推荐高亮
+   - 区分不同效果类型（宝牌 vs 推荐）
+
+4. **交互改进**
    - 与原生 outline 着色器的选中高亮保持同步
-   - 支持多牌同时闪烁
+   - 支持多牌同时显示不同效果
 
 ---
 
@@ -732,7 +894,8 @@ Naki:
 - Majsoul 协议: 见 FLOW_COMPARISON.md
 
 ### 相关代码
-- Naki 的 shimmer 实现: `Naki/Resources/JavaScript/naki-recommendation-shimmer.js`
+- Naki 的推荐高亮实现: `Naki/Resources/JavaScript/naki-autoplay.js:459-543`
+- Naki 的 dora hook: `Naki/Resources/JavaScript/naki-game-api.js:802-894`
 - Debug Server: `Naki/Services/Debug/DebugServer.swift:306-506`
 - Majsoul Bridge: `Naki/Services/Bridge/MajsoulBridge.swift:200-207`
 
