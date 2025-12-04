@@ -114,17 +114,22 @@ class WebViewModel {
     /// 啟動定期檢查計時器
     private func startAutoPlayCheckTimer() {
         autoPlayCheckTimer?.invalidate()
-        autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.checkAndRetriggerAutoPlay()
         }
     }
 
     /// 定期檢查：如果有推薦且沒有正在執行的動作，重新觸發
     private func checkAndRetriggerAutoPlay() {
+        guard let webView = wkWebView else { return }
+
+        // ⭐ 檢查並更新高亮效果（如果有推薦但沒有顯示效果）
+        checkAndUpdateHighlights()
+
+        // 自動打牌檢查
         guard autoPlayController?.state.mode == .auto,
               !recommendations.isEmpty,
-              currentExecutionId == nil,  // 沒有正在執行的動作
-              let webView = wkWebView else { return }
+              currentExecutionId == nil else { return }
 
         // 檢查遊戲是否有可用操作
         let checkScript = """
@@ -142,6 +147,26 @@ class WebViewModel {
             // 有 oplist 且有推薦，重新觸發
             self.debugServer?.addLog("⏰ Timer: retrigger auto-play")
             self.triggerAutoPlayNow(delay: 0.1)  // 短延遲立即執行
+        }
+    }
+
+    /// 檢查並更新高亮效果
+    private func checkAndUpdateHighlights() {
+        guard !recommendations.isEmpty,
+              let webView = wkWebView,
+              let controller = nativeBotController else { return }
+
+        // 檢查是否有活躍的效果
+        let checkScript = "window.__nakiRecommendHighlight?.activeEffects?.length || 0"
+
+        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
+            guard let self = self,
+                  let effectCount = result as? Int,
+                  effectCount == 0 else { return }
+
+            // 有推薦但沒有效果，重新顯示
+            self.debugServer?.addLog("⏰ Timer: refresh highlights")
+            self.showGameHighlightForRecommendations(self.recommendations, controller: controller)
         }
     }
 
@@ -244,6 +269,9 @@ class WebViewModel {
 
         let script = """
         (function() {
+            // ⭐ 先清除現有效果，確保不會有殘留
+            window.__nakiRecommendHighlight?.hide();
+
             var mr = window.view?.DesktopMgr?.Inst?.mainrole;
             if (!mr || !mr.hand) return [];
 
@@ -291,7 +319,7 @@ class WebViewModel {
                 }
             }
 
-            // 調用高亮模組
+            // 調用高亮模組（showMultiple 內部也會 hide，但這裡已經 hide 過了）
             if (results.length > 0) {
                 window.__nakiRecommendHighlight?.showMultiple(results);
             }
