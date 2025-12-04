@@ -4,12 +4,14 @@
 //
 //  Created by Claude on 2025/12/01.
 //  自動打牌控制器 - 管理自動打牌模式 (UI 自動化方案)
+//  Updated: 2025/12/04 - 遷移至 WebPage API (macOS 26.0+)
 //
 
 import Combine
 import Foundation
 import WebKit
 import MortalSwift
+
 
 // MARK: - Auto Play Mode
 
@@ -66,6 +68,8 @@ struct AutoPlayState {
 // MARK: - Auto Play Controller
 
 /// 自動打牌控制器 (UI 自動化版本)
+/// 使用 WebPage API (macOS 26.0+)
+@available(macOS 26.0, *)
 class AutoPlayController: ObservableObject {
 
     // MARK: - Published Properties
@@ -75,8 +79,8 @@ class AutoPlayController: ObservableObject {
 
     // MARK: - Private Properties
 
-    /// WebView 引用（用於執行 JavaScript）
-    private weak var webView: WKWebView?
+    /// WebPage 引用（用於執行 JavaScript）
+    private weak var webPage: WebPage?
 
     /// 動作執行計時器
     private var actionTimer: Timer?
@@ -98,10 +102,10 @@ class AutoPlayController: ObservableObject {
 
     // MARK: - Configuration
 
-    /// 設置 WebView 引用
-    func setWebView(_ webView: WKWebView) {
-        self.webView = webView
-        bridgeLog("\(logTag) WebView set")
+    /// 設置 WebPage 引用
+    func setWebPage(_ webPage: WebPage?) {
+        self.webPage = webPage
+        bridgeLog("\(logTag) WebPage set")
     }
 
     /// 設置自動打牌模式
@@ -258,24 +262,25 @@ class AutoPlayController: ObservableObject {
         }
     }
 
-    /// 執行動作 (通過 UI 自動化)
+    /// 執行動作 (透過 UI 自動化)
     private func executeAction(_ action: AutoPlayAction) {
-        guard let webView = webView else {
-            bridgeLog("\(logTag) Error: WebView not available")
-            lastError = "WebView 不可用"
+        guard let webPage = webPage else {
+            bridgeLog("\(logTag) Error: WebPage not available")
+            lastError = "WebPage 不可用"
             return
         }
 
         let script = generateJavaScript(for: action)
         bridgeLog("\(logTag) Executing: \(script)")
 
-        webView.evaluateJavaScript(script) { [weak self] result, error in
-            if let error = error {
-                bridgeLog("\(self?.logTag ?? "") JS error: \(error.localizedDescription)")
-                self?.handleActionError(error.localizedDescription)
-            } else {
+        Task { @MainActor [weak self] in
+            do {
+                _ = try await webPage.callJavaScript(script)
                 bridgeLog("\(self?.logTag ?? "") Action executed successfully")
                 self?.handleActionSuccess()
+            } catch {
+                bridgeLog("\(self?.logTag ?? "") JS error: \(error.localizedDescription)")
+                self?.handleActionError(error.localizedDescription)
             }
         }
     }

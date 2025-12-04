@@ -1,22 +1,24 @@
 //
 //  WebSocketInterceptor.swift
-//  akagi
+//  Naki
 //
 //  Created by Suoie on 2025/11/30.
-//  WebSocket 攔截器 - 通過 JavaScript 注入監聽雀魂的 WebSocket 通訊
-//  Updated: 2025/12/01 - 添加自動打牌支援
-//  Updated: 2025/12/03 - 重構為從外部 JS 文件載入
+//  WebSocket 攔截器 - 透過 JavaScript 注入監聽雀魂的 WebSocket 通訊
+//  Updated: 2025/12/01 - 新增自動打牌支援
+//  Updated: 2025/12/03 - 重構為從外部 JS 檔案載入
+//  Updated: 2025/12/04 - 支援 WebPage API (macOS 26.0+)
 //
 
 import Foundation
 import WebKit
 import os.log
 
-// 使用 LogManager 的 wsLog 函數
+// 使用 LogManager 的 wsLog 函式
 
 // MARK: - WebSocket Interceptor
 
-/// WebSocket 攔截器，用於監聽 WKWebView 中的 WebSocket 通訊
+/// WebSocket 攔截器，用於監聽 WebPage 中的 WebSocket 通訊
+/// 透過 WKUserScript 注入 JavaScript 程式碼
 class WebSocketInterceptor {
 
     /// JavaScript 模組文件名稱（按載入順序）

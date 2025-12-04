@@ -7,12 +7,13 @@
 //  核心視圖模型（協調器），負責：
 //  - 協調各服務 (AutoPlayService, DebugServer, GameStateManager)
 //  - Bot 控制 (NativeBotController + MortalSwift)
-//  - WebView 整合 (JavaScript Bridge)
+//  - WebPage 整合 (JavaScript Bridge) - 使用 macOS 26.0+ WebPage API
 //
 //  更新日誌:
 //  - 2025/11/30: 移除 Python 依賴，純 Swift 實現
-//  - 2025/12/02: v1.1.2 重構 - 提取重複代碼，清理未使用變數
+//  - 2025/12/02: v1.1.2 重構 - 提取重複程式碼，清理未使用變數
 //  - 2025/12/03: v1.2.0 服務化重構 - 提取 AutoPlayService, GameStateManager
+//  - 2025/12/04: v1.3.0 WebPage API - 使用 macOS 26.0+ 新 API
 //
 
 import MortalSwift
@@ -20,10 +21,11 @@ import SwiftUI
 import WebKit
 
 @Observable
+@MainActor
 class WebViewModel {
     var statusMessage = ""
 
-    // 連接狀態
+    // 連線狀態
     var isConnected = false
     var recommendationCount = 0
 
@@ -54,21 +56,21 @@ class WebViewModel {
     var isDebugServerRunning = false
     var debugServerPort: UInt16 = 8765
 
-    // 方案 1: 原生 WebPage（僅顯示網頁）
+    // MARK: - WebPage (macOS 26.0+)
+
+    /// WebPage 實例
     var webPage: WebPage?
 
-    // 方案 2: WKWebView（完整功能 + JavaScript Bridge）
-    var wkWebView: WKWebView? {
-        didSet {
-            // 當 WKWebView 設置時，也設置給服務
-            if let webView = wkWebView {
-                autoPlayController?.setWebView(webView)
-                autoPlayService.setWebView(webView)
-            }
-        }
-    }
+    /// Web 協調器（處理 WebSocket 訊息和導覽事件）
+    private var webCoordinator: NakiWebCoordinator?
 
-    // 已棄用 - 保留屬性以兼容舊代碼
+    /// 導覽決策器
+    private var navigationDecider: NakiNavigationDecider?
+
+    /// 對話框展示器
+    private var dialogPresenter: NakiDialogPresenter?
+
+    // 已棄用 - 保留屬性以相容舊程式碼
     var botEngineMode: String = "native"
     var isProxyRunning: Bool = false
 
@@ -87,8 +89,48 @@ class WebViewModel {
     private var autoPlayCheckTimer: Timer?
 
     init() {
-        // 初始化 WebPage（用於簡單顯示）
-        webPage = WebPage()
+        // 初始化協調器和輔助類別
+        webCoordinator = NakiWebCoordinator(viewModel: self)
+        navigationDecider = NakiNavigationDecider(viewModel: self)
+        dialogPresenter = NakiDialogPresenter(viewModel: self)
+
+        // 建立 WebPage 設定
+        var configuration = WebPage.Configuration()
+
+        // 設定 userContentController（JavaScript 橋接）
+        let userContentController = WKUserContentController()
+
+        // 註冊 JavaScript Bridge 處理器
+        if let coordinator = webCoordinator {
+            userContentController.add(coordinator.websocketHandler, name: "websocketBridge")
+        }
+
+        // 注入所有 JavaScript 模組（WebSocket 拦截、Shimmer 效果等）
+        let websocketScript = WebSocketInterceptor.createUserScript()
+        userContentController.addUserScript(websocketScript)
+
+        configuration.userContentController = userContentController
+
+        // 啟用 Web Inspector（僅用於開發除錯）
+        #if DEBUG
+        // WebPage 使用 isInspectable 属性
+        #endif
+
+        // 建立 WebPage
+        if let decider = navigationDecider, let presenter = dialogPresenter {
+            webPage = WebPage(
+                configuration: configuration,
+                navigationDecider: decider,
+                dialogPresenter: presenter
+            )
+        } else {
+            webPage = WebPage(configuration: configuration)
+        }
+
+        // 啟用 Inspector
+        #if DEBUG
+        webPage?.isInspectable = true
+        #endif
 
         // 初始化原生 Bot 控制器
         nativeBotController = NativeBotController()
@@ -96,34 +138,72 @@ class WebViewModel {
         // 初始化自動打牌控制器
         autoPlayController = AutoPlayController()
 
-        // 設置 AutoPlayService 委託
+        // 設定 AutoPlayService 委托
         autoPlayService.delegate = self
+        autoPlayService.setWebPage(webPage)
 
-        // ⭐ 自動啟動 Debug Server
+        // 設定 AutoPlayController 的 WebPage
+        autoPlayController?.setWebPage(webPage)
+
+        // 自動啟動 Debug Server
         startDebugServer()
 
-        // ⭐ 自動設置全自動打牌模式
+        // 自動設定全自動打牌模式
         autoPlayController?.setMode(.auto)
 
-        // ⭐ 啟動定期檢查計時器（每 2 秒檢查一次）
+        // 啟動定期檢查計時器（每 2 秒檢查一次）
         startAutoPlayCheckTimer()
 
-        statusMessage = "準備就緒 (全自動模式)"
+        // 监听导航事件
+        observeNavigations()
+
+        statusMessage = "准备就绪 (全自動模式)"
+    }
+
+    /// 监听导航事件
+    private func observeNavigations() {
+        guard let page = webPage else { return }
+
+        Task {
+            do {
+                for try await event in page.navigations {
+                    switch event {
+                    case .startedProvisionalNavigation:
+                        webCoordinator?.handleNavigationStarted()
+                        statusMessage = "正在加载雀魂..."
+
+                    case .committed:
+                        statusMessage = "雀魂已加载，等待连接..."
+
+                    case .finished:
+                        print("[WebView] Page loaded successfully")
+
+                    case .receivedServerRedirect:
+                        break
+                    }
+                }
+            } catch {
+                print("[WebView] Navigation error: \(error)")
+                statusMessage = "加载失敗: \(error.localizedDescription)"
+            }
+        }
     }
 
     /// 啟動定期檢查計時器
     private func startAutoPlayCheckTimer() {
         autoPlayCheckTimer?.invalidate()
         autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.checkAndRetriggerAutoPlay()
+            Task { @MainActor in
+                self?.checkAndRetriggerAutoPlay()
+            }
         }
     }
 
     /// 定期檢查：如果有推薦且沒有正在執行的動作，重新觸發
     private func checkAndRetriggerAutoPlay() {
-        guard let webView = wkWebView else { return }
+        guard let page = webPage else { return }
 
-        // ⭐ 檢查並更新高亮效果（如果有推薦但沒有顯示效果）
+        // 檢查並更新高亮效果（如果有推薦但沒有顯示效果）
         checkAndUpdateHighlights()
 
         // 自動打牌檢查
@@ -133,46 +213,49 @@ class WebViewModel {
 
         // 檢查遊戲是否有可用操作
         let checkScript = """
-        (function() {
-            var dm = window.view.DesktopMgr.Inst;
-            if (!dm || !dm.oplist || dm.oplist.length === 0) return false;
-            return true;
-        })()
+        var dm = window.view.DesktopMgr.Inst;
+        if (!dm || !dm.oplist || dm.oplist.length === 0) return false;
+        return true;
         """
 
-        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
-            guard let self = self,
-                  let hasOp = result as? Bool, hasOp else { return }
-
-            // 有 oplist 且有推薦，重新觸發
-            self.debugServer?.addLog("⏰ Timer: retrigger auto-play")
-            self.triggerAutoPlayNow(delay: 0.1)  // 短延遲立即執行
+        Task {
+            do {
+                let result = try await page.callJavaScript(checkScript)
+                if let hasOp = result as? Bool, hasOp {
+                    debugServer?.addLog("⏰ Timer: retrigger auto-play")
+                    triggerAutoPlayNow(delay: 0.1)
+                }
+            } catch {
+                // 忽略错误
+            }
         }
     }
 
     /// 檢查並更新高亮效果
     private func checkAndUpdateHighlights() {
         guard !recommendations.isEmpty,
-              let webView = wkWebView,
+              let page = webPage,
               let controller = nativeBotController else { return }
 
         // 檢查是否有活躍的效果
         let checkScript = "window.__nakiRecommendHighlight?.activeEffects?.length || 0"
 
-        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
-            guard let self = self,
-                  let effectCount = result as? Int,
-                  effectCount == 0 else { return }
-
-            // 有推薦但沒有效果，重新顯示
-            self.debugServer?.addLog("⏰ Timer: refresh highlights")
-            self.showGameHighlightForRecommendations(self.recommendations, controller: controller)
+        Task {
+            do {
+                let result = try await page.callJavaScript(checkScript)
+                if let effectCount = result as? Int, effectCount == 0 {
+                    debugServer?.addLog("⏰ Timer: refresh highlights")
+                    await showGameHighlightForRecommendations(recommendations, controller: controller)
+                }
+            } catch {
+                // 忽略错误
+            }
         }
     }
 
     // MARK: - Native Bot Methods
 
-    /// 使用原生 MortalSwift 創建 Bot
+    /// 使用原生 MortalSwift 建立 Bot
     func createNativeBot(playerId: Int, is3P: Bool = false) async throws {
         guard let controller = nativeBotController else {
             throw NativeBotError.botNotInitialized
@@ -180,7 +263,7 @@ class WebViewModel {
 
         try controller.createBot(playerId: UInt8(playerId), is3P: is3P)
         botStatus = controller.botState
-        statusMessage = "Bot 已創建 (Player \(playerId))"
+        statusMessage = "Bot 已建立 (Player \(playerId))"
     }
 
     /// 處理單一 MJAI 事件
@@ -189,25 +272,25 @@ class WebViewModel {
             throw NativeBotError.botNotInitialized
         }
         let response = try await controller.react(event: event)
-        await MainActor.run { updateUIAfterBotResponse(from: controller) }
+        updateUIAfterBotResponse(from: controller)
         return response
     }
 
-    /// 批量處理多個 MJAI 事件
+    /// 批次處理多个 MJAI 事件
     func processNativeEvents(_ events: [[String: Any]]) async throws -> [String: Any]? {
         guard let controller = nativeBotController else {
             throw NativeBotError.botNotInitialized
         }
         let response = try await controller.react(events: events)
-        await MainActor.run { updateUIAfterBotResponse(from: controller) }
+        updateUIAfterBotResponse(from: controller)
         return response
     }
 
-    /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
+    /// 从 Bot 控制器更新 UI 状态並觸發自動打牌
     private func updateUIAfterBotResponse(from controller: NativeBotController) {
         bridgeLog("[WebViewModel] ===== updateUIAfterBotResponse CALLED =====")
 
-        // 更新遊戲狀態
+        // 更新遊戲状态
         gameState = controller.gameState
         botStatus = controller.botState
         tehaiTiles = controller.tehaiMjai
@@ -217,40 +300,44 @@ class WebViewModel {
 
         bridgeLog("[WebViewModel] Updated recommendations: \(recommendations.count)")
 
-        // 同步到 GameStateManager（供 UI 響應式更新）
+        // 同步到 GameStateManager（供 UI 回應式更新）
         gameStateManager.syncFrom(controller: controller)
 
         // 更新高亮牌（顯示所有符合條件的推薦）
         if let firstRec = recommendations.first {
             highlightedTile = firstRec.displayTile
 
-            // ⭐ 在遊戲 UI 上顯示多個推薦的原生高亮
-            showGameHighlightForRecommendations(recommendations, controller: controller)
+            // 在遊戲 UI 上顯示多个推薦的原生高亮
+            Task {
+                await showGameHighlightForRecommendations(recommendations, controller: controller)
+            }
         } else {
-            // 沒有推薦時隱藏高亮
-            hideGameHighlight()
+            // 沒有推薦时隐藏高亮
+            Task {
+                await hideGameHighlight()
+            }
         }
 
         // 觸發自動打牌
         triggerAutoPlayIfNeeded()
     }
 
-    /// 在遊戲 UI 上顯示多個推薦的原生高亮效果
-    /// 根據機率顯示不同顏色：> 0.5 綠色，0.2~0.5 紅色，< 0.2 不顯示
-    private func showGameHighlightForRecommendations(_ recommendations: [Recommendation], controller: NativeBotController) {
-        guard let webView = wkWebView else { return }
+    /// 在遊戲 UI 上顯示多个推薦的原生高亮效果
+    /// 根据機率顯示不同顏色：> 0.5 綠色，0.2~0.5 紅色，< 0.2 不顯示
+    private func showGameHighlightForRecommendations(_ recommendations: [Recommendation], controller: NativeBotController) async {
+        guard let page = webPage else { return }
 
-        // 過濾出有效的打牌推薦（機率 > 0.2）
+        // 过滤出有效的打牌推薦（機率 > 0.2）
         let validRecs = recommendations.filter { rec in
             rec.tile != nil && rec.probability > 0.2
         }
 
         if validRecs.isEmpty {
-            hideGameHighlight()
+            await hideGameHighlight()
             return
         }
 
-        // 構建 JavaScript 來查找所有推薦牌的位置
+        // 建構 JavaScript 来查找所有推薦牌的位置
         var tileDataArray: [[String: Any]] = []
         for rec in validRecs {
             guard let tile = rec.tile else { continue }
@@ -260,7 +347,7 @@ class WebViewModel {
             ])
         }
 
-        // 將數據轉為 JSON
+        // 將資料轉為 JSON
         guard let jsonData = try? JSONSerialization.data(withJSONObject: tileDataArray),
               let jsonString = String(data: jsonData, encoding: .utf8) else {
             bridgeLog("[WebViewModel] Failed to serialize recommendations")
@@ -268,117 +355,111 @@ class WebViewModel {
         }
 
         let script = """
-        (function() {
-            // ⭐ 先清除現有效果，確保不會有殘留
-            window.__nakiRecommendHighlight?.hide();
+        // 先清除現有效果，确保不會有残留
+        window.__nakiRecommendHighlight?.hide();
 
-            var mr = window.view?.DesktopMgr?.Inst?.mainrole;
-            if (!mr || !mr.hand) return [];
+        var mr = window.view?.DesktopMgr?.Inst?.mainrole;
+        if (!mr || !mr.hand) return [];
 
-            var tiles = \(jsonString);
-            var results = [];
+        var tiles = \(jsonString);
+        var results = [];
 
-            // 雀魂的 type 映射：0=筒(p), 1=萬(m), 2=索(s), 3=字牌(z)
-            var typeMap = {'m': 1, 'p': 0, 's': 2};
-            var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
+        // 雀魂的 type 映射：0=筒(p), 1=万(m), 2=索(s), 3=字牌(z)
+        var typeMap = {'m': 1, 'p': 0, 's': 2};
+        var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
 
-            for (var j = 0; j < tiles.length; j++) {
-                var target = tiles[j].mjaiString;
-                var probability = tiles[j].probability;
+        for (var j = 0; j < tiles.length; j++) {
+            var target = tiles[j].mjaiString;
+            var probability = tiles[j].probability;
 
-                var tileType, tileValue, isRed = false;
+            var tileType, tileValue, isRed = false;
 
-                // 處理字牌
-                if (honorMap[target]) {
-                    tileType = honorMap[target][0];
-                    tileValue = honorMap[target][1];
-                } else {
-                    // 處理數牌：1m, 5mr, etc.
-                    tileValue = parseInt(target[0]);
-                    var suitChar = target[1];
-                    tileType = typeMap[suitChar];
-                    isRed = target.length > 2 && target[2] === 'r';
-                }
+            // 處理字牌
+            if (honorMap[target]) {
+                tileType = honorMap[target][0];
+                tileValue = honorMap[target][1];
+            } else {
+                // 處理數牌：1m, 5mr, etc.
+                tileValue = parseInt(target[0]);
+                var suitChar = target[1];
+                tileType = typeMap[suitChar];
+                isRed = target.length > 2 && target[2] === 'r';
+            }
 
-                // 在手牌中查找
-                for (var i = 0; i < mr.hand.length; i++) {
-                    var t = mr.hand[i];
-                    if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
-                        // 如果是紅寶牌，檢查 dora 標記
-                        var match = false;
-                        if (isRed) {
-                            match = t.val.dora === true;
-                        } else {
-                            match = !t.val.dora;
-                        }
-                        if (match) {
-                            results.push({ tileIndex: i, probability: probability });
-                            break;
-                        }
+            // 在手牌中查找
+            for (var i = 0; i < mr.hand.length; i++) {
+                var t = mr.hand[i];
+                if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
+                    // 如果是红宝牌，檢查 dora 标记
+                    var match = false;
+                    if (isRed) {
+                        match = t.val.dora === true;
+                    } else {
+                        match = !t.val.dora;
+                    }
+                    if (match) {
+                        results.push({ tileIndex: i, probability: probability });
+                        break;
                     }
                 }
             }
+        }
 
-            // 調用高亮模組（showMultiple 內部也會 hide，但這裡已經 hide 過了）
-            if (results.length > 0) {
-                window.__nakiRecommendHighlight?.showMultiple(results);
-            }
+        // 呼叫高亮模組（showMultiple 內部也會 hide，但這裡已經 hide 過了）
+        if (results.length > 0) {
+            window.__nakiRecommendHighlight?.showMultiple(results);
+        }
 
-            return results;
-        })()
+        return results;
         """
 
-        webView.evaluateJavaScript(script) { result, error in
-            if let error = error {
-                bridgeLog("[WebViewModel] Error showing highlights: \(error.localizedDescription)")
-                return
-            }
-
+        do {
+            let result = try await page.callJavaScript(script)
             if let results = result as? [[String: Any]] {
                 bridgeLog("[WebViewModel] Highlighted \(results.count) recommendations")
             }
+        } catch {
+            bridgeLog("[WebViewModel] Error showing highlights: \(error.localizedDescription)")
         }
     }
 
-    /// 隱藏遊戲 UI 上的高亮效果
-    private func hideGameHighlight() {
-        guard let webView = wkWebView else { return }
+    /// 隐藏遊戲 UI 上的高亮效果
+    private func hideGameHighlight() async {
+        guard let page = webPage else { return }
 
         let script = "window.__nakiRecommendHighlight?.hide()"
-        webView.evaluateJavaScript(script) { result, error in
-            if let error = error {
-                bridgeLog("[WebViewModel] Error hiding highlight: \(error.localizedDescription)")
-            } else {
-                bridgeLog("[WebViewModel] Hidden game highlight")
-            }
+        do {
+            _ = try await page.callJavaScript(script)
+            bridgeLog("[WebViewModel] Hidden game highlight")
+        } catch {
+            bridgeLog("[WebViewModel] Error hiding highlight: \(error.localizedDescription)")
         }
     }
 
-    /// 根據當前推薦觸發自動打牌
+    /// 根据當前推薦觸發自動打牌
     private func triggerAutoPlayIfNeeded() {
         let autoMode = autoPlayController?.state.mode
         let hasRecs = !recommendations.isEmpty
 
         guard autoMode == .auto, hasRecs else { return }
 
-        // 根據動作類型決定延遲時間
+        // 根据動作類型決定延遲時間
         guard let firstRec = recommendations.first else { return }
         let firstAction = firstRec.actionType
         let tileName = firstRec.displayTile
         let delay: TimeInterval = calculateDelay(for: firstAction)
 
-        // ⭐ 防抖動：如果同一個動作在短時間內已經觸發過，跳過
-        // 但對於 none (pass) 動作，不使用防抖動，因為每次有新的副露機會都需要響應
+        // 防抖动：如果同一个動作在短時間内已經觸發过，跳过
+        // 但對於 none (pass) 動作，不使用防抖动，因為每次有新的副露機會都需要回應
         let triggerKey = "\(firstAction.rawValue)-\(tileName)"
         let now = Date()
         let isPassAction = firstAction == .none
 
-        if !isPassAction,  // pass 動作不受防抖動限制
+        if !isPassAction,
            let lastKey = lastTriggerKey,
            let lastTime = lastTriggerTime,
            lastKey == triggerKey,
            now.timeIntervalSince(lastTime) < delay + 0.5 {
-            // 同一個動作在 delay + 0.5 秒內已觸發過，跳過
             return
         }
 
@@ -392,68 +473,67 @@ class WebViewModel {
 
     /// 計算動作延遲時間
     private func calculateDelay(for actionType: Recommendation.ActionType?) -> TimeInterval {
-        // 注意：.none 會跟 Optional.none 衝突，所以要用 .some(.none)
         switch actionType {
         case .hora:
-            return 1.0   // 和牌: 等待遊戲 oplist 更新
+            return 1.0
         case .chi, .pon, .kan:
-            return 1.5   // 副露: 等待遊戲 UI 完全準備好
+            return 1.5
         case .some(.none):
-            return 1.0   // 跳過: 等待遊戲 oplist 準備好（太短會在 oplist 出現前執行）
+            return 1.0
         default:
-            return 1.8   // 打牌: 較長延遲確保穩定
+            return 1.8
         }
     }
 
-    /// 刪除原生 Bot
+    /// 删除原生 Bot
     func deleteNativeBot() {
         nativeBotController?.deleteBot()
         botStatus = BotStatus()
         recommendations = []
         tehaiTiles = []
         tsumoTile = nil
-        // ⭐ 隱藏遊戲 UI 上的高亮
-        hideGameHighlight()
+        // 隐藏遊戲 UI 上的高亮
+        Task {
+            await hideGameHighlight()
+        }
         bridgeLog("[WebViewModel] Bot deleted and state cleared")
     }
 
     // MARK: - Auto Play Methods
 
-    /// 設置自動打牌模式
+    /// 設定自動打牌模式
     func setAutoPlayMode(_ mode: AutoPlayMode) {
         autoPlayController?.setMode(mode)
         bridgeLog("[WebViewModel] Auto-play mode set to: \(mode.rawValue)")
         debugServer?.addLog("Mode changed: \(mode.rawValue), recs: \(recommendations.count)")
 
-        // ⭐ 當啟用全自動模式且有現有推薦時，立即觸發
+        // 当啟用全自動模式且有現有推薦时，立即觸發
         if mode == .auto, !recommendations.isEmpty {
             let firstAction = recommendations.first?.actionType
             let delay: TimeInterval
-            // 注意：.none 會跟 Optional.none 衝突，所以要用完整類型名
             switch firstAction {
             case .hora:
-                delay = 0  // 和牌: 立即執行，時間窗口極短
+                delay = 0
             case .chi, .pon, .kan:
-                delay = 1.5  // 副露: 等待遊戲 UI 完全準備好
+                delay = 1.5
             case .some(.none):
-                delay = 1.2  // 跳過: 等待其他玩家動作完成
+                delay = 1.2
             default:
-                delay = 1.8  // 打牌: 較長延遲確保穩定
+                delay = 1.8
             }
             debugServer?.addLog("Auto-triggering on mode change: \(firstAction?.rawValue ?? "?") (delay: \(delay)s)")
             triggerAutoPlayNow(delay: delay)
         }
     }
 
-    /// 設置自動打牌延遲
+    /// 設定自動打牌延遲
     func setAutoPlayDelay(_ delay: TimeInterval) {
         autoPlayController?.setActionDelay(delay)
     }
 
-    /// 設定高亮效果選項
-    /// - Parameter showRotatingEffect: 是否顯示旋轉高亮效果
+    /// 設定高亮效果选项
     func setHighlightSettings(showRotatingEffect: Bool) {
-        guard let webView = wkWebView else { return }
+        guard let page = webPage else { return }
 
         let script = """
         window.__nakiRecommendHighlight?.setSettings({
@@ -461,11 +541,12 @@ class WebViewModel {
         });
         """
 
-        webView.evaluateJavaScript(script) { _, error in
-            if let error = error {
-                bridgeLog("[WebViewModel] Error setting highlight: \(error.localizedDescription)")
-            } else {
+        Task {
+            do {
+                _ = try await page.callJavaScript(script)
                 bridgeLog("[WebViewModel] Highlight settings: rotating=\(showRotatingEffect)")
+            } catch {
+                bridgeLog("[WebViewModel] Error setting highlight: \(error.localizedDescription)")
             }
         }
     }
@@ -481,18 +562,17 @@ class WebViewModel {
     }
 
     /// 手動觸發自動打牌（使用當前推薦）
-    /// - Parameter delay: 延遲執行的秒數（預設 1.2 秒）
     func triggerAutoPlayNow(delay: TimeInterval = 1.2) {
-        guard let webView = wkWebView,
+        guard let page = webPage,
               let firstRec = recommendations.first else {
-            bridgeLog("[WebViewModel] Cannot trigger: no WebView or recommendations")
+            bridgeLog("[WebViewModel] Cannot trigger: no WebPage or recommendations")
             return
         }
 
         let actionType = firstRec.actionType
         let tileName = firstRec.displayTile
 
-        // 生成執行 ID 用於追蹤
+        // 生成執行 ID 用于追踪
         let executionId = UUID()
         currentExecutionId = executionId
 
@@ -509,547 +589,415 @@ class WebViewModel {
                 return
             }
 
-            // ⭐ 所有動作都使用重試機制（包括 hora）
-            // hora 之前不重試導致 oplist 還沒準備好時失敗
-            self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: 1, executionId: executionId)
+            // 所有動作都使用重試機制
+            Task {
+                await self.executeAutoPlayActionWithRetry(page: page, actionType: actionType, tileName: tileName, attempt: 1, executionId: executionId)
+            }
         }
     }
 
-    /// 最大重試次數
-    private let maxRetryAttempts = 50  // 50 次 x 0.1s = 最多等 5 秒
+    /// 最大重試次数
+    private let maxRetryAttempts = 50
 
-    /// 帶重試的自動打牌執行
-    /// ⭐ 改進版：如果 oplist 還沒準備好，會等待並重試
-    /// - Parameters:
-    ///   - webView: WKWebView 實例
-    ///   - actionType: 動作類型
-    ///   - tileName: 牌名
-    ///   - attempt: 當前嘗試次數
-    ///   - executionId: 執行 ID，用於檢查是否被取代
-    private func executeAutoPlayActionWithRetry(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+    /// 带重試的自動打牌執行
+    private func executeAutoPlayActionWithRetry(page: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) async {
 
-        // ⭐ 檢查是否被新的觸發取代
+        // 檢查是否被新的觸發取代
         if currentExecutionId != executionId {
             debugServer?.addLog("⏭️ Retry cancelled: superseded (attempt \(attempt))")
             return
         }
 
-        // 先檢查是否還有操作可執行
+        // 先檢查是否还有操作可執行
         let checkScript = """
-        (function() {
-            var dm = window.view.DesktopMgr.Inst;
-            if (!dm) return {hasOp: false, reason: 'no dm'};
-            if (!dm.oplist || dm.oplist.length === 0) return {hasOp: false, reason: 'no oplist'};
+        var dm = window.view.DesktopMgr.Inst;
+        if (!dm) return JSON.stringify({hasOp: false, reason: 'no dm'});
+        if (!dm.oplist || dm.oplist.length === 0) return JSON.stringify({hasOp: false, reason: 'no oplist'});
 
-            // 檢查是否還有待處理的操作
-            var opTypes = dm.oplist.map(o => o.type);
-            return {hasOp: true, opTypes: opTypes, count: dm.oplist.length};
-        })()
+        var opTypes = dm.oplist.map(function(o) { return o.type; });
+        return JSON.stringify({hasOp: true, opTypes: opTypes, count: dm.oplist.length});
         """
 
-        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
-            guard let self = self else { return }
+        do {
+            let result = try await page.callJavaScript(checkScript)
 
-            // ⭐ 再次檢查是否被取代（JS 回調後）
-            if self.currentExecutionId != executionId {
-                self.debugServer?.addLog("⏭️ Retry cancelled after JS: superseded")
+            // 再次檢查是否被取代
+            if currentExecutionId != executionId {
+                debugServer?.addLog("⏭️ Retry cancelled after JS: superseded")
                 return
             }
 
-            // 解析結果
-            if let dict = result as? [String: Any],
+            // 解析 JSON 字符串
+            if let jsonString = result as? String,
+               let jsonData = jsonString.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                let hasOp = dict["hasOp"] as? Bool {
 
                 if !hasOp {
-                    // ⭐ 沒有 oplist
                     let reason = dict["reason"] as? String ?? "unknown"
 
-                    // ⭐ 打牌 (discard) 不需要等待 oplist，直接執行
-                    // 因為打牌只需要輪到自己，不需要特定的 oplist
+                    // 打牌 (discard) 不需要等待 oplist，直接執行
                     if actionType == .discard {
-                        self.debugServer?.addLog("Discard: no oplist, exec directly")
-                        self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
-                        // 檢查是否成功（延遲後檢查 oplist 是否清空）
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                            self?.debugServer?.addLog("✅ Discard sent")
-                            self?.currentExecutionId = nil
-                        }
+                        debugServer?.addLog("Discard: no oplist, exec directly")
+                        await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
+                        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+                        debugServer?.addLog("✅ Discard sent")
+                        currentExecutionId = nil
                         return
                     }
 
-                    // ⭐ 其他動作（pass/chi/pon/kan/hora/riichi）需要等待 oplist
-                    if attempt < self.maxRetryAttempts {
-                        // 繼續等待 oplist
+                    // 其他動作需要等待 oplist
+                    if attempt < maxRetryAttempts {
                         if attempt == 1 || attempt % 10 == 0 {
-                            self.debugServer?.addLog("Wait oplist \(attempt)/\(self.maxRetryAttempts) (\(reason))")
+                            debugServer?.addLog("Wait oplist \(attempt)/\(maxRetryAttempts) (\(reason))")
                         }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                            self?.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
-                        }
+                        try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                        await executeAutoPlayActionWithRetry(page: page, actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
                     } else {
-                        // 超過最大嘗試次數
-                        // 對於 pass，如果等了很久還沒有 oplist，可能真的沒有機會
                         if actionType == .none {
-                            self.debugServer?.addLog("✅ Pass: no oplist after \(attempt) attempts, no opportunity")
+                            debugServer?.addLog("✅ Pass: no oplist after \(attempt) attempts, no opportunity")
                         } else {
-                            self.debugServer?.addLog("❌ No oplist after \(attempt) attempts, giving up")
+                            debugServer?.addLog("❌ No oplist after \(attempt) attempts, giving up")
                         }
-                        // ⭐ 清除執行 ID，讓定期檢查可以重新觸發
-                        self.currentExecutionId = nil
+                        currentExecutionId = nil
                     }
                     return
                 }
 
-                // 還有操作，執行動作
+                // 有操作，執行動作
                 let opInfo = dict["opTypes"] as? [Int] ?? []
-                self.debugServer?.addLog("Attempt \(attempt): ops=\(opInfo)")
+                debugServer?.addLog("Attempt \(attempt): ops=\(opInfo)")
 
-                // 執行動作
-                self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+                await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
 
-                // ⭐ pass 操作：較長間隔 (0.5s)，最多重試 5 次
+                // pass 操作：較長間隔 (0.5s)，最多重試 5 次
                 if actionType == .none {
                     let maxPassRetries = 5
                     if attempt >= maxPassRetries {
-                        self.debugServer?.addLog("✅ Pass sent (\(attempt) attempts)")
+                        debugServer?.addLog("✅ Pass sent (\(attempt) attempts)")
                         return
                     }
-                    // 0.5 秒後檢查，給伺服器足夠時間處理
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                        self?.checkAndRetryIfNeeded(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
-                    }
+                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
+                    await checkAndRetryIfNeeded(page: page, actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
                     return
                 }
 
-                // 其他操作：0.1 秒後檢查是否成功
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                    self?.checkAndRetryIfNeeded(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
-                }
+                // 其他操作：0.1 秒后檢查是否成功
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                await checkAndRetryIfNeeded(page: page, actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
             } else {
                 // 無法解析，直接執行一次
-                self.debugServer?.addLog("Attempt \(attempt): check failed, exec anyway")
-                self.executeAutoPlayAction(webView: webView, actionType: actionType, tileName: tileName)
+                debugServer?.addLog("Attempt \(attempt): check failed, exec anyway")
+                await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
             }
+        } catch {
+            debugServer?.addLog("JS error: \(error.localizedDescription)")
         }
     }
 
     /// 檢查動作是否成功，失敗則重試
-    /// ⭐ 改進版：檢查畫面狀態而不只是 oplist
-    private func checkAndRetryIfNeeded(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+    private func checkAndRetryIfNeeded(page: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) async {
 
-        // ⭐ 檢查是否被新的觸發取代
+        // 檢查是否被新的觸發取代
         if currentExecutionId != executionId {
             debugServer?.addLog("⏭️ Check cancelled: superseded")
             return
         }
 
-        // 根據動作類型使用不同的驗證腳本
         let checkScript = """
-        (function() {
-            var dm = window.view.DesktopMgr.Inst;
-            if (!dm) return {success: true, reason: 'no dm'};
+        var dm = window.view.DesktopMgr.Inst;
+        if (!dm) return JSON.stringify({success: true, reason: 'no dm'});
 
-            var actionType = '\(actionType.rawValue)';
-            var tileName = '\(tileName)';
+        var actionType = '\(actionType.rawValue)';
+        var tileName = '\(tileName)';
 
-            // ⭐ 檢查 oplist 是否還有我們要執行的操作
-            if (dm.oplist && dm.oplist.length > 0) {
-                var opTypes = dm.oplist.map(o => o.type);
+        if (dm.oplist && dm.oplist.length > 0) {
+            var opTypes = dm.oplist.map(function(o) { return o.type; });
 
-                // 根據動作類型檢查
-                if (actionType === 'discard') {
-                    // 打牌：檢查是否還有 type 1 (dapai)
-                    if (opTypes.includes(1)) {
-                        return {success: false, reason: 'discard op still present', opTypes: opTypes};
-                    }
-                } else if (actionType === 'chi') {
-                    if (opTypes.includes(2)) {
-                        return {success: false, reason: 'chi op still present', opTypes: opTypes};
-                    }
-                } else if (actionType === 'pon') {
-                    if (opTypes.includes(3)) {
-                        return {success: false, reason: 'pon op still present', opTypes: opTypes};
-                    }
-                } else if (actionType === 'kan') {
-                    if (opTypes.includes(4) || opTypes.includes(5) || opTypes.includes(6)) {
-                        return {success: false, reason: 'kan op still present', opTypes: opTypes};
-                    }
-                } else if (actionType === 'hora') {
-                    if (opTypes.includes(8) || opTypes.includes(9)) {
-                        return {success: false, reason: 'hora op still present', opTypes: opTypes};
-                    }
-                } else if (actionType === 'none') {
-                    // 跳過：如果還有吃碰槓和的選項，表示還沒跳過
-                    var hasCallOp = opTypes.some(t => t >= 2 && t <= 9);
-                    if (hasCallOp) {
-                        return {success: false, reason: 'call ops still present', opTypes: opTypes};
-                    }
+            if (actionType === 'discard') {
+                if (opTypes.indexOf(1) >= 0) {
+                    return JSON.stringify({success: false, reason: 'discard op still present', opTypes: opTypes});
+                }
+            } else if (actionType === 'chi') {
+                if (opTypes.indexOf(2) >= 0) {
+                    return JSON.stringify({success: false, reason: 'chi op still present', opTypes: opTypes});
+                }
+            } else if (actionType === 'pon') {
+                if (opTypes.indexOf(3) >= 0) {
+                    return JSON.stringify({success: false, reason: 'pon op still present', opTypes: opTypes});
+                }
+            } else if (actionType === 'kan') {
+                if (opTypes.indexOf(4) >= 0 || opTypes.indexOf(5) >= 0 || opTypes.indexOf(6) >= 0) {
+                    return JSON.stringify({success: false, reason: 'kan op still present', opTypes: opTypes});
+                }
+            } else if (actionType === 'hora') {
+                if (opTypes.indexOf(8) >= 0 || opTypes.indexOf(9) >= 0) {
+                    return JSON.stringify({success: false, reason: 'hora op still present', opTypes: opTypes});
+                }
+            } else if (actionType === 'none') {
+                var hasCallOp = false;
+                for (var i = 0; i < opTypes.length; i++) {
+                    if (opTypes[i] >= 2 && opTypes[i] <= 9) { hasCallOp = true; break; }
+                }
+                if (hasCallOp) {
+                    return JSON.stringify({success: false, reason: 'call ops still present', opTypes: opTypes});
                 }
             }
+        }
 
-            // oplist 空了或不包含我們的操作，認為成功
-            return {success: true, reason: 'oplist cleared or action done'};
-        })()
+        return JSON.stringify({success: true, reason: 'oplist cleared or action done'});
         """
 
-        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
-            guard let self = self else { return }
+        do {
+            let result = try await page.callJavaScript(checkScript)
 
-            if let dict = result as? [String: Any],
+            // 解析 JSON 字符串
+            if let jsonString = result as? String,
+               let jsonData = jsonString.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                let success = dict["success"] as? Bool {
 
                 if success {
                     let reason = dict["reason"] as? String ?? "ok"
-                    self.debugServer?.addLog("✅ Action success after \(attempt) attempts (\(reason))")
-                    self.currentExecutionId = nil  // ⭐ 清除執行 ID
+                    debugServer?.addLog("✅ Action success after \(attempt) attempts (\(reason))")
+                    currentExecutionId = nil
                     return
                 }
 
                 // 失敗，需要重試
                 let opInfo = dict["opTypes"] as? [Int] ?? []
 
-                if attempt >= self.maxRetryAttempts {
-                    self.debugServer?.addLog("❌ Max retries reached (\(attempt)), ops=\(opInfo)")
-                    self.currentExecutionId = nil  // ⭐ 清除執行 ID
+                if attempt >= maxRetryAttempts {
+                    debugServer?.addLog("❌ Max retries reached (\(attempt)), ops=\(opInfo)")
+                    currentExecutionId = nil
                     return
                 }
 
                 // 重試
-                self.debugServer?.addLog("Retry \(attempt + 1): ops still present \(opInfo)")
-                self.executeAutoPlayActionWithRetry(webView: webView, actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
+                debugServer?.addLog("Retry \(attempt + 1): ops still present \(opInfo)")
+                await executeAutoPlayActionWithRetry(page: page, actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
             }
+        } catch {
+            debugServer?.addLog("Check error: \(error.localizedDescription)")
         }
     }
 
     /// 實際執行自動打牌動作
-    private func executeAutoPlayAction(webView: WKWebView, actionType: Recommendation.ActionType, tileName: String) {
+    private func executeAutoPlayAction(page: WebPage, actionType: Recommendation.ActionType, tileName: String) async {
 
         switch actionType {
         case .riichi:
-            // ⭐ 立直：需要找到要打的牌（從其他推薦中找，或用第二高機率的打牌推薦）
-            // 先嘗試用遊戲 API 執行立直
             debugServer?.addLog("Exec: riichi...")
             let script = """
-            (function() {
-                var dm = window.view.DesktopMgr.Inst;
-                if (!dm || !dm.oplist) return {success: false, error: 'no oplist'};
+            var dm = window.view.DesktopMgr.Inst;
+            if (!dm || !dm.oplist) return JSON.stringify({success: false, error: 'no oplist'});
 
-                // 找到立直操作 (type 7)
-                var riichiOp = dm.oplist.find(o => o.type === 7);
-                if (!riichiOp) return {success: false, error: 'no riichi op'};
+            var riichiOp = null;
+            for (var i = 0; i < dm.oplist.length; i++) {
+                if (dm.oplist[i].type === 7) { riichiOp = dm.oplist[i]; break; }
+            }
+            if (!riichiOp) return JSON.stringify({success: false, error: 'no riichi op'});
 
-                // 使用 NetAgent 發送立直請求
-                if (window.app && window.app.NetAgent) {
-                    // 立直需要指定打哪張牌，找第一個可以立直的牌
-                    var combination = riichiOp.combination || [];
-                    var tileToDiscard = combination.length > 0 ? combination[0] : null;
+            if (window.app && window.app.NetAgent) {
+                var combination = riichiOp.combination || [];
+                var tileToDiscard = combination.length > 0 ? combination[0] : null;
 
-                    window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
-                        type: 7,
-                        tile: tileToDiscard,
-                        timeuse: 1
-                    });
-                    return {success: true, tile: tileToDiscard, combinations: combination};
-                }
-                return {success: false, error: 'no NetAgent'};
-            })()
+                window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
+                    type: 7,
+                    tile: tileToDiscard,
+                    timeuse: 1
+                });
+                return JSON.stringify({success: true, tile: tileToDiscard, combinations: combination});
+            }
+            return JSON.stringify({success: false, error: 'no NetAgent'});
             """
-            webView.evaluateJavaScript(script) { [weak self] result, error in
-                if let error = error {
-                    self?.debugServer?.addLog("riichi error: \(error.localizedDescription)")
-                } else if let dict = result as? [String: Any] {
-                    self?.debugServer?.addLog("riichi result: \(dict)")
+            do {
+                let result = try await page.callJavaScript(script)
+                if let jsonString = result as? String {
+                    debugServer?.addLog("riichi result: \(jsonString)")
                 }
+            } catch {
+                debugServer?.addLog("riichi error: \(error.localizedDescription)")
             }
 
         case .discard:
-            // 改進的牌匹配邏輯：處理紅寶牌 (5mr, 5pr, 5sr)
-            // 先查詢遊戲內部的牌映射
+            // WebPage.callJavaScript 的 functionBody 需要 return 語句
             let findScript = """
-            (function() {
-                var mr = window.view.DesktopMgr.Inst.mainrole;
-                if (!mr || !mr.hand) return {index: -1, debug: 'no mainrole'};
+            var mr = window.view.DesktopMgr.Inst.mainrole;
+            if (!mr || !mr.hand) return JSON.stringify({index: -1, debug: 'no mainrole'});
 
-                var target = '\(tileName)';
+            var target = '\(tileName)';
 
-                // 先輸出手牌資訊以供調試
-                var handInfo = [];
-                for (var i = 0; i < mr.hand.length; i++) {
-                    var t = mr.hand[i];
-                    if (t && t.val) {
-                        handInfo.push('i' + i + ':t' + t.val.type + 'v' + t.val.index + (t.val.dora ? 'r' : ''));
+            var handInfo = [];
+            for (var i = 0; i < mr.hand.length; i++) {
+                var t = mr.hand[i];
+                if (t && t.val) {
+                    handInfo.push('i' + i + ':t' + t.val.type + 'v' + t.val.index + (t.val.dora ? 'r' : ''));
+                }
+            }
+
+            var typeMap = {'m': 1, 'p': 0, 's': 2};
+            var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
+
+            var tileType, tileValue, isRed = false;
+
+            if (honorMap[target]) {
+                tileType = honorMap[target][0];
+                tileValue = honorMap[target][1];
+            } else {
+                tileValue = parseInt(target[0]);
+                var suitChar = target[1];
+                tileType = typeMap[suitChar];
+                isRed = target.length > 2 && target[2] === 'r';
+            }
+
+            var debugInfo = 'want:' + target + '(t' + tileType + 'v' + tileValue + ') hand:[' + handInfo.join(',') + ']';
+
+            for (var i = 0; i < mr.hand.length; i++) {
+                var t = mr.hand[i];
+                if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
+                    if (isRed) {
+                        if (t.val.dora) return JSON.stringify({index: i, debug: debugInfo + ' =>found red@' + i});
+                    } else {
+                        if (!t.val.dora) return JSON.stringify({index: i, debug: debugInfo + ' =>found@' + i});
                     }
                 }
+            }
 
-                // 雀魂的 type 映射：0=筒, 1=萬, 2=索, 3=字牌
-                var typeMap = {'m': 1, 'p': 0, 's': 2};
-                var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
-
-                var tileType, tileValue, isRed = false;
-
-                // 處理字牌
-                if (honorMap[target]) {
-                    tileType = honorMap[target][0];
-                    tileValue = honorMap[target][1];
-                } else {
-                    // 處理數牌：1m, 5mr, etc.
-                    tileValue = parseInt(target[0]);
-                    var suitChar = target[1];
-                    tileType = typeMap[suitChar];
-                    isRed = target.length > 2 && target[2] === 'r';
+            for (var i = 0; i < mr.hand.length; i++) {
+                var t = mr.hand[i];
+                if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
+                    return JSON.stringify({index: i, debug: debugInfo + ' =>found(any)@' + i});
                 }
+            }
 
-                var debugInfo = 'want:' + target + '(t' + tileType + 'v' + tileValue + ') hand:[' + handInfo.join(',') + ']';
-
-                // 在手牌中查找
-                for (var i = 0; i < mr.hand.length; i++) {
-                    var t = mr.hand[i];
-                    if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
-                        // 如果是紅寶牌，檢查 dora 標記
-                        if (isRed) {
-                            if (t.val.dora) return {index: i, debug: debugInfo + ' =>found red@' + i};
-                        } else {
-                            if (!t.val.dora) return {index: i, debug: debugInfo + ' =>found@' + i};
-                        }
-                    }
+            if (mr.drewPai && mr.drewPai.val) {
+                var t = mr.drewPai;
+                debugInfo += ' tsumo:t' + t.val.type + 'v' + t.val.index;
+                if (t.val.type === tileType && t.val.index === tileValue) {
+                    return JSON.stringify({index: mr.hand.length, debug: debugInfo + ' =>tsumo'});
                 }
+            }
 
-                // 如果沒找到精確匹配，再找一次不考慮紅寶牌
-                for (var i = 0; i < mr.hand.length; i++) {
-                    var t = mr.hand[i];
-                    if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
-                        return {index: i, debug: debugInfo + ' =>found(any)@' + i};
-                    }
-                }
-
-                // 檢查摸牌
-                if (mr.drewPai && mr.drewPai.val) {
-                    var t = mr.drewPai;
-                    debugInfo += ' tsumo:t' + t.val.type + 'v' + t.val.index;
-                    if (t.val.type === tileType && t.val.index === tileValue) {
-                        return {index: mr.hand.length, debug: debugInfo + ' =>tsumo'};
-                    }
-                }
-
-                return {index: -1, debug: debugInfo + ' =>NOT_FOUND'};
-            })()
+            return JSON.stringify({index: -1, debug: debugInfo + ' =>NOT_FOUND'});
             """
-            webView.evaluateJavaScript(findScript) { [weak self] result, error in
-                if let dict = result as? [String: Any],
+            do {
+                let result = try await page.callJavaScript(findScript)
+                // 解析 JSON 字符串
+                if let jsonString = result as? String,
+                   let jsonData = jsonString.data(using: .utf8),
+                   let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                    let tileIndex = dict["index"] as? Int,
                    let debug = dict["debug"] as? String {
-                    self?.debugServer?.addLog("Find: \(debug)")
+                    debugServer?.addLog("Find: \(debug)")
 
                     if tileIndex >= 0 {
-                        let script = "window.__nakiGameAPI.smartExecute('discard', {tileIndex: \(tileIndex)})"
-                        webView.evaluateJavaScript(script) { _, error in
-                            if let error = error {
-                                self?.debugServer?.addLog("discard error: \(error.localizedDescription)")
-                            } else {
-                                self?.debugServer?.addLog("discard idx=\(tileIndex) OK")
-                            }
+                        let discardScript = "window.__nakiGameAPI.smartExecute('discard', {tileIndex: \(tileIndex)})"
+                        do {
+                            _ = try await page.callJavaScript(discardScript)
+                            debugServer?.addLog("discard idx=\(tileIndex) OK")
+                        } catch {
+                            debugServer?.addLog("discard error: \(error.localizedDescription)")
                         }
                     } else {
-                        self?.debugServer?.addLog("Tile not found, skipping")
+                        debugServer?.addLog("Tile not found, skipping")
                     }
-                } else if let error = error {
-                    self?.debugServer?.addLog("Find error: \(error.localizedDescription)")
+                } else {
+                    debugServer?.addLog("Find result parse failed: \(String(describing: result))")
                 }
+            } catch {
+                debugServer?.addLog("Find error: \(error.localizedDescription)")
             }
 
         case .chi:
-            // ⭐ 吃操作：chi_0=chiLow(被吃牌最小), chi_1=chiMid(中間), chi_2=chiHigh(最大)
-            //
-            // Mortal 的 chi 類型定義：
-            //   chi_0 (chiLow)  = 被吃的牌在順子中最小 (例如吃 1，用 2-3 組成 1-2-3)
-            //   chi_1 (chiMid)  = 被吃的牌在順子中間 (例如吃 2，用 1-3 組成 1-2-3)
-            //   chi_2 (chiHigh) = 被吃的牌在順子中最大 (例如吃 3，用 1-2 組成 1-2-3)
-            //
-            // 遊戲的 combination 陣列按手牌順序排列（從小到大）：
-            //   例如吃 3p，combinations = ["1p|2p", "2p|4p", "4p|5p"]
-            //   - index 0: 1p|2p → 1-2-3，被吃牌 3 是最大 → chi_2
-            //   - index 1: 2p|4p → 2-3-4，被吃牌 3 是中間 → chi_1
-            //   - index 2: 4p|5p → 3-4-5，被吃牌 3 是最小 → chi_0
-            //
-            // 所以映射是反轉的：gameIndex = count - 1 - chiType
-            //
-            var chiType = 0  // 0=low, 1=mid, 2=high
+            var chiType = 0
             if tileName.hasPrefix("chi_"), let idx = Int(String(tileName.dropFirst(4))) {
                 chiType = idx
             }
-            // 查詢可用的吃組合，找到正確的 combination index
+
             let queryScript = """
-            (function() {
-                var dm = window.view.DesktopMgr.Inst;
-                if (!dm || !dm.oplist) return {available: false, error: 'no oplist'};
-                var chiOp = dm.oplist.find(o => o.type === 2);
-                if (!chiOp) return {available: false, error: 'no chi op'};
+            var dm = window.view.DesktopMgr.Inst;
+            if (!dm || !dm.oplist) return JSON.stringify({available: false, error: 'no oplist'});
 
-                // 組合格式: ["1p|2p", "2p|4p", "4p|5p"] 表示可用的手牌組合（按數值從小到大）
-                var combinations = chiOp.combination || [];
+            var chiOp = null;
+            for (var i = 0; i < dm.oplist.length; i++) {
+                if (dm.oplist[i].type === 2) { chiOp = dm.oplist[i]; break; }
+            }
+            if (!chiOp) return JSON.stringify({available: false, error: 'no chi op'});
 
-                // 獲取被吃的牌 (上家打出的牌)
-                var targetPai = null;
-                if (dm.lastpai && dm.lastpai.val) {
-                    targetPai = {type: dm.lastpai.val.type, index: dm.lastpai.val.index};
-                }
+            var combinations = chiOp.combination || [];
 
-                return {
-                    available: true,
-                    combinations: combinations,
-                    count: combinations.length,
-                    targetPai: targetPai
-                };
-            })()
+            var targetPai = null;
+            if (dm.lastpai && dm.lastpai.val) {
+                targetPai = {type: dm.lastpai.val.type, index: dm.lastpai.val.index};
+            }
+
+            return JSON.stringify({
+                available: true,
+                combinations: combinations,
+                count: combinations.length,
+                targetPai: targetPai
+            });
             """
-            webView.evaluateJavaScript(queryScript) { [weak self] result, _ in
-                guard let dict = result as? [String: Any],
+
+            do {
+                let result = try await page.callJavaScript(queryScript)
+                guard let jsonString = result as? String,
+                      let jsonData = jsonString.data(using: .utf8),
+                      let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
                       let available = dict["available"] as? Bool, available,
                       let combinations = dict["combinations"] as? [String] else {
-                    self?.debugServer?.addLog("Chi: no combinations available")
+                    debugServer?.addLog("Chi: no combinations available")
                     return
                 }
 
-                // ⭐ 反轉映射：chi_0 → 最後一個，chi_2 → 第一個
-                // 如果只有一個組合，直接用 0
                 let combIndex: Int
                 if combinations.count == 1 {
                     combIndex = 0
                 } else {
-                    // gameIndex = count - 1 - chiType
                     combIndex = max(0, combinations.count - 1 - chiType)
                 }
                 let combInfo = combinations.isEmpty ? "" : " [\(combinations.joined(separator: ", "))]"
-                self?.debugServer?.addLog("Chi: mortal=chi_\(chiType) → gameIdx=\(combIndex)\(combInfo)")
+                debugServer?.addLog("Chi: mortal=chi_\(chiType) → gameIdx=\(combIndex)\(combInfo)")
 
-                // 執行吃操作
-                let script = "window.__nakiGameAPI.smartExecute('chi', {chiIndex: \(combIndex)})"
-                self?.wkWebView?.evaluateJavaScript(script) { result, error in
-                    if let error = error {
-                        self?.debugServer?.addLog("chi error: \(error.localizedDescription)")
-                    } else {
-                        self?.debugServer?.addLog("chi result: \(String(describing: result))")
-                    }
+                let chiScript = "window.__nakiGameAPI.smartExecute('chi', {chiIndex: \(combIndex)})"
+                do {
+                    let chiResult = try await page.callJavaScript(chiScript)
+                    debugServer?.addLog("chi result: \(String(describing: chiResult))")
+                } catch {
+                    debugServer?.addLog("chi error: \(error.localizedDescription)")
                 }
+            } catch {
+                debugServer?.addLog("Chi query error: \(error.localizedDescription)")
             }
 
         case .pon, .kan, .hora:
             let action = actionType.rawValue
             debugServer?.addLog("Exec: \(action)...")
             let script = "window.__nakiGameAPI.smartExecute('\(action)', {})"
-            webView.evaluateJavaScript(script) { [weak self] result, error in
-                if let error = error {
-                    self?.debugServer?.addLog("\(action) error: \(error.localizedDescription)")
-                } else {
-                    self?.debugServer?.addLog("\(action) result: \(String(describing: result))")
-                }
+            do {
+                let result = try await page.callJavaScript(script)
+                debugServer?.addLog("\(action) result: \(String(describing: result))")
+            } catch {
+                debugServer?.addLog("\(action) error: \(error.localizedDescription)")
             }
 
         case .none:
             debugServer?.addLog("Exec: pass...")
             let script = "window.__nakiGameAPI.smartExecute('pass', {})"
-            webView.evaluateJavaScript(script) { [weak self] result, error in
-                if let error = error {
-                    self?.debugServer?.addLog("pass error: \(error.localizedDescription)")
-                } else if let resultNum = result as? Int, resultNum > 0 {
-                    self?.debugServer?.addLog("pass OK")
+            do {
+                let result = try await page.callJavaScript(script)
+                if let resultNum = result as? Int, resultNum > 0 {
+                    debugServer?.addLog("pass OK")
                 } else {
-                    self?.debugServer?.addLog("pass result: \(String(describing: result))")
+                    debugServer?.addLog("pass result: \(String(describing: result))")
                 }
+            } catch {
+                debugServer?.addLog("pass error: \(error.localizedDescription)")
             }
 
         case .unknown:
             bridgeLog("[WebViewModel] Unknown action type, skipping")
-        }
-    }
-
-    /// 測試自動打牌指示器 - 顯示所有可能的點擊位置
-    func testAutoPlayIndicators() {
-        guard let webView = wkWebView else {
-            statusMessage = "WebView 不可用"
-            return
-        }
-
-        webView.evaluateJavaScript("window.__nakiTestIndicators ? __nakiTestIndicators() : 'Not loaded'") { [weak self] result, error in
-            if let error = error {
-                self?.statusMessage = "測試失敗: \(error.localizedDescription)"
-            } else if let result = result as? String, result == "Not loaded" {
-                self?.statusMessage = "自動打牌腳本尚未載入"
-            } else {
-                self?.statusMessage = "已顯示測試指示器"
-            }
-        }
-    }
-
-    /// 測試單次點擊 - 在畫面中央顯示點擊指示器
-    func testSingleClick() {
-        guard let webView = wkWebView else {
-            statusMessage = "WebView 不可用"
-            return
-        }
-
-        webView.evaluateJavaScript("window.__nakiTestClick ? __nakiTestClick(960, 540, '測試點擊') : 'Not loaded'") { [weak self] result, error in
-            if let error = error {
-                self?.statusMessage = "測試失敗: \(error.localizedDescription)"
-            } else if let result = result as? String, result == "Not loaded" {
-                self?.statusMessage = "自動打牌腳本尚未載入"
-            } else {
-                self?.statusMessage = "已顯示測試點擊"
-            }
-        }
-    }
-
-    /// 探測遊戲 API（尋找可用的座標系統）
-    func detectGameAPI() {
-        guard let webView = wkWebView else {
-            statusMessage = "WebView 不可用"
-            return
-        }
-
-        webView.evaluateJavaScript("window.__nakiDetectGameAPI ? __nakiDetectGameAPI() : null") { [weak self] result, error in
-            if let error = error {
-                self?.statusMessage = "探測失敗: \(error.localizedDescription)"
-            } else if result == nil {
-                self?.statusMessage = "探測腳本尚未載入"
-            } else {
-                self?.statusMessage = "已探測遊戲 API，請查看 Log"
-            }
-        }
-    }
-
-    /// 深度探索遊戲物件結構
-    func exploreGameObjects() {
-        guard let webView = wkWebView else {
-            statusMessage = "WebView 不可用"
-            return
-        }
-
-        webView.evaluateJavaScript("window.__nakiExploreGameObjects ? __nakiExploreGameObjects() : null") { [weak self] result, error in
-            if let error = error {
-                self?.statusMessage = "探索失敗: \(error.localizedDescription)"
-            } else if result == nil {
-                self?.statusMessage = "探索腳本尚未載入"
-            } else {
-                self?.statusMessage = "已探索遊戲物件，請查看 Log"
-            }
-        }
-    }
-
-    /// 尋找手牌座標
-    func findHandTiles() {
-        guard let webView = wkWebView else {
-            statusMessage = "WebView 不可用"
-            return
-        }
-
-        webView.evaluateJavaScript("window.__nakiFindHandTiles ? __nakiFindHandTiles() : null") { [weak self] result, error in
-            if let error = error {
-                self?.statusMessage = "搜尋失敗: \(error.localizedDescription)"
-            } else if result == nil {
-                self?.statusMessage = "搜尋腳本尚未載入"
-            } else {
-                self?.statusMessage = "已搜尋手牌資訊，請查看 Log"
-            }
         }
     }
 
@@ -1058,39 +1006,44 @@ class WebViewModel {
     /// 啟動 Debug Server
     func startDebugServer() {
         guard debugServer == nil else {
-            statusMessage = "Debug Server 已在運行"
+            statusMessage = "Debug Server 已在运行"
             return
         }
 
         debugServer = DebugServer(port: debugServerPort)
 
-        // 設置 JavaScript 執行回調
+        // 設定 JavaScript 執行回调
         debugServer?.executeJavaScript = { [weak self] script, completion in
-            guard let webView = self?.wkWebView else {
-                completion(nil, NSError(domain: "Naki", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebView not available"]))
+            guard let page = self?.webPage else {
+                completion(nil, NSError(domain: "Naki", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebPage not available"]))
                 return
             }
 
-            DispatchQueue.main.async {
-                webView.evaluateJavaScript(script) { result, error in
-                    completion(result, error)
+            Task { @MainActor in
+                do {
+                    let result = try await page.callJavaScript(script)
+                    print("[JS Debug] Script: \(script.prefix(50))...")
+                    print("[JS Debug] Result type: \(type(of: result)), value: \(String(describing: result))")
+                    completion(result, nil)
+                } catch {
+                    print("[JS Debug] Error: \(error)")
+                    completion(nil, error)
                 }
             }
         }
 
-        // 設置日誌回調
+        // 設定日志回调
         debugServer?.onLog = { [weak self] message in
             bridgeLog(message)
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self?.statusMessage = message
             }
         }
 
-        // ⭐ 設置 Bot 狀態回調（使用 GameStateManager 作為唯一數據源）
+        // 設定 Bot 状态回调
         debugServer?.getBotStatus = { [weak self] in
             guard let self = self else { return [:] }
 
-            // 統一使用 GameStateManager 的推薦列表作為數據源
             let recs: [[String: Any]] = self.gameStateManager.recommendations.map { rec in
                 return [
                     "tile": rec.displayTile,
@@ -1124,11 +1077,10 @@ class WebViewModel {
             return result
         }
 
-        // ⭐ 設置手動觸發自動打牌回調
+        // 設定手動觸發自動打牌回调
         debugServer?.triggerAutoPlay = { [weak self] in
             guard let self = self else { return }
 
-            // 優先使用 lastAction (通過 AutoPlayController)
             if let controller = self.nativeBotController,
                let lastAction = controller.lastAction {
                 self.debugServer?.addLog("Triggering with lastAction")
@@ -1138,23 +1090,29 @@ class WebViewModel {
                     tsumo: controller.tsumo
                 )
             } else {
-                // 使用當前推薦
                 self.triggerAutoPlayNow()
             }
         }
 
-        // ⭐ 設置 JavaScript 執行回調
+        // 設定 JavaScript 執行回调
         debugServer?.evaluateJS = { [weak self] script, completion in
-            guard let webView = self?.wkWebView else {
-                completion(nil, NSError(domain: "WebView", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebView not available"]))
+            guard let page = self?.webPage else {
+                completion(nil, NSError(domain: "WebPage", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebPage not available"]))
                 return
             }
-            webView.evaluateJavaScript(script, completionHandler: completion)
+            Task { @MainActor in
+                do {
+                    let result = try await page.callJavaScript(script)
+                    completion(result, nil)
+                } catch {
+                    completion(nil, error)
+                }
+            }
         }
 
-        // 端口變更回調（當端口被佔用時會自動切換）
+        // 端口变更回调
         debugServer?.onPortChanged = { [weak self] newPort in
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self?.debugServerPort = newPort
                 self?.isDebugServerRunning = true
                 self?.statusMessage = "Debug Server 已啟動: http://localhost:\(newPort)"
@@ -1172,7 +1130,7 @@ class WebViewModel {
         statusMessage = "Debug Server 已停止"
     }
 
-    /// 切換 Debug Server
+    /// 切换 Debug Server
     func toggleDebugServer() {
         if isDebugServerRunning {
             stopDebugServer()
@@ -1181,117 +1139,49 @@ class WebViewModel {
         }
     }
 
-    /// 更新點擊位置校準參數
-    func updateClickCalibration(tileSpacing: Double, offsetX: Double, offsetY: Double) {
-        guard let webView = wkWebView else {
-            statusMessage = "WebView 不可用"
-            return
-        }
+    // MARK: - Load URL
 
-        let script = """
-        if (window.__nakiAutoPlay) {
-            window.__nakiAutoPlay.calibration = {
-                tileSpacing: \(tileSpacing),
-                offsetX: \(offsetX),
-                offsetY: \(offsetY)
-            };
-            console.log('[Naki] Calibration updated:', window.__nakiAutoPlay.calibration);
-            true;
-        } else {
-            false;
-        }
-        """
+    /// 加载雀魂麻將
+    func loadMajsoul() async {
+        guard let page = webPage else { return }
 
-        webView.evaluateJavaScript(script) { [weak self] result, error in
-            if let error = error {
-                self?.statusMessage = "校準失敗: \(error.localizedDescription)"
-            } else if let success = result as? Bool, success {
-                self?.statusMessage = "校準已更新: 間距=\(Int(tileSpacing)), X=\(Int(offsetX)), Y=\(Int(offsetY))"
-            } else {
-                self?.statusMessage = "自動打牌腳本尚未載入"
-            }
-        }
-    }
-
-    // MARK: - Load HTML
-
-    // WKWebView 載入方法
-    func loadHTMLInWKWebView() async {
-        guard let webView = wkWebView else { return }
-
-        await MainActor.run {
-            // 載入雀魂麻將遊戲
-            if let url = URL(string: "https://game.maj-soul.com/1/") {
-                webView.load(URLRequest(url: url))
-                statusMessage = "正在加載雀魂麻將..."
-            }
-        }
-    }
-
-    // 載入本地 HTML 檔案
-    func loadLocalHTML() async {
-        guard let webView = wkWebView else { return }
-
-        await MainActor.run {
-            if let htmlPath = Bundle.main.path(forResource: "index", ofType: "html"),
-               let htmlURL = URL(string: "file://\(htmlPath)") {
-                webView.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
-                statusMessage = "已加載本地界面"
-            }
-        }
-    }
-
-    // 載入指定 URL
-    func loadURL(_ urlString: String) async {
-        guard let webView = wkWebView else { return }
-
-        await MainActor.run {
-            if let url = URL(string: urlString) {
-                webView.load(URLRequest(url: url))
-                statusMessage = "正在加載 \(urlString)"
-            }
-        }
-    }
-
-    // 原生 WebPage 載入方法（簡化版，僅供參考）
-    func loadHTML() async {
-        guard let webPage = webPage else { return }
-
-        // 載入雀魂麻將遊戲
         if let url = URL(string: "https://game.maj-soul.com/1/") {
-            webPage.load(url)
-            statusMessage = "正在加載雀魂麻將..."
+            page.load(url)
+            statusMessage = "正在加载雀魂麻將..."
+        }
+    }
+
+    /// 加载指定 URL
+    func loadURL(_ urlString: String) async {
+        guard let page = webPage else { return }
+
+        if let url = URL(string: urlString) {
+            page.load(url)
+            statusMessage = "正在加载 \(urlString)"
         }
     }
 
     // MARK: - Call JavaScript
 
     func callJS(function: String, params: [String: Any]) async {
-        // 使用 WKWebView 執行 JavaScript
-        guard let webView = wkWebView else {
-            print("WKWebView not ready")
+        guard let page = webPage else {
+            print("WebPage not ready")
             return
         }
 
-        await MainActor.run {
-            do {
-                let jsonData = try JSONSerialization.data(withJSONObject: params)
-                let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: params)
+            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
 
-                let script = "\(function)(\(jsonString));"
+            let script = "\(function)(\(jsonString));"
 
-                webView.evaluateJavaScript(script) { result, error in
-                    if let error = error {
-                        print("JavaScript Error: \(error.localizedDescription)")
-                    }
-                }
-            } catch {
-                print("JSON Serialization Error: \(error.localizedDescription)")
-            }
+            _ = try await page.callJavaScript(script)
+        } catch {
+            print("JavaScript Error: \(error.localizedDescription)")
         }
     }
 
-    // MARK: - Deprecated Methods (保留接口以兼容舊代碼)
+    // MARK: - Deprecated Methods
 
     func createBot(playerId: Int) async -> Result<Void, Error> {
         do {
@@ -1326,20 +1216,17 @@ extension WebViewModel: AutoPlayServiceDelegate {
 
     func autoPlayService(_ service: AutoPlayService, didComplete actionType: Recommendation.ActionType) {
         bridgeLog("[WebViewModel] AutoPlayService completed: \(actionType.rawValue)")
-        // 動作完成後可以更新 UI 狀態
-        DispatchQueue.main.async { [weak self] in
-            self?.statusMessage = "動作完成: \(actionType.displayName)"
-            // ⭐ 隱藏遊戲 UI 上的推薦高亮
-            self?.hideGameHighlight()
+        statusMessage = "動作完成: \(actionType.displayName)"
+        Task {
+            await hideGameHighlight()
         }
     }
 
     func autoPlayService(_ service: AutoPlayService, didFail actionType: Recommendation.ActionType, error: String) {
         bridgeLog("[WebViewModel] AutoPlayService failed: \(actionType.rawValue) - \(error)")
-        DispatchQueue.main.async { [weak self] in
-            self?.statusMessage = "動作失敗: \(error)"
-            // ⭐ 隱藏遊戲 UI 上的推薦高亮
-            self?.hideGameHighlight()
+        statusMessage = "動作失敗: \(error)"
+        Task {
+            await hideGameHighlight()
         }
     }
 }

@@ -113,7 +113,11 @@ struct ContentView: View {
 
             // 重新載入
             ToolbarItem(placement: .destructiveAction) {
-                Button(action: { viewModel.wkWebView?.reload() }) {
+                Button(action: {
+                    Task {
+                        try? await viewModel.webPage?.reload()
+                    }
+                }) {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("重新載入")
@@ -326,10 +330,11 @@ struct AdvancedSettingsSheet: View {
                                 }
                                 .buttonStyle(.bordered)
 
-                                Button("測試點擊") {
-                                    viewModel.testAutoPlayIndicators()
-                                }
-                                .buttonStyle(.bordered)
+                                // TODO: 實作測試點擊功能
+                                // Button("測試點擊") {
+                                //     viewModel.testAutoPlayIndicators()
+                                // }
+                                // .buttonStyle(.bordered)
                             }
                         }
                     } label: {
@@ -406,11 +411,12 @@ struct AdvancedSettingsSheet: View {
     }
 
     private func updateCalibration() {
-        viewModel.updateClickCalibration(
-            tileSpacing: tileSpacing,
-            offsetX: offsetX,
-            offsetY: offsetY
-        )
+        // TODO: 實作校準更新功能
+        // viewModel.updateClickCalibration(
+        //     tileSpacing: tileSpacing,
+        //     offsetX: offsetX,
+        //     offsetY: offsetY
+        // )
     }
 }
 
