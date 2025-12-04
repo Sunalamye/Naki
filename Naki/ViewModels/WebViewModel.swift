@@ -195,13 +195,61 @@ class WebViewModel {
         // 同步到 GameStateManager（供 UI 響應式更新）
         gameStateManager.syncFrom(controller: controller)
 
-        // 更新高亮牌
+        // 更新高亮牌（只顯示最高分推薦）
         if let firstRec = recommendations.first {
             highlightedTile = firstRec.displayTile
+
+            // ⭐ 在遊戲 UI 上顯示原生高亮
+            showGameHighlightForRecommendation(firstRec, controller: controller)
+        } else {
+            // 沒有推薦時隱藏高亮
+            hideGameHighlight()
         }
 
         // 觸發自動打牌
         triggerAutoPlayIfNeeded()
+    }
+
+    /// 在遊戲 UI 上顯示原生高亮效果
+    private func showGameHighlightForRecommendation(_ recommendation: Recommendation, controller: NativeBotController) {
+        guard let webView = wkWebView else { return }
+
+        // 找到推薦牌在手牌中的索引
+        guard let recommendedTile = recommendation.tile else {
+            // 非打牌動作（吃碰槓和），不需要高亮
+            return
+        }
+
+        // 在手牌中查找該牌的位置
+        let tileIndex = controller.tehai.firstIndex(of: recommendedTile)
+        guard let index = tileIndex else {
+            bridgeLog("[WebViewModel] Cannot find recommended tile in tehai: \(recommendedTile.mjaiString)")
+            return
+        }
+
+        // 調用 JavaScript 顯示高亮
+        let script = "window.__nakiRecommendHighlight?.show(\(index))"
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                bridgeLog("[WebViewModel] Error showing highlight: \(error.localizedDescription)")
+            } else {
+                bridgeLog("[WebViewModel] Highlighted recommendation: \(recommendedTile.mjaiString) at index \(index)")
+            }
+        }
+    }
+
+    /// 隱藏遊戲 UI 上的高亮效果
+    private func hideGameHighlight() {
+        guard let webView = wkWebView else { return }
+
+        let script = "window.__nakiRecommendHighlight?.hide()"
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                bridgeLog("[WebViewModel] Error hiding highlight: \(error.localizedDescription)")
+            } else {
+                bridgeLog("[WebViewModel] Hidden game highlight")
+            }
+        }
     }
 
     /// 根據當前推薦觸發自動打牌
@@ -262,6 +310,8 @@ class WebViewModel {
         recommendations = []
         tehaiTiles = []
         tsumoTile = nil
+        // ⭐ 隱藏遊戲 UI 上的高亮
+        hideGameHighlight()
         bridgeLog("[WebViewModel] Bot deleted and state cleared")
     }
 
@@ -1157,6 +1207,8 @@ extension WebViewModel: AutoPlayServiceDelegate {
         // 動作完成後可以更新 UI 狀態
         DispatchQueue.main.async { [weak self] in
             self?.statusMessage = "動作完成: \(actionType.displayName)"
+            // ⭐ 隱藏遊戲 UI 上的推薦高亮
+            self?.hideGameHighlight()
         }
     }
 
@@ -1164,6 +1216,8 @@ extension WebViewModel: AutoPlayServiceDelegate {
         bridgeLog("[WebViewModel] AutoPlayService failed: \(actionType.rawValue) - \(error)")
         DispatchQueue.main.async { [weak self] in
             self?.statusMessage = "動作失敗: \(error)"
+            // ⭐ 隱藏遊戲 UI 上的推薦高亮
+            self?.hideGameHighlight()
         }
     }
 }
