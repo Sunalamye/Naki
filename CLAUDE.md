@@ -94,6 +94,24 @@ Four JS modules are injected into WKWebView (must be in "Copy Bundle Resources" 
 
 Verify injection is working via the debug server's `/js` endpoint.
 
+### Majsoul WebUI Objects (Laya Engine)
+
+**IMPORTANT**: The following objects exist in **Majsoul's WebUI** (JavaScript/Laya), not in Naki:
+
+Key objects:
+- Game manager: `window.view.DesktopMgr.Inst`
+- Hand tiles: `mainrole.hand[]` (14 tile objects with `val`, `isDora`, `_doraeffect`, `_recommendeffect`, etc.)
+- Dora effects: `effect_dora3D`, `effect_dora3D_touying`, `effect_doraPlane`
+- Recommendation highlight: `effect_recommend.active` (AI recommendation control)
+
+See `@docs/majsoul-webui-objects-reference.md` for complete reference including:
+- How to find and query objects (Debug Server methods)
+- Complete tile object properties
+- Game manager structure
+- Effect control mechanisms
+- Laya Sprite3D properties
+- Type mapping and encoding
+
 ### ⚠️ Tile Index Mapping - Critical Pitfall
 
 **IMPORTANT**: When finding tiles in the game UI, you CANNOT use Swift's `tehai` array indices directly!
