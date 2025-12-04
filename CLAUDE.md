@@ -94,6 +94,31 @@ Four JS modules are injected into WKWebView (must be in "Copy Bundle Resources" 
 
 Verify injection is working via the debug server's `/js` endpoint.
 
+### ⚠️ Tile Index Mapping - Critical Pitfall
+
+**IMPORTANT**: When finding tiles in the game UI, you CANNOT use Swift's `tehai` array indices directly!
+
+**The Problem**:
+- Swift's `tehai` array is sorted by tile index: `tehai.sort { $0.index < $1.index }`
+- Majsoul's UI displays tiles in a different visual order (not sorted by index)
+- Using `tehai` index to click/highlight will target the WRONG tile
+
+**The Solution**:
+Always use the **same logic as `executeAutoPlayAction` in `WebViewModel.swift`**:
+
+1. Parse tile MJAI name (e.g., "7m", "5mr", "W")
+2. Convert to Majsoul type mapping:
+   - `typeMap = {'m': 1, 'p': 0, 's': 2}`
+   - `honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]}`
+3. Iterate through `mr.hand[i]` in JavaScript
+4. Match by `tile.val.type` and `tile.val.index` (note: index is 0-based, tile value is 1-based)
+5. For red dora (e.g., "5mr"), also check `tile.val.dora` flag
+
+**References**:
+- See `WebViewModel.swift:226-266` for correct implementation
+- See `WebViewModel.swift:590-650` for executeAutoPlayAction reference
+- Never assume Swift array order matches UI display order
+
 ## Common Tasks
 
 ### Add a Game Property
