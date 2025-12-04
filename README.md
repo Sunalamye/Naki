@@ -3,6 +3,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Version-2.0.0-green" alt="Version">
   <img src="https://img.shields.io/badge/Platform-macOS%2026+-blue" alt="Platform">
+  <img src="https://img.shields.io/badge/Arch-Apple%20Silicon-red" alt="Architecture">
   <img src="https://img.shields.io/badge/Swift-5.9+-orange" alt="Swift">
   <img src="https://img.shields.io/badge/License-AGPL--3.0%20with%20Commons%20Clause-blue" alt="License">
 </p>
@@ -93,7 +94,9 @@
 ### 系統需求
 - macOS 26.0+ (需要 WebPage API)
 - Xcode 26.0+
-- Apple Silicon 或 Intel Mac
+- **Apple Silicon (M1/M2/M3/M4)** - 不支援 Intel Mac
+
+> **注意**：由於 libriichi (Rust FFI) 僅編譯為 arm64 架構，本應用僅支援 Apple Silicon Mac。
 
 ### 編譯
 
