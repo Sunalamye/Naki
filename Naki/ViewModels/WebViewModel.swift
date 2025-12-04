@@ -180,6 +180,8 @@ class WebViewModel {
 
     /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
     private func updateUIAfterBotResponse(from controller: NativeBotController) {
+        bridgeLog("[WebViewModel] ===== updateUIAfterBotResponse CALLED =====")
+
         // 更新遊戲狀態
         gameState = controller.gameState
         botStatus = controller.botState
@@ -187,6 +189,8 @@ class WebViewModel {
         tsumoTile = controller.lastTsumo
         recommendations = controller.lastRecommendations
         recommendationCount = recommendations.count
+
+        bridgeLog("[WebViewModel] Updated recommendations: \(recommendations.count)")
 
         // 同步到 GameStateManager（供 UI 響應式更新）
         gameStateManager.syncFrom(controller: controller)
@@ -910,27 +914,30 @@ class WebViewModel {
             }
         }
 
-        // ⭐ 設置 Bot 狀態回調
+        // ⭐ 設置 Bot 狀態回調（使用 GameStateManager 作為唯一數據源）
         debugServer?.getBotStatus = { [weak self] in
             guard let self = self else { return [:] }
 
-            // 使用基本類型確保 JSON 序列化成功
-            let recs: [[String: Any]] = self.recommendations.map { rec in
+            // 統一使用 GameStateManager 的推薦列表作為數據源
+            let recs: [[String: Any]] = self.gameStateManager.recommendations.map { rec in
                 return [
                     "tile": rec.displayTile,
-                    "prob": rec.probability
+                    "action": rec.actionType.rawValue,
+                    "label": rec.displayLabel,
+                    "prob": rec.probability,
+                    "percentage": rec.percentageString
                 ]
             }
 
             let result: [String: Any] = [
                 "botStatus": [
-                    "isActive": self.botStatus.isActive,
-                    "playerId": self.botStatus.playerId
+                    "isActive": self.gameStateManager.botStatus.isActive,
+                    "playerId": self.gameStateManager.botStatus.playerId
                 ],
                 "gameState": [
-                    "bakaze": self.gameState.bakazeDisplay,
-                    "kyoku": self.gameState.kyoku,
-                    "honba": self.gameState.honba
+                    "bakaze": self.gameStateManager.gameState.bakazeDisplay,
+                    "kyoku": self.gameStateManager.gameState.kyoku,
+                    "honba": self.gameStateManager.gameState.honba
                 ],
                 "autoPlay": [
                     "mode": self.autoPlayController?.state.mode.rawValue ?? "unknown",
