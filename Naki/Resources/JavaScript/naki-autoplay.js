@@ -466,11 +466,67 @@
      */
     window.__nakiRecommendHighlight = {
         activeEffects: [],  // 存儲所有活躍的效果 { effect, runUV, tileIndex }
+        nativeEffectActive: false,  // 追蹤原生 effect_recommend 狀態
 
         // 顏色配置
         colors: {
             green: { r: 0, g: 2, b: 0, a: 2 },   // probability > 0.5
             red: { r: 2, g: 0, b: 0, a: 2 }      // 0.2 < probability <= 0.5
+        },
+
+        /**
+         * 將原生 effect_recommend 移動到指定牌的位置
+         * @param {number} tileIndex - 牌在手中的位置
+         * @returns {boolean} 成功或失敗
+         */
+        moveNativeEffect: function(tileIndex) {
+            try {
+                const mgr = window.view?.DesktopMgr?.Inst;
+                if (!mgr?.effect_recommend?._childs?.[0]) {
+                    console.log('[Naki Highlight] Native effect_recommend not available');
+                    return false;
+                }
+
+                const hand = mgr.mainrole?.hand;
+                if (!hand || !hand[tileIndex]) {
+                    console.log('[Naki Highlight] Tile not found at index:', tileIndex);
+                    return false;
+                }
+
+                // 獲取目標牌的 pos_x
+                const targetX = hand[tileIndex].pos_x;
+                const effect = mgr.effect_recommend;
+                const child = effect._childs[0];
+
+                // 移動子對象到目標位置 (Y 和 Z 保持固定)
+                child.transform.localPosition = new Laya.Vector3(targetX, 1.66, -0.52);
+
+                // 激活效果
+                effect.active = true;
+                this.nativeEffectActive = true;
+
+                console.log('[Naki Highlight] Native effect moved to tile', tileIndex, 'x:', targetX);
+                return true;
+            } catch (e) {
+                console.error('[Naki Highlight] moveNativeEffect failed:', e);
+                return false;
+            }
+        },
+
+        /**
+         * 隱藏原生 effect_recommend
+         */
+        hideNativeEffect: function() {
+            try {
+                const effect = window.view?.DesktopMgr?.Inst?.effect_recommend;
+                if (effect) {
+                    effect.active = false;
+                    this.nativeEffectActive = false;
+                    console.log('[Naki Highlight] Native effect hidden');
+                }
+            } catch (e) {
+                console.error('[Naki Highlight] hideNativeEffect failed:', e);
+            }
         },
 
         /**
@@ -591,6 +647,15 @@
                 return 0;
             }
 
+            // 🌟 找出最高概率的推薦，移動原生 effect_recommend
+            if (recommendations.length > 0) {
+                const sorted = [...recommendations].sort((a, b) => b.probability - a.probability);
+                const best = sorted[0];
+                if (best.probability > 0.2) {
+                    this.moveNativeEffect(best.tileIndex);
+                }
+            }
+
             let created = 0;
             for (const rec of recommendations) {
                 const { tileIndex, probability } = rec;
@@ -654,6 +719,9 @@
                 // 停止旋轉動畫
                 this.stopRotation();
 
+                // 🌟 隱藏原生 effect_recommend
+                this.hideNativeEffect();
+
                 // 銷毀所有效果
                 for (const item of this.activeEffects) {
                     if (item.effects) {
@@ -680,8 +748,9 @@
          */
         getStatus: function() {
             return {
-                isActive: this.activeEffects.length > 0,
+                isActive: this.activeEffects.length > 0 || this.nativeEffectActive,
                 effectCount: this.activeEffects.length,
+                nativeEffectActive: this.nativeEffectActive,
                 effects: this.activeEffects.map(e => ({
                     tileIndex: e.tileIndex,
                     probability: e.probability
