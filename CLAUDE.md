@@ -98,6 +98,11 @@ Verify injection is working via the debug server's `/js` endpoint.
 
 **IMPORTANT**: The following objects exist in **Majsoul's WebUI** (JavaScript/Laya), not in Naki:
 
+**Testing WebUI**: When testing any WebUI visuals or game objects, always use the debug server's `/js` endpoint:
+```bash
+curl -X POST http://localhost:8765/js -d "YOUR_JAVASCRIPT_CODE"
+```
+
 Key objects:
 - Game manager: `window.view.DesktopMgr.Inst`
 - Hand tiles: `mainrole.hand[]` (14 tile objects with `val`, `isDora`, `_doraeffect`, `_recommendeffect`, etc.)

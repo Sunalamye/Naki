@@ -886,10 +886,55 @@
         }
     };
 
+    // ========================================
+    // 高亮效果初始化 Hook
+    // ========================================
+    window.__nakiHighlightInit = {
+        initialized: false,
+        effectRef: null,
+
+        /**
+         * 初始化 effect_recommend 並儲存參考
+         */
+        init: function() {
+            try {
+                const inst = window.view?.DesktopMgr?.Inst;
+                if (!inst || !inst.effect_recommend) {
+                    console.log('[Naki Highlight Init] effect_recommend not available yet');
+                    return false;
+                }
+
+                // 儲存參考
+                this.effectRef = inst.effect_recommend;
+
+                // 確保基本設置
+                this.effectRef.active = true;
+
+                this.initialized = true;
+                console.log('[Naki Highlight Init] effect_recommend initialized successfully');
+                return true;
+
+            } catch (e) {
+                console.error('[Naki Highlight Init] Failed to initialize:', e.message);
+                return false;
+            }
+        },
+
+        /**
+         * 獲取高亮效果物件參考
+         */
+        getEffect: function() {
+            return this.effectRef || window.view?.DesktopMgr?.Inst?.effect_recommend;
+        }
+    };
+
     // 尝试立即启动 Hook（如果游戏已经初始化）
     setTimeout(() => {
         if (window.__nakiDoraHook.hook()) {
             console.log('[Naki] Dora Hook initialized on game load');
+        }
+        if (window.__nakiHighlightInit.init()) {
+            console.log('[Naki] Highlight Init hook completed');
         }
     }, 500);
 

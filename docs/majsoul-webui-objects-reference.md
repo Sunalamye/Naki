@@ -604,31 +604,63 @@ const honorMap = {
 
 ### 牌號轉換
 
+#### ⚠️ 重要更正：Index 轉換規則
+
+**原始遊戲數據到人類可讀的牌號:**
+- **數字牌 (type 0-2)**: `index 直接 = 牌號` (1-9，不需要 +-1)
+- **字牌 (type 3)**: 使用下表映射
+
 ```javascript
-// 從 MJAI 字串到 Majsoul 物件查找
+// 正確的轉換方式（Majsoul 原始數據 → 可讀牌號）
+
+// 數字牌
+const typeMap = {
+  0: 'p',   // 筒子
+  1: 'm',   // 萬子
+  2: 's'    // 索子
+};
+
+// 字牌映射
+const honorMap = {
+  0: 'E',   // 東
+  1: 'S',   // 南
+  2: 'W',   // 西
+  3: 'N',   // 北
+  4: 'P',   // 白
+  5: 'F',   // 發
+  6: 'C'    // 中
+};
+
+// 示例：原始遊戲數據轉換
+const examples = [
+  { type: 1, index: 2 } → "2m" (2萬),
+  { type: 1, index: 4 } → "4m" (4萬),
+  { type: 0, index: 3 } → "3p" (3筒),
+  { type: 2, index: 1 } → "1s" (1索),
+  { type: 3, index: 3 } → "N"  (北),
+  { type: 3, index: 6 } → "C"  (中)
+];
+
+// 反向轉換（MJAI 字串到 Majsoul 查詢時使用）
 const mjaiString = "5mr";  // 紅五萬
-
-// 解析
 const tileValue = parseInt(mjaiString[0]);     // 5
-const suitChar = mjaiString[1];                // 'm'
-const isRed = mjaiString.length > 2 && mjaiString[2] === 'r';  // true
-
-// 轉換為 Majsoul 格式
-const majsoulType = typeMap[suitChar];         // 1 (萬)
-const majsoulIndex = tileValue - 1;            // 4 (0-based)
-const isDora = isRed;                          // true
+// ⭐ 更正：index = tileValue（直接等於，不需要 -1）
+const majsoulIndex = tileValue;                // 5
 ```
 
 ### 查找牌的正確方式
 
 **檔案**: `Naki/ViewModels/WebViewModel.swift:252-264`
 
+⚠️ **已更正：根據實際遊戲數據，index 直接等於牌號**
+
 ```javascript
-// ✅ 正確的牌查找邏輯
+// ✅ 正確的牌查找邏輯（已更正）
 function findTileInHand(tileValue, suitChar, isRed) {
   const typeMap = {'m': 1, 'p': 0, 's': 2};
   const tileType = typeMap[suitChar];
-  const tileIndex = tileValue - 1;
+  // ⭐ 更正：index 直接 = tileValue（不需要 -1）
+  const tileIndex = tileValue;  // 例：MJAI "2m" → index=2
 
   const hand = window.view.DesktopMgr.Inst.mainrole.hand;
 
@@ -670,126 +702,124 @@ mr.setChoosePai(mr.hand[tileIndex], true);  // 會點到錯誤的牌！
 
 ## 效果物件 (Effect Objects)
 
-### 宝牌閃光效果 (Dora Shimmer)
+### 效果模板對照表
 
-#### 訪問路徑
+| 模板 | 子節點名稱 | 用途 | 動畫類型 |
+|------|-----------|------|----------|
+| `effect_dora3D` | "dora" | 其他場景用 | `anim.Bling` |
+| `effect_doraPlane` | "effect" | ⭐ **紅寶牌實際使用** | `anim.RunUV` |
+| `effect_dora3D_touying` | "dora" | 透明/陰影效果 | `anim.Bling` |
+
+### 動畫類型說明
 
 ```javascript
-window.view.DesktopMgr.Inst.effect_dora3D
+// 兩種動畫類型
+anim.Bling   // 透明度閃爍動畫（修改 albedoColor.w）
+anim.RunUV   // ⭐ UV 流動動畫（紅寶牌實際使用的效果）
 ```
 
-#### 屬性
+### 宝牌效果創建流程 ⭐
+
+**重要發現**: 紅寶牌使用的是 `effect_doraPlane` + `anim.RunUV`，而不是 `effect_dora3D` + `anim.Bling`。
+
+#### 完整創建代碼
 
 ```javascript
-{
-  name: "effect_dora3D",
-  visible: boolean,                  // 是否可見
-  active: boolean,                   // 是否激活
-  _activeInHierarchy: boolean,        // 在層級中的激活狀態
-  alpha: number,                     // 透明度 (0-1)
-  // ... 其他 Laya Sprite3D 屬性
+function createDoraEffect(tile) {
+  const mgr = window.view.DesktopMgr.Inst;
+
+  // 1. ⭐ 使用 effect_doraPlane（不是 effect_dora3D）
+  const template = mgr.effect_doraPlane;
+  const effect = template.clone();
+
+  // 2. ⭐ 掛到牌的 mySelf 上（不是 "effect" 容器）
+  tile.mySelf.addChild(effect);
+
+  // 3. 設置位置和縮放（相對於牌的本地座標）
+  effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+  effect.transform.localScale = new Laya.Vector3(1, 1, 1);
+
+  // 4. 啟用效果
+  effect.active = true;
+
+  // 5. ⭐ 添加 RunUV 動畫（不是 Bling）
+  effect.getChildAt(0).addComponent(anim.RunUV);
+
+  // 6. 保存引用以便後續清除
+  tile._doraeffect = effect;
+
+  return effect;
 }
+
+// 使用示例
+const hand = window.view.DesktopMgr.Inst.mainrole.hand;
+const tile = hand[0];  // 第一張牌
+createDoraEffect(tile);
 ```
 
-#### 重要發現
-
-**檔案**: `Naki/docs/majsoul-native-shimmer-implementation.md:756-762`
-
-⚠️ **`effect_dora3D` 不用於控制單張牌的宝牌閃光**
-
-- `effect_dora3D.visible` 有 `configurable: false`（無法被攔截）
-- 遊戲從啟動到現在從未修改此屬性
-- 每張牌有自己的 `_doraeffect` 物件
-
-### 推薦高亮效果 (Recommendation Highlight)
-
-#### 訪問路徑
+#### 清除效果
 
 ```javascript
-window.view.DesktopMgr.Inst.effect_recommend
-```
-
-**檔案**: `Naki/Resources/JavaScript/naki-autoplay.js:466-543`
-
-#### 屬性
-
-```javascript
-{
-  name: "effect_recommend",
-  active: boolean,                   // ⭐ 激活狀態
-  _activeInHierarchy: boolean,
-  _childs: [Sprite3D],              // 包含 1 個子物件（高亮框）
-  // ... 其他 Laya Sprite3D 屬性
-}
-```
-
-#### 控制方式
-
-```javascript
-// 顯示推薦高亮
-window.view.DesktopMgr.Inst.effect_recommend.active = true;
-
-// 隱藏推薦高亮
-window.view.DesktopMgr.Inst.effect_recommend.active = false;
-```
-
-#### Naki 推薦高亮管理器
-
-```javascript
-window.__nakiRecommendHighlight = {
-  isActive: false,
-  highlightTileIndex: -1,
-
-  // 顯示指定位置的牌的高亮
-  show(tileIndex) {
-    inst.effect_recommend.active = true;
-    this.highlightTileIndex = tileIndex;
-    return true;
-  },
-
-  // 隱藏高亮
-  hide() {
-    inst.effect_recommend.active = false;
-    this.isActive = false;
-    return true;
-  },
-
-  // 獲取當前狀態
-  getStatus() {
-    return {
-      isActive: this.isActive,
-      highlightTileIndex: this.highlightTileIndex,
-      hasEffect: !!window.view?.DesktopMgr?.Inst?.effect_recommend
-    };
+function removeDoraEffect(tile) {
+  if (tile._doraeffect) {
+    tile._doraeffect.destroy();
+    tile._doraeffect = null;
   }
 }
 ```
 
-### 每張牌的效果物件
+### ⚠️ 常見錯誤
 
-#### 宝牌閃光 (_doraeffect)
+| 錯誤做法 | 正確做法 | 結果 |
+|---------|---------|------|
+| 使用 `effect_dora3D` | 使用 `effect_doraPlane` | 子節點結構不同 |
+| 使用 `anim.Bling` | 使用 `anim.RunUV` | 動畫效果不同 |
+| 掛到 "effect" 容器 | 掛到 `tile.mySelf` | 位置會錯誤 |
+| 設置世界座標 | 設置本地座標 (0,0,0) | 效果會消失 |
+
+### 宝牌閃光效果模板
+
+#### 訪問路徑
 
 ```javascript
-const tile = window.view.DesktopMgr.Inst.mainrole.hand[0];
+window.view.DesktopMgr.Inst.effect_dora3D      // 3D 效果
+window.view.DesktopMgr.Inst.effect_doraPlane   // ⭐ 平面效果（紅寶牌用）
+window.view.DesktopMgr.Inst.effect_dora3D_touying  // 陰影效果
+```
 
-if (tile._doraeffect) {
-  tile._doraeffect.active = true;    // 顯示宝牌閃光
-  // 或
-  tile._doraeffect.visible = true;   // 替代方式
+#### 屬性
+
+```javascript
+{
+  name: "effect_dora",
+  visible: boolean,                  // 是否可見
+  active: boolean,                   // 是否激活
+  _activeInHierarchy: boolean,       // 在層級中的激活狀態
+  alpha: number,                     // 透明度 (0-1)
+  parent: Sprite3D,                  // 父節點
+  numChildren: number,               // 子節點數量
+  // ... 其他 Laya Sprite3D 屬性
 }
 ```
 
-#### 推薦高亮 (_recommendeffect)
+#### 檢查效果結構
 
 ```javascript
-const tile = window.view.DesktopMgr.Inst.mainrole.hand[0];
+// 檢查紅寶牌的實際效果結構
+const hand = window.view.DesktopMgr.Inst.mainrole.hand;
+const redDora = hand.find(t => t.val && t.val.dora);
 
-if (tile._recommendeffect) {
-  tile._recommendeffect.active = true;   // 顯示推薦高亮
+if (redDora && redDora._doraeffect) {
+  const effect = redDora._doraeffect;
+  console.log({
+    effectName: effect.name,
+    childName: effect.getChildAt(0).name,  // 應該是 "effect"
+    parentName: effect.parent.name,         // 應該是 "pai"
+    animationType: effect.getChildAt(0)._components[0] instanceof anim.RunUV
+      ? "RunUV" : "Bling"
+  });
 }
 ```
-
----
 
 ## 宝牌指示牌 (Dora Indicators)
 

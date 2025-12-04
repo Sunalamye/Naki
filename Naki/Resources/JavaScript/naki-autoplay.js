@@ -475,13 +475,20 @@
         show: function(tileIndex) {
             try {
                 const inst = window.view?.DesktopMgr?.Inst;
-                if (!inst || !inst.effect_recommend) {
+                if (!inst) {
+                    console.log('[Naki Highlight] Game manager not available');
+                    return false;
+                }
+
+                // ⭐ 使用初始化 hook 的高亮效果參考，或直接獲取
+                const effect = window.__nakiHighlightInit?.getEffect?.() || inst.effect_recommend;
+                if (!effect) {
                     console.log('[Naki Highlight] effect_recommend not available');
                     return false;
                 }
 
-                // 激活推薦效果
-                inst.effect_recommend.active = true;
+                // 啟用推薦效果
+                effect.active = true;
                 this.isActive = true;
                 this.highlightTileIndex = tileIndex;
 
