@@ -1,8 +1,8 @@
 # Naki (鳴き) - 雀魂麻將 AI 助手
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.2.0-green" alt="Version">
-  <img src="https://img.shields.io/badge/Platform-macOS%2013+-blue" alt="Platform">
+  <img src="https://img.shields.io/badge/Version-2.0.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/Platform-macOS%2026+-blue" alt="Platform">
   <img src="https://img.shields.io/badge/Swift-5.9+-orange" alt="Swift">
   <img src="https://img.shields.io/badge/License-AGPL--3.0%20with%20Commons%20Clause-blue" alt="License">
 </p>
@@ -32,7 +32,7 @@
 
 | 功能 | 說明 |
 |-----|------|
-| 🎮 **內嵌遊戲** | WKWebView 直接載入雀魂，無需外部瀏覽器 |
+| 🎮 **內嵌遊戲** | WebPage API (macOS 26.0+) 直接載入雀魂，無需外部瀏覽器 |
 | 🧠 **AI 推理** | Core ML + Mortal 神經網絡，本地即時運算 |
 | 🤖 **全自動打牌** | 打牌、吃、碰、槓、立直、和牌一鍵全自動 |
 | 📊 **即時推薦** | 顯示每張牌的 Q 值與最優選擇 |
@@ -46,7 +46,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        WKWebView                             │
+│                   WebPage (macOS 26.0+)                      │
 │                   (game.maj-soul.com)                        │
 │                           │                                  │
 │           ┌───────────────┴───────────────┐                 │
@@ -91,8 +91,8 @@
 ## 🚀 快速開始
 
 ### 系統需求
-- macOS 13.0+ (Ventura)
-- Xcode 15.0+
+- macOS 26.0+ (需要 WebPage API)
+- Xcode 26.0+
 - Apple Silicon 或 Intel Mac
 
 ### 編譯
