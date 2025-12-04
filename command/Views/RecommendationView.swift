@@ -119,7 +119,7 @@ struct RecommendationView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(Color.contentBackground)
 
             Divider()
 
@@ -141,7 +141,7 @@ struct RecommendationView: View {
                 }
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(Color.windowBackground)
         .cornerRadius(6)
         .shadow(color: .black.opacity(0.1), radius: 2)
     }
@@ -209,7 +209,7 @@ struct CompactRecommendationView: View {
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color(NSColor.controlBackgroundColor))
+                .fill(Color.contentBackground)
         )
     }
 }

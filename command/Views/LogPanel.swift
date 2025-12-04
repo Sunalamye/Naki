@@ -55,17 +55,21 @@ struct LogPanel: View {
                     Image(systemName: autoScroll ? "arrow.down.circle.fill" : "arrow.down.circle")
                 }
                 .toggleStyle(.button)
+                #if os(macOS)
                 .help("自動滾動到最新")
+                #endif
 
                 // 清除按鈕
                 Button(action: { logManager.clear() }) {
                     Image(systemName: "trash")
                 }
+                #if os(macOS)
                 .help("清除日誌")
+                #endif
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(Color.contentBackground)
 
             Divider()
 
@@ -84,7 +88,7 @@ struct LogPanel: View {
                 }
             }
             .padding(6)
-            .background(Color(NSColor.textBackgroundColor))
+            .background(Color.textFieldBackground)
 
             Divider()
 
@@ -109,7 +113,7 @@ struct LogPanel: View {
                 }
             }
         }
-        .background(Color(NSColor.textBackgroundColor))
+        .background(Color.textFieldBackground)
     }
 }
 

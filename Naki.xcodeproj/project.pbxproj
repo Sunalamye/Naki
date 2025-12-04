@@ -9,16 +9,181 @@
 /* Begin PBXBuildFile section */
 		EC3077B02EDC6A1600216E0C /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC3077AF2EDC6A1600216E0C /* MortalSwift */; };
 		EC3077B12EDDAFF200216E0C /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC3076D42EDBE64400216E0C /* MortalSwift */; };
+		ECAAD5222EE1BBB50056F965 /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = ECAAD5212EE1BBB50056F965 /* MortalSwift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		ECAAD4292EE1BAB50056F965 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EC3076562EDAFD2300216E0C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = ECAAD41B2EE1BAB40056F965;
+			remoteInfo = "Naki-M";
+		};
+		ECAAD4332EE1BAB60056F965 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = EC3076562EDAFD2300216E0C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = ECAAD41B2EE1BAB40056F965;
+			remoteInfo = "Naki-M";
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		EC30765E2EDAFD2300216E0C /* Naki.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Naki.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ECAAD41C2EE1BAB40056F965 /* Naki-M.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Naki-M.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		ECAAD4282EE1BAB50056F965 /* Naki-MTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Naki-MTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		ECAAD4322EE1BAB60056F965 /* Naki-MUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Naki-MUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		ECAAD45C2EE1BAD30056F965 /* Exceptions for "Naki" folder in "Naki-MUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				App/NakiApp.swift,
+			);
+			target = ECAAD4312EE1BAB60056F965 /* Naki-MUITests */;
+		};
+		ECAAD5072EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Color+Extension.swift",
+				Models/GameModels.swift,
+				Resources/Assets.xcassets,
+				Resources/index.html,
+				"Resources/JavaScript/naki-autoplay.js",
+				"Resources/JavaScript/naki-core.js",
+				"Resources/JavaScript/naki-game-api.js",
+				"Resources/JavaScript/naki-websocket.js",
+				Services/AutoPlay/AutoPlayService.swift,
+				Services/Bot/AutoPlayController.swift,
+				Services/Bot/NativeBotController.swift,
+				Services/Bridge/LiqiParser.swift,
+				Services/Bridge/MajsoulBridge.swift,
+				Services/Bridge/MJAIEventStream.swift,
+				Services/Bridge/WebSocketInterceptor.swift,
+				Services/Debug/DebugServer.swift,
+				Services/LogManager.swift,
+				ViewModels/GameStateManager.swift,
+				ViewModels/WebViewModel.swift,
+				Views/BotStatusView.swift,
+				Views/ContentView.swift,
+				Views/LogPanel.swift,
+				Views/RecommendationView.swift,
+				Views/WebViewController.swift,
+			);
+			target = EC30765D2EDAFD2300216E0C /* Naki */;
+		};
+		ECAAD5082EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki-MUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Models/GameModels.swift,
+				Services/AutoPlay/AutoPlayService.swift,
+				Services/Bot/AutoPlayController.swift,
+				Services/Bot/NativeBotController.swift,
+				Services/Bridge/LiqiParser.swift,
+				Services/Bridge/MajsoulBridge.swift,
+				Services/Bridge/MJAIEventStream.swift,
+				Services/Bridge/WebSocketInterceptor.swift,
+				Services/Debug/DebugServer.swift,
+				Services/LogManager.swift,
+				ViewModels/GameStateManager.swift,
+				ViewModels/WebViewModel.swift,
+				Views/BotStatusView.swift,
+				Views/ContentView.swift,
+				Views/LogPanel.swift,
+				Views/RecommendationView.swift,
+				Views/WebViewController.swift,
+			);
+			target = ECAAD4312EE1BAB60056F965 /* Naki-MUITests */;
+		};
+		ECAAD50B2EE1BB260056F965 /* Exceptions for "command" folder in "Naki-M" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Color+Extension.swift",
+				Models/GameModels.swift,
+				Resources/index.html,
+				"Resources/JavaScript/naki-autoplay.js",
+				"Resources/JavaScript/naki-core.js",
+				"Resources/JavaScript/naki-game-api.js",
+				"Resources/JavaScript/naki-websocket.js",
+				Services/AutoPlay/AutoPlayService.swift,
+				Services/Bot/AutoPlayController.swift,
+				Services/Bot/NativeBotController.swift,
+				Services/Bridge/LiqiParser.swift,
+				Services/Bridge/MajsoulBridge.swift,
+				Services/Bridge/MJAIEventStream.swift,
+				Services/Bridge/WebSocketInterceptor.swift,
+				Services/Debug/DebugServer.swift,
+				Services/LogManager.swift,
+				ViewModels/GameStateManager.swift,
+				ViewModels/WebViewModel.swift,
+				Views/BotStatusView.swift,
+				Views/ContentView.swift,
+				Views/LogPanel.swift,
+				Views/RecommendationView.swift,
+				Views/WebViewController.swift,
+			);
+			target = ECAAD41B2EE1BAB40056F965 /* Naki-M */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		ECAAD45D2EE1BAD30056F965 /* Exceptions for "Naki" folder in "Compile Sources" phase from "Naki-MUITests" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = ECAAD42E2EE1BAB60056F965 /* Sources */;
+			membershipExceptions = (
+				akagi.entitlements,
+			);
+		};
+		ECAAD5092EE1BB0E0056F965 /* Exceptions for "command" folder in "Compile Sources" phase from "Naki-MUITests" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = ECAAD42E2EE1BAB60056F965 /* Sources */;
+			membershipExceptions = (
+				Resources/Assets.xcassets,
+				Resources/index.html,
+				"Resources/JavaScript/naki-autoplay.js",
+				"Resources/JavaScript/naki-core.js",
+				"Resources/JavaScript/naki-game-api.js",
+				"Resources/JavaScript/naki-websocket.js",
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		EC3076602EDAFD2300216E0C /* Naki */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				ECAAD45C2EE1BAD30056F965 /* Exceptions for "Naki" folder in "Naki-MUITests" target */,
+				ECAAD45D2EE1BAD30056F965 /* Exceptions for "Naki" folder in "Compile Sources" phase from "Naki-MUITests" target */,
+			);
 			path = Naki;
+			sourceTree = "<group>";
+		};
+		ECAAD41D2EE1BAB40056F965 /* Naki-M */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Naki-M";
+			sourceTree = "<group>";
+		};
+		ECAAD42B2EE1BAB50056F965 /* Naki-MTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Naki-MTests";
+			sourceTree = "<group>";
+		};
+		ECAAD4352EE1BAB60056F965 /* Naki-MUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Naki-MUITests";
+			sourceTree = "<group>";
+		};
+		ECAAD4B72EE1BB090056F965 /* command */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				ECAAD5072EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki" target */,
+				ECAAD50B2EE1BB260056F965 /* Exceptions for "command" folder in "Naki-M" target */,
+				ECAAD5082EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki-MUITests" target */,
+				ECAAD5092EE1BB0E0056F965 /* Exceptions for "command" folder in "Compile Sources" phase from "Naki-MUITests" target */,
+			);
+			path = command;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -33,13 +198,39 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		ECAAD4192EE1BAB40056F965 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ECAAD5222EE1BBB50056F965 /* MortalSwift in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECAAD4252EE1BAB50056F965 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECAAD42F2EE1BAB60056F965 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		EC3076552EDAFD2300216E0C = {
 			isa = PBXGroup;
 			children = (
+				ECAAD4B72EE1BB090056F965 /* command */,
 				EC3076602EDAFD2300216E0C /* Naki */,
+				ECAAD41D2EE1BAB40056F965 /* Naki-M */,
+				ECAAD42B2EE1BAB50056F965 /* Naki-MTests */,
+				ECAAD4352EE1BAB60056F965 /* Naki-MUITests */,
 				EC3076D32EDBE64400216E0C /* Frameworks */,
 				EC30765F2EDAFD2300216E0C /* Products */,
 			);
@@ -49,6 +240,9 @@
 			isa = PBXGroup;
 			children = (
 				EC30765E2EDAFD2300216E0C /* Naki.app */,
+				ECAAD41C2EE1BAB40056F965 /* Naki-M.app */,
+				ECAAD4282EE1BAB50056F965 /* Naki-MTests.xctest */,
+				ECAAD4322EE1BAB60056F965 /* Naki-MUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,6 +281,75 @@
 			productReference = EC30765E2EDAFD2300216E0C /* Naki.app */;
 			productType = "com.apple.product-type.application";
 		};
+		ECAAD41B2EE1BAB40056F965 /* Naki-M */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ECAAD4402EE1BAB60056F965 /* Build configuration list for PBXNativeTarget "Naki-M" */;
+			buildPhases = (
+				ECAAD4182EE1BAB40056F965 /* Sources */,
+				ECAAD4192EE1BAB40056F965 /* Frameworks */,
+				ECAAD41A2EE1BAB40056F965 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				ECAAD41D2EE1BAB40056F965 /* Naki-M */,
+			);
+			name = "Naki-M";
+			packageProductDependencies = (
+				ECAAD5212EE1BBB50056F965 /* MortalSwift */,
+			);
+			productName = "Naki-M";
+			productReference = ECAAD41C2EE1BAB40056F965 /* Naki-M.app */;
+			productType = "com.apple.product-type.application";
+		};
+		ECAAD4272EE1BAB50056F965 /* Naki-MTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ECAAD4412EE1BAB60056F965 /* Build configuration list for PBXNativeTarget "Naki-MTests" */;
+			buildPhases = (
+				ECAAD4242EE1BAB50056F965 /* Sources */,
+				ECAAD4252EE1BAB50056F965 /* Frameworks */,
+				ECAAD4262EE1BAB50056F965 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				ECAAD42A2EE1BAB50056F965 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				ECAAD42B2EE1BAB50056F965 /* Naki-MTests */,
+			);
+			name = "Naki-MTests";
+			packageProductDependencies = (
+			);
+			productName = "Naki-MTests";
+			productReference = ECAAD4282EE1BAB50056F965 /* Naki-MTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		ECAAD4312EE1BAB60056F965 /* Naki-MUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ECAAD4422EE1BAB60056F965 /* Build configuration list for PBXNativeTarget "Naki-MUITests" */;
+			buildPhases = (
+				ECAAD42E2EE1BAB60056F965 /* Sources */,
+				ECAAD42F2EE1BAB60056F965 /* Frameworks */,
+				ECAAD4302EE1BAB60056F965 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				ECAAD4342EE1BAB60056F965 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				ECAAD4352EE1BAB60056F965 /* Naki-MUITests */,
+			);
+			name = "Naki-MUITests";
+			packageProductDependencies = (
+			);
+			productName = "Naki-MUITests";
+			productReference = ECAAD4322EE1BAB60056F965 /* Naki-MUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -99,6 +362,17 @@
 				TargetAttributes = {
 					EC30765D2EDAFD2300216E0C = {
 						CreatedOnToolsVersion = 26.0;
+					};
+					ECAAD41B2EE1BAB40056F965 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					ECAAD4272EE1BAB50056F965 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = ECAAD41B2EE1BAB40056F965;
+					};
+					ECAAD4312EE1BAB60056F965 = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = ECAAD41B2EE1BAB40056F965;
 					};
 				};
 			};
@@ -120,12 +394,36 @@
 			projectRoot = "";
 			targets = (
 				EC30765D2EDAFD2300216E0C /* Naki */,
+				ECAAD41B2EE1BAB40056F965 /* Naki-M */,
+				ECAAD4272EE1BAB50056F965 /* Naki-MTests */,
+				ECAAD4312EE1BAB60056F965 /* Naki-MUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		EC30765C2EDAFD2300216E0C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECAAD41A2EE1BAB40056F965 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECAAD4262EE1BAB50056F965 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECAAD4302EE1BAB60056F965 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -142,7 +440,41 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		ECAAD4182EE1BAB40056F965 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECAAD4242EE1BAB50056F965 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ECAAD42E2EE1BAB60056F965 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		ECAAD42A2EE1BAB50056F965 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = ECAAD41B2EE1BAB40056F965 /* Naki-M */;
+			targetProxy = ECAAD4292EE1BAB50056F965 /* PBXContainerItemProxy */;
+		};
+		ECAAD4342EE1BAB60056F965 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = ECAAD41B2EE1BAB40056F965 /* Naki-M */;
+			targetProxy = ECAAD4332EE1BAB60056F965 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		EC3076672EDAFD2500216E0C /* Debug */ = {
@@ -333,6 +665,167 @@
 			};
 			name = Release;
 		};
+		ECAAD43A2EE1BAB60056F965 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YRJZ6WG9VC;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.39c154f25912233am.Naki-M";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		ECAAD43B2EE1BAB60056F965 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YRJZ6WG9VC;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.39c154f25912233am.Naki-M";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		ECAAD43C2EE1BAB60056F965 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YRJZ6WG9VC;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.39c154f25912233am.Naki-MTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Naki-M.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Naki-M";
+			};
+			name = Debug;
+		};
+		ECAAD43D2EE1BAB60056F965 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YRJZ6WG9VC;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.39c154f25912233am.Naki-MTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Naki-M.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Naki-M";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		ECAAD43E2EE1BAB60056F965 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YRJZ6WG9VC;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.39c154f25912233am.Naki-MUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Naki-M";
+			};
+			name = Debug;
+		};
+		ECAAD43F2EE1BAB60056F965 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = YRJZ6WG9VC;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.39c154f25912233am.Naki-MUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Naki-M";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -354,6 +847,33 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		ECAAD4402EE1BAB60056F965 /* Build configuration list for PBXNativeTarget "Naki-M" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ECAAD43A2EE1BAB60056F965 /* Debug */,
+				ECAAD43B2EE1BAB60056F965 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		ECAAD4412EE1BAB60056F965 /* Build configuration list for PBXNativeTarget "Naki-MTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ECAAD43C2EE1BAB60056F965 /* Debug */,
+				ECAAD43D2EE1BAB60056F965 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		ECAAD4422EE1BAB60056F965 /* Build configuration list for PBXNativeTarget "Naki-MUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ECAAD43E2EE1BAB60056F965 /* Debug */,
+				ECAAD43F2EE1BAB60056F965 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -362,7 +882,7 @@
 			repositoryURL = "https://github.com/Sunalamye/MortalSwift";
 			requirement = {
 				kind = upToNextMinorVersion;
-				minimumVersion = 0.1.1;
+				minimumVersion = 0.2.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -373,6 +893,11 @@
 			productName = MortalSwift;
 		};
 		EC3077AF2EDC6A1600216E0C /* MortalSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EC3077AE2EDC6A1600216E0C /* XCRemoteSwiftPackageReference "MortalSwift" */;
+			productName = MortalSwift;
+		};
+		ECAAD5212EE1BBB50056F965 /* MortalSwift */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = EC3077AE2EDC6A1600216E0C /* XCRemoteSwiftPackageReference "MortalSwift" */;
 			productName = MortalSwift;

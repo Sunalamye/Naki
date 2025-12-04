@@ -39,7 +39,7 @@ struct BotStatusView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(Color.contentBackground)
 
             Divider()
 
@@ -77,7 +77,7 @@ struct BotStatusView: View {
             }
             .padding(12)
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(Color.windowBackground)
         .cornerRadius(8)
         .shadow(color: .black.opacity(0.1), radius: 4)
     }
@@ -284,7 +284,7 @@ struct CompactBotStatusView: View {
         .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color(NSColor.controlBackgroundColor))
+                .fill(Color.contentBackground)
         )
     }
 }
