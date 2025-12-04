@@ -114,17 +114,22 @@ class WebViewModel {
     /// 啟動定期檢查計時器
     private func startAutoPlayCheckTimer() {
         autoPlayCheckTimer?.invalidate()
-        autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.checkAndRetriggerAutoPlay()
         }
     }
 
     /// 定期檢查：如果有推薦且沒有正在執行的動作，重新觸發
     private func checkAndRetriggerAutoPlay() {
+        guard let webView = wkWebView else { return }
+
+        // ⭐ 檢查並更新高亮效果（如果有推薦但沒有顯示效果）
+        checkAndUpdateHighlights()
+
+        // 自動打牌檢查
         guard autoPlayController?.state.mode == .auto,
               !recommendations.isEmpty,
-              currentExecutionId == nil,  // 沒有正在執行的動作
-              let webView = wkWebView else { return }
+              currentExecutionId == nil else { return }
 
         // 檢查遊戲是否有可用操作
         let checkScript = """
@@ -142,6 +147,26 @@ class WebViewModel {
             // 有 oplist 且有推薦，重新觸發
             self.debugServer?.addLog("⏰ Timer: retrigger auto-play")
             self.triggerAutoPlayNow(delay: 0.1)  // 短延遲立即執行
+        }
+    }
+
+    /// 檢查並更新高亮效果
+    private func checkAndUpdateHighlights() {
+        guard !recommendations.isEmpty,
+              let webView = wkWebView,
+              let controller = nativeBotController else { return }
+
+        // 檢查是否有活躍的效果
+        let checkScript = "window.__nakiRecommendHighlight?.activeEffects?.length || 0"
+
+        webView.evaluateJavaScript(checkScript) { [weak self] result, _ in
+            guard let self = self,
+                  let effectCount = result as? Int,
+                  effectCount == 0 else { return }
+
+            // 有推薦但沒有效果，重新顯示
+            self.debugServer?.addLog("⏰ Timer: refresh highlights")
+            self.showGameHighlightForRecommendations(self.recommendations, controller: controller)
         }
     }
 
@@ -180,6 +205,8 @@ class WebViewModel {
 
     /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
     private func updateUIAfterBotResponse(from controller: NativeBotController) {
+        bridgeLog("[WebViewModel] ===== updateUIAfterBotResponse CALLED =====")
+
         // 更新遊戲狀態
         gameState = controller.gameState
         botStatus = controller.botState
@@ -188,16 +215,143 @@ class WebViewModel {
         recommendations = controller.lastRecommendations
         recommendationCount = recommendations.count
 
+        bridgeLog("[WebViewModel] Updated recommendations: \(recommendations.count)")
+
         // 同步到 GameStateManager（供 UI 響應式更新）
         gameStateManager.syncFrom(controller: controller)
 
-        // 更新高亮牌
+        // 更新高亮牌（顯示所有符合條件的推薦）
         if let firstRec = recommendations.first {
             highlightedTile = firstRec.displayTile
+
+            // ⭐ 在遊戲 UI 上顯示多個推薦的原生高亮
+            showGameHighlightForRecommendations(recommendations, controller: controller)
+        } else {
+            // 沒有推薦時隱藏高亮
+            hideGameHighlight()
         }
 
         // 觸發自動打牌
         triggerAutoPlayIfNeeded()
+    }
+
+    /// 在遊戲 UI 上顯示多個推薦的原生高亮效果
+    /// 根據機率顯示不同顏色：> 0.5 綠色，0.2~0.5 紅色，< 0.2 不顯示
+    private func showGameHighlightForRecommendations(_ recommendations: [Recommendation], controller: NativeBotController) {
+        guard let webView = wkWebView else { return }
+
+        // 過濾出有效的打牌推薦（機率 > 0.2）
+        let validRecs = recommendations.filter { rec in
+            rec.tile != nil && rec.probability > 0.2
+        }
+
+        if validRecs.isEmpty {
+            hideGameHighlight()
+            return
+        }
+
+        // 構建 JavaScript 來查找所有推薦牌的位置
+        var tileDataArray: [[String: Any]] = []
+        for rec in validRecs {
+            guard let tile = rec.tile else { continue }
+            tileDataArray.append([
+                "mjaiString": tile.mjaiString,
+                "probability": rec.probability
+            ])
+        }
+
+        // 將數據轉為 JSON
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: tileDataArray),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            bridgeLog("[WebViewModel] Failed to serialize recommendations")
+            return
+        }
+
+        let script = """
+        (function() {
+            // ⭐ 先清除現有效果，確保不會有殘留
+            window.__nakiRecommendHighlight?.hide();
+
+            var mr = window.view?.DesktopMgr?.Inst?.mainrole;
+            if (!mr || !mr.hand) return [];
+
+            var tiles = \(jsonString);
+            var results = [];
+
+            // 雀魂的 type 映射：0=筒(p), 1=萬(m), 2=索(s), 3=字牌(z)
+            var typeMap = {'m': 1, 'p': 0, 's': 2};
+            var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
+
+            for (var j = 0; j < tiles.length; j++) {
+                var target = tiles[j].mjaiString;
+                var probability = tiles[j].probability;
+
+                var tileType, tileValue, isRed = false;
+
+                // 處理字牌
+                if (honorMap[target]) {
+                    tileType = honorMap[target][0];
+                    tileValue = honorMap[target][1];
+                } else {
+                    // 處理數牌：1m, 5mr, etc.
+                    tileValue = parseInt(target[0]);
+                    var suitChar = target[1];
+                    tileType = typeMap[suitChar];
+                    isRed = target.length > 2 && target[2] === 'r';
+                }
+
+                // 在手牌中查找
+                for (var i = 0; i < mr.hand.length; i++) {
+                    var t = mr.hand[i];
+                    if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
+                        // 如果是紅寶牌，檢查 dora 標記
+                        var match = false;
+                        if (isRed) {
+                            match = t.val.dora === true;
+                        } else {
+                            match = !t.val.dora;
+                        }
+                        if (match) {
+                            results.push({ tileIndex: i, probability: probability });
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 調用高亮模組（showMultiple 內部也會 hide，但這裡已經 hide 過了）
+            if (results.length > 0) {
+                window.__nakiRecommendHighlight?.showMultiple(results);
+            }
+
+            return results;
+        })()
+        """
+
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                bridgeLog("[WebViewModel] Error showing highlights: \(error.localizedDescription)")
+                return
+            }
+
+            if let results = result as? [[String: Any]] {
+                bridgeLog("[WebViewModel] Highlighted \(results.count) recommendations")
+            }
+        }
+    }
+
+    /// 隱藏遊戲 UI 上的高亮效果
+    private func hideGameHighlight() {
+        guard let webView = wkWebView else { return }
+
+        let script = "window.__nakiRecommendHighlight?.hide()"
+        webView.evaluateJavaScript(script) { result, error in
+            if let error = error {
+                bridgeLog("[WebViewModel] Error hiding highlight: \(error.localizedDescription)")
+            } else {
+                bridgeLog("[WebViewModel] Hidden game highlight")
+            }
+        }
     }
 
     /// 根據當前推薦觸發自動打牌
@@ -258,6 +412,8 @@ class WebViewModel {
         recommendations = []
         tehaiTiles = []
         tsumoTile = nil
+        // ⭐ 隱藏遊戲 UI 上的高亮
+        hideGameHighlight()
         bridgeLog("[WebViewModel] Bot deleted and state cleared")
     }
 
@@ -292,6 +448,26 @@ class WebViewModel {
     /// 設置自動打牌延遲
     func setAutoPlayDelay(_ delay: TimeInterval) {
         autoPlayController?.setActionDelay(delay)
+    }
+
+    /// 設定高亮效果選項
+    /// - Parameter showRotatingEffect: 是否顯示旋轉高亮效果
+    func setHighlightSettings(showRotatingEffect: Bool) {
+        guard let webView = wkWebView else { return }
+
+        let script = """
+        window.__nakiRecommendHighlight?.setSettings({
+            showRotatingEffect: \(showRotatingEffect)
+        });
+        """
+
+        webView.evaluateJavaScript(script) { _, error in
+            if let error = error {
+                bridgeLog("[WebViewModel] Error setting highlight: \(error.localizedDescription)")
+            } else {
+                bridgeLog("[WebViewModel] Highlight settings: rotating=\(showRotatingEffect)")
+            }
+        }
     }
 
     /// 確認待處理的自動打牌動作
@@ -910,27 +1086,30 @@ class WebViewModel {
             }
         }
 
-        // ⭐ 設置 Bot 狀態回調
+        // ⭐ 設置 Bot 狀態回調（使用 GameStateManager 作為唯一數據源）
         debugServer?.getBotStatus = { [weak self] in
             guard let self = self else { return [:] }
 
-            // 使用基本類型確保 JSON 序列化成功
-            let recs: [[String: Any]] = self.recommendations.map { rec in
+            // 統一使用 GameStateManager 的推薦列表作為數據源
+            let recs: [[String: Any]] = self.gameStateManager.recommendations.map { rec in
                 return [
                     "tile": rec.displayTile,
-                    "prob": rec.probability
+                    "action": rec.actionType.rawValue,
+                    "label": rec.displayLabel,
+                    "prob": rec.probability,
+                    "percentage": rec.percentageString
                 ]
             }
 
             let result: [String: Any] = [
                 "botStatus": [
-                    "isActive": self.botStatus.isActive,
-                    "playerId": self.botStatus.playerId
+                    "isActive": self.gameStateManager.botStatus.isActive,
+                    "playerId": self.gameStateManager.botStatus.playerId
                 ],
                 "gameState": [
-                    "bakaze": self.gameState.bakazeDisplay,
-                    "kyoku": self.gameState.kyoku,
-                    "honba": self.gameState.honba
+                    "bakaze": self.gameStateManager.gameState.bakazeDisplay,
+                    "kyoku": self.gameStateManager.gameState.kyoku,
+                    "honba": self.gameStateManager.gameState.honba
                 ],
                 "autoPlay": [
                     "mode": self.autoPlayController?.state.mode.rawValue ?? "unknown",
@@ -1150,6 +1329,8 @@ extension WebViewModel: AutoPlayServiceDelegate {
         // 動作完成後可以更新 UI 狀態
         DispatchQueue.main.async { [weak self] in
             self?.statusMessage = "動作完成: \(actionType.displayName)"
+            // ⭐ 隱藏遊戲 UI 上的推薦高亮
+            self?.hideGameHighlight()
         }
     }
 
@@ -1157,6 +1338,8 @@ extension WebViewModel: AutoPlayServiceDelegate {
         bridgeLog("[WebViewModel] AutoPlayService failed: \(actionType.rawValue) - \(error)")
         DispatchQueue.main.async { [weak self] in
             self?.statusMessage = "動作失敗: \(error)"
+            // ⭐ 隱藏遊戲 UI 上的推薦高亮
+            self?.hideGameHighlight()
         }
     }
 }

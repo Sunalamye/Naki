@@ -171,6 +171,9 @@ class DebugServer {
         case ("GET", "/"):
             handleRoot(connection: connection)
 
+        case ("GET", "/help"):
+            handleHelp(connection: connection)
+
         case ("GET", "/status"):
             handleStatus(connection: connection)
 
@@ -298,6 +301,208 @@ class DebugServer {
             "timestamp": ISO8601DateFormatter().string(from: Date())
         ]
         sendJSON(connection: connection, data: status)
+    }
+
+    /// AI 友好的 Help 端點 - 返回結構化的 API 文檔
+    private func handleHelp(connection: NWConnection) {
+        let help: [String: Any] = [
+            "name": "Naki Debug API",
+            "version": "1.0",
+            "description": "Naki 麻將 AI 助手的 Debug API，用於監控遊戲狀態、控制 Bot、執行遊戲操作",
+            "base_url": "http://localhost:\(actualPort)",
+            "endpoints": [
+                // 系統類
+                [
+                    "method": "GET",
+                    "path": "/",
+                    "description": "首頁，HTML 格式的端點列表（人類可讀）",
+                    "returns": "HTML"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/help",
+                    "description": "本端點，JSON 格式的 API 文檔（AI 友好）",
+                    "returns": "JSON with complete API documentation"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/status",
+                    "description": "伺服器狀態和埠號",
+                    "returns": "{\"status\": \"running\", \"port\": 8765, \"timestamp\": \"ISO8601\"}"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/logs",
+                    "description": "獲取 Debug 日誌（最多 10,000 條）",
+                    "returns": "{\"logs\": [...], \"count\": number}"
+                ],
+                [
+                    "method": "DELETE",
+                    "path": "/logs",
+                    "description": "清空所有日誌",
+                    "returns": "{\"success\": true}"
+                ],
+                // Bot 控制類
+                [
+                    "method": "GET",
+                    "path": "/bot/status",
+                    "description": "Bot 狀態、手牌、推薦、可用動作",
+                    "returns": "Complete bot status with recommendations"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/bot/trigger",
+                    "description": "手動觸發自動打牌",
+                    "returns": "{\"success\": true}"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/bot/ops",
+                    "description": "探索可用的副露操作 (chi/pon/kan)",
+                    "returns": "{\"success\": true, \"data\": {...}}"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/bot/deep",
+                    "description": "深度探索 naki API (所有方法)",
+                    "returns": "{\"success\": true, \"data\": {...}}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/bot/chi",
+                    "description": "測試吃操作",
+                    "returns": "{\"success\": true, \"data\": {...}}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/bot/pon",
+                    "description": "測試碰操作",
+                    "returns": "{\"success\": true, \"data\": {...}}"
+                ],
+                // 遊戲狀態類
+                [
+                    "method": "GET",
+                    "path": "/game/state",
+                    "description": "當前遊戲狀態",
+                    "returns": "Game state JSON"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/game/hand",
+                    "description": "手牌資訊",
+                    "returns": "Hand tiles info"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/game/ops",
+                    "description": "當前可用操作",
+                    "returns": "{\"ops\": [...]}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/game/discard",
+                    "description": "打出指定牌",
+                    "body": "{\"tileIndex\": 0}",
+                    "returns": "{\"success\": true, \"tileIndex\": 0}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/game/action",
+                    "description": "執行遊戲動作",
+                    "body": "{\"action\": \"pass\", \"params\": {}}",
+                    "returns": "{\"success\": true, \"action\": \"pass\"}"
+                ],
+                // JavaScript 執行
+                [
+                    "method": "POST",
+                    "path": "/js",
+                    "description": "執行任意 JavaScript",
+                    "body": "JavaScript code as string",
+                    "returns": "{\"result\": ...}"
+                ],
+                // 探索類
+                [
+                    "method": "GET",
+                    "path": "/detect",
+                    "description": "檢測遊戲 API",
+                    "returns": "Game API detection result"
+                ],
+                [
+                    "method": "GET",
+                    "path": "/explore",
+                    "description": "探索遊戲物件",
+                    "returns": "Game objects exploration data"
+                ],
+                // UI 操作類
+                [
+                    "method": "GET",
+                    "path": "/test-indicators",
+                    "description": "顯示測試指示器",
+                    "returns": "{\"result\": \"OK\"}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/click",
+                    "description": "在指定座標點擊",
+                    "body": "{\"x\": 100, \"y\": 200, \"label\": \"optional\"}",
+                    "returns": "{\"result\": \"clicked\", \"x\": 100, \"y\": 200}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/calibrate",
+                    "description": "設定校準參數",
+                    "body": "{\"tileSpacing\": 96, \"offsetX\": -200, \"offsetY\": 0}",
+                    "returns": "{\"tileSpacing\": 96, \"offsetX\": -200, \"offsetY\": 0}"
+                ]
+            ],
+            "common_workflows": [
+                [
+                    "name": "監控遊戲狀態",
+                    "steps": [
+                        "GET /bot/status - 檢查 Bot 狀態和手牌",
+                        "GET /logs - 查看最近的操作日誌",
+                        "GET /game/state - 獲取當前遊戲狀態"
+                    ]
+                ],
+                [
+                    "name": "手動控制自動打牌",
+                    "steps": [
+                        "GET /bot/status - 查看當前推薦",
+                        "POST /bot/trigger - 手動觸發自動打牌",
+                        "GET /logs - 查看執行結果"
+                    ]
+                ],
+                [
+                    "name": "測試副露操作",
+                    "steps": [
+                        "GET /bot/ops - 探索可用操作",
+                        "POST /bot/chi 或 /bot/pon - 測試具體操作",
+                        "GET /logs - 查看測試結果"
+                    ]
+                ],
+                [
+                    "name": "執行 JavaScript 調試",
+                    "steps": [
+                        "POST /js -d 'your_script' - 執行任意 JavaScript",
+                        "GET /logs - 查看執行日誌"
+                    ]
+                ]
+            ],
+            "tile_notation": [
+                "數牌（Suited）": "1-9 + m(萬)/p(筒)/s(索)，如 1m, 5p, 9s",
+                "紅寶牌（Red 5s）": "5mr, 5pr, 5sr",
+                "字牌（Honor）": "E(東), S(南), W(西), N(北), P(白), F(發), C(中)"
+            ],
+            "tips": [
+                "使用 /help 獲取此文檔",
+                "使用 /logs 查看操作歷史",
+                "使用 /bot/status 一次性獲取所有狀態",
+                "Bot 的推薦按機率排序，第一個通常是最佳選擇",
+                "使用 /js 端點執行任意 JavaScript 進行調試",
+                "遊戲狀態通過 @import @docs/architecture-deep-dive.md 了解詳細流程"
+            ]
+        ]
+        sendJSON(connection: connection, data: help)
     }
 
     private func handleJavaScript(body: String, connection: NWConnection) {
@@ -630,7 +835,12 @@ class DebugServer {
 
     private func sendJSON(connection: NWConnection, data: [String: Any]) {
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: data, options: .prettyPrinted)
+            if data.isEmpty {
+                throw NSError(domain: "DebugServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty JSON data"])
+            }
+            
+            let sanitized = sanitizeForJSON(data) as! [String: Any]
+            let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: .prettyPrinted)
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
             sendResponse(connection: connection, status: 200, body: body, contentType: "application/json")
         } catch {
@@ -638,6 +848,26 @@ class DebugServer {
         }
     }
 
+    private func sanitizeForJSON(_ value: Any) -> Any {
+        switch value {
+        case let dict as [String: Any]:
+            return dict.mapValues { sanitizeForJSON($0) }
+        case let array as [Any]:
+            return array.map { sanitizeForJSON($0) }
+        case let d as Double where d.isNaN || d.isInfinite:
+            return NSNull()
+        case let f as Float where f.isNaN || f.isInfinite:
+            return NSNull()
+        case let n as NSNumber:
+            let d = n.doubleValue
+            if d.isNaN || d.isInfinite {
+                return NSNull()
+            }
+            return n
+        default:
+            return value
+        }
+    }
     // MARK: - Logging
 
     private func log(_ message: String) {

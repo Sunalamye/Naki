@@ -207,6 +207,7 @@ struct AdvancedSettingsSheet: View {
 
     // AI 設定
     @State private var temperature: Double = 0.3
+    @State private var showRotatingEffect: Bool = false  // 預設關閉旋轉效果
 
     // 位置校準
     @State private var tileSpacing: Double = 96.0
@@ -248,6 +249,21 @@ struct AdvancedSettingsSheet: View {
                             Text("較低溫度 = 更確定性的推薦，較高溫度 = 更多樣化的推薦")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
+
+                            Divider()
+
+                            // 旋轉高亮效果開關
+                            Toggle(isOn: $showRotatingEffect) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("顯示旋轉高亮效果")
+                                    Text("啟用後會在推薦牌上顯示額外的旋轉光環效果")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .onChange(of: showRotatingEffect) { _, newValue in
+                                viewModel.setHighlightSettings(showRotatingEffect: newValue)
+                            }
                         }
                     } label: {
                         Label("AI 設定", systemImage: "brain")

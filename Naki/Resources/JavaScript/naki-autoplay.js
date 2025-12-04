@@ -456,5 +456,335 @@
         window.__nakiAutoPlay.showClickIndicator(x, y, label || 'TEST');
     };
 
+    // ========================================
+    // 🌟 推薦高亮管理模組 (RunUV 效果版)
+    // ========================================
+    /**
+     * 管理推薦牌的視覺高亮效果
+     * 使用 effect_doraPlane + anim.RunUV 實現
+     * 支援多個推薦同時顯示，根據機率顯示不同顏色
+     */
+    window.__nakiRecommendHighlight = {
+        activeEffects: [],  // 存儲所有活躍的效果 { effect, runUV, tileIndex }
+        nativeEffectActive: false,  // 追蹤原生 effect_recommend 狀態
+
+        // 🔧 設定選項
+        settings: {
+            showRotatingEffect: false,  // 是否顯示旋轉 Bling 效果（預設關閉）
+            showNativeEffect: true      // 是否顯示原生 effect_recommend（預設開啟）
+        },
+
+        // 顏色配置
+        colors: {
+            green: { r: 0, g: 2, b: 0, a: 2 },   // probability > 0.5
+            red: { r: 2, g: 0, b: 0, a: 2 }      // 0.2 < probability <= 0.5
+        },
+
+        /**
+         * 將原生 effect_recommend 移動到指定牌的位置
+         * @param {number} tileIndex - 牌在手中的位置
+         * @returns {boolean} 成功或失敗
+         */
+        moveNativeEffect: function(tileIndex) {
+            try {
+                const mgr = window.view?.DesktopMgr?.Inst;
+                if (!mgr?.effect_recommend?._childs?.[0]) {
+                    console.log('[Naki Highlight] Native effect_recommend not available');
+                    return false;
+                }
+
+                const hand = mgr.mainrole?.hand;
+                if (!hand || !hand[tileIndex]) {
+                    console.log('[Naki Highlight] Tile not found at index:', tileIndex);
+                    return false;
+                }
+
+                // 獲取目標牌的 pos_x
+                const targetX = hand[tileIndex].pos_x;
+                const effect = mgr.effect_recommend;
+                const child = effect._childs[0];
+
+                // 移動子對象到目標位置 (Y 和 Z 保持固定)
+                child.transform.localPosition = new Laya.Vector3(targetX, 1.66, -0.52);
+
+                // 激活效果
+                effect.active = true;
+                this.nativeEffectActive = true;
+
+                console.log('[Naki Highlight] Native effect moved to tile', tileIndex, 'x:', targetX);
+                return true;
+            } catch (e) {
+                console.error('[Naki Highlight] moveNativeEffect failed:', e);
+                return false;
+            }
+        },
+
+        /**
+         * 隱藏原生 effect_recommend
+         */
+        hideNativeEffect: function() {
+            try {
+                const effect = window.view?.DesktopMgr?.Inst?.effect_recommend;
+                if (effect) {
+                    effect.active = false;
+                    this.nativeEffectActive = false;
+                    console.log('[Naki Highlight] Native effect hidden');
+                }
+            } catch (e) {
+                console.error('[Naki Highlight] hideNativeEffect failed:', e);
+            }
+        },
+
+        /**
+         * 根據機率獲取顏色
+         * @param {number} probability - 機率值 (0.0 ~ 1.0)
+         * @returns {object|null} 顏色對象或 null（不顯示）
+         */
+        getColorForProbability: function(probability) {
+            if (probability > 0.5) {
+                return this.colors.green;
+            } else if (probability > 0.2) {
+                return this.colors.red;
+            }
+            return null;  // probability <= 0.2 不顯示
+        },
+
+        // 旋轉動畫 interval ID
+        rotateIntervalId: null,
+
+        /**
+         * 為單張牌創建雙層旋轉 Bling 效果
+         * @param {object} tile - 牌物件
+         * @param {object} color - 顏色 { r, g, b, a }
+         * @param {boolean} reverse - 未使用（保留參數兼容性）
+         * @returns {object|null} { effects: [effect1, effect2], blings: [bling1, bling2] } 或 null
+         */
+        createEffect: function(tile, color, reverse) {
+            try {
+                const mgr = window.view?.DesktopMgr?.Inst;
+                if (!mgr || !tile || !tile.mySelf) return null;
+
+                const effects = [];
+                const blings = [];
+
+                // 創建兩層效果 (90° 和 180°)
+                [90, 180].forEach(rotation => {
+                    const effect = mgr.effect_doraPlane.clone();
+                    tile.mySelf.addChild(effect);
+
+                    effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+                    effect.transform.localRotationEuler = new Laya.Vector3(0, 0, rotation);
+                    effect.transform.localScale = new Laya.Vector3(1, 1, 1);
+                    effect.active = true;
+
+                    const child = effect.getChildAt(0);
+                    const bling = child.addComponent(anim.Bling);
+                    bling.tick = 300;
+
+                    if (color && bling.mat) {
+                        const c = bling.mat.albedoColor;
+                        c.x = color.r;
+                        c.y = color.g;
+                        c.z = color.b;
+                        c.w = color.a;
+                        bling.mat.albedoColor = c;
+                    }
+
+                    effects.push(effect);
+                    blings.push(bling);
+                });
+
+                return { effects, blings };
+            } catch (e) {
+                console.error('[Naki Highlight] createEffect failed:', e);
+                return null;
+            }
+        },
+
+        /**
+         * 啟動旋轉動畫
+         */
+        startRotation: function() {
+            if (this.rotateIntervalId) return;
+
+            const self = this;
+            this.rotateIntervalId = setInterval(function() {
+                self.activeEffects.forEach(item => {
+                    if (item.effects) {
+                        item.effects.forEach(effect => {
+                            if (effect && effect.transform) {
+                                const z = effect.transform.localRotationEuler.z + 3;
+                                effect.transform.localRotationEuler = new Laya.Vector3(0, 0, z);
+                            }
+                        });
+                    }
+                });
+            }, 30);
+        },
+
+        /**
+         * 停止旋轉動畫
+         */
+        stopRotation: function() {
+            if (this.rotateIntervalId) {
+                clearInterval(this.rotateIntervalId);
+                this.rotateIntervalId = null;
+            }
+        },
+
+        /**
+         * 顯示多個推薦的高亮
+         * @param {Array} recommendations - [{ tileIndex, probability }, ...]
+         * @returns {number} 成功創建的效果數量
+         */
+        showMultiple: function(recommendations) {
+            // 先清除現有效果
+            this.hide();
+
+            const mgr = window.view?.DesktopMgr?.Inst;
+            if (!mgr) {
+                console.log('[Naki Highlight] Game manager not available');
+                return 0;
+            }
+
+            const hand = mgr.mainrole?.hand;
+            if (!hand) {
+                console.log('[Naki Highlight] Hand not available');
+                return 0;
+            }
+
+            // 🌟 找出最高概率的推薦，移動原生 effect_recommend
+            if (this.settings.showNativeEffect && recommendations.length > 0) {
+                const sorted = [...recommendations].sort((a, b) => b.probability - a.probability);
+                const best = sorted[0];
+                if (best.probability > 0.2) {
+                    this.moveNativeEffect(best.tileIndex);
+                }
+            }
+
+            // 如果旋轉效果被禁用，直接返回
+            if (!this.settings.showRotatingEffect) {
+                console.log('[Naki Highlight] Rotating effect disabled, using native only');
+                return 0;
+            }
+
+            let created = 0;
+            for (const rec of recommendations) {
+                const { tileIndex, probability } = rec;
+
+                // 根據機率獲取顏色
+                const color = this.getColorForProbability(probability);
+                if (!color) {
+                    console.log('[Naki Highlight] Skipping tile', tileIndex, 'probability too low:', probability);
+                    continue;
+                }
+
+                // 獲取牌物件
+                const tile = hand[tileIndex];
+                if (!tile) {
+                    console.log('[Naki Highlight] Tile not found at index:', tileIndex);
+                    continue;
+                }
+
+                // 創建雙層效果
+                const result = this.createEffect(tile, color, false);
+                if (result) {
+                    this.activeEffects.push({
+                        effects: result.effects,
+                        blings: result.blings,
+                        tileIndex: tileIndex,
+                        probability: probability
+                    });
+                    created++;
+                    console.log('[Naki Highlight] Created effect for tile', tileIndex,
+                        'probability:', probability.toFixed(3),
+                        'color:', probability > 0.5 ? 'green' : 'red');
+                }
+            }
+
+            // 啟動旋轉動畫
+            if (created > 0) {
+                this.startRotation();
+            }
+
+            console.log('[Naki Highlight] Created', created, 'effects');
+            return created;
+        },
+
+        /**
+         * 顯示單個推薦的高亮（向後兼容）
+         * @param {number} tileIndex - 牌在手中的位置
+         * @param {number} probability - 機率值（預設 1.0）
+         * @returns {boolean} 成功或失敗
+         */
+        show: function(tileIndex, probability) {
+            const prob = typeof probability === 'number' ? probability : 1.0;
+            return this.showMultiple([{ tileIndex, probability: prob }]) > 0;
+        },
+
+        /**
+         * 隱藏所有推薦高亮
+         * @returns {boolean} 成功或失敗
+         */
+        hide: function() {
+            try {
+                // 停止旋轉動畫
+                this.stopRotation();
+
+                // 🌟 隱藏原生 effect_recommend
+                this.hideNativeEffect();
+
+                // 銷毀所有效果
+                for (const item of this.activeEffects) {
+                    if (item.effects) {
+                        item.effects.forEach(effect => {
+                            if (effect) effect.destroy();
+                        });
+                    }
+                    // 向後兼容舊格式
+                    if (item.effect) {
+                        item.effect.destroy();
+                    }
+                }
+                this.activeEffects = [];
+                console.log('[Naki Highlight] All effects hidden');
+                return true;
+            } catch (e) {
+                console.error('[Naki Highlight] hide failed:', e);
+                return false;
+            }
+        },
+
+        /**
+         * 獲取當前狀態
+         */
+        getStatus: function() {
+            return {
+                isActive: this.activeEffects.length > 0 || this.nativeEffectActive,
+                effectCount: this.activeEffects.length,
+                nativeEffectActive: this.nativeEffectActive,
+                settings: this.settings,
+                effects: this.activeEffects.map(e => ({
+                    tileIndex: e.tileIndex,
+                    probability: e.probability
+                }))
+            };
+        },
+
+        /**
+         * 更新設定
+         * @param {object} newSettings - { showRotatingEffect, showNativeEffect }
+         */
+        setSettings: function(newSettings) {
+            if (typeof newSettings.showRotatingEffect === 'boolean') {
+                this.settings.showRotatingEffect = newSettings.showRotatingEffect;
+            }
+            if (typeof newSettings.showNativeEffect === 'boolean') {
+                this.settings.showNativeEffect = newSettings.showNativeEffect;
+            }
+            console.log('[Naki Highlight] Settings updated:', this.settings);
+        }
+    };
+
     console.log('[Naki] AutoPlay module loaded');
 })();

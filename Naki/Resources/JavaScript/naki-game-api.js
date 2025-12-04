@@ -799,5 +799,144 @@
         }
     };
 
+    // ========================================
+    // 🎯 Dora Shimmer Effect 追踪 Hook
+    // ========================================
+    /**
+     * 拦截 effect_dora3D.visible 的修改
+     * 用于追踪游戏何时调用原生闪光效果
+     */
+    window.__nakiDoraHook = {
+        hooked: false,
+        callHistory: [],
+        maxHistory: 100,
+
+        /**
+         * 启动 Hook - 拦截 effect_dora3D.visible 的 set/get
+         */
+        hook: function() {
+            try {
+                const inst = window.view?.DesktopMgr?.Inst;
+                if (!inst || !inst.effect_dora3D) {
+                    console.log('[Naki Dora Hook] DesktopMgr or effect_dora3D not available yet');
+                    return false;
+                }
+
+                const effect = inst.effect_dora3D;
+                let _visible = effect.visible;
+
+                Object.defineProperty(effect, 'visible', {
+                    get() {
+                        return _visible;
+                    },
+                    set(val) {
+                        const timestamp = new Date().toISOString();
+                        const stack = new Error().stack;
+                        const caller = stack?.split('\n')[2]?.trim() || 'unknown';
+
+                        const entry = {
+                            timestamp,
+                            value: val,
+                            caller,
+                            alpha: effect.alpha
+                        };
+
+                        this.callHistory.push(entry);
+                        if (this.callHistory.length > this.maxHistory) {
+                            this.callHistory.shift();
+                        }
+
+                        console.log(`[Naki Dora Hook] effect_dora3D.visible set to: ${val}`, {
+                            timestamp,
+                            alpha: effect.alpha,
+                            caller
+                        });
+
+                        _visible = val;
+                    }
+                });
+
+                this.hooked = true;
+                console.log('[Naki Dora Hook] Successfully hooked effect_dora3D.visible');
+                return true;
+
+            } catch (e) {
+                console.error('[Naki Dora Hook] Failed to hook:', e.message);
+                return false;
+            }
+        },
+
+        /**
+         * 获取调用历史
+         */
+        getHistory: function() {
+            return {
+                hooked: this.hooked,
+                count: this.callHistory.length,
+                history: this.callHistory
+            };
+        },
+
+        /**
+         * 清空历史
+         */
+        clearHistory: function() {
+            this.callHistory = [];
+            console.log('[Naki Dora Hook] History cleared');
+        }
+    };
+
+    // ========================================
+    // 高亮效果初始化 Hook
+    // ========================================
+    window.__nakiHighlightInit = {
+        initialized: false,
+        effectRef: null,
+
+        /**
+         * 初始化 effect_recommend 並儲存參考
+         */
+        init: function() {
+            try {
+                const inst = window.view?.DesktopMgr?.Inst;
+                if (!inst || !inst.effect_recommend) {
+                    console.log('[Naki Highlight Init] effect_recommend not available yet');
+                    return false;
+                }
+
+                // 儲存參考
+                this.effectRef = inst.effect_recommend;
+
+                // 確保基本設置
+                this.effectRef.active = true;
+
+                this.initialized = true;
+                console.log('[Naki Highlight Init] effect_recommend initialized successfully');
+                return true;
+
+            } catch (e) {
+                console.error('[Naki Highlight Init] Failed to initialize:', e.message);
+                return false;
+            }
+        },
+
+        /**
+         * 獲取高亮效果物件參考
+         */
+        getEffect: function() {
+            return this.effectRef || window.view?.DesktopMgr?.Inst?.effect_recommend;
+        }
+    };
+
+    // 尝试立即启动 Hook（如果游戏已经初始化）
+    setTimeout(() => {
+        if (window.__nakiDoraHook.hook()) {
+            console.log('[Naki] Dora Hook initialized on game load');
+        }
+        if (window.__nakiHighlightInit.init()) {
+            console.log('[Naki] Highlight Init hook completed');
+        }
+    }, 500);
+
     console.log('[Naki] Game API module loaded');
 })();

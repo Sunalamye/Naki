@@ -46,7 +46,7 @@ struct NakiWebView: NSViewRepresentable {
         // 註冊 WebSocket 攔截處理器
         userContentController.add(context.coordinator.websocketHandler, name: "websocketBridge")
 
-        // 注入 WebSocket 攔截腳本（在頁面加載前）
+        // 注入所有 JavaScript 模組（WebSocket 攔截、Shimmer 效果等）
         let websocketScript = WebSocketInterceptor.createUserScript()
         userContentController.addUserScript(websocketScript)
 
