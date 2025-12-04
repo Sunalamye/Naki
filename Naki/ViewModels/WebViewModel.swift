@@ -450,6 +450,26 @@ class WebViewModel {
         autoPlayController?.setActionDelay(delay)
     }
 
+    /// 設定高亮效果選項
+    /// - Parameter showRotatingEffect: 是否顯示旋轉高亮效果
+    func setHighlightSettings(showRotatingEffect: Bool) {
+        guard let webView = wkWebView else { return }
+
+        let script = """
+        window.__nakiRecommendHighlight?.setSettings({
+            showRotatingEffect: \(showRotatingEffect)
+        });
+        """
+
+        webView.evaluateJavaScript(script) { _, error in
+            if let error = error {
+                bridgeLog("[WebViewModel] Error setting highlight: \(error.localizedDescription)")
+            } else {
+                bridgeLog("[WebViewModel] Highlight settings: rotating=\(showRotatingEffect)")
+            }
+        }
+    }
+
     /// 確認待處理的自動打牌動作
     func confirmAutoPlayAction() {
         autoPlayController?.confirmPendingAction()

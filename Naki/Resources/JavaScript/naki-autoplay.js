@@ -468,6 +468,12 @@
         activeEffects: [],  // 存儲所有活躍的效果 { effect, runUV, tileIndex }
         nativeEffectActive: false,  // 追蹤原生 effect_recommend 狀態
 
+        // 🔧 設定選項
+        settings: {
+            showRotatingEffect: false,  // 是否顯示旋轉 Bling 效果（預設關閉）
+            showNativeEffect: true      // 是否顯示原生 effect_recommend（預設開啟）
+        },
+
         // 顏色配置
         colors: {
             green: { r: 0, g: 2, b: 0, a: 2 },   // probability > 0.5
@@ -648,12 +654,18 @@
             }
 
             // 🌟 找出最高概率的推薦，移動原生 effect_recommend
-            if (recommendations.length > 0) {
+            if (this.settings.showNativeEffect && recommendations.length > 0) {
                 const sorted = [...recommendations].sort((a, b) => b.probability - a.probability);
                 const best = sorted[0];
                 if (best.probability > 0.2) {
                     this.moveNativeEffect(best.tileIndex);
                 }
+            }
+
+            // 如果旋轉效果被禁用，直接返回
+            if (!this.settings.showRotatingEffect) {
+                console.log('[Naki Highlight] Rotating effect disabled, using native only');
+                return 0;
             }
 
             let created = 0;
@@ -751,11 +763,26 @@
                 isActive: this.activeEffects.length > 0 || this.nativeEffectActive,
                 effectCount: this.activeEffects.length,
                 nativeEffectActive: this.nativeEffectActive,
+                settings: this.settings,
                 effects: this.activeEffects.map(e => ({
                     tileIndex: e.tileIndex,
                     probability: e.probability
                 }))
             };
+        },
+
+        /**
+         * 更新設定
+         * @param {object} newSettings - { showRotatingEffect, showNativeEffect }
+         */
+        setSettings: function(newSettings) {
+            if (typeof newSettings.showRotatingEffect === 'boolean') {
+                this.settings.showRotatingEffect = newSettings.showRotatingEffect;
+            }
+            if (typeof newSettings.showNativeEffect === 'boolean') {
+                this.settings.showNativeEffect = newSettings.showNativeEffect;
+            }
+            console.log('[Naki Highlight] Settings updated:', this.settings);
         }
     };
 
