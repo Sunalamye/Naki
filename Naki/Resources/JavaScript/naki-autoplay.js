@@ -487,49 +487,86 @@
             return null;  // probability <= 0.2 不顯示
         },
 
+        // 旋轉動畫 interval ID
+        rotateIntervalId: null,
+
         /**
-         * 為單張牌創建 RunUV 效果
+         * 為單張牌創建雙層旋轉 Bling 效果
          * @param {object} tile - 牌物件
          * @param {object} color - 顏色 { r, g, b, a }
-         * @param {boolean} reverse - 是否反向動畫
-         * @returns {object|null} { effect, runUV } 或 null
+         * @param {boolean} reverse - 未使用（保留參數兼容性）
+         * @returns {object|null} { effects: [effect1, effect2], blings: [bling1, bling2] } 或 null
          */
         createEffect: function(tile, color, reverse) {
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 if (!mgr || !tile || !tile.mySelf) return null;
 
-                // Clone effect_doraPlane
-                const effect = mgr.effect_doraPlane.clone();
-                tile.mySelf.addChild(effect);
+                const effects = [];
+                const blings = [];
 
-                // 設置位置
-                effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+                // 創建兩層效果 (90° 和 180°)
+                [90, 180].forEach(rotation => {
+                    const effect = mgr.effect_doraPlane.clone();
+                    tile.mySelf.addChild(effect);
 
-                // 設置方向（反向用 -1）
-                const scaleX = reverse ? -1 : 1;
-                effect.transform.localScale = new Laya.Vector3(scaleX, 1, 1);
+                    effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+                    effect.transform.localRotationEuler = new Laya.Vector3(0, 0, rotation);
+                    effect.transform.localScale = new Laya.Vector3(1, 1, 1);
+                    effect.active = true;
 
-                effect.active = true;
+                    const child = effect.getChildAt(0);
+                    const bling = child.addComponent(anim.Bling);
+                    bling.tick = 300;
 
-                // 添加 RunUV 動畫
-                const child = effect.getChildAt(0);
-                const runUV = child.addComponent(anim.RunUV);
+                    if (color && bling.mat) {
+                        const c = bling.mat.albedoColor;
+                        c.x = color.r;
+                        c.y = color.g;
+                        c.z = color.b;
+                        c.w = color.a;
+                        bling.mat.albedoColor = c;
+                    }
 
-                // 設置顏色
-                if (color && runUV.mat) {
-                    const c = runUV.mat.albedoColor;
-                    c.x = color.r;
-                    c.y = color.g;
-                    c.z = color.b;
-                    c.w = color.a;
-                    runUV.mat.albedoColor = c;
-                }
+                    effects.push(effect);
+                    blings.push(bling);
+                });
 
-                return { effect, runUV };
+                return { effects, blings };
             } catch (e) {
                 console.error('[Naki Highlight] createEffect failed:', e);
                 return null;
+            }
+        },
+
+        /**
+         * 啟動旋轉動畫
+         */
+        startRotation: function() {
+            if (this.rotateIntervalId) return;
+
+            const self = this;
+            this.rotateIntervalId = setInterval(function() {
+                self.activeEffects.forEach(item => {
+                    if (item.effects) {
+                        item.effects.forEach(effect => {
+                            if (effect && effect.transform) {
+                                const z = effect.transform.localRotationEuler.z + 3;
+                                effect.transform.localRotationEuler = new Laya.Vector3(0, 0, z);
+                            }
+                        });
+                    }
+                });
+            }, 30);
+        },
+
+        /**
+         * 停止旋轉動畫
+         */
+        stopRotation: function() {
+            if (this.rotateIntervalId) {
+                clearInterval(this.rotateIntervalId);
+                this.rotateIntervalId = null;
             }
         },
 
@@ -572,12 +609,12 @@
                     continue;
                 }
 
-                // 創建效果（使用反向動畫與紅寶牌區分）
-                const result = this.createEffect(tile, color, true);
+                // 創建雙層效果
+                const result = this.createEffect(tile, color, false);
                 if (result) {
                     this.activeEffects.push({
-                        effect: result.effect,
-                        runUV: result.runUV,
+                        effects: result.effects,
+                        blings: result.blings,
                         tileIndex: tileIndex,
                         probability: probability
                     });
@@ -586,6 +623,11 @@
                         'probability:', probability.toFixed(3),
                         'color:', probability > 0.5 ? 'green' : 'red');
                 }
+            }
+
+            // 啟動旋轉動畫
+            if (created > 0) {
+                this.startRotation();
             }
 
             console.log('[Naki Highlight] Created', created, 'effects');
@@ -609,7 +651,17 @@
          */
         hide: function() {
             try {
+                // 停止旋轉動畫
+                this.stopRotation();
+
+                // 銷毀所有效果
                 for (const item of this.activeEffects) {
+                    if (item.effects) {
+                        item.effects.forEach(effect => {
+                            if (effect) effect.destroy();
+                        });
+                    }
+                    // 向後兼容舊格式
                     if (item.effect) {
                         item.effect.destroy();
                     }
