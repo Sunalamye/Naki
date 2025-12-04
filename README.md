@@ -131,10 +131,10 @@ curl -X POST http://localhost:8765/js -d 'window.location.href'
 
 ## 📋 TODO
 
-- [ ] 輪到自己時閃爍提示
-- [ ] 出牌高亮動畫
+- [x] 設定介面優化
+- [x] 出牌高亮提示
+- [ ] MortalSwift 閃退問題待解決
 - [ ] 三麻模式支援
-- [ ] 設定介面優化
 
 ## 🤝 貢獻
 
