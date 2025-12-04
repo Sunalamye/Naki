@@ -768,6 +768,108 @@ function removeDoraEffect(tile) {
 }
 ```
 
+#### 反轉動畫方向
+
+使用 `scale.x = -1` 可以翻轉 RunUV 動畫的播放方向：
+
+```javascript
+function createReversedDoraEffect(tile) {
+  const mgr = window.view.DesktopMgr.Inst;
+
+  // 1. Clone effect_doraPlane
+  const effect = mgr.effect_doraPlane.clone();
+
+  // 2. 掛到牌上
+  tile.mySelf.addChild(effect);
+
+  // 3. 設置位置
+  effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+
+  // 4. ⭐ 用負 scale 翻轉動畫方向
+  effect.transform.localScale = new Laya.Vector3(-1, 1, 1);
+
+  // 5. 啟用
+  effect.active = true;
+
+  // 6. 添加 RunUV 動畫
+  effect.getChildAt(0).addComponent(anim.RunUV);
+
+  return effect;
+}
+```
+
+**注意**: 直接修改 `runUV.v` 或 `runUV.__v` 無效，因為 RunUV 內部使用共享的閉包變數。
+
+#### 調整效果顏色
+
+透過修改材質的 `albedoColor` 可以改變效果顏色：
+
+```javascript
+function setDoraEffectColor(runUV, r, g, b, a) {
+  var color = runUV.mat.albedoColor;
+  color.x = r;  // 紅
+  color.y = g;  // 綠
+  color.z = b;  // 藍
+  color.w = a;  // 透明度/亮度
+  runUV.mat.albedoColor = color;
+}
+
+// 常用顏色 (值 > 1 會更亮，原始值為 2)
+setDoraEffectColor(runUV, 2, 2, 2, 2);  // 白色（原始）
+setDoraEffectColor(runUV, 2, 0, 0, 2);  // 紅色
+setDoraEffectColor(runUV, 0, 2, 0, 2);  // 綠色
+setDoraEffectColor(runUV, 0, 0, 2, 2);  // 藍色
+setDoraEffectColor(runUV, 2, 2, 0, 2);  // 黃色
+setDoraEffectColor(runUV, 2, 0, 2, 2);  // 紫色
+setDoraEffectColor(runUV, 0, 2, 2, 2);  // 青色
+```
+
+#### 完整的自定義效果示例
+
+```javascript
+function createCustomDoraEffect(tile, options) {
+  const mgr = window.view.DesktopMgr.Inst;
+  const defaults = {
+    reverse: false,
+    color: { r: 2, g: 2, b: 2, a: 2 }
+  };
+  const opts = Object.assign({}, defaults, options);
+
+  // 創建效果
+  const effect = mgr.effect_doraPlane.clone();
+  tile.mySelf.addChild(effect);
+  effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+
+  // 設置方向
+  const scaleX = opts.reverse ? -1 : 1;
+  effect.transform.localScale = new Laya.Vector3(scaleX, 1, 1);
+
+  effect.active = true;
+
+  // 添加動畫
+  const runUV = effect.getChildAt(0).addComponent(anim.RunUV);
+
+  // 設置顏色
+  const color = runUV.mat.albedoColor;
+  color.x = opts.color.r;
+  color.y = opts.color.g;
+  color.z = opts.color.b;
+  color.w = opts.color.a;
+  runUV.mat.albedoColor = color;
+
+  return { effect, runUV };
+}
+
+// 使用示例
+const tile = window.view.DesktopMgr.Inst.mainrole.hand[0];
+
+// 創建反向紅色效果
+createCustomDoraEffect(tile, {
+  reverse: true,
+  color: { r: 2, g: 0, b: 0, a: 2 }
+});
+```
+
 ### ⚠️ 常見錯誤
 
 | 錯誤做法 | 正確做法 | 結果 |

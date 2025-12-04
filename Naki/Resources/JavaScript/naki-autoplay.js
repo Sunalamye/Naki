@@ -457,83 +457,169 @@
     };
 
     // ========================================
-    // 🌟 推薦高亮管理模組
+    // 🌟 推薦高亮管理模組 (RunUV 效果版)
     // ========================================
     /**
      * 管理推薦牌的視覺高亮效果
-     * 基於 Majsoul 的 effect_recommend 機制
+     * 使用 effect_doraPlane + anim.RunUV 實現
+     * 支援多個推薦同時顯示，根據機率顯示不同顏色
      */
     window.__nakiRecommendHighlight = {
-        isActive: false,
-        highlightTileIndex: -1,
+        activeEffects: [],  // 存儲所有活躍的效果 { effect, runUV, tileIndex }
+
+        // 顏色配置
+        colors: {
+            green: { r: 0, g: 2, b: 0, a: 2 },   // probability > 0.5
+            red: { r: 2, g: 0, b: 0, a: 2 }      // 0.2 < probability <= 0.5
+        },
 
         /**
-         * 顯示推薦牌的高亮
-         * @param {number} tileIndex - 牌在手中的位置 (0-13)
-         * @returns {boolean} 成功或失敗
+         * 根據機率獲取顏色
+         * @param {number} probability - 機率值 (0.0 ~ 1.0)
+         * @returns {object|null} 顏色對象或 null（不顯示）
          */
-        show: function(tileIndex) {
+        getColorForProbability: function(probability) {
+            if (probability > 0.5) {
+                return this.colors.green;
+            } else if (probability > 0.2) {
+                return this.colors.red;
+            }
+            return null;  // probability <= 0.2 不顯示
+        },
+
+        /**
+         * 為單張牌創建 RunUV 效果
+         * @param {object} tile - 牌物件
+         * @param {object} color - 顏色 { r, g, b, a }
+         * @param {boolean} reverse - 是否反向動畫
+         * @returns {object|null} { effect, runUV } 或 null
+         */
+        createEffect: function(tile, color, reverse) {
             try {
-                const inst = window.view?.DesktopMgr?.Inst;
-                if (!inst) {
-                    console.log('[Naki Highlight] Game manager not available');
-                    return false;
-                }
+                const mgr = window.view?.DesktopMgr?.Inst;
+                if (!mgr || !tile || !tile.mySelf) return null;
 
-                // ⭐ 使用初始化 hook 的高亮效果參考，或直接獲取
-                const effect = window.__nakiHighlightInit?.getEffect?.() || inst.effect_recommend;
-                if (!effect) {
-                    console.log('[Naki Highlight] effect_recommend not available');
-                    return false;
-                }
+                // Clone effect_doraPlane
+                const effect = mgr.effect_doraPlane.clone();
+                tile.mySelf.addChild(effect);
 
-                // 啟用推薦效果
+                // 設置位置
+                effect.transform.localPosition = new Laya.Vector3(0, 0, 0);
+
+                // 設置方向（反向用 -1）
+                const scaleX = reverse ? -1 : 1;
+                effect.transform.localScale = new Laya.Vector3(scaleX, 1, 1);
+
                 effect.active = true;
-                this.isActive = true;
-                this.highlightTileIndex = tileIndex;
 
-                console.log('[Naki Highlight] 顯示推薦高亮於牌位置:', tileIndex);
-                return true;
+                // 添加 RunUV 動畫
+                const child = effect.getChildAt(0);
+                const runUV = child.addComponent(anim.RunUV);
 
+                // 設置顏色
+                if (color && runUV.mat) {
+                    const c = runUV.mat.albedoColor;
+                    c.x = color.r;
+                    c.y = color.g;
+                    c.z = color.b;
+                    c.w = color.a;
+                    runUV.mat.albedoColor = c;
+                }
+
+                return { effect, runUV };
             } catch (e) {
-                console.error('[Naki Highlight] 顯示高亮失敗:', e);
-                return false;
+                console.error('[Naki Highlight] createEffect failed:', e);
+                return null;
             }
         },
 
         /**
-         * 隱藏推薦牌的高亮
+         * 顯示多個推薦的高亮
+         * @param {Array} recommendations - [{ tileIndex, probability }, ...]
+         * @returns {number} 成功創建的效果數量
+         */
+        showMultiple: function(recommendations) {
+            // 先清除現有效果
+            this.hide();
+
+            const mgr = window.view?.DesktopMgr?.Inst;
+            if (!mgr) {
+                console.log('[Naki Highlight] Game manager not available');
+                return 0;
+            }
+
+            const hand = mgr.mainrole?.hand;
+            if (!hand) {
+                console.log('[Naki Highlight] Hand not available');
+                return 0;
+            }
+
+            let created = 0;
+            for (const rec of recommendations) {
+                const { tileIndex, probability } = rec;
+
+                // 根據機率獲取顏色
+                const color = this.getColorForProbability(probability);
+                if (!color) {
+                    console.log('[Naki Highlight] Skipping tile', tileIndex, 'probability too low:', probability);
+                    continue;
+                }
+
+                // 獲取牌物件
+                const tile = hand[tileIndex];
+                if (!tile) {
+                    console.log('[Naki Highlight] Tile not found at index:', tileIndex);
+                    continue;
+                }
+
+                // 創建效果（使用反向動畫與紅寶牌區分）
+                const result = this.createEffect(tile, color, true);
+                if (result) {
+                    this.activeEffects.push({
+                        effect: result.effect,
+                        runUV: result.runUV,
+                        tileIndex: tileIndex,
+                        probability: probability
+                    });
+                    created++;
+                    console.log('[Naki Highlight] Created effect for tile', tileIndex,
+                        'probability:', probability.toFixed(3),
+                        'color:', probability > 0.5 ? 'green' : 'red');
+                }
+            }
+
+            console.log('[Naki Highlight] Created', created, 'effects');
+            return created;
+        },
+
+        /**
+         * 顯示單個推薦的高亮（向後兼容）
+         * @param {number} tileIndex - 牌在手中的位置
+         * @param {number} probability - 機率值（預設 1.0）
+         * @returns {boolean} 成功或失敗
+         */
+        show: function(tileIndex, probability) {
+            const prob = typeof probability === 'number' ? probability : 1.0;
+            return this.showMultiple([{ tileIndex, probability: prob }]) > 0;
+        },
+
+        /**
+         * 隱藏所有推薦高亮
          * @returns {boolean} 成功或失敗
          */
         hide: function() {
             try {
-                const inst = window.view?.DesktopMgr?.Inst;
-                if (!inst || !inst.effect_recommend) {
-                    return false;
+                for (const item of this.activeEffects) {
+                    if (item.effect) {
+                        item.effect.destroy();
+                    }
                 }
-
-                // 停用推薦效果
-                inst.effect_recommend.active = false;
-                this.isActive = false;
-                this.highlightTileIndex = -1;
-
-                console.log('[Naki Highlight] 隱藏推薦高亮');
+                this.activeEffects = [];
+                console.log('[Naki Highlight] All effects hidden');
                 return true;
-
             } catch (e) {
-                console.error('[Naki Highlight] 隱藏高亮失敗:', e);
+                console.error('[Naki Highlight] hide failed:', e);
                 return false;
-            }
-        },
-
-        /**
-         * 切換推薦高亮
-         */
-        toggle: function(tileIndex) {
-            if (this.isActive) {
-                return this.hide();
-            } else {
-                return this.show(tileIndex || 0);
             }
         },
 
@@ -542,9 +628,12 @@
          */
         getStatus: function() {
             return {
-                isActive: this.isActive,
-                highlightTileIndex: this.highlightTileIndex,
-                hasEffect: !!window.view?.DesktopMgr?.Inst?.effect_recommend
+                isActive: this.activeEffects.length > 0,
+                effectCount: this.activeEffects.length,
+                effects: this.activeEffects.map(e => ({
+                    tileIndex: e.tileIndex,
+                    probability: e.probability
+                }))
             };
         }
     };

@@ -195,12 +195,12 @@ class WebViewModel {
         // 同步到 GameStateManager（供 UI 響應式更新）
         gameStateManager.syncFrom(controller: controller)
 
-        // 更新高亮牌（只顯示最高分推薦）
+        // 更新高亮牌（顯示所有符合條件的推薦）
         if let firstRec = recommendations.first {
             highlightedTile = firstRec.displayTile
 
-            // ⭐ 在遊戲 UI 上顯示原生高亮
-            showGameHighlightForRecommendation(firstRec, controller: controller)
+            // ⭐ 在遊戲 UI 上顯示多個推薦的原生高亮
+            showGameHighlightForRecommendations(recommendations, controller: controller)
         } else {
             // 沒有推薦時隱藏高亮
             hideGameHighlight()
@@ -210,86 +210,104 @@ class WebViewModel {
         triggerAutoPlayIfNeeded()
     }
 
-    /// 在遊戲 UI 上顯示原生高亮效果
-    private func showGameHighlightForRecommendation(_ recommendation: Recommendation, controller: NativeBotController) {
+    /// 在遊戲 UI 上顯示多個推薦的原生高亮效果
+    /// 根據機率顯示不同顏色：> 0.5 綠色，0.2~0.5 紅色，< 0.2 不顯示
+    private func showGameHighlightForRecommendations(_ recommendations: [Recommendation], controller: NativeBotController) {
         guard let webView = wkWebView else { return }
 
-        // 找到推薦牌
-        guard let recommendedTile = recommendation.tile else {
-            // 非打牌動作（吃碰槓和），不需要高亮
+        // 過濾出有效的打牌推薦（機率 > 0.2）
+        let validRecs = recommendations.filter { rec in
+            rec.tile != nil && rec.probability > 0.2
+        }
+
+        if validRecs.isEmpty {
+            hideGameHighlight()
             return
         }
 
-        let tileMjaiString = recommendedTile.mjaiString
+        // 構建 JavaScript 來查找所有推薦牌的位置
+        var tileDataArray: [[String: Any]] = []
+        for rec in validRecs {
+            guard let tile = rec.tile else { continue }
+            tileDataArray.append([
+                "mjaiString": tile.mjaiString,
+                "probability": rec.probability
+            ])
+        }
 
-        // ⭐ 參考打牌邏輯：直接在 JavaScript 中按 type + index 查找牌的位置
+        // 將數據轉為 JSON
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: tileDataArray),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            bridgeLog("[WebViewModel] Failed to serialize recommendations")
+            return
+        }
+
         let script = """
         (function() {
             var mr = window.view?.DesktopMgr?.Inst?.mainrole;
-            if (!mr || !mr.hand) return -1;
+            if (!mr || !mr.hand) return [];
 
-            var target = '\(tileMjaiString)';
+            var tiles = \(jsonString);
+            var results = [];
 
             // 雀魂的 type 映射：0=筒(p), 1=萬(m), 2=索(s), 3=字牌(z)
             var typeMap = {'m': 1, 'p': 0, 's': 2};
             var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
 
-            var tileType, tileValue, isRed = false;
+            for (var j = 0; j < tiles.length; j++) {
+                var target = tiles[j].mjaiString;
+                var probability = tiles[j].probability;
 
-            // 處理字牌
-            if (honorMap[target]) {
-                tileType = honorMap[target][0];
-                tileValue = honorMap[target][1];
-            } else {
-                // 處理數牌：1m, 5mr, etc.
-                tileValue = parseInt(target[0]);
-                var suitChar = target[1];
-                tileType = typeMap[suitChar];
-                isRed = target.length > 2 && target[2] === 'r';
-            }
+                var tileType, tileValue, isRed = false;
 
-            // 在手牌中查找
-            for (var i = 0; i < mr.hand.length; i++) {
-                var t = mr.hand[i];
-                if (t && t.val && t.val.type === tileType && t.val.index === (tileValue - 1)) {
-                    // 如果是紅寶牌，檢查 dora 標記
-                    if (isRed) {
-                        if (t.val.dora) return i;
-                    } else {
-                        if (!t.val.dora) return i;
+                // 處理字牌
+                if (honorMap[target]) {
+                    tileType = honorMap[target][0];
+                    tileValue = honorMap[target][1];
+                } else {
+                    // 處理數牌：1m, 5mr, etc.
+                    tileValue = parseInt(target[0]);
+                    var suitChar = target[1];
+                    tileType = typeMap[suitChar];
+                    isRed = target.length > 2 && target[2] === 'r';
+                }
+
+                // 在手牌中查找
+                for (var i = 0; i < mr.hand.length; i++) {
+                    var t = mr.hand[i];
+                    if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
+                        // 如果是紅寶牌，檢查 dora 標記
+                        var match = false;
+                        if (isRed) {
+                            match = t.val.dora === true;
+                        } else {
+                            match = !t.val.dora;
+                        }
+                        if (match) {
+                            results.push({ tileIndex: i, probability: probability });
+                            break;
+                        }
                     }
                 }
             }
 
-            return -1;  // 未找到
+            // 調用高亮模組
+            if (results.length > 0) {
+                window.__nakiRecommendHighlight?.showMultiple(results);
+            }
+
+            return results;
         })()
         """
 
-        webView.evaluateJavaScript(script) { [weak self] result, error in
+        webView.evaluateJavaScript(script) { result, error in
             if let error = error {
-                bridgeLog("[WebViewModel] Error finding tile position: \(error.localizedDescription)")
+                bridgeLog("[WebViewModel] Error showing highlights: \(error.localizedDescription)")
                 return
             }
 
-            guard let indexObj = result as? NSNumber else {
-                bridgeLog("[WebViewModel] Could not find recommended tile \(tileMjaiString) in UI")
-                return
-            }
-
-            let index = indexObj.intValue
-            if index < 0 {
-                bridgeLog("[WebViewModel] Recommended tile \(tileMjaiString) not found in hand")
-                return
-            }
-
-            // 顯示高亮
-            let highlightScript = "window.__nakiRecommendHighlight?.show(\(index))"
-            self?.wkWebView?.evaluateJavaScript(highlightScript) { _, error in
-                if let error = error {
-                    bridgeLog("[WebViewModel] Error showing highlight: \(error.localizedDescription)")
-                } else {
-                    bridgeLog("[WebViewModel] Highlighted recommendation: \(tileMjaiString) at UI index \(index)")
-                }
+            if let results = result as? [[String: Any]] {
+                bridgeLog("[WebViewModel] Highlighted \(results.count) recommendations")
             }
         }
     }
