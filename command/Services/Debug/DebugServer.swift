@@ -236,6 +236,10 @@ class DebugServer {
         case ("POST", "/bot/pon"):
             handleTestPon(connection: connection)
 
+        // ⭐ MCP Protocol 端點
+        case ("POST", "/mcp"):
+            handleMCP(body: body, headers: lines, connection: connection)
+
         default:
             sendResponse(connection: connection, status: 404, body: "Not Found: \(path)")
         }
@@ -897,5 +901,520 @@ class DebugServer {
     /// ⭐ 清空日誌
     func clearLogs() {
         logBuffer.removeAll()
+    }
+
+    // MARK: - MCP Protocol Support
+
+    /// MCP 工具定義
+    private var mcpTools: [[String: Any]] {
+        [
+            // 系統類
+            [
+                "name": "get_status",
+                "description": "獲取 Debug Server 狀態和埠號",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "get_help",
+                "description": "獲取完整的 API 文檔（JSON 格式）",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "get_logs",
+                "description": "獲取 Debug 日誌（最多 10,000 條）",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "clear_logs",
+                "description": "清空所有日誌",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+
+            // Bot 控制類
+            [
+                "name": "bot_status",
+                "description": "獲取 Bot 狀態，包含手牌、AI 推薦動作、可用操作等完整信息",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "bot_trigger",
+                "description": "手動觸發自動打牌（執行 AI 推薦的動作）",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "bot_ops",
+                "description": "探索可用的副露操作（吃/碰/槓）",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "bot_deep",
+                "description": "深度探索 naki API（所有方法）",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "bot_chi",
+                "description": "測試吃操作",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "bot_pon",
+                "description": "測試碰操作",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+
+            // 遊戲狀態類
+            [
+                "name": "game_state",
+                "description": "獲取當前遊戲狀態",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "game_hand",
+                "description": "獲取手牌資訊",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "game_ops",
+                "description": "獲取當前可用操作",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "game_discard",
+                "description": "打出指定索引的牌",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "tileIndex": [
+                            "type": "integer",
+                            "description": "要打出的牌在手牌中的索引 (0-13)"
+                        ]
+                    ],
+                    "required": ["tileIndex"]
+                ]
+            ],
+            [
+                "name": "game_action",
+                "description": "執行遊戲動作（如 pass, chi, pon, kan, riichi, tsumo, ron）",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "action": [
+                            "type": "string",
+                            "description": "動作名稱"
+                        ],
+                        "params": [
+                            "type": "object",
+                            "description": "動作參數（可選）"
+                        ]
+                    ],
+                    "required": ["action"]
+                ]
+            ],
+
+            // JavaScript 執行
+            [
+                "name": "execute_js",
+                "description": "在遊戲 WebView 中執行任意 JavaScript 代碼",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "code": [
+                            "type": "string",
+                            "description": "要執行的 JavaScript 代碼"
+                        ]
+                    ],
+                    "required": ["code"]
+                ]
+            ],
+
+            // 探索類
+            [
+                "name": "detect",
+                "description": "檢測遊戲 API 是否可用",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "explore",
+                "description": "探索遊戲物件結構",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+
+            // UI 操作類
+            [
+                "name": "test_indicators",
+                "description": "顯示測試指示器（用於調試點擊位置）",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "click",
+                "description": "在指定座標點擊",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "x": ["type": "number", "description": "X 座標"],
+                        "y": ["type": "number", "description": "Y 座標"],
+                        "label": ["type": "string", "description": "點擊標籤（可選）"]
+                    ],
+                    "required": ["x", "y"]
+                ]
+            ],
+            [
+                "name": "calibrate",
+                "description": "設定校準參數",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "tileSpacing": ["type": "number", "description": "牌間距（默認 96）"],
+                        "offsetX": ["type": "number", "description": "X 偏移（默認 -200）"],
+                        "offsetY": ["type": "number", "description": "Y 偏移（默認 0）"]
+                    ],
+                    "required": []
+                ]
+            ]
+        ]
+    }
+
+    /// 處理 MCP 請求
+    private func handleMCP(body: String, headers: [String], connection: NWConnection) {
+        log("MCP request received")
+
+        // 解析 JSON-RPC 請求
+        guard let data = body.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let method = json["method"] as? String else {
+            sendMCPError(connection: connection, id: nil, code: -32700, message: "Parse error")
+            return
+        }
+
+        let id = json["id"]  // 可以是 Int 或 String
+        let params = json["params"] as? [String: Any] ?? [:]
+
+        log("MCP method: \(method)")
+
+        // 路由 MCP 方法
+        switch method {
+        case "initialize":
+            handleMCPInitialize(id: id, params: params, connection: connection)
+
+        case "initialized":
+            // 客戶端確認初始化完成，直接返回空響應
+            sendMCPResult(connection: connection, id: id, result: [:])
+
+        case "tools/list":
+            handleMCPToolsList(id: id, connection: connection)
+
+        case "tools/call":
+            handleMCPToolsCall(id: id, params: params, connection: connection)
+
+        default:
+            sendMCPError(connection: connection, id: id, code: -32601, message: "Method not found: \(method)")
+        }
+    }
+
+    /// 處理 initialize 請求
+    private func handleMCPInitialize(id: Any?, params: [String: Any], connection: NWConnection) {
+        let result: [String: Any] = [
+            "protocolVersion": "2025-03-26",
+            "serverInfo": [
+                "name": "naki",
+                "version": "1.2.0"
+            ],
+            "capabilities": [
+                "tools": [:]
+            ]
+        ]
+        sendMCPResult(connection: connection, id: id, result: result)
+    }
+
+    /// 處理 tools/list 請求
+    private func handleMCPToolsList(id: Any?, connection: NWConnection) {
+        let result: [String: Any] = [
+            "tools": mcpTools
+        ]
+        sendMCPResult(connection: connection, id: id, result: result)
+    }
+
+    /// 處理 tools/call 請求
+    private func handleMCPToolsCall(id: Any?, params: [String: Any], connection: NWConnection) {
+        guard let toolName = params["name"] as? String else {
+            sendMCPError(connection: connection, id: id, code: -32602, message: "Missing tool name")
+            return
+        }
+
+        let arguments = params["arguments"] as? [String: Any] ?? [:]
+        log("MCP tools/call: \(toolName) with args: \(arguments)")
+
+        // 根據工具名稱執行對應的操作
+        switch toolName {
+        // 系統類
+        case "get_status":
+            let status: [String: Any] = [
+                "status": "running",
+                "port": actualPort,
+                "timestamp": ISO8601DateFormatter().string(from: Date())
+            ]
+            sendMCPToolResult(connection: connection, id: id, content: status)
+
+        case "get_help":
+            // 複用 handleHelp 的邏輯，但直接構建響應
+            let help = buildHelpContent()
+            sendMCPToolResult(connection: connection, id: id, content: help)
+
+        case "get_logs":
+            sendMCPToolResult(connection: connection, id: id, content: ["logs": logBuffer, "count": logBuffer.count])
+
+        case "clear_logs":
+            logBuffer.removeAll()
+            sendMCPToolResult(connection: connection, id: id, content: ["success": true, "message": "Logs cleared"])
+
+        // Bot 控制類
+        case "bot_status":
+            if let status = getBotStatus?() {
+                sendMCPToolResult(connection: connection, id: id, content: status)
+            } else {
+                sendMCPToolError(connection: connection, id: id, message: "Bot status not available")
+            }
+
+        case "bot_trigger":
+            log("MCP: Manual auto-play trigger requested")
+            triggerAutoPlay?()
+            sendMCPToolResult(connection: connection, id: id, content: ["success": true, "message": "Auto-play triggered"])
+
+        case "bot_ops":
+            executeJSForMCP("window.__nakiGameAPI.exploreOperationAPI()", id: id, connection: connection)
+
+        case "bot_deep":
+            executeJSForMCP("window.__nakiGameAPI.deepExploreNaki()", id: id, connection: connection)
+
+        case "bot_chi":
+            executeJSForMCP("window.__nakiGameAPI.testChi()", id: id, connection: connection)
+
+        case "bot_pon":
+            executeJSForMCP("window.__nakiGameAPI.testPon()", id: id, connection: connection)
+
+        // 遊戲狀態類
+        case "game_state":
+            executeJSForMCP("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getGameState()) : '{\"error\": \"API not loaded\"}'", id: id, connection: connection, parseJSON: true)
+
+        case "game_hand":
+            executeJSForMCP("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getHandInfo()) : '{\"error\": \"API not loaded\"}'", id: id, connection: connection, parseJSON: true)
+
+        case "game_ops":
+            executeJSForMCP("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getAvailableOps()) : '[]'", id: id, connection: connection, parseJSON: true)
+
+        case "game_discard":
+            guard let tileIndex = arguments["tileIndex"] as? Int else {
+                sendMCPToolError(connection: connection, id: id, message: "Missing tileIndex parameter")
+                return
+            }
+            let script = "window.__nakiGameAPI ? __nakiGameAPI.discardTile(\(tileIndex)) : false"
+            executeJavaScript?(script) { [weak self] result, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else if let success = result as? Bool {
+                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "tileIndex": tileIndex])
+                } else {
+                    self?.sendMCPToolError(connection: connection, id: id, message: "Discard failed")
+                }
+            }
+
+        case "game_action":
+            guard let action = arguments["action"] as? String else {
+                sendMCPToolError(connection: connection, id: id, message: "Missing action parameter")
+                return
+            }
+            let actionParams = arguments["params"] as? [String: Any] ?? [:]
+            let paramsJson = (try? JSONSerialization.data(withJSONObject: actionParams))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            let script = "window.__nakiGameAPI ? __nakiGameAPI.smartExecute('\(action)', \(paramsJson)) : false"
+            executeJavaScript?(script) { [weak self] _, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else {
+                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": true, "action": action])
+                }
+            }
+
+        // JavaScript 執行
+        case "execute_js":
+            guard let code = arguments["code"] as? String, !code.isEmpty else {
+                sendMCPToolError(connection: connection, id: id, message: "Missing or empty code parameter")
+                return
+            }
+            executeJavaScript?(code) { [weak self] result, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else {
+                    self?.sendMCPToolResult(connection: connection, id: id, content: ["result": result ?? NSNull()])
+                }
+            }
+
+        // 探索類
+        case "detect":
+            executeJSForMCP("window.__nakiDetectGameAPI ? __nakiDetectGameAPI() : {error: 'Not loaded'}", id: id, connection: connection)
+
+        case "explore":
+            executeJSForMCP("window.__nakiExploreGameObjects ? __nakiExploreGameObjects() : {error: 'Not loaded'}", id: id, connection: connection)
+
+        // UI 操作類
+        case "test_indicators":
+            executeJSForMCP("window.__nakiTestIndicators ? (__nakiTestIndicators(), 'OK') : 'Not loaded'", id: id, connection: connection)
+
+        case "click":
+            guard let x = arguments["x"] as? Double,
+                  let y = arguments["y"] as? Double else {
+                sendMCPToolError(connection: connection, id: id, message: "Missing x or y parameter")
+                return
+            }
+            let label = arguments["label"] as? String ?? "MCP Click"
+            let script = "window.__nakiAutoPlay.click(\(x), \(y), '\(label)')"
+            executeJavaScript?(script) { [weak self] _, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else {
+                    self?.sendMCPToolResult(connection: connection, id: id, content: ["result": "clicked", "x": x, "y": y])
+                }
+            }
+
+        case "calibrate":
+            let tileSpacing = arguments["tileSpacing"] as? Double ?? 96
+            let offsetX = arguments["offsetX"] as? Double ?? -200
+            let offsetY = arguments["offsetY"] as? Double ?? 0
+            let script = """
+            if (window.__nakiAutoPlay) {
+                window.__nakiAutoPlay.calibration = {
+                    tileSpacing: \(tileSpacing),
+                    offsetX: \(offsetX),
+                    offsetY: \(offsetY)
+                };
+                JSON.stringify(window.__nakiAutoPlay.calibration);
+            } else {
+                'Not loaded';
+            }
+            """
+            executeJavaScript?(script) { [weak self] _, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else {
+                    self?.sendMCPToolResult(connection: connection, id: id, content: [
+                        "result": "calibrated",
+                        "tileSpacing": tileSpacing,
+                        "offsetX": offsetX,
+                        "offsetY": offsetY
+                    ])
+                }
+            }
+
+        default:
+            sendMCPToolError(connection: connection, id: id, message: "Unknown tool: \(toolName)")
+        }
+    }
+
+    // MARK: - MCP Helper Methods
+
+    /// 執行 JavaScript 並返回 MCP 結果
+    private func executeJSForMCP(_ script: String, id: Any?, connection: NWConnection, parseJSON: Bool = false) {
+        executeJavaScript?(script) { [weak self] result, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else if parseJSON, let jsonString = result as? String,
+                          let data = jsonString.data(using: .utf8),
+                          let json = try? JSONSerialization.jsonObject(with: data) {
+                    self?.sendMCPToolResult(connection: connection, id: id, content: json)
+                } else {
+                    self?.sendMCPToolResult(connection: connection, id: id, content: ["result": result ?? NSNull()])
+                }
+            }
+        }
+    }
+
+    /// 構建 Help 內容
+    private func buildHelpContent() -> [String: Any] {
+        return [
+            "name": "Naki Debug API",
+            "version": "1.0",
+            "description": "Naki 麻將 AI 助手的 Debug API，用於監控遊戲狀態、控制 Bot、執行遊戲操作",
+            "base_url": "http://localhost:\(actualPort)",
+            "mcp_endpoint": "http://localhost:\(actualPort)/mcp",
+            "tools_count": mcpTools.count,
+            "tile_notation": [
+                "數牌（Suited）": "1-9 + m(萬)/p(筒)/s(索)，如 1m, 5p, 9s",
+                "紅寶牌（Red 5s）": "5mr, 5pr, 5sr",
+                "字牌（Honor）": "E(東), S(南), W(西), N(北), P(白), F(發), C(中)"
+            ]
+        ]
+    }
+
+    /// 發送 MCP 成功結果
+    private func sendMCPResult(connection: NWConnection, id: Any?, result: [String: Any]) {
+        var response: [String: Any] = [
+            "jsonrpc": "2.0",
+            "result": result
+        ]
+        if let id = id {
+            response["id"] = id
+        }
+        sendMCPJSON(connection: connection, data: response)
+    }
+
+    /// 發送 MCP 工具執行結果
+    private func sendMCPToolResult(connection: NWConnection, id: Any?, content: Any) {
+        let contentText: String
+        if let dict = content as? [String: Any] {
+            contentText = (try? JSONSerialization.data(withJSONObject: sanitizeForJSON(dict), options: []))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        } else if let array = content as? [Any] {
+            contentText = (try? JSONSerialization.data(withJSONObject: sanitizeForJSON(array), options: []))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        } else {
+            contentText = String(describing: content)
+        }
+
+        let result: [String: Any] = [
+            "content": [
+                ["type": "text", "text": contentText]
+            ],
+            "isError": false
+        ]
+        sendMCPResult(connection: connection, id: id, result: result)
+    }
+
+    /// 發送 MCP 工具執行錯誤
+    private func sendMCPToolError(connection: NWConnection, id: Any?, message: String) {
+        let result: [String: Any] = [
+            "content": [
+                ["type": "text", "text": message]
+            ],
+            "isError": true
+        ]
+        sendMCPResult(connection: connection, id: id, result: result)
+    }
+
+    /// 發送 MCP 錯誤
+    private func sendMCPError(connection: NWConnection, id: Any?, code: Int, message: String) {
+        var response: [String: Any] = [
+            "jsonrpc": "2.0",
+            "error": [
+                "code": code,
+                "message": message
+            ]
+        ]
+        if let id = id {
+            response["id"] = id
+        }
+        sendMCPJSON(connection: connection, data: response)
+    }
+
+    /// 發送 MCP JSON 響應
+    private func sendMCPJSON(connection: NWConnection, data: [String: Any]) {
+        do {
+            let sanitized = sanitizeForJSON(data) as! [String: Any]
+            let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: [])
+            let body = String(data: jsonData, encoding: .utf8) ?? "{}"
+            sendResponse(connection: connection, status: 200, body: body, contentType: "application/json")
+        } catch {
+            sendResponse(connection: connection, status: 500, body: "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}", contentType: "application/json")
+        }
     }
 }

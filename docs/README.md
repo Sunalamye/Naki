@@ -4,7 +4,7 @@
 
 ---
 
-## 📖 5 個核心文檔
+## 📖 6 個核心文檔
 
 ### 1. **architecture-deep-dive.md** - 架構深度詳解
 
@@ -87,7 +87,26 @@
 
 ---
 
-### 5. **claude-md-refactoring-journal.md** - CLAUDE.md 重構歷程
+### 5. **mcp-server-guide.md** - MCP Server 指南 (NEW)
+
+**引用位置**: README.md → MCP Server 部分
+
+**內容**:
+- MCP 協議支援說明
+- 22 個工具完整列表
+- Claude Code 配置方式
+- JSON-RPC 2.0 請求/響應格式
+- 使用範例和工作流程
+- 故障排除指南
+
+**使用場景**:
+- 配置 Claude Code 整合
+- AI 助手操作遊戲
+- MCP 工具開發參考
+
+---
+
+### 6. **claude-md-refactoring-journal.md** - CLAUDE.md 重構歷程
 
 **引用位置**: CLAUDE.md → Verifying Changes 部分
 
@@ -126,6 +145,7 @@ dev-notes/
 | 提升開發效率 | shell-tools-guide.md |
 | JavaScript 開發 | majsoul-webui-objects-reference.md |
 | 調試應用 | debug-api-help-endpoint.md |
+| AI 整合 (MCP) | mcp-server-guide.md |
 | 學習最佳實踐 | claude-md-refactoring-journal.md |
 | 了解開發過程 | dev-notes/ |
 
@@ -139,10 +159,11 @@ dev-notes/
 ├─ shell-tools-guide.md (262 行)
 ├─ majsoul-webui-objects-reference.md (798 行)
 ├─ debug-api-help-endpoint.md (200 行)
+├─ mcp-server-guide.md (350 行) [NEW]
 ├─ claude-md-refactoring-journal.md (475 行)
 └─ dev-notes/ (開發筆記集合)
 
-總行數: ~2,000+ 行
+總行數: ~2,300+ 行
 ```
 
 ---
@@ -161,6 +182,6 @@ dev-notes/
 ---
 
 **Created**: 2025-12-04
-**Last Updated**: 2025-12-04
+**Last Updated**: 2025-12-05
 **Purpose**: 核心指南文檔導覽
 

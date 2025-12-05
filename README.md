@@ -132,6 +132,44 @@ curl -X POST http://localhost:8765/bot/trigger
 curl -X POST http://localhost:8765/js -d 'window.location.href'
 ```
 
+## 🤖 MCP Server (Claude Code 整合)
+
+Naki 支援 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)，讓 AI 助手可以直接操作遊戲。
+
+### 配置 Claude Code
+
+```bash
+claude mcp add --transport http naki http://localhost:8765/mcp
+```
+
+### 可用工具 (22 個)
+
+| 類別 | 工具 | 說明 |
+|-----|------|------|
+| **Bot 控制** | `bot_status` | 獲取 Bot 狀態、手牌、AI 推薦 |
+| | `bot_trigger` | 手動觸發自動打牌 |
+| **遊戲操作** | `game_state` | 獲取遊戲狀態 |
+| | `game_discard` | 打出指定牌 |
+| | `game_action` | 執行動作 (pass/chi/pon/kan) |
+| **調試** | `execute_js` | 執行 JavaScript |
+| | `get_logs` | 獲取日誌 |
+
+### 使用範例
+
+```bash
+# 測試 MCP 連接
+curl -X POST http://localhost:8765/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+
+# 在 Claude Code 中使用
+mcp__naki__bot_status
+mcp__naki__bot_trigger
+mcp__naki__execute_js --code "window.location.href"
+```
+
+詳見 [MCP Server 指南](docs/mcp-server-guide.md)
+
 ## 📋 TODO
 
 - [x] 設定介面優化
