@@ -335,6 +335,30 @@ class WebViewModel {
     private func showGameHighlightForRecommendations(_ recommendations: [Recommendation], controller: NativeBotController) async {
         guard let page = webPage else { return }
 
+        // 檢查第一個推薦是否為按鈕動作（非打牌）
+        if let firstRec = recommendations.first,
+           firstRec.tile == nil,
+           firstRec.probability > 0.2 {
+            // 按鈕動作：chi/pon/kan/hora/none(pass)
+            let actionMap: [Recommendation.ActionType: String] = [
+                .chi: "chi",
+                .pon: "pon",
+                .kan: "kan",
+                .hora: "hora",
+                .none: "pass"
+            ]
+            if let jsAction = actionMap[firstRec.actionType] {
+                let script = "window.__nakiRecommendHighlight?.moveNativeEffectToButton('\(jsAction)')"
+                do {
+                    _ = try await page.callJavaScript(script)
+                    bridgeLog("[WebViewModel] Highlighted button: \(jsAction)")
+                } catch {
+                    bridgeLog("[WebViewModel] Error highlighting button: \(error.localizedDescription)")
+                }
+                return
+            }
+        }
+
         // 过滤出有效的打牌推薦（機率 > 0.2）
         let validRecs = recommendations.filter { rec in
             rec.tile != nil && rec.probability > 0.2

@@ -2,7 +2,9 @@
 
 **日期**: 2025-12-05
 **功能**: 為動作按鈕（碰/吃/槓/過等）添加推薦高亮效果
-**檔案**: `command/Resources/JavaScript/naki-autoplay.js`
+**檔案**:
+- `command/Resources/JavaScript/naki-autoplay.js` - JavaScript 實現
+- `command/ViewModels/WebViewModel.swift` - Swift 流程整合
 
 ---
 
@@ -271,9 +273,55 @@ posX = 27.5 - (2 * 7) = 13.5  ✓ (用戶確認正確)
 
 ---
 
+## 流程整合
+
+### Swift 端整合 (WebViewModel.swift:338-360)
+
+在 `showGameHighlightForRecommendations` 函數中新增按鈕高亮邏輯：
+
+```swift
+// 檢查第一個推薦是否為按鈕動作（非打牌）
+if let firstRec = recommendations.first,
+   firstRec.tile == nil,
+   firstRec.probability > 0.2 {
+    // 按鈕動作：chi/pon/kan/hora/none(pass)
+    let actionMap: [Recommendation.ActionType: String] = [
+        .chi: "chi",
+        .pon: "pon",
+        .kan: "kan",
+        .hora: "hora",
+        .none: "pass"
+    ]
+    if let jsAction = actionMap[firstRec.actionType] {
+        let script = "window.__nakiRecommendHighlight?.moveNativeEffectToButton('\(jsAction)')"
+        _ = try await page.callJavaScript(script)
+        return
+    }
+}
+```
+
+### 判斷邏輯
+
+1. 檢查第一個推薦的 `tile` 是否為 `nil`（非打牌動作）
+2. 檢查機率是否 > 0.2
+3. 根據 `actionType` 映射到 JavaScript 動作名稱
+4. 調用 `moveNativeEffectToButton` 顯示按鈕高亮
+
+### ActionType 映射
+
+| Swift ActionType | JavaScript 動作 | 說明 |
+|-----------------|----------------|------|
+| `.chi` | `"chi"` | 吃 |
+| `.pon` | `"pon"` | 碰 |
+| `.kan` | `"kan"` | 槓 |
+| `.hora` | `"hora"` | 和牌 |
+| `.none` | `"pass"` | 過 |
+
+---
+
 ## 後續工作
 
-1. **整合到推薦系統**: 當 AI 推薦動作時，自動調用 `moveNativeEffectToButton`
+1. ~~**整合到推薦系統**: 當 AI 推薦動作時，自動調用 `moveNativeEffectToButton`~~ ✅ 已完成
 2. **處理多選情況**: 如吃牌時有多個選擇
 3. **動畫過渡**: 添加從手牌到按鈕的平滑移動效果
 
@@ -282,6 +330,7 @@ posX = 27.5 - (2 * 7) = 13.5  ✓ (用戶確認正確)
 ## 相關檔案
 
 - `command/Resources/JavaScript/naki-autoplay.js:538-629` - moveNativeEffectToButton 實現
+- `command/ViewModels/WebViewModel.swift:338-360` - Swift 流程整合
 - `docs/majsoul-webui-objects-reference.md` - WebUI 物件參考
 
 ---
@@ -291,3 +340,4 @@ posX = 27.5 - (2 * 7) = 13.5  ✓ (用戶確認正確)
 | 日期 | 版本 | 變更內容 |
 |------|------|---------|
 | 2025-12-05 | 1.0 | 初始實現，新增 moveNativeEffectToButton 方法 |
+| 2025-12-05 | 1.1 | 整合到推薦系統流程 (WebViewModel.swift) |
