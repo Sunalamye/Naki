@@ -105,6 +105,9 @@ struct RecommendationRow: View {
 // MARK: - Recommendation List View
 
 struct RecommendationView: View {
+    
+    @Environment(\.webViewModel) private var viewModel
+
     var recommendations: [Recommendation]
     var maxDisplay: Int = 5
 
@@ -121,7 +124,16 @@ struct RecommendationView: View {
 
                 Spacer()
 
-                if !recommendations.isEmpty {
+                if recommendations.isEmpty {
+                    Button(action: {
+                        Task {
+                            await viewModel?.resyncBot()
+                        }
+                    }) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("重新載入 Bot")
+                }else{
                     Text("\(recommendations.count) 選項")
                         .font(.caption2)
                         .foregroundColor(.secondary)
