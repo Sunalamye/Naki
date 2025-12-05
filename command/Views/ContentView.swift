@@ -21,7 +21,7 @@ struct ContentView: View {
     @State private var showLog = false
     
     // 自動打牌控制
-    @State private var autoPlayMode: AutoPlayMode = .auto
+    @AppStorage("AutoPlayMode") private var autoPlayMode: AutoPlayMode = .auto
     @State private var actionDelay: Double = 1.0
     
     var body: some View {
