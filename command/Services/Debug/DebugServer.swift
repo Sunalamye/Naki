@@ -1123,15 +1123,16 @@ class DebugServer {
             ],
 
             // JavaScript 執行
+            // ⚠️ WebPage.callJavaScript(functionBody:) 需要 return 語句
             [
                 "name": "execute_js",
-                "description": "在遊戲 WebView 中執行任意 JavaScript 代碼",
+                "description": "在遊戲 WebView 中執行 JavaScript 代碼。⚠️ 重要：必須使用 return 語句才能獲取返回值！例如：'return 1+1' 返回 2，'return document.title' 返回標題。返回 Object 時使用 JSON.stringify()。",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
                         "code": [
                             "type": "string",
-                            "description": "要執行的 JavaScript 代碼"
+                            "description": "要執行的 JavaScript 代碼（函數體格式，需要 return 語句才能獲取返回值）"
                         ]
                     ],
                     "required": ["code"]
