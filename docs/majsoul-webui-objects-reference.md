@@ -1364,11 +1364,13 @@ function moveEffectToButton(actionType) {
     var ui = uiscript.UI_ChiPengHu.Inst;
     var container = ui.container_btns;
 
-    // 按鈕名稱映射
+    // 按鈕名稱映射（支援的動作類型）
     var btnNameMap = {
         'chi': 'btn_chi',
         'pon': 'btn_peng',
         'kan': 'btn_gang',
+        'hora': 'btn_hu',
+        'riichi': 'btn_lizhi',
         'pass': 'btn_cancel'
     };
 

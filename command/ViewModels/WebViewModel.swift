@@ -347,17 +347,20 @@ class WebViewModel {
         guard let page = webPage else { return }
 
         // 檢查第一個推薦是否為按鈕動作（非打牌）
+        // 按鈕動作類型：chi/pon/kan/hora/riichi/none(pass)
+        let buttonActionMap: [Recommendation.ActionType: String] = [
+            .chi: "chi",
+            .pon: "pon",
+            .kan: "kan",
+            .hora: "hora",
+            .riichi: "riichi",
+            .none: "pass"
+        ]
+
         if let firstRec = recommendations.first,
-           firstRec.tile == nil,
+           buttonActionMap[firstRec.actionType] != nil,
            firstRec.probability > 0.2 {
-            // 按鈕動作：chi/pon/kan/hora/none(pass)
-            let actionMap: [Recommendation.ActionType: String] = [
-                .chi: "chi",
-                .pon: "pon",
-                .kan: "kan",
-                .hora: "hora",
-                .none: "pass"
-            ]
+            let actionMap = buttonActionMap
             if let jsAction = actionMap[firstRec.actionType] {
                 let script = "window.__nakiRecommendHighlight?.moveNativeEffectToButton('\(jsAction)')"
                 do {
