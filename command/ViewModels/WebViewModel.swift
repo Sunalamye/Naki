@@ -239,9 +239,11 @@ class WebViewModel {
         }
     }
 
-    /// 檢查並更新高亮效果
+    /// 檢查並更新推薦顯示
     private func checkAndUpdateHighlights() {
-        guard !recommendations.isEmpty,
+        // 只在顯示推薦模式下檢查（推薦/自動模式）
+        guard autoPlayController?.state.mode.showRecommendation == true,
+              !recommendations.isEmpty,
               let page = webPage,
               let controller = nativeBotController else { return }
 
@@ -311,16 +313,25 @@ class WebViewModel {
         // 同步到 GameStateManager（供 UI 回應式更新）
         gameStateManager.syncFrom(controller: controller)
 
-        // 更新高亮牌（顯示所有符合條件的推薦）
+        // 更新推薦顯示（根據模式決定是否顯示）
+        let shouldShowRecommendation = autoPlayController?.state.mode.showRecommendation ?? false
+
         if let firstRec = recommendations.first {
             highlightedTile = firstRec.displayTile
 
-            // 在遊戲 UI 上顯示多个推薦的原生高亮
-            Task {
-                await showGameHighlightForRecommendations(recommendations, controller: controller)
+            // 在遊戲 UI 上顯示推薦（只在推薦/自動模式下顯示）
+            if shouldShowRecommendation {
+                Task {
+                    await showGameHighlightForRecommendations(recommendations, controller: controller)
+                }
+            } else {
+                // 關閉模式：隱藏推薦
+                Task {
+                    await hideGameHighlight()
+                }
             }
         } else {
-            // 沒有推薦时隐藏高亮
+            // 沒有推薦時隱藏
             Task {
                 await hideGameHighlight()
             }
@@ -539,8 +550,23 @@ class WebViewModel {
         bridgeLog("[WebViewModel] Auto-play mode set to: \(mode.rawValue)")
         debugServer?.addLog("Mode changed: \(mode.rawValue), recs: \(recommendations.count)")
 
-        // 当啟用全自動模式且有現有推薦时，立即觸發
-        if mode == .auto, !recommendations.isEmpty {
+        // 根據模式處理推薦顯示
+        if mode.showRecommendation {
+            // 推薦/自動模式：顯示推薦（如果有）
+            if !recommendations.isEmpty, let controller = nativeBotController {
+                Task {
+                    await showGameHighlightForRecommendations(recommendations, controller: controller)
+                }
+            }
+        } else {
+            // 關閉模式：隱藏推薦
+            Task {
+                await hideGameHighlight()
+            }
+        }
+
+        // 只有全自動模式才觸發自動打牌
+        if mode.isFullAuto, !recommendations.isEmpty {
             let firstAction = recommendations.first?.actionType
             let delay: TimeInterval
             switch firstAction {

@@ -17,14 +17,16 @@ import MortalSwift
 
 /// 自動打牌模式
 enum AutoPlayMode: String, CaseIterable {
-    case off = "關閉"
-    case recommend = "推薦確認"  // 顯示推薦，需要手動確認
-    case auto = "全自動"         // 完全自動執行推薦動作
+    case off = "關閉"            // 不顯示推薦，不自動打牌（AI 仍在背景運算）
+    case recommend = "推薦"      // 顯示推薦，需要手動打牌
+    case auto = "自動"           // 顯示推薦，自動執行推薦動作
 
-    var isEnabled: Bool {
+    /// 是否顯示推薦（推薦和自動模式都顯示）
+    var showRecommendation: Bool {
         return self != .off
     }
 
+    /// 是否啟用自動打牌（只有自動模式）
     var isFullAuto: Bool {
         return self == .auto
     }
@@ -152,7 +154,8 @@ class AutoPlayController: ObservableObject {
     ///   - tsumo: 當前摸牌
     ///   - immediately: 是否立即執行（跳過延遲）
     func handleRecommendedAction(_ action: MJAIAction, tehai: [Tile], tsumo: Tile?, immediately: Bool = false) {
-        guard state.mode.isEnabled else { return }
+        // off 模式下不處理自動打牌（但 AI 推薦仍在背景運行）
+        guard state.mode != .off else { return }
 
         // 更新手牌狀態
         updateHandState(tehai: tehai, tsumo: tsumo)

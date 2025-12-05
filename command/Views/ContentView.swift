@@ -68,7 +68,7 @@ struct ContentView: View {
         ToolbarItem(placement: .navigation) {
             Picker("", selection: $autoPlayMode) {
                 Text("關").tag(AutoPlayMode.off)
-                Text("提示").tag(AutoPlayMode.recommend)
+                Text("推薦").tag(AutoPlayMode.recommend)
                 Text("自動").tag(AutoPlayMode.auto)
             }
             .pickerStyle(.segmented)
@@ -76,7 +76,7 @@ struct ContentView: View {
             .onChange(of: autoPlayMode) { _, newValue in
                 viewModel.setAutoPlayMode(newValue)
             }
-            .help("自動打牌模式")
+            .help("AI 推薦模式")
         }
 
         // 延遲調整
@@ -200,10 +200,10 @@ struct ContentView: View {
                         .font(.caption)
                 }
                 .frame(width: 80)
-                // 自動打牌模式
+                // AI 推薦模式
                 Picker("模式", selection: $autoPlayMode) {
                     Text("關").tag(AutoPlayMode.off)
-                    Text("提示").tag(AutoPlayMode.recommend)
+                    Text("推薦").tag(AutoPlayMode.recommend)
                     Text("自動").tag(AutoPlayMode.auto)
                 }
                 .pickerStyle(.segmented)
