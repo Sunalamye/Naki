@@ -273,36 +273,6 @@ struct Recommendation: Identifiable, Equatable {
     }
 }
 
-// MARK: - Tile Unicode Extension
-
-extension Tile {
-    /// 牌的 Unicode 表示
-    var unicode: String {
-        switch self {
-        case .man(let n, let red):
-            if red { return "🀋" } // 紅5萬特別處理
-            let base = 0x1F007 + (n - 1)
-            return String(UnicodeScalar(base)!)
-        case .pin(let n, let red):
-            if red { return "🀝" }
-            let base = 0x1F019 + (n - 1)
-            return String(UnicodeScalar(base)!)
-        case .sou(let n, let red):
-            if red { return "🀔" }
-            let base = 0x1F010 + (n - 1)
-            return String(UnicodeScalar(base)!)
-        case .east: return "🀀"
-        case .south: return "🀁"
-        case .west: return "🀂"
-        case .north: return "🀃"
-        case .white: return "🀆"
-        case .green: return "🀅"
-        case .red: return "🀄"
-        case .unknown: return "🀫"
-        }
-    }
-}
-
 // MARK: - MahjongTile
 
 /// 麻將牌表示（整合 Tile 強類型和 MJAI 字串）

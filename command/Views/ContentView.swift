@@ -308,7 +308,7 @@ struct ContentView: View {
 struct GamePanel: View {
     var viewModel: WebViewModel
     @Binding var showLog: Bool
-
+    
     var body: some View {
         VSplitView {
             // 上半部分：Bot 狀態和推薦
@@ -567,9 +567,7 @@ struct AdvancedSettingsSheet: View {
                     HStack {
                         Button("重建 Bot") {
                             Task {
-                                viewModel.deleteNativeBot()
-                                try? await Task.sleep(nanoseconds: 100_000_000)
-                                try? await viewModel.createNativeBot(playerId: 0)
+                                await viewModel.resyncBot()
                             }
                         }
                         .buttonStyle(.bordered)

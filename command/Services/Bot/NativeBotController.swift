@@ -92,7 +92,8 @@ class NativeBotController {
         self.is3P = is3P
 
         // 使用內建的 Core ML 模型
-        bot = try MortalBot(playerId: playerId, version: 4, useBundledModel: true)
+        // MortalSwift v0.3.0 使用 Int 作為 playerId
+        bot = try MortalBot(playerId: Int(playerId), version: 4, useBundledModel: true)
 
         botLog("[NativeBotController] Bot 創建成功: playerId=\(playerId), is3P=\(is3P)")
     }
@@ -598,16 +599,23 @@ class NativeBotController {
         // ⭐ 獲取可用動作的 mask (await 因為是 actor)
         let mask = await bot.getMask()
 
-        // 解析 mask 來判斷可用動作
-        canDiscard = mask.prefix(37).contains(where: { $0 == 1 })
-        canRiichi = mask.count > MahjongAction.riichi.rawValue && mask[MahjongAction.riichi.rawValue] == 1
-        canChi = [MahjongAction.chiLow, .chiMid, .chiHigh].contains(where: { mask.count > $0.rawValue && mask[$0.rawValue] == 1 })
-        canPon = mask.count > MahjongAction.pon.rawValue && mask[MahjongAction.pon.rawValue] == 1
-        canKan = mask.count > MahjongAction.kan.rawValue && mask[MahjongAction.kan.rawValue] == 1
-        canAgari = mask.count > MahjongAction.hora.rawValue && mask[MahjongAction.hora.rawValue] == 1
+        // 使用 PlayerState.ActionIndex 常量
+        typealias AI = PlayerState.ActionIndex
 
-        // ⭐ 儲存候選動作 (await 因為是 actor)
-        lastCandidates = await bot.getCandidates()
+        // 解析 mask 來判斷可用動作
+        canDiscard = mask.prefix(AI.discardEnd + 1).contains(where: { $0 == 1 })
+        canRiichi = mask.count > AI.riichi && mask[AI.riichi] == 1
+        canChi = [AI.chiLow, AI.chiMid, AI.chiHigh].contains(where: { mask.count > $0 && mask[$0] == 1 })
+        canPon = mask.count > AI.pon && mask[AI.pon] == 1
+        canKan = mask.count > AI.kan && mask[AI.kan] == 1
+        canAgari = mask.count > AI.hora && mask[AI.hora] == 1
+
+        // ⭐ 儲存候選動作 (await 因為是 actor) - v0.3.0 使用 getCandidateActions()
+        let candidates = await bot.getCandidateActions()
+        if let jsonData = try? JSONEncoder().encode(candidates),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            lastCandidates = jsonString
+        }
     }
 
     /// 更新推薦列表 (async 因為 MortalBot 是 actor)
@@ -657,8 +665,8 @@ class NativeBotController {
         if validCount == 0 {
             botLog("[NativeBotController] Mask is empty after meld, generating from tehai")
 
-            // 根據手牌生成可打牌的 mask
-            mask = [UInt8](repeating: 0, count: MahjongAction.allCases.count)
+            // 根據手牌生成可打牌的 mask (使用 PlayerState.actionSpace)
+            mask = [UInt8](repeating: 0, count: PlayerState.actionSpace)
 
             // 遍歷手牌，標記可以打的牌
             for tile in tehai {
@@ -686,7 +694,7 @@ class NativeBotController {
 
         if !hasValidProbs || currentValidCount != probs.filter({ $0 > 0 }).count {
             let uniformProb = Float(1.0) / Float(currentValidCount)
-            probs = [Float](repeating: 0, count: MahjongAction.allCases.count)
+            probs = [Float](repeating: 0, count: PlayerState.actionSpace)
             for (index, isAvailable) in mask.enumerated() where isAvailable == 1 {
                 if index < probs.count {
                     probs[index] = uniformProb
@@ -756,72 +764,65 @@ class NativeBotController {
     }
 
     private func actionIndexToRecommendation(_ index: Int, probability: Double) -> Recommendation? {
-        guard let action = MahjongAction(rawValue: index) else { return nil }
+        typealias AI = PlayerState.ActionIndex
 
-        switch action {
-        case .discard1m, .discard2m, .discard3m, .discard4m, .discard5m,
-             .discard6m, .discard7m, .discard8m, .discard9m:
-            let num = index + 1
-            // 特殊處理 5m：優先丟普通牌，只有在只有紅寶牌時才丟紅寶牌
-            if num == 5 {
-                let tileStr = shouldDiscardRedDora(suit: "m") ? "5mr" : "5m"
-                return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+        // 打牌動作 (0-33)
+        if index >= AI.discardStart && index <= AI.discardEnd {
+            // 萬子 (0-8 -> 1m-9m)
+            if index <= 8 {
+                let num = index + 1
+                if num == 5 {
+                    let tileStr = shouldDiscardRedDora(suit: "m") ? "5mr" : "5m"
+                    return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+                }
+                return Recommendation(tile: "\(num)m", probability: probability, actionType: .discard)
             }
-            return Recommendation(tile: "\(num)m", probability: probability, actionType: .discard)
-
-        case .discard1p, .discard2p, .discard3p, .discard4p, .discard5p,
-             .discard6p, .discard7p, .discard8p, .discard9p:
-            let num = index - 8
-            // 特殊處理 5p：優先丟普通牌，只有在只有紅寶牌時才丟紅寶牌
-            if num == 5 {
-                let tileStr = shouldDiscardRedDora(suit: "p") ? "5pr" : "5p"
-                return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+            // 筒子 (9-17 -> 1p-9p)
+            else if index <= 17 {
+                let num = index - 8
+                if num == 5 {
+                    let tileStr = shouldDiscardRedDora(suit: "p") ? "5pr" : "5p"
+                    return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+                }
+                return Recommendation(tile: "\(num)p", probability: probability, actionType: .discard)
             }
-            return Recommendation(tile: "\(num)p", probability: probability, actionType: .discard)
-
-        case .discard1s, .discard2s, .discard3s, .discard4s, .discard5s,
-             .discard6s, .discard7s, .discard8s, .discard9s:
-            let num = index - 17
-            // 特殊處理 5s：優先丟普通牌，只有在只有紅寶牌時才丟紅寶牌
-            if num == 5 {
-                let tileStr = shouldDiscardRedDora(suit: "s") ? "5sr" : "5s"
-                return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+            // 索子 (18-26 -> 1s-9s)
+            else if index <= 26 {
+                let num = index - 17
+                if num == 5 {
+                    let tileStr = shouldDiscardRedDora(suit: "s") ? "5sr" : "5s"
+                    return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
+                }
+                return Recommendation(tile: "\(num)s", probability: probability, actionType: .discard)
             }
-            return Recommendation(tile: "\(num)s", probability: probability, actionType: .discard)
+            // 字牌 (27-33 -> E/S/W/N/P/F/C)
+            else {
+                let honorTiles = ["E", "S", "W", "N", "P", "F", "C"]
+                let honorIndex = index - 27
+                if honorIndex < honorTiles.count {
+                    return Recommendation(tile: honorTiles[honorIndex], probability: probability, actionType: .discard)
+                }
+            }
+        }
 
-        case .discardEast:
-            return Recommendation(tile: "E", probability: probability, actionType: .discard)
-        case .discardSouth:
-            return Recommendation(tile: "S", probability: probability, actionType: .discard)
-        case .discardWest:
-            return Recommendation(tile: "W", probability: probability, actionType: .discard)
-        case .discardNorth:
-            return Recommendation(tile: "N", probability: probability, actionType: .discard)
-        case .discardWhite:
-            return Recommendation(tile: "P", probability: probability, actionType: .discard)
-        case .discardGreen:
-            return Recommendation(tile: "F", probability: probability, actionType: .discard)
-        case .discardRed:
-            return Recommendation(tile: "C", probability: probability, actionType: .discard)
-
-        case .riichi:
+        // 其他動作
+        switch index {
+        case AI.riichi:
             return Recommendation(tile: "reach", probability: probability, actionType: .riichi)
-        case .chiLow:
-            // ⭐ 存储吃的类型在 label 中：chi_0 表示第一种吃法
+        case AI.chiLow:
             return Recommendation(tile: "chi_0", probability: probability, actionType: .chi)
-        case .chiMid:
+        case AI.chiMid:
             return Recommendation(tile: "chi_1", probability: probability, actionType: .chi)
-        case .chiHigh:
+        case AI.chiHigh:
             return Recommendation(tile: "chi_2", probability: probability, actionType: .chi)
-        case .pon:
+        case AI.pon:
             return Recommendation(tile: "pon", probability: probability, actionType: .pon)
-        case .kan:
+        case AI.kan:
             return Recommendation(tile: "kan", probability: probability, actionType: .kan)
-        case .hora:
+        case AI.hora:
             return Recommendation(tile: "hora", probability: probability, actionType: .hora)
-        case .pass:
+        case AI.pass:
             return Recommendation(tile: "none", probability: probability, actionType: .none)
-
         default:
             return nil
         }

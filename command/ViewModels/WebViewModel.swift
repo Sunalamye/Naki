@@ -300,6 +300,24 @@ class WebViewModel {
     return response
   }
 
+  /// 重新同步 Bot（手動重建或重連時使用）
+  /// 會使用 EventStream 重放歷史事件，讓新 Bot 恢復到當前遊戲狀態
+  func resyncBot() async {
+    guard let coordinator = webCoordinator else {
+      bridgeLog("[WebViewModel] Cannot resync: coordinator not available")
+      statusMessage = "無法重建：協調器不可用"
+      return
+    }
+
+    if !coordinator.eventStream.canResync() {
+      bridgeLog("[WebViewModel] Cannot resync: no game in progress")
+      statusMessage = "無法重建：沒有進行中的遊戲"
+      return
+    }
+
+    await coordinator.resyncBot()
+  }
+
   /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
   private func updateUIAfterBotResponse(from controller: NativeBotController) {
     bridgeLog("[WebViewModel] ===== updateUIAfterBotResponse CALLED =====")

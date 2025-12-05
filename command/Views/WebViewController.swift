@@ -207,8 +207,8 @@ class NakiWebCoordinator {
         }
     }
 
-    /// 重新同步 Bot（WebSocket 重连时使用）
-    private func resyncBot() async {
+    /// 重新同步 Bot（WebSocket 重连时或手動重建時使用）
+    func resyncBot() async {
         guard let playerId = eventStream.getPlayerId() else {
             bridgeLog("[Coordinator] Cannot resync: no playerId found in history")
             return
