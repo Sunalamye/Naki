@@ -117,6 +117,7 @@ class WebViewModel {
         // 啟用 Web Inspector（僅用於開發除錯）
         #if DEBUG
         // WebPage 使用 isInspectable 属性
+        webPage?.isInspectable = true
         #endif
 
         // 建立 WebPage
