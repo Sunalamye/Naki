@@ -41,7 +41,11 @@
 
 ## 📸 截圖
 
-![Naki AI 推薦介面](image.png)
+### macOS
+![Naki macOS 介面](image.png)
+
+### iOS / iPhone
+![Naki iPhone 介面](iphone.png)
 
 ## 🏗️ 架構設計
 
