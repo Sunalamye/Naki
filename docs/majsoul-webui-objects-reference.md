@@ -22,34 +22,42 @@
 
 ## 如何查找物件 (Finding Objects)
 
-### 使用 Debug Server 查詢
+### 使用 MCP 工具查詢（推薦）
 
-Naki 提供 HTTP Debug Server（端口 8765），可用於查詢和檢查遊戲物件。
+Naki 提供 MCP 工具，可直接在 AI 助手中查詢和檢查遊戲物件。
 
 #### 1. 基本 API 查詢
 
-```bash
+```
 # 獲取完整 API 文檔
-curl http://localhost:8765/help | jq .
+mcp__naki__get_help
 
 # 執行 JavaScript 並查看結果
-curl -X POST http://localhost:8765/js -d "YOUR_SCRIPT"
+mcp__naki__execute_js({ code: "YOUR_SCRIPT" })
 
 # 查看實時日誌
-curl http://localhost:8765/logs
+mcp__naki__get_logs
 ```
 
 #### 2. 查詢遊戲管理器
 
-```bash
+```
 # 檢查 DesktopMgr 是否存在
-curl -X POST http://localhost:8765/js -d "window.view?.DesktopMgr?.Inst"
+mcp__naki__execute_js({ code: "window.view?.DesktopMgr?.Inst" })
 
 # 獲取遊戲狀態結構
-curl -X POST http://localhost:8765/js -d "Object.keys(window.view.DesktopMgr.Inst)"
+mcp__naki__execute_js({ code: "Object.keys(window.view.DesktopMgr.Inst)" })
 
 # 查詢手牌
-curl -X POST http://localhost:8765/js -d "window.view.DesktopMgr.Inst.mainrole.hand.length"
+mcp__naki__execute_js({ code: "window.view.DesktopMgr.Inst.mainrole.hand.length" })
+```
+
+### 使用 HTTP 端點（傳統方式）
+
+```bash
+curl http://localhost:8765/help | jq .                                    # API 文檔
+curl -X POST http://localhost:8765/js -d "YOUR_SCRIPT"                    # 執行 JS
+curl http://localhost:8765/logs                                           # 日誌
 ```
 
 ### 在 JavaScript 中查詢
@@ -207,77 +215,79 @@ oplist.forEach(op => {
 });
 ```
 
-### 使用 Debug Server 的完整工作流
+### 使用 MCP 工具的完整工作流（推薦）
 
-#### 1. 啟動並驗證 Debug Server
+#### 1. 驗證連接
 
-```bash
-# 在 Naki 運行時執行
-curl http://localhost:8765/
+```
+# 獲取 API 狀態
+mcp__naki__get_status
 
-# 應該看到 HTML 響應，列出所有端點
+# 獲取完整文檔
+mcp__naki__get_help
 ```
 
-#### 2. 執行複雜的 JavaScript 查詢
+#### 2. 執行 JavaScript 查詢
 
-```bash
-# 查詢手牌詳細信息並格式化為 JSON
-curl -X POST http://localhost:8765/js -d "
+```
+# 查詢手牌詳細信息
+mcp__naki__execute_js({ code: `
 const inst = window.view?.DesktopMgr?.Inst;
 if (inst) {
-  const hand = inst.mainrole.hand.map((t, i) => ({
+  inst.mainrole.hand.map((t, i) => ({
     index: i,
     type: t.val.type,
     number: t.val.index + 1,
-    isDora: t.isDora,
-    isDoraTile: t.val.dora,
-    pos_x: t.pos_x,
-    z: t.z
+    isDora: t.isDora
   }));
-  JSON.stringify(hand, null, 2);
-} else {
-  'Game manager not available'
 }
-" | jq .
+` })
 ```
 
 #### 3. 監控物件變更
 
-```bash
-# 設置宝牌效果攔截並查詢歷史
-curl -X POST http://localhost:8765/js -d "window.__nakiDoraHook?.hook()"
+```
+# 設置宝牌效果攔截
+mcp__naki__execute_js({ code: "window.__nakiDoraHook?.hook()" })
 
-# 延遲後查詢變更歷史
-sleep 2
-curl -X POST http://localhost:8765/js -d "window.__nakiDoraHook?.getHistory()"
+# 查詢變更歷史
+mcp__naki__execute_js({ code: "window.__nakiDoraHook?.getHistory()" })
 ```
 
 #### 4. 測試推薦高亮
 
-```bash
+```
 # 顯示第 3 張牌的推薦高亮
-curl -X POST http://localhost:8765/js -d "window.__nakiRecommendHighlight?.show(3)"
+mcp__naki__execute_js({ code: "window.__nakiRecommendHighlight?.show(3)" })
 
 # 查詢當前狀態
-curl -X POST http://localhost:8765/js -d "window.__nakiRecommendHighlight?.getStatus()"
+mcp__naki__execute_js({ code: "window.__nakiRecommendHighlight?.getStatus()" })
 
 # 隱藏高亮
-curl -X POST http://localhost:8765/js -d "window.__nakiRecommendHighlight?.hide()"
+mcp__naki__execute_js({ code: "window.__nakiRecommendHighlight?.hide()" })
 ```
 
 ### 常見查詢命令速查表
+
+#### MCP 工具（推薦）
+
+| 任務 | MCP 工具 |
+|------|------|
+| **檢查遊戲是否已加載** | `mcp__naki__execute_js({ code: "!!window.view?.DesktopMgr?.Inst" })` |
+| **查詢手牌數** | `mcp__naki__execute_js({ code: "window.view.DesktopMgr.Inst.mainrole.hand.length" })` |
+| **列出手牌** | `mcp__naki__execute_js({ code: "window.view.DesktopMgr.Inst.mainrole.hand.map((t,i)=>({i,t:t.val.type,n:t.val.index+1}))" })` |
+| **獲取 Bot 狀態和 AI 推薦** | `mcp__naki__bot_status` |
+| **獲取遊戲狀態** | `mcp__naki__game_state` |
+| **查看日誌** | `mcp__naki__get_logs` |
+
+#### HTTP 端點（傳統方式）
 
 | 任務 | 命令 |
 |------|------|
 | **檢查遊戲是否已加載** | `curl -X POST http://localhost:8765/js -d "!!window.view?.DesktopMgr?.Inst"` |
 | **查詢手牌數** | `curl -X POST http://localhost:8765/js -d "window.view.DesktopMgr.Inst.mainrole.hand.length"` |
-| **列出手牌** | `curl -X POST http://localhost:8765/js -d "window.view.DesktopMgr.Inst.mainrole.hand.map((t,i)=>({i,t:t.val.type,n:t.val.index+1}))"` |
-| **檢查推薦效果** | `curl -X POST http://localhost:8765/js -d "window.view.DesktopMgr.Inst.effect_recommend?.active"` |
-| **查詢宝牌** | `curl -X POST http://localhost:8765/js -d "window.view.DesktopMgr.Inst.dora"` |
-| **列出可用操作** | `curl -X POST http://localhost:8765/js -d "window.view.DesktopMgr.Inst.oplist.map(op=>op.name)"` |
-| **取得第一張牌的屬性** | `curl -X POST http://localhost:8765/js -d "Object.keys(window.view.DesktopMgr.Inst.mainrole.hand[0])"` |
-| **獲取推薦高亮狀態** | `curl -X POST http://localhost:8765/js -d "window.__nakiRecommendHighlight?.getStatus()"` |
-| **獲取宝牌變更歷史** | `curl -X POST http://localhost:8765/js -d "window.__nakiDoraHook?.getHistory()"` |
+| **獲取 Bot 狀態** | `curl http://localhost:8765/bot/status` |
+| **查看日誌** | `curl http://localhost:8765/logs` |
 
 ### 故障排查
 

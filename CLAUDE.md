@@ -44,18 +44,20 @@ open Naki.xcodeproj          # Open in Xcode
 # Build via Xcode (Cmd + B) or run (Cmd + R)
 ```
 
-### Debug
+### Debug (MCP Tools)
 
-The app runs an HTTP debug server on port 8765. **Get full API docs via**:
+Naki provides MCP (Model Context Protocol) tools for AI agents. **Use these tools directly**:
 
-```bash
-curl http://localhost:8765/help | jq .       # Complete API documentation (JSON)
-curl http://localhost:8765/                  # HTML endpoints list (browser)
-curl http://localhost:8765/bot/status        # Bot state and recommendations
-curl http://localhost:8765/logs              # View debug logs
+```
+mcp__naki__get_help      # Complete API documentation (JSON)
+mcp__naki__bot_status    # Bot state, hand tiles, AI recommendations
+mcp__naki__get_logs      # View debug logs
+mcp__naki__bot_trigger   # Manually trigger auto-play action
+mcp__naki__game_state    # Current game state
+mcp__naki__execute_js    # Execute JavaScript in game context
 ```
 
-The `/help` endpoint provides AI-friendly structured documentation with all available endpoints, common workflows, tile notation, and usage tips. See `DebugServer.swift:306-506` for implementation.
+For HTTP access (port 8765), see @docs/debug-api-help-endpoint.md.
 
 ### Test
 
@@ -98,9 +100,9 @@ Verify injection is working via the debug server's `/js` endpoint.
 
 **IMPORTANT**: The following objects exist in **Majsoul's WebUI** (JavaScript/Laya), not in Naki:
 
-**Testing WebUI**: When testing any WebUI visuals or game objects, always use the debug server's `/js` endpoint:
-```bash
-curl -X POST http://localhost:8765/js -d "YOUR_JAVASCRIPT_CODE"
+**Testing WebUI**: When testing any WebUI visuals or game objects, use the MCP tool:
+```
+mcp__naki__execute_js({ code: "YOUR_JAVASCRIPT_CODE" })
 ```
 
 Key objects:
@@ -153,17 +155,17 @@ Always use the **same logic as `executeAutoPlayAction` in `WebViewModel.swift`**
 
 ### Fix WebSocket Issues
 
-1. Check JS console errors: `curl -X POST http://localhost:8765/js -d 'YOUR_SCRIPT'`
+1. Check JS console errors: `mcp__naki__execute_js({ code: "YOUR_SCRIPT" })`
 2. Verify `naki-websocket.js` injection in `WebViewController.swift`
 3. Check Protobuf parsing in `LiqiParser.swift` if protocol changed
-4. Use debug logs in UI (right sidebar, powered by `LogManager`)
+4. Use debug logs: `mcp__naki__get_logs` or UI sidebar (powered by `LogManager`)
 
 ### Handle Majsoul Protocol Changes
 
 1. New message fields? Update `LiqiParser.swift` protobuf parsing
 2. New action types? Add to `ActionType` enum in `GameModels.swift`
 3. Format changes? Update `MajsoulBridge.swift:200-207`
-4. Test via debug endpoints to verify parsing
+4. Test via MCP tools: `mcp__naki__bot_status`, `mcp__naki__game_state`
 
 ## Important Patterns
 

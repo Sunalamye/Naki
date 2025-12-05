@@ -116,20 +116,25 @@ open Naki.xcodeproj
 
 ## 🔧 Debug API
 
-啟動後自動開啟 HTTP Server (port 8765)：
+啟動後自動開啟 HTTP Server (port 8765)，支援 MCP 工具或傳統 HTTP 呼叫：
+
+### MCP 工具 (推薦用於 AI 助手)
+
+| 工具 | 說明 |
+|-----|------|
+| `mcp__naki__get_logs` | 查看日誌 |
+| `mcp__naki__bot_status` | Bot 狀態、手牌、AI 推薦 |
+| `mcp__naki__bot_trigger` | 手動觸發自動打牌 |
+| `mcp__naki__execute_js` | 執行 JavaScript |
+| `mcp__naki__game_state` | 遊戲狀態 |
+
+### HTTP 端點 (傳統方式)
 
 ```bash
-# 查看日誌
-curl http://localhost:8765/logs
-
-# Bot 狀態
-curl http://localhost:8765/bot/status
-
-# 手動觸發自動打牌
-curl -X POST http://localhost:8765/bot/trigger
-
-# 執行 JavaScript
-curl -X POST http://localhost:8765/js -d 'window.location.href'
+curl http://localhost:8765/logs              # 查看日誌
+curl http://localhost:8765/bot/status        # Bot 狀態
+curl -X POST http://localhost:8765/bot/trigger  # 手動觸發
+curl -X POST http://localhost:8765/js -d 'code' # 執行 JS
 ```
 
 ## 🤖 MCP Server (Claude Code 整合)
@@ -156,16 +161,20 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 
 ### 使用範例
 
-```bash
-# 測試 MCP 連接
-curl -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+在 Claude Code 中直接使用 MCP 工具：
 
-# 在 Claude Code 中使用
+```
+# 獲取 Bot 狀態和 AI 推薦
 mcp__naki__bot_status
+
+# 手動觸發自動打牌
 mcp__naki__bot_trigger
-mcp__naki__execute_js --code "window.location.href"
+
+# 執行 JavaScript 查詢遊戲狀態
+mcp__naki__execute_js({ code: "window.location.href" })
+
+# 獲取完整 API 文檔
+mcp__naki__get_help
 ```
 
 詳見 [MCP Server 指南](docs/mcp-server-guide.md)

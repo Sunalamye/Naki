@@ -282,7 +282,28 @@ curl http://localhost:8765/help | jq .
 
 ### AI 使用範例
 
-AI 助手可以這樣使用：
+#### MCP 工具方式（推薦）
+
+AI 助手可以直接使用 MCP 工具：
+
+```
+# 獲取 API 文檔
+mcp__naki__get_help
+
+# 獲取 Bot 狀態、手牌、AI 推薦
+mcp__naki__bot_status
+
+# 獲取遊戲狀態
+mcp__naki__game_state
+
+# 手動觸發自動打牌
+mcp__naki__bot_trigger
+
+# 執行 JavaScript
+mcp__naki__execute_js({ code: "window.view.DesktopMgr.Inst" })
+```
+
+#### HTTP 方式（傳統）
 
 ```
 1. 首先調用 GET /help 了解 API 結構
@@ -360,7 +381,10 @@ AI 助手可以這樣使用：
 # 人類使用（瀏覽器）
 open http://localhost:8765/
 
-# AI 使用（curl/程式）
+# AI 使用（MCP 工具 - 推薦）
+mcp__naki__get_help
+
+# AI 使用（HTTP 傳統方式）
 curl http://localhost:8765/help
 ```
 

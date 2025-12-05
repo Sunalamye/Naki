@@ -217,24 +217,24 @@ No automated test suite (due to game UI interaction complexity).
 ## Common Debugging Patterns
 
 ### WebSocket Interception Not Working
-1. Verify JS injection: `curl -X POST http://localhost:8765/js -d "window.nakaMessenger"` should return truthy
+1. Verify JS injection: `mcp__naki__execute_js({ code: "window.nakaMessenger" })` should return truthy
 2. Check browser console via remote debugging
 3. Verify `naki-websocket.js` modifications if protocol changed
 
 ### Bot Not Creating Recommendations
-1. Check `curl http://localhost:8765/bot/status` for bot state
+1. Check `mcp__naki__bot_status` for bot state
 2. Verify `start_game` was received (should have playerId)
 3. Check MortalSwift framework is linked in Xcode build phases
-4. Review logs in UI sidebar for inference errors
+4. Review logs: `mcp__naki__get_logs` or UI sidebar
 
 ### AutoPlay Failing to Click
-1. Verify tile positions are correct: `curl -X POST http://localhost:8765/js -d "document.querySelector('[class*=tile]').getBoundingClientRect()"`
+1. Verify tile positions: `mcp__naki__execute_js({ code: "document.querySelector('[class*=tile]').getBoundingClientRect()" })`
 2. Check game layout hasn't changed
-3. Review retry logs in sidebar
+3. Review retry logs in sidebar or via `mcp__naki__get_logs`
 4. Consider if game UI is in unexpected state
 
 ### Protocol Parsing Errors
 1. Add debug logs to `MajsoulBridge.swift` and `LiqiParser.swift`
-2. Check raw Liqi messages via WebSocket interception logs
+2. Check raw Liqi messages via `mcp__naki__get_logs`
 3. Compare with Python Akagi implementation in reference docs
 4. Update protobuf definitions if Majsoul changed message format
