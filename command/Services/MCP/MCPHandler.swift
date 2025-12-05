@@ -123,7 +123,7 @@ final class MCPHandler {
             "protocolVersion": "2025-03-26",
             "serverInfo": [
                 "name": "naki",
-                "version": "2.0.0"
+                "version": "2.1.0"
             ],
             "capabilities": [
                 "tools": [:]

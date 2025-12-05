@@ -1,7 +1,7 @@
 # Naki (鳴き) - 雀魂麻將 AI 助手
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.0.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.1.0-green" alt="Version">
   <img src="https://img.shields.io/badge/Platform-macOS%2026+-blue" alt="Platform">
   <img src="https://img.shields.io/badge/Arch-Apple%20Silicon-red" alt="Architecture">
   <img src="https://img.shields.io/badge/Swift-5.9+-orange" alt="Swift">
@@ -183,6 +183,9 @@ mcp__naki__get_help
 
 - [x] 設定介面優化
 - [x] 出牌高亮提示
+- [x] 動作按鈕推薦高亮（吃/碰/槓/立直）
+- [x] MCP Server 模組化重構
+- [x] iOS 跨平台 UI 支援
 - [ ] MortalSwift 閃退問題待解決
 - [ ] 三麻模式支援
 

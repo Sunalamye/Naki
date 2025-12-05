@@ -10,7 +10,7 @@ This file provides guidance to Claude Code when working with this repository.
 - **Platform**: macOS 13.0+
 - **Swift**: 5.9+
 - **License**: AGPL-3.0 with Commons Clause
-- **Version**: 1.2.0
+- **Version**: 2.1.0
 
 ## Architecture
 
