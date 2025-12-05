@@ -43,6 +43,8 @@
 
 ### macOS
 ![Naki macOS 介面](image.png)
+過碰推薦
+![Recommend](image-1.png)
 
 ### iOS / iPhone
 ![Naki iPhone 介面](iphone.png)
