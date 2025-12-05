@@ -536,6 +536,99 @@
         },
 
         /**
+         * 將原生 effect_recommend 移動到指定按鈕的位置
+         * @param {string} actionType - 動作類型: 'chi', 'pon', 'kan', 'hu', 'zimo', 'pass' 等
+         * @returns {boolean} 成功或失敗
+         */
+        moveNativeEffectToButton: function(actionType) {
+            try {
+                const mgr = window.view?.DesktopMgr?.Inst;
+                if (!mgr?.effect_recommend?._childs?.[0]) {
+                    console.log('[Naki Highlight] Native effect_recommend not available');
+                    return false;
+                }
+
+                const ui = window.uiscript?.UI_ChiPengHu?.Inst;
+                if (!ui?.container_btns) {
+                    console.log('[Naki Highlight] UI_ChiPengHu not available');
+                    return false;
+                }
+
+                // 按鈕名稱映射
+                const btnNameMap = {
+                    'chi': 'btn_chi',
+                    'pon': 'btn_peng',
+                    'kan': 'btn_gang',
+                    'hu': 'btn_hu',
+                    'zimo': 'btn_zimo',
+                    'ron': 'btn_hu',
+                    'hora': 'btn_hu',
+                    'pass': 'btn_cancel',
+                    'cancel': 'btn_cancel',
+                    'riichi': 'btn_lizhi',
+                    'ryukyoku': 'btn_jiuzhongjiupai',
+                    'kyushu': 'btn_jiuzhongjiupai'
+                };
+
+                const targetBtnName = btnNameMap[actionType];
+                if (!targetBtnName) {
+                    console.log('[Naki Highlight] Unknown action type:', actionType);
+                    return false;
+                }
+
+                // 獲取所有可見按鈕（從右到左排序）
+                const container = ui.container_btns;
+                const visibleBtns = [];
+                for (let i = 0; i < container.numChildren; i++) {
+                    const btn = container.getChildAt(i);
+                    if (btn.visible) {
+                        visibleBtns.push({
+                            name: btn.name,
+                            x: btn.x,
+                            center_x: container.x + btn.x + btn.width / 2
+                        });
+                    }
+                }
+
+                // 按 center_x 從大到小排序（最右邊的在前）
+                visibleBtns.sort((a, b) => b.center_x - a.center_x);
+
+                // 找到目標按鈕的索引
+                let btnIndex = -1;
+                for (let i = 0; i < visibleBtns.length; i++) {
+                    if (visibleBtns[i].name === targetBtnName) {
+                        btnIndex = i;
+                        break;
+                    }
+                }
+
+                if (btnIndex === -1) {
+                    console.log('[Naki Highlight] Target button not visible:', targetBtnName);
+                    return false;
+                }
+
+                // 計算 3D 位置：x = 27.5 - (索引 × 7), y = 4.5
+                const effect = mgr.effect_recommend;
+                const child = effect._childs[0];
+                const posX = 27.5 - (btnIndex * 7);
+                const posY = 4.5;
+                const posZ = -0.52;
+
+                child.transform.localPosition = new Laya.Vector3(posX, posY, posZ);
+                effect.active = true;
+                this.nativeEffectActive = true;
+
+                console.log('[Naki Highlight] Moved to button:', actionType,
+                    'btnName:', targetBtnName, 'index:', btnIndex,
+                    'pos:', posX, posY, posZ);
+                return true;
+            } catch (e) {
+                console.error('[Naki Highlight] moveNativeEffectToButton failed:', e);
+                return false;
+            }
+        },
+
+        /**
          * 根據機率獲取顏色
          * @param {number} probability - 機率值 (0.0 ~ 1.0)
          * @returns {object|null} 顏色對象或 null（不顯示）

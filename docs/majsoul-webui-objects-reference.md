@@ -1242,6 +1242,176 @@ console.log(`宝牌變更歷史: ${history.count} 次`);
 
 ---
 
+## 動作按鈕 UI (UI_ChiPengHu)
+
+### 訪問路徑
+
+```javascript
+window.uiscript.UI_ChiPengHu.Inst
+```
+
+**用途**: 吃/碰/槓/過等動作按鈕的 UI 容器
+
+### 結構
+
+```javascript
+{
+  container_btns: {
+    x: 812,                    // 容器 X 位置
+    y: 821,                    // 容器 Y 位置
+    numChildren: 15,           // 子按鈕數量
+    // 子按鈕...
+  },
+
+  // 直接訪問按鈕
+  btn_chi: Button,             // 吃按鈕 (索引 4)
+  btn_peng: Button,            // 碰按鈕 (索引 5)
+  btn_gang: Button,            // 槓按鈕 (索引 6)
+  btn_lizhi: Button,           // 立直按鈕 (索引 7)
+  btn_hu: Button,              // 和/榮和按鈕 (索引 8)
+  btn_zimo: Button,            // 自摸按鈕 (索引 10)
+  btn_cancel: Button,          // 過/取消按鈕 (索引 14)
+  btn_jiuzhongjiupai: Button,  // 九種九牌 (索引 2)
+  btn_babei: Button,           // 流局 (索引 3)
+  btn_anpai: Button,           // 暗牌 (索引 9)
+  btn_kaipai: Button,          // 開牌 (索引 11)
+  btn_suoding: Button,         // 鎖定 (索引 12)
+  btn_anpailiqi: Button,       // 暗牌立直 (索引 13)
+  btn_liqi10: Button,          // 立直 10 (索引 0)
+  btn_liqi5: Button,           // 立直 5 (索引 1)
+}
+```
+
+### 按鈕結構
+
+```javascript
+// 單一按鈕屬性
+{
+  name: string,        // 按鈕名稱，如 "btn_chi"
+  x: number,           // 相對於容器的 X 位置
+  y: number,           // 相對於容器的 Y 位置
+  width: number,       // 按鈕寬度（通常 384）
+  height: number,      // 按鈕高度
+  visible: boolean,    // 是否可見
+  _selected: boolean   // 是否被選中
+}
+```
+
+### 按鈕索引表
+
+| 索引 | 名稱 | 用途 |
+|-----|------|------|
+| 0 | btn_liqi10 | 立直 10 |
+| 1 | btn_liqi5 | 立直 5 |
+| 2 | btn_jiuzhongjiupai | 九種九牌 |
+| 3 | btn_babei | 流局 |
+| 4 | btn_chi | 吃 |
+| 5 | btn_peng | 碰 |
+| 6 | btn_gang | 槓 |
+| 7 | btn_lizhi | 立直 |
+| 8 | btn_hu | 和/榮和 |
+| 9 | btn_anpai | 暗牌 |
+| 10 | btn_zimo | 自摸 |
+| 11 | btn_kaipai | 開牌 |
+| 12 | btn_suoding | 鎖定 |
+| 13 | btn_anpailiqi | 暗牌立直 |
+| 14 | btn_cancel | 過/取消 |
+
+### 獲取可見按鈕
+
+```javascript
+var ui = uiscript.UI_ChiPengHu.Inst;
+var container = ui.container_btns;
+var visibleBtns = [];
+
+for (var i = 0; i < container.numChildren; i++) {
+    var btn = container.getChildAt(i);
+    if (btn.visible) {
+        visibleBtns.push({
+            name: btn.name,
+            x: btn.x,
+            center_x: container.x + btn.x + btn.width / 2
+        });
+    }
+}
+
+console.log("可見按鈕:", visibleBtns);
+```
+
+### 按鈕 3D 效果座標映射
+
+將 `effect_recommend` 移動到按鈕位置的座標映射：
+
+| 按鈕位置（從右到左） | UI center_x | 3D x | 3D y | 3D z |
+|---------------------|-------------|------|------|------|
+| 第1個（過，最右） | 1719 | 27.5 | 4.5 | -0.52 |
+| 第2個 | 1335 | 20.5 | 4.5 | -0.52 |
+| 第3個 | - | 13.5 | 4.5 | -0.52 |
+
+**計算公式**:
+```javascript
+// 按鈕索引從右到左排列（0 = 最右邊）
+var posX = 27.5 - (btnIndex * 7);
+var posY = 4.5;
+var posZ = -0.52;
+```
+
+### 移動效果到按鈕位置
+
+```javascript
+function moveEffectToButton(actionType) {
+    var mgr = view.DesktopMgr.Inst;
+    var ui = uiscript.UI_ChiPengHu.Inst;
+    var container = ui.container_btns;
+
+    // 按鈕名稱映射
+    var btnNameMap = {
+        'chi': 'btn_chi',
+        'pon': 'btn_peng',
+        'kan': 'btn_gang',
+        'pass': 'btn_cancel'
+    };
+
+    var targetBtnName = btnNameMap[actionType];
+
+    // 獲取可見按鈕並排序
+    var visibleBtns = [];
+    for (var i = 0; i < container.numChildren; i++) {
+        var btn = container.getChildAt(i);
+        if (btn.visible) {
+            visibleBtns.push({
+                name: btn.name,
+                center_x: container.x + btn.x + btn.width / 2
+            });
+        }
+    }
+    visibleBtns.sort(function(a, b) { return b.center_x - a.center_x; });
+
+    // 找到目標按鈕索引
+    var btnIndex = -1;
+    for (var i = 0; i < visibleBtns.length; i++) {
+        if (visibleBtns[i].name === targetBtnName) {
+            btnIndex = i;
+            break;
+        }
+    }
+
+    if (btnIndex === -1) return false;
+
+    // 計算 3D 位置
+    var posX = 27.5 - (btnIndex * 7);
+    var effect = mgr.effect_recommend;
+    var child = effect._childs[0];
+
+    child.transform.localPosition = new Laya.Vector3(posX, 4.5, -0.52);
+    effect.active = true;
+
+    return true;
+}
+```
+
+---
+
 ## 相關資源
 
 ### Shader 資源
@@ -1262,6 +1432,7 @@ console.log(`宝牌變更歷史: ${history.count} 次`);
 
 ---
 
-**文檔版本**: 1.0
-**更新日期**: 2025-12-04
+**文檔版本**: 1.1
+**更新日期**: 2025-12-05
 **驗證狀態**: ✅ 通過 Debug Server 和 JavaScript 直接查詢驗證
+**變更記錄**: 新增動作按鈕 UI (UI_ChiPengHu) 章節
