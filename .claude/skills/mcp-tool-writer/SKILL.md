@@ -77,6 +77,8 @@ struct MyNewTool: MCPTool {
 register(MyNewTool.self)
 ```
 
+**注意**: Tools 列表會自動從 Registry 生成，無需手動維護 JSON 檔案。
+
 ### Step 3: Add to Xcode Project
 
 如果創建了新文件，需要在 `Naki.xcodeproj/project.pbxproj` 的 membershipExceptions 中添加路徑。
