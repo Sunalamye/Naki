@@ -170,13 +170,13 @@ struct ContentView: View {
                 HStack(alignment: .top){
                     iOSLeftView
                     NakiWebView(viewModel: viewModel)
-                        .ignoresSafeArea(edges: .bottom)
                 }
                 //                // 底部浮動控制面板
                 iOSBottomPanel
                     .opacity(0.5)
                     .allowsHitTesting(false)
             }
+            .ignoresSafeArea(edges: .bottom)
             .navigationTitle("Naki")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
