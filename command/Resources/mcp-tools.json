@@ -2,7 +2,7 @@
   "tools": [
     {
       "name": "get_status",
-      "description": "獲取 Debug Server 狀態和埠號",
+      "description": "獲取 MCP Server 狀態和埠號",
       "inputSchema": {"type": "object", "properties": {}, "required": []}
     },
     {

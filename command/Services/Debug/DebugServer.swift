@@ -3,15 +3,15 @@
 //  Naki
 //
 //  Created by Claude on 2025/12/01.
-//  本地 HTTP Debug Server - 允許外部工具控制 App
+//  本地 HTTP MCP Server - 允許外部工具控制 App
 //
 
 import Foundation
 import Network
 
-// MARK: - Debug Server
+// MARK: - MCP Server
 
-/// 本地 HTTP Debug Server
+/// 本地 HTTP MCP Server
 class DebugServer {
 
     // MARK: - Properties
@@ -113,7 +113,7 @@ class DebugServer {
                     self.actualPort = port
                     self.isRunning = true
                     self.mcpHandler.serverPort = port
-                    self.log("Debug Server started on http://localhost:\(port)")
+                    self.log("MCP Server started on http://localhost:\(port)")
                     self.onPortChanged?(port)
                 case .failed(let error):
                     self.log("Server failed on port \(port): \(error)")
@@ -151,7 +151,7 @@ class DebugServer {
         listener?.cancel()
         listener = nil
         isRunning = false
-        log("Debug Server stopped")
+        log("MCP Server stopped")
     }
 
     // MARK: - Connection Handling
@@ -312,9 +312,9 @@ class DebugServer {
         let html = """
         <!DOCTYPE html>
         <html>
-        <head><title>Naki Debug Server</title></head>
+        <head><title>Naki MCP Server</title></head>
         <body>
-        <h1>🀄 Naki Debug Server</h1>
+        <h1>🀄 Naki MCP Server</h1>
         <h2>Available Endpoints:</h2>
         <ul>
             <li><code>GET /status</code> - Get server status</li>
@@ -537,7 +537,7 @@ class DebugServer {
     private func sendJSON(connection: NWConnection, data: [String: Any]) {
         do {
             if data.isEmpty {
-                throw NSError(domain: "DebugServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty JSON data"])
+                throw NSError(domain: "MCPServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty JSON data"])
             }
 
             let sanitized = sanitizeForJSON(data) as! [String: Any]
@@ -575,7 +575,7 @@ class DebugServer {
     private func log(_ message: String) {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let logMessage = "[\(timestamp)] \(message)"
-        print("[DebugServer] \(message)")
+        print("[MCPServer] \(message)")
 
         // 存儲到 buffer
         logBuffer.append(logMessage)

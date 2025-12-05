@@ -103,7 +103,7 @@ struct ContentView: View {
             }
         }
         
-        // Debug Server
+        // MCP Server
         ToolbarItem(placement: .navigation) {
             Button(action: { viewModel.toggleDebugServer() }) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -116,13 +116,13 @@ struct ContentView: View {
                             .font(.system(.caption, design: .monospaced))
                         
                     }
-                    Text("Debug Server")
+                    Text("MCP Server")
                         .font(.system(size: 8))
                         .foregroundColor(.secondary)
                 }
             }
             .frame(width: 80)
-            .help(viewModel.isDebugServerRunning ? "Debug Server 運行中" : "Debug Server 已停止")
+            .help(viewModel.isDebugServerRunning ? "MCP Server 運行中" : "MCP Server 已停止")
         }
         
         // 連接狀態
@@ -588,7 +588,7 @@ struct AdvancedSettingsSheet: View {
             }
 
             #if os(macOS)
-            // Debug Server (僅 macOS)
+            // MCP Server (僅 macOS)
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -620,7 +620,7 @@ struct AdvancedSettingsSheet: View {
                     }
                 }
             } label: {
-                Label("Debug Server", systemImage: "server.rack")
+                Label("MCP Server", systemImage: "server.rack")
             }
             #endif
         }

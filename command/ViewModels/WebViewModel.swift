@@ -5,7 +5,7 @@
 //  Created by Suoie on 2025/11/29.
 //
 //  核心視圖模型（協調器），負責：
-//  - 協調各服務 (AutoPlayService, DebugServer, GameStateManager)
+//  - 協調各服務 (AutoPlayService, MCPServer, GameStateManager)
 //  - Bot 控制 (NativeBotController + MortalSwift)
 //  - WebPage 整合 (JavaScript Bridge) - 使用 macOS 26.0+ WebPage API
 //
@@ -51,7 +51,7 @@ class WebViewModel {
   // 自動打牌控制器（UI 自動化）
   private var autoPlayController: AutoPlayController?
 
-  // Debug Server
+  // MCP Server
   private var debugServer: DebugServer?
   var isDebugServerRunning = false
   var debugServerPort: UInt16 = 8765
@@ -149,7 +149,7 @@ class WebViewModel {
     // 設定 AutoPlayController 的 WebPage
     autoPlayController?.setWebPage(webPage)
 
-    // 自動啟動 Debug Server
+    // 自動啟動 MCP Server
     startDebugServer()
 
     // 自動設定全自動打牌模式
@@ -1170,12 +1170,12 @@ class WebViewModel {
     }
   }
 
-  // MARK: - Debug Server
+  // MARK: - MCP Server
 
-  /// 啟動 Debug Server
+  /// 啟動 MCP Server
   func startDebugServer() {
     guard debugServer == nil else {
-      statusMessage = "Debug Server 已在運行"
+      statusMessage = "MCP Server 已在運行"
       return
     }
 
@@ -1280,22 +1280,22 @@ class WebViewModel {
       Task { @MainActor in
         self?.debugServerPort = newPort
         self?.isDebugServerRunning = true
-        self?.statusMessage = "Debug Server 已啟動: http://localhost:\(newPort)"
+        self?.statusMessage = "MCP Server 已啟動: http://localhost:\(newPort)"
       }
     }
 
     debugServer?.start()
   }
 
-  /// 停止 Debug Server
+  /// 停止 MCP Server
   func stopDebugServer() {
     debugServer?.stop()
     debugServer = nil
     isDebugServerRunning = false
-    statusMessage = "Debug Server 已停止"
+    statusMessage = "MCP Server 已停止"
   }
 
-  /// 切換 Debug Server
+  /// 切換 MCP Server
   func toggleDebugServer() {
     if isDebugServerRunning {
       stopDebugServer()

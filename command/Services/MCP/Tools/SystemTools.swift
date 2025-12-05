@@ -10,10 +10,10 @@ import Foundation
 
 // MARK: - Get Status Tool
 
-/// 獲取 Debug Server 狀態
+/// 獲取 MCP Server 狀態
 struct GetStatusTool: MCPTool {
     static let name = "get_status"
-    static let description = "獲取 Debug Server 狀態和埠號"
+    static let description = "獲取 MCP Server 狀態和埠號"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
