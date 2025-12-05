@@ -78,6 +78,9 @@ class WebViewModel {
     private var lastAutoPlayTriggerTime: Date = .distantPast
     private var lastAutoPlayActionType: Recommendation.ActionType?
 
+    /// 是否已經套用過隱藏名稱設定（防止重複套用）
+    private var hasAppliedHideNamesSettings = false
+
     /// 當前正在執行的動作ID（用於追蹤而非阻擋）
     private var currentExecutionId: UUID?
 
@@ -171,6 +174,8 @@ class WebViewModel {
                     case .startedProvisionalNavigation:
                         webCoordinator?.handleNavigationStarted()
                         statusMessage = "正在加载雀魂..."
+                        // 重置隱藏名稱設定狀態，以便重新套用
+                        resetHideNamesSettings()
 
                     case .committed:
                         statusMessage = "雀魂已加载，等待连接..."
@@ -202,6 +207,9 @@ class WebViewModel {
     /// 定期檢查：如果有推薦且沒有正在執行的動作，重新觸發
     private func checkAndRetriggerAutoPlay() {
         guard let page = webPage else { return }
+
+        // 自動套用隱藏名稱設定（僅在遊戲可用時套用一次）
+        applyHideNamesSettingsIfNeeded()
 
         // 檢查並更新高亮效果（如果有推薦但沒有顯示效果）
         checkAndUpdateHighlights()
@@ -549,6 +557,77 @@ class WebViewModel {
                 bridgeLog("[WebViewModel] Error setting highlight: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// 設定是否隱藏玩家名稱
+    func setHidePlayerNames(_ hide: Bool) {
+        guard let page = webPage else { return }
+
+        let script = "window.__nakiPlayerNames?.setHidden(\(hide))"
+
+        Task {
+            do {
+                let result = try await page.callJavaScript(script)
+                bridgeLog("[WebViewModel] Hide player names: \(hide), result: \(String(describing: result))")
+            } catch {
+                bridgeLog("[WebViewModel] Error setting hide names: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// 獲取玩家名稱隱藏狀態
+    func getPlayerNamesStatus() async -> [String: Any]? {
+        guard let page = webPage else { return nil }
+
+        let script = "JSON.stringify(window.__nakiPlayerNames?.getStatus() || {})"
+
+        do {
+            let result = try await page.callJavaScript(script)
+            if let jsonString = result as? String,
+               let data = jsonString.data(using: .utf8),
+               let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                return status
+            }
+        } catch {
+            bridgeLog("[WebViewModel] Error getting names status: \(error.localizedDescription)")
+        }
+        return nil
+    }
+
+    /// 自動套用隱藏名稱設定（在遊戲可用時套用）
+    private func applyHideNamesSettingsIfNeeded() {
+        guard !hasAppliedHideNamesSettings else { return }
+        guard let page = webPage else { return }
+
+        // 檢查用戶設定
+        let shouldHide = UserDefaults.standard.bool(forKey: "hidePlayerNames")
+        guard shouldHide else {
+            // 如果用戶不想隱藏，標記為已處理，不需要再檢查
+            hasAppliedHideNamesSettings = true
+            return
+        }
+
+        // 檢查遊戲 API 是否可用
+        let checkScript = "window.__nakiPlayerNames && window.uiscript?.UI_DesktopInfo?.Inst ? true : false"
+
+        Task {
+            do {
+                let result = try await page.callJavaScript(checkScript)
+                if let isAvailable = result as? Bool, isAvailable {
+                    // API 可用，套用設定
+                    setHidePlayerNames(true)
+                    hasAppliedHideNamesSettings = true
+                    bridgeLog("[WebViewModel] Auto-applied hide player names setting")
+                }
+            } catch {
+                // 忽略錯誤，下次定期檢查時會再嘗試
+            }
+        }
+    }
+
+    /// 重置隱藏名稱設定狀態（頁面重新載入時調用）
+    func resetHideNamesSettings() {
+        hasAppliedHideNamesSettings = false
     }
 
     /// 確認待處理的自動打牌動作

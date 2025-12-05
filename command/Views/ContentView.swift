@@ -380,6 +380,9 @@ struct AdvancedSettingsSheet: View {
     @State private var temperature: Double = 0.3
     @State private var showRotatingEffect: Bool = false  // 預設關閉旋轉效果
 
+    // 隱私設定
+    @AppStorage("hidePlayerNames") private var hidePlayerNames: Bool = false
+
     // 位置校準
     @State private var tileSpacing: Double = 96.0
     @State private var offsetX: Double = -200.0
@@ -474,6 +477,25 @@ struct AdvancedSettingsSheet: View {
                 }
             } label: {
                 Label("AI 設定", systemImage: "brain")
+            }
+
+            // 隱私設定
+            GroupBox {
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle(isOn: $hidePlayerNames) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("隱藏玩家名稱")
+                            Text("隱藏遊戲中所有玩家的暱稱顯示")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .onChange(of: hidePlayerNames) { _, newValue in
+                        viewModel.setHidePlayerNames(newValue)
+                    }
+                }
+            } label: {
+                Label("隱私設定", systemImage: "eye.slash")
             }
 
             #if os(macOS)

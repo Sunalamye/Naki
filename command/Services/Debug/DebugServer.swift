@@ -240,6 +240,19 @@ class DebugServer {
         case ("POST", "/mcp"):
             handleMCP(body: body, headers: lines, connection: connection)
 
+        // ⭐ UI 控制端點
+        case ("GET", "/ui/names"):
+            handleGetPlayerNamesStatus(connection: connection)
+
+        case ("POST", "/ui/names/hide"):
+            handleHidePlayerNames(connection: connection)
+
+        case ("POST", "/ui/names/show"):
+            handleShowPlayerNames(connection: connection)
+
+        case ("POST", "/ui/names/toggle"):
+            handleTogglePlayerNames(connection: connection)
+
         default:
             sendResponse(connection: connection, status: 404, body: "Not Found: \(path)")
         }
@@ -292,6 +305,17 @@ class DebugServer {
         <pre>curl http://localhost:\(actualPort)/bot/deep</pre>
         <pre>curl -X POST http://localhost:\(actualPort)/bot/chi</pre>
         <pre>curl -X POST http://localhost:\(actualPort)/bot/pon</pre>
+        <h3>UI Control:</h3>
+        <ul>
+            <li><code>GET /ui/names</code> - Get player names visibility status</li>
+            <li><code>POST /ui/names/hide</code> - Hide all player names</li>
+            <li><code>POST /ui/names/show</code> - Show all player names</li>
+            <li><code>POST /ui/names/toggle</code> - Toggle player names visibility</li>
+        </ul>
+        <h2>Quick UI Control:</h2>
+        <pre>curl http://localhost:\(actualPort)/ui/names</pre>
+        <pre>curl -X POST http://localhost:\(actualPort)/ui/names/hide</pre>
+        <pre>curl -X POST http://localhost:\(actualPort)/ui/names/show</pre>
         </body>
         </html>
         """
@@ -457,6 +481,31 @@ class DebugServer {
                     "description": "設定校準參數",
                     "body": "{\"tileSpacing\": 96, \"offsetX\": -200, \"offsetY\": 0}",
                     "returns": "{\"tileSpacing\": 96, \"offsetX\": -200, \"offsetY\": 0}"
+                ],
+                // UI 控制類
+                [
+                    "method": "GET",
+                    "path": "/ui/names",
+                    "description": "獲取玩家名稱顯示狀態",
+                    "returns": "{\"available\": true, \"hidden\": false, \"players\": [...]}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/ui/names/hide",
+                    "description": "隱藏所有玩家名稱",
+                    "returns": "{\"success\": true, \"hidden\": true}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/ui/names/show",
+                    "description": "顯示所有玩家名稱",
+                    "returns": "{\"success\": true, \"hidden\": false}"
+                ],
+                [
+                    "method": "POST",
+                    "path": "/ui/names/toggle",
+                    "description": "切換玩家名稱顯示狀態",
+                    "returns": "{\"success\": true, \"hidden\": boolean}"
                 ]
             ],
             "common_workflows": [
@@ -810,6 +859,68 @@ class DebugServer {
         }
     }
 
+    // MARK: - UI Control Handlers
+
+    private func handleGetPlayerNamesStatus(connection: NWConnection) {
+        log("Get player names status requested")
+        let script = "JSON.stringify(window.__nakiPlayerNames?.getStatus() || {available: false})"
+        executeJavaScript?(script) { [weak self] result, error in
+            if let error = error {
+                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
+            } else if let jsonString = result as? String,
+                      let data = jsonString.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                self?.sendJSON(connection: connection, data: json)
+            } else {
+                self?.sendJSON(connection: connection, data: ["available": false])
+            }
+        }
+    }
+
+    private func handleHidePlayerNames(connection: NWConnection) {
+        log("Hide player names requested")
+        let script = "window.__nakiPlayerNames?.hide() || false"
+        executeJavaScript?(script) { [weak self] result, error in
+            if let error = error {
+                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
+            } else {
+                let success = result as? Bool ?? false
+                self?.sendJSON(connection: connection, data: ["success": success, "hidden": true])
+            }
+        }
+    }
+
+    private func handleShowPlayerNames(connection: NWConnection) {
+        log("Show player names requested")
+        let script = "window.__nakiPlayerNames?.show() || false"
+        executeJavaScript?(script) { [weak self] result, error in
+            if let error = error {
+                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
+            } else {
+                let success = result as? Bool ?? false
+                self?.sendJSON(connection: connection, data: ["success": success, "hidden": false])
+            }
+        }
+    }
+
+    private func handleTogglePlayerNames(connection: NWConnection) {
+        log("Toggle player names requested")
+        let script = "window.__nakiPlayerNames?.toggle() || false"
+        executeJavaScript?(script) { [weak self] result, error in
+            if let error = error {
+                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
+            } else {
+                let success = result as? Bool ?? false
+                // 獲取當前狀態
+                let statusScript = "window.__nakiPlayerNames?.hidden || false"
+                self?.executeJavaScript?(statusScript) { statusResult, _ in
+                    let hidden = statusResult as? Bool ?? false
+                    self?.sendJSON(connection: connection, data: ["success": success, "hidden": hidden])
+                }
+            }
+        }
+    }
+
     // MARK: - Response Helpers
 
     private func sendResponse(connection: NWConnection, status: Int, body: String, contentType: String = "text/plain") {
@@ -1070,6 +1181,28 @@ class DebugServer {
                     ],
                     "required": []
                 ]
+            ],
+
+            // UI 控制類
+            [
+                "name": "ui_names_status",
+                "description": "獲取玩家名稱的顯示狀態",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "ui_names_hide",
+                "description": "隱藏所有玩家名稱",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "ui_names_show",
+                "description": "顯示所有玩家名稱",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
+            ],
+            [
+                "name": "ui_names_toggle",
+                "description": "切換玩家名稱的顯示狀態",
+                "inputSchema": ["type": "object", "properties": [:], "required": []]
             ]
         ]
     }
@@ -1302,6 +1435,44 @@ class DebugServer {
                         "offsetX": offsetX,
                         "offsetY": offsetY
                     ])
+                }
+            }
+
+        // UI 控制類
+        case "ui_names_status":
+            executeJSForMCP("JSON.stringify(window.__nakiPlayerNames?.getStatus() || {available: false})", id: id, connection: connection, parseJSON: true)
+
+        case "ui_names_hide":
+            executeJavaScript?("window.__nakiPlayerNames?.hide() || false") { [weak self] result, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else {
+                    let success = result as? Bool ?? false
+                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "hidden": true])
+                }
+            }
+
+        case "ui_names_show":
+            executeJavaScript?("window.__nakiPlayerNames?.show() || false") { [weak self] result, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else {
+                    let success = result as? Bool ?? false
+                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "hidden": false])
+                }
+            }
+
+        case "ui_names_toggle":
+            executeJavaScript?("window.__nakiPlayerNames?.toggle() || false") { [weak self] result, error in
+                if let error = error {
+                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
+                } else {
+                    let success = result as? Bool ?? false
+                    // 獲取當前狀態
+                    self?.executeJavaScript?("window.__nakiPlayerNames?.hidden || false") { statusResult, _ in
+                        let hidden = statusResult as? Bool ?? false
+                        self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "hidden": hidden])
+                    }
                 }
             }
 

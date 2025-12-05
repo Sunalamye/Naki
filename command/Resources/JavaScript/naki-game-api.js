@@ -938,5 +938,122 @@
         }
     }, 500);
 
+    // ========================================
+    // 🎭 玩家名稱隱藏功能
+    // ========================================
+
+    /**
+     * 玩家名稱控制模組
+     * 用於隱藏/顯示遊戲中的玩家名稱
+     */
+    window.__nakiPlayerNames = {
+        hidden: false,
+
+        /**
+         * 隱藏所有玩家名稱
+         */
+        hide: function() {
+            try {
+                const UI_DesktopInfo = window.uiscript?.UI_DesktopInfo;
+                if (!UI_DesktopInfo || !UI_DesktopInfo.Inst) {
+                    console.log('[Naki PlayerNames] UI_DesktopInfo not available');
+                    return false;
+                }
+
+                const playerInfos = UI_DesktopInfo.Inst._player_infos;
+                if (!playerInfos || playerInfos.length === 0) {
+                    console.log('[Naki PlayerNames] No player infos found');
+                    return false;
+                }
+
+                playerInfos.forEach((info, i) => {
+                    if (info && info.name) {
+                        info.name.visible = false;
+                    }
+                });
+
+                this.hidden = true;
+                console.log('[Naki PlayerNames] All player names hidden');
+                return true;
+            } catch (e) {
+                console.error('[Naki PlayerNames] Error hiding names:', e.message);
+                return false;
+            }
+        },
+
+        /**
+         * 顯示所有玩家名稱
+         */
+        show: function() {
+            try {
+                const UI_DesktopInfo = window.uiscript?.UI_DesktopInfo;
+                if (!UI_DesktopInfo || !UI_DesktopInfo.Inst) {
+                    console.log('[Naki PlayerNames] UI_DesktopInfo not available');
+                    return false;
+                }
+
+                const playerInfos = UI_DesktopInfo.Inst._player_infos;
+                if (!playerInfos || playerInfos.length === 0) {
+                    console.log('[Naki PlayerNames] No player infos found');
+                    return false;
+                }
+
+                playerInfos.forEach((info, i) => {
+                    if (info && info.name) {
+                        info.name.visible = true;
+                    }
+                });
+
+                this.hidden = false;
+                console.log('[Naki PlayerNames] All player names shown');
+                return true;
+            } catch (e) {
+                console.error('[Naki PlayerNames] Error showing names:', e.message);
+                return false;
+            }
+        },
+
+        /**
+         * 切換名稱顯示狀態
+         */
+        toggle: function() {
+            return this.hidden ? this.show() : this.hide();
+        },
+
+        /**
+         * 設置名稱顯示狀態
+         * @param {boolean} hide - true 隱藏，false 顯示
+         */
+        setHidden: function(hide) {
+            return hide ? this.hide() : this.show();
+        },
+
+        /**
+         * 獲取當前狀態
+         */
+        getStatus: function() {
+            try {
+                const UI_DesktopInfo = window.uiscript?.UI_DesktopInfo;
+                if (!UI_DesktopInfo || !UI_DesktopInfo.Inst) {
+                    return { available: false, hidden: this.hidden };
+                }
+
+                const playerInfos = UI_DesktopInfo.Inst._player_infos;
+                const names = playerInfos?.map((info, i) => ({
+                    index: i,
+                    visible: info?.name?.visible ?? null
+                })) || [];
+
+                return {
+                    available: true,
+                    hidden: this.hidden,
+                    players: names
+                };
+            } catch (e) {
+                return { available: false, error: e.message };
+            }
+        }
+    };
+
     console.log('[Naki] Game API module loaded');
 })();
