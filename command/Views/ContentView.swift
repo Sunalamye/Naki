@@ -11,30 +11,35 @@ import WebKit
 
 struct ContentView: View {
     @State private var viewModel = WebViewModel()
+    
+#if os(macOS)
     @State private var showGamePanel = true
+#else
+    @State private var showGamePanel = false
+#endif
     @State private var showAdvancedSettings = false
     @State private var showLog = false
-
+    
     // 自動打牌控制
     @State private var autoPlayMode: AutoPlayMode = .auto
     @State private var actionDelay: Double = 1.0
-
+    
     var body: some View {
-        #if os(macOS)
+#if os(macOS)
         macOSLayout
-        #else
+#else
         iOSLayout
-        #endif
+#endif
     }
-
+    
     // MARK: - macOS Layout
-    #if os(macOS)
+#if os(macOS)
     private var macOSLayout: some View {
         HSplitView {
             // WebView
             NakiWebView(viewModel: viewModel)
                 .frame(minWidth: 600)
-
+            
             // 遊戲面板（右側）
             if showGamePanel {
                 GamePanel(viewModel: viewModel, showLog: $showLog)
@@ -53,7 +58,7 @@ struct ContentView: View {
             macOSToolbarContent
         }
     }
-
+    
     @ToolbarContentBuilder
     private var macOSToolbarContent: some ToolbarContent {
         // 進階設定
@@ -63,7 +68,7 @@ struct ContentView: View {
             }
             .help("進階設定")
         }
-
+        
         // 左側：自動打牌模式
         ToolbarItem(placement: .navigation) {
             Picker("", selection: $autoPlayMode) {
@@ -78,7 +83,7 @@ struct ContentView: View {
             }
             .help("AI 推薦模式")
         }
-
+        
         // 延遲調整
         ToolbarItem(placement: .navigation) {
             if autoPlayMode != .off {
@@ -86,7 +91,7 @@ struct ContentView: View {
                     Text("\(actionDelay, specifier: "%.1f")s")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.secondary)
-
+                    
                     Stepper("", value: $actionDelay, in: 0.5...3.0, step: 0.5)
                         .labelsHidden()
                         .onChange(of: actionDelay) { _, newValue in
@@ -97,7 +102,7 @@ struct ContentView: View {
                 .help("動作延遲")
             }
         }
-
+        
         // Debug Server
         ToolbarItem(placement: .navigation) {
             Button(action: { viewModel.toggleDebugServer() }) {
@@ -106,10 +111,10 @@ struct ContentView: View {
                         Circle()
                             .fill(viewModel.isDebugServerRunning ? Color.green : Color.gray)
                             .frame(width: 6, height: 6)
-
+                        
                         Text("\(viewModel.debugServerPort)")
                             .font(.system(.caption, design: .monospaced))
-
+                        
                     }
                     Text("Debug Server")
                         .font(.system(size: 8))
@@ -119,13 +124,13 @@ struct ContentView: View {
             .frame(width: 80)
             .help(viewModel.isDebugServerRunning ? "Debug Server 運行中" : "Debug Server 已停止")
         }
-
+        
         // 連接狀態
         ToolbarItem(placement: .navigation) {
             ConnectionIndicator(viewModel: viewModel)
                 .frame(width: 80)
         }
-
+        
         // 重新載入
         ToolbarItem(placement: .destructiveAction) {
             Button(action: {
@@ -137,7 +142,7 @@ struct ContentView: View {
             }
             .help("重新載入")
         }
-
+        
         // 右側：日誌切換
         ToolbarItem(placement: .primaryAction) {
             Button(action: { showLog.toggle() }) {
@@ -145,7 +150,7 @@ struct ContentView: View {
             }
             .help("顯示/隱藏日誌")
         }
-
+        
         // 遊戲面板切換
         ToolbarItem(placement: .primaryAction) {
             Button(action: { showGamePanel.toggle() }) {
@@ -154,19 +159,23 @@ struct ContentView: View {
             .help("顯示/隱藏遊戲面板")
         }
     }
-    #endif
-
+#endif
+    
     // MARK: - iOS Layout
-    #if os(iOS)
+#if os(iOS)
+    
     private var iOSLayout: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                // 全螢幕 WebView
-                NakiWebView(viewModel: viewModel)
-                    .ignoresSafeArea(edges: .bottom)
-
-//                // 底部浮動控制面板
-//                iOSBottomPanel
+                HStack(alignment: .top){
+                    iOSLeftView
+                    NakiWebView(viewModel: viewModel)
+                        .ignoresSafeArea(edges: .bottom)
+                }
+                //                // 底部浮動控制面板
+                iOSBottomPanel
+                    .opacity(0.5)
+                    .allowsHitTesting(false)
             }
             .navigationTitle("Naki")
             .navigationBarTitleDisplayMode(.inline)
@@ -181,17 +190,17 @@ struct ContentView: View {
             }
         }
     }
-
+    
     private var iOSBottomPanel: some View {
         HStack(spacing: 0) {
-            // 狀態訊息
             if !viewModel.statusMessage.isEmpty {
                 StatusBar(viewModel: viewModel)
             }
-
-            // 快速控制列
-            HStack(spacing: 16) {
-                // 連接狀態
+        }
+    }
+    private var iOSLeftView: some View {
+        VStack(alignment:.leading, spacing: 16) {
+            VStack{
                 HStack(spacing: 4) {
                     Circle()
                         .fill(viewModel.isConnected ? Color.green : Color.red)
@@ -199,65 +208,51 @@ struct ContentView: View {
                     Text(viewModel.isConnected ? "已連接" : "未連接")
                         .font(.caption)
                 }
-                .frame(width: 80)
-                // AI 推薦模式
-                Picker("模式", selection: $autoPlayMode) {
-                    Text("關").tag(AutoPlayMode.off)
-                    Text("推薦").tag(AutoPlayMode.recommend)
-                    Text("自動").tag(AutoPlayMode.auto)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 150)
-                .onChange(of: autoPlayMode) { _, newValue in
-                    viewModel.setAutoPlayMode(newValue)
-                }
-
-
-                // 推薦數量指示
-                if viewModel.recommendationCount > 0 {
-                    Button(action: { showGamePanel = true }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "brain")
-                            Text("\(viewModel.recommendationCount)")
-                        }
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.green.opacity(0.2))
-                        .cornerRadius(8)
-                    }
-                }
+                
+                Text("WebSocket")
+                    .font(.system(size: 8))
+                    .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.ultraThinMaterial)
+            
+            RecommendationView(
+                recommendations: viewModel.recommendations,
+                maxDisplay: 5
+            )
         }
+        .frame(width: 140)
     }
-
+    
     @ToolbarContentBuilder
     private var iOSToolbarContent: some ToolbarContent {
         // 左側：重新載入
         ToolbarItem(placement: .navigationBarLeading) {
             Button(action: {
-                Task {
-                    try? await viewModel.webPage?.reload()
-                }
+                viewModel.webPage?.reload()
             }) {
                 Image(systemName: "arrow.clockwise")
             }
         }
         
         ToolbarItem(placement: .automatic) {
-            iOSBottomPanel
+            Picker("模式", selection: $autoPlayMode) {
+                Text("關").tag(AutoPlayMode.off)
+                Text("推薦").tag(AutoPlayMode.recommend)
+                Text("自動").tag(AutoPlayMode.auto)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 150)
+            .onChange(of: autoPlayMode) { _, newValue in
+                viewModel.setAutoPlayMode(newValue)
+            }
         }
-
+        
         // 右側：遊戲面板
         ToolbarItem(placement: .navigationBarTrailing) {
             Button(action: { showGamePanel = true }) {
                 Image(systemName: "sidebar.right")
             }
         }
-
+        
         // 右側：設定
         ToolbarItem(placement: .navigationBarTrailing) {
             Button(action: { showAdvancedSettings = true }) {
@@ -265,7 +260,7 @@ struct ContentView: View {
             }
         }
     }
-
+    
     private var iOSGamePanelSheet: some View {
         NavigationStack {
             ScrollView {
@@ -275,13 +270,13 @@ struct ContentView: View {
                         botStatus: viewModel.botStatus,
                         gameState: viewModel.gameState
                     )
-
+                    
                     // AI 推薦
                     RecommendationView(
                         recommendations: viewModel.recommendations,
                         maxDisplay: 5
                     )
-
+                    
                     // 日誌（可展開）
                     DisclosureGroup("日誌") {
                         LogPanel()
@@ -304,7 +299,7 @@ struct ContentView: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
-    #endif
+#endif
 }
 
 // MARK: - Game Panel (macOS 右側面板)
