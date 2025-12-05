@@ -1,0 +1,176 @@
+{
+  "tools": [
+    {
+      "name": "get_status",
+      "description": "獲取 Debug Server 狀態和埠號",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "get_help",
+      "description": "獲取完整的 API 文檔（JSON 格式）",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "get_logs",
+      "description": "獲取 Debug 日誌（最多 10,000 條）",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "clear_logs",
+      "description": "清空所有日誌",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "bot_status",
+      "description": "獲取 Bot 狀態，包含手牌、AI 推薦動作、可用操作等完整信息",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "bot_trigger",
+      "description": "手動觸發自動打牌（執行 AI 推薦的動作）",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "bot_ops",
+      "description": "探索可用的副露操作（吃/碰/槓）",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "bot_deep",
+      "description": "深度探索 naki API（所有方法）",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "bot_chi",
+      "description": "測試吃操作",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "bot_pon",
+      "description": "測試碰操作",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "game_state",
+      "description": "獲取當前遊戲狀態",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "game_hand",
+      "description": "獲取手牌資訊",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "game_ops",
+      "description": "獲取當前可用操作",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "game_discard",
+      "description": "打出指定索引的牌",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tileIndex": {
+            "type": "integer",
+            "description": "要打出的牌在手牌中的索引 (0-13)"
+          }
+        },
+        "required": ["tileIndex"]
+      }
+    },
+    {
+      "name": "game_action",
+      "description": "執行遊戲動作（如 pass, chi, pon, kan, riichi, tsumo, ron）",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "動作名稱"
+          },
+          "params": {
+            "type": "object",
+            "description": "動作參數（可選）"
+          }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "execute_js",
+      "description": "在遊戲 WebView 中執行 JavaScript 代碼。⚠️ 重要：必須使用 return 語句才能獲取返回值！例如：'return 1+1' 返回 2，'return document.title' 返回標題。返回 Object 時使用 JSON.stringify()。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "要執行的 JavaScript 代碼（函數體格式，需要 return 語句才能獲取返回值）"
+          }
+        },
+        "required": ["code"]
+      }
+    },
+    {
+      "name": "detect",
+      "description": "檢測遊戲 API 是否可用",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "explore",
+      "description": "探索遊戲物件結構",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "test_indicators",
+      "description": "顯示測試指示器（用於調試點擊位置）",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "click",
+      "description": "在指定座標點擊",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "x": {"type": "number", "description": "X 座標"},
+          "y": {"type": "number", "description": "Y 座標"},
+          "label": {"type": "string", "description": "點擊標籤（可選）"}
+        },
+        "required": ["x", "y"]
+      }
+    },
+    {
+      "name": "calibrate",
+      "description": "設定校準參數",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tileSpacing": {"type": "number", "description": "牌間距（默認 96）"},
+          "offsetX": {"type": "number", "description": "X 偏移（默認 -200）"},
+          "offsetY": {"type": "number", "description": "Y 偏移（默認 0）"}
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "ui_names_status",
+      "description": "獲取玩家名稱的顯示狀態",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "ui_names_hide",
+      "description": "隱藏所有玩家名稱",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "ui_names_show",
+      "description": "顯示所有玩家名稱",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    },
+    {
+      "name": "ui_names_toggle",
+      "description": "切換玩家名稱的顯示狀態",
+      "inputSchema": {"type": "object", "properties": {}, "required": []}
+    }
+  ]
+}

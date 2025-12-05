@@ -55,6 +55,7 @@
 				"Resources/JavaScript/naki-core.js",
 				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
+				"Resources/mcp-tools.json",
 				Services/AutoPlay/AutoPlayService.swift,
 				Services/Bot/AutoPlayController.swift,
 				Services/Bot/NativeBotController.swift,
@@ -64,6 +65,7 @@
 				Services/Bridge/WebSocketInterceptor.swift,
 				Services/Debug/DebugServer.swift,
 				Services/LogManager.swift,
+				Services/MCP/MCPHandler.swift,
 				ViewModels/GameStateManager.swift,
 				ViewModels/WebViewModel.swift,
 				Views/BotStatusView.swift,
@@ -87,6 +89,7 @@
 				Services/Bridge/WebSocketInterceptor.swift,
 				Services/Debug/DebugServer.swift,
 				Services/LogManager.swift,
+				Services/MCP/MCPHandler.swift,
 				ViewModels/GameStateManager.swift,
 				ViewModels/WebViewModel.swift,
 				Views/BotStatusView.swift,
@@ -107,6 +110,7 @@
 				"Resources/JavaScript/naki-core.js",
 				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
+				"Resources/mcp-tools.json",
 				Services/AutoPlay/AutoPlayService.swift,
 				Services/Bot/AutoPlayController.swift,
 				Services/Bot/NativeBotController.swift,
@@ -116,6 +120,7 @@
 				Services/Bridge/WebSocketInterceptor.swift,
 				Services/Debug/DebugServer.swift,
 				Services/LogManager.swift,
+				Services/MCP/MCPHandler.swift,
 				ViewModels/GameStateManager.swift,
 				ViewModels/WebViewModel.swift,
 				Views/BotStatusView.swift,
@@ -146,6 +151,7 @@
 				"Resources/JavaScript/naki-core.js",
 				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
+				"Resources/mcp-tools.json",
 			);
 		};
 /* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */

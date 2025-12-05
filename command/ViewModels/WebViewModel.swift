@@ -1275,26 +1275,6 @@ class WebViewModel {
       }
     }
 
-    // 設定 JavaScript 執行回調
-    debugServer?.evaluateJS = { [weak self] script, completion in
-      guard let page = self?.webPage else {
-        completion(
-          nil,
-          NSError(
-            domain: "WebPage", code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "WebPage not available"]))
-        return
-      }
-      Task { @MainActor in
-        do {
-          let result = try await page.callJavaScript(script)
-          completion(result, nil)
-        } catch {
-          completion(nil, error)
-        }
-      }
-    }
-
     // 端口變更回調
     debugServer?.onPortChanged = { [weak self] newPort in
       Task { @MainActor in

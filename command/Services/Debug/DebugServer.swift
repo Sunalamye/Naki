@@ -31,24 +31,51 @@ class DebugServer {
     /// 端口變更回調
     var onPortChanged: ((UInt16) -> Void)?
 
-    /// ⭐ 日誌存儲（最多保留 10000 條）
+    /// 日誌存儲（最多保留 10000 條）
     private var logBuffer: [String] = []
     private let maxLogCount = 10000
 
-    /// ⭐ 獲取 Bot 狀態的回調
+    /// 獲取 Bot 狀態的回調
     var getBotStatus: (() -> [String: Any])?
 
-    /// ⭐ 手動觸發自動打牌的回調
+    /// 手動觸發自動打牌的回調
     var triggerAutoPlay: (() -> Void)?
 
-    /// ⭐ 執行 JavaScript 的回調
-    var evaluateJS: ((_ script: String, _ completion: @escaping (Any?, Error?) -> Void) -> Void)?
+    /// MCP 協議處理器
+    private let mcpHandler = MCPHandler()
 
     // MARK: - Initialization
 
     init(port: UInt16 = 8765) {
         self.preferredPort = port
         self.actualPort = port
+        setupMCPHandler()
+    }
+
+    /// 設置 MCP Handler 的回調
+    private func setupMCPHandler() {
+        mcpHandler.serverPort = actualPort
+        mcpHandler.executeJavaScript = { [weak self] script, completion in
+            self?.executeJavaScript?(script, completion)
+        }
+        mcpHandler.getBotStatus = { [weak self] in
+            self?.getBotStatus?() ?? [:]
+        }
+        mcpHandler.triggerAutoPlay = { [weak self] in
+            self?.triggerAutoPlay?()
+        }
+        mcpHandler.getLogs = { [weak self] in
+            self?.logBuffer ?? []
+        }
+        mcpHandler.clearLogs = { [weak self] in
+            self?.logBuffer.removeAll()
+        }
+        mcpHandler.log = { [weak self] message in
+            self?.log(message)
+        }
+        mcpHandler.sendResponse = { [weak self] connection, status, body, contentType in
+            self?.sendResponse(connection: connection, status: status, body: body, contentType: contentType)
+        }
     }
 
     // MARK: - Server Control
@@ -85,6 +112,7 @@ class DebugServer {
                 case .ready:
                     self.actualPort = port
                     self.isRunning = true
+                    self.mcpHandler.serverPort = port
                     self.log("Debug Server started on http://localhost:\(port)")
                     self.onPortChanged?(port)
                 case .failed(let error):
@@ -195,7 +223,7 @@ class DebugServer {
         case ("POST", "/calibrate"):
             handleCalibrate(body: body, connection: connection)
 
-        // ⭐ 新增：遊戲 API 端點
+        // 遊戲 API 端點
         case ("GET", "/game/state"):
             handleGameState(connection: connection)
 
@@ -211,7 +239,7 @@ class DebugServer {
         case ("POST", "/game/action"):
             handleGameAction(body: body, connection: connection)
 
-        // ⭐ 新增：Debug 端點
+        // Debug 端點
         case ("GET", "/logs"):
             handleLogs(connection: connection)
 
@@ -236,11 +264,11 @@ class DebugServer {
         case ("POST", "/bot/pon"):
             handleTestPon(connection: connection)
 
-        // ⭐ MCP Protocol 端點
+        // MCP Protocol 端點（委託給 MCPHandler）
         case ("POST", "/mcp"):
-            handleMCP(body: body, headers: lines, connection: connection)
+            mcpHandler.handleRequest(body: body, headers: lines, connection: connection)
 
-        // ⭐ UI 控制端點
+        // UI 控制端點
         case ("GET", "/ui/names"):
             handleGetPlayerNamesStatus(connection: connection)
 
@@ -255,6 +283,26 @@ class DebugServer {
 
         default:
             sendResponse(connection: connection, status: 404, body: "Not Found: \(path)")
+        }
+    }
+
+    // MARK: - MCP Tool Helper
+
+    /// 調用 MCP 工具並發送 HTTP 響應
+    private func callToolAndRespond(tool: String, arguments: [String: Any] = [:], connection: NWConnection) {
+        mcpHandler.callTool(name: tool, arguments: arguments) { [weak self] result in
+            switch result {
+            case .success(let value):
+                if let dict = value as? [String: Any] {
+                    self?.sendJSON(connection: connection, data: dict)
+                } else if let array = value as? [Any] {
+                    self?.sendJSON(connection: connection, data: ["data": array])
+                } else {
+                    self?.sendJSON(connection: connection, data: ["result": value])
+                }
+            case .error(let message):
+                self?.sendJSON(connection: connection, data: ["error": message])
+            }
         }
     }
 
@@ -323,239 +371,12 @@ class DebugServer {
     }
 
     private func handleStatus(connection: NWConnection) {
-        let status: [String: Any] = [
-            "status": "running",
-            "port": actualPort,
-            "timestamp": ISO8601DateFormatter().string(from: Date())
-        ]
-        sendJSON(connection: connection, data: status)
+        callToolAndRespond(tool: "get_status", connection: connection)
     }
 
     /// AI 友好的 Help 端點 - 返回結構化的 API 文檔
     private func handleHelp(connection: NWConnection) {
-        let help: [String: Any] = [
-            "name": "Naki Debug API",
-            "version": "1.0",
-            "description": "Naki 麻將 AI 助手的 Debug API，用於監控遊戲狀態、控制 Bot、執行遊戲操作",
-            "base_url": "http://localhost:\(actualPort)",
-            "endpoints": [
-                // 系統類
-                [
-                    "method": "GET",
-                    "path": "/",
-                    "description": "首頁，HTML 格式的端點列表（人類可讀）",
-                    "returns": "HTML"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/help",
-                    "description": "本端點，JSON 格式的 API 文檔（AI 友好）",
-                    "returns": "JSON with complete API documentation"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/status",
-                    "description": "伺服器狀態和埠號",
-                    "returns": "{\"status\": \"running\", \"port\": 8765, \"timestamp\": \"ISO8601\"}"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/logs",
-                    "description": "獲取 Debug 日誌（最多 10,000 條）",
-                    "returns": "{\"logs\": [...], \"count\": number}"
-                ],
-                [
-                    "method": "DELETE",
-                    "path": "/logs",
-                    "description": "清空所有日誌",
-                    "returns": "{\"success\": true}"
-                ],
-                // Bot 控制類
-                [
-                    "method": "GET",
-                    "path": "/bot/status",
-                    "description": "Bot 狀態、手牌、推薦、可用動作",
-                    "returns": "Complete bot status with recommendations"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/bot/trigger",
-                    "description": "手動觸發自動打牌",
-                    "returns": "{\"success\": true}"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/bot/ops",
-                    "description": "探索可用的副露操作 (chi/pon/kan)",
-                    "returns": "{\"success\": true, \"data\": {...}}"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/bot/deep",
-                    "description": "深度探索 naki API (所有方法)",
-                    "returns": "{\"success\": true, \"data\": {...}}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/bot/chi",
-                    "description": "測試吃操作",
-                    "returns": "{\"success\": true, \"data\": {...}}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/bot/pon",
-                    "description": "測試碰操作",
-                    "returns": "{\"success\": true, \"data\": {...}}"
-                ],
-                // 遊戲狀態類
-                [
-                    "method": "GET",
-                    "path": "/game/state",
-                    "description": "當前遊戲狀態",
-                    "returns": "Game state JSON"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/game/hand",
-                    "description": "手牌資訊",
-                    "returns": "Hand tiles info"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/game/ops",
-                    "description": "當前可用操作",
-                    "returns": "{\"ops\": [...]}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/game/discard",
-                    "description": "打出指定牌",
-                    "body": "{\"tileIndex\": 0}",
-                    "returns": "{\"success\": true, \"tileIndex\": 0}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/game/action",
-                    "description": "執行遊戲動作",
-                    "body": "{\"action\": \"pass\", \"params\": {}}",
-                    "returns": "{\"success\": true, \"action\": \"pass\"}"
-                ],
-                // JavaScript 執行
-                [
-                    "method": "POST",
-                    "path": "/js",
-                    "description": "執行任意 JavaScript",
-                    "body": "JavaScript code as string",
-                    "returns": "{\"result\": ...}"
-                ],
-                // 探索類
-                [
-                    "method": "GET",
-                    "path": "/detect",
-                    "description": "檢測遊戲 API",
-                    "returns": "Game API detection result"
-                ],
-                [
-                    "method": "GET",
-                    "path": "/explore",
-                    "description": "探索遊戲物件",
-                    "returns": "Game objects exploration data"
-                ],
-                // UI 操作類
-                [
-                    "method": "GET",
-                    "path": "/test-indicators",
-                    "description": "顯示測試指示器",
-                    "returns": "{\"result\": \"OK\"}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/click",
-                    "description": "在指定座標點擊",
-                    "body": "{\"x\": 100, \"y\": 200, \"label\": \"optional\"}",
-                    "returns": "{\"result\": \"clicked\", \"x\": 100, \"y\": 200}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/calibrate",
-                    "description": "設定校準參數",
-                    "body": "{\"tileSpacing\": 96, \"offsetX\": -200, \"offsetY\": 0}",
-                    "returns": "{\"tileSpacing\": 96, \"offsetX\": -200, \"offsetY\": 0}"
-                ],
-                // UI 控制類
-                [
-                    "method": "GET",
-                    "path": "/ui/names",
-                    "description": "獲取玩家名稱顯示狀態",
-                    "returns": "{\"available\": true, \"hidden\": false, \"players\": [...]}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/ui/names/hide",
-                    "description": "隱藏所有玩家名稱",
-                    "returns": "{\"success\": true, \"hidden\": true}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/ui/names/show",
-                    "description": "顯示所有玩家名稱",
-                    "returns": "{\"success\": true, \"hidden\": false}"
-                ],
-                [
-                    "method": "POST",
-                    "path": "/ui/names/toggle",
-                    "description": "切換玩家名稱顯示狀態",
-                    "returns": "{\"success\": true, \"hidden\": boolean}"
-                ]
-            ],
-            "common_workflows": [
-                [
-                    "name": "監控遊戲狀態",
-                    "steps": [
-                        "GET /bot/status - 檢查 Bot 狀態和手牌",
-                        "GET /logs - 查看最近的操作日誌",
-                        "GET /game/state - 獲取當前遊戲狀態"
-                    ]
-                ],
-                [
-                    "name": "手動控制自動打牌",
-                    "steps": [
-                        "GET /bot/status - 查看當前推薦",
-                        "POST /bot/trigger - 手動觸發自動打牌",
-                        "GET /logs - 查看執行結果"
-                    ]
-                ],
-                [
-                    "name": "測試副露操作",
-                    "steps": [
-                        "GET /bot/ops - 探索可用操作",
-                        "POST /bot/chi 或 /bot/pon - 測試具體操作",
-                        "GET /logs - 查看測試結果"
-                    ]
-                ],
-                [
-                    "name": "執行 JavaScript 調試",
-                    "steps": [
-                        "POST /js -d 'your_script' - 執行任意 JavaScript",
-                        "GET /logs - 查看執行日誌"
-                    ]
-                ]
-            ],
-            "tile_notation": [
-                "數牌（Suited）": "1-9 + m(萬)/p(筒)/s(索)，如 1m, 5p, 9s",
-                "紅寶牌（Red 5s）": "5mr, 5pr, 5sr",
-                "字牌（Honor）": "E(東), S(南), W(西), N(北), P(白), F(發), C(中)"
-            ],
-            "tips": [
-                "使用 /help 獲取此文檔",
-                "使用 /logs 查看操作歷史",
-                "使用 /bot/status 一次性獲取所有狀態",
-                "Bot 的推薦按機率排序，第一個通常是最佳選擇",
-                "使用 /js 端點執行任意 JavaScript 進行調試",
-                "遊戲狀態通過 @import @docs/architecture-deep-dive.md 了解詳細流程"
-            ]
-        ]
-        sendJSON(connection: connection, data: help)
+        callToolAndRespond(tool: "get_help", connection: connection)
     }
 
     private func handleJavaScript(body: String, connection: NWConnection) {
@@ -563,44 +384,19 @@ class DebugServer {
             sendJSON(connection: connection, data: ["error": "No JavaScript code provided"])
             return
         }
-
-        executeJavaScript?(body) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                self?.sendJSON(connection: connection, data: ["result": result ?? NSNull()])
-            }
-        }
+        callToolAndRespond(tool: "execute_js", arguments: ["code": body], connection: connection)
     }
 
     private func handleDetect(connection: NWConnection) {
-        executeJavaScript?("window.__nakiDetectGameAPI ? __nakiDetectGameAPI() : {error: 'Not loaded'}") { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                self?.sendJSON(connection: connection, data: ["result": result ?? NSNull()])
-            }
-        }
+        callToolAndRespond(tool: "detect", connection: connection)
     }
 
     private func handleExplore(connection: NWConnection) {
-        executeJavaScript?("window.__nakiExploreGameObjects ? __nakiExploreGameObjects() : {error: 'Not loaded'}") { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                self?.sendJSON(connection: connection, data: ["result": result ?? NSNull()])
-            }
-        }
+        callToolAndRespond(tool: "explore", connection: connection)
     }
 
     private func handleTestIndicators(connection: NWConnection) {
-        executeJavaScript?("window.__nakiTestIndicators ? (__nakiTestIndicators(), 'OK') : 'Not loaded'") { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                self?.sendJSON(connection: connection, data: ["result": result ?? "OK"])
-            }
-        }
+        callToolAndRespond(tool: "test_indicators", connection: connection)
     }
 
     private func handleClick(body: String, connection: NWConnection) {
@@ -611,17 +407,8 @@ class DebugServer {
             sendJSON(connection: connection, data: ["error": "Invalid JSON. Expected: {\"x\": 100, \"y\": 200}"])
             return
         }
-
         let label = json["label"] as? String ?? "API Click"
-        let script = "window.__nakiAutoPlay.click(\(x), \(y), '\(label)')"
-
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                self?.sendJSON(connection: connection, data: ["result": "clicked", "x": x, "y": y])
-            }
-        }
+        callToolAndRespond(tool: "click", arguments: ["x": x, "y": y, "label": label], connection: connection)
     }
 
     private func handleCalibrate(body: String, connection: NWConnection) {
@@ -630,80 +417,21 @@ class DebugServer {
             sendJSON(connection: connection, data: ["error": "Invalid JSON"])
             return
         }
-
-        let tileSpacing = json["tileSpacing"] as? Double ?? 96
-        let offsetX = json["offsetX"] as? Double ?? -200
-        let offsetY = json["offsetY"] as? Double ?? 0
-
-        let script = """
-        if (window.__nakiAutoPlay) {
-            window.__nakiAutoPlay.calibration = {
-                tileSpacing: \(tileSpacing),
-                offsetX: \(offsetX),
-                offsetY: \(offsetY)
-            };
-            JSON.stringify(window.__nakiAutoPlay.calibration);
-        } else {
-            'Not loaded';
-        }
-        """
-
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                self?.sendJSON(connection: connection, data: [
-                    "result": "calibrated",
-                    "tileSpacing": tileSpacing,
-                    "offsetX": offsetX,
-                    "offsetY": offsetY
-                ])
-            }
-        }
+        callToolAndRespond(tool: "calibrate", arguments: json, connection: connection)
     }
 
     // MARK: - Game API Handlers
 
     private func handleGameState(connection: NWConnection) {
-        executeJavaScript?("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getGameState()) : '{\"error\": \"API not loaded\"}'") { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else if let jsonString = result as? String,
-                      let data = jsonString.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                self?.sendJSON(connection: connection, data: json)
-            } else {
-                self?.sendJSON(connection: connection, data: ["error": "Failed to parse game state"])
-            }
-        }
+        callToolAndRespond(tool: "game_state", connection: connection)
     }
 
     private func handleGameHand(connection: NWConnection) {
-        executeJavaScript?("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getHandInfo()) : '{\"error\": \"API not loaded\"}'") { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else if let jsonString = result as? String,
-                      let data = jsonString.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                self?.sendJSON(connection: connection, data: json)
-            } else {
-                self?.sendJSON(connection: connection, data: ["error": "Failed to parse hand info"])
-            }
-        }
+        callToolAndRespond(tool: "game_hand", connection: connection)
     }
 
     private func handleGameOps(connection: NWConnection) {
-        executeJavaScript?("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getAvailableOps()) : '[]'") { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else if let jsonString = result as? String,
-                      let data = jsonString.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                self?.sendJSON(connection: connection, data: ["ops": json])
-            } else {
-                self?.sendJSON(connection: connection, data: ["ops": []])
-            }
-        }
+        callToolAndRespond(tool: "game_ops", connection: connection)
     }
 
     private func handleGameDiscard(body: String, connection: NWConnection) {
@@ -713,18 +441,7 @@ class DebugServer {
             sendJSON(connection: connection, data: ["error": "Invalid JSON. Expected: {\"tileIndex\": 0}"])
             return
         }
-
-        let script = "window.__nakiGameAPI ? __nakiGameAPI.discardTile(\(tileIndex)) : false"
-
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else if let success = result as? Bool {
-                self?.sendJSON(connection: connection, data: ["success": success, "tileIndex": tileIndex])
-            } else {
-                self?.sendJSON(connection: connection, data: ["error": "Discard failed"])
-            }
-        }
+        callToolAndRespond(tool: "game_discard", arguments: ["tileIndex": tileIndex], connection: connection)
     }
 
     private func handleGameAction(body: String, connection: NWConnection) {
@@ -734,191 +451,60 @@ class DebugServer {
             sendJSON(connection: connection, data: ["error": "Invalid JSON. Expected: {\"action\": \"pass\"}"])
             return
         }
-
         let params = json["params"] as? [String: Any] ?? [:]
-        let paramsJson = (try? JSONSerialization.data(withJSONObject: params))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-
-        let script = "window.__nakiGameAPI ? __nakiGameAPI.smartExecute('\(action)', \(paramsJson)) : false"
-
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                self?.sendJSON(connection: connection, data: ["success": true, "action": action])
-            }
-        }
+        callToolAndRespond(tool: "game_action", arguments: ["action": action, "params": params], connection: connection)
     }
 
     // MARK: - Debug Handlers
 
     private func handleLogs(connection: NWConnection) {
-        sendJSON(connection: connection, data: ["logs": logBuffer, "count": logBuffer.count])
+        callToolAndRespond(tool: "get_logs", connection: connection)
     }
 
     private func handleClearLogs(connection: NWConnection) {
-        logBuffer.removeAll()
-        sendJSON(connection: connection, data: ["success": true, "message": "Logs cleared"])
+        callToolAndRespond(tool: "clear_logs", connection: connection)
     }
 
     private func handleBotStatus(connection: NWConnection) {
-        if let status = getBotStatus?() {
-            sendJSON(connection: connection, data: status)
-        } else {
-            sendJSON(connection: connection, data: ["error": "Bot status not available"])
-        }
+        callToolAndRespond(tool: "bot_status", connection: connection)
     }
 
     private func handleTriggerAutoPlay(connection: NWConnection) {
-        log("Manual auto-play trigger requested")
-        triggerAutoPlay?()
-        sendJSON(connection: connection, data: ["success": true, "message": "Auto-play triggered"])
+        callToolAndRespond(tool: "bot_trigger", connection: connection)
     }
 
     private func handleExploreOps(connection: NWConnection) {
-        log("Explore operation API requested")
-        guard let evaluateJS = evaluateJS else {
-            sendJSON(connection: connection, data: ["error": "JS evaluation not available"])
-            return
-        }
-
-        let script = "window.__nakiGameAPI.exploreOperationAPI()"
-        evaluateJS(script) { [weak self] result, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-                } else if let result = result {
-                    self?.sendJSON(connection: connection, data: ["success": true, "data": result])
-                } else {
-                    self?.sendJSON(connection: connection, data: ["error": "No result"])
-                }
-            }
-        }
+        callToolAndRespond(tool: "bot_ops", connection: connection)
     }
 
     private func handleDeepExplore(connection: NWConnection) {
-        log("Deep explore naki API requested")
-        guard let evaluateJS = evaluateJS else {
-            sendJSON(connection: connection, data: ["error": "JS evaluation not available"])
-            return
-        }
-
-        let script = "window.__nakiGameAPI.deepExploreNaki()"
-        evaluateJS(script) { [weak self] result, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-                } else if let result = result {
-                    self?.sendJSON(connection: connection, data: ["success": true, "data": result])
-                } else {
-                    self?.sendJSON(connection: connection, data: ["error": "No result"])
-                }
-            }
-        }
+        callToolAndRespond(tool: "bot_deep", connection: connection)
     }
 
     private func handleTestChi(connection: NWConnection) {
-        log("Test Chi requested")
-        guard let evaluateJS = evaluateJS else {
-            sendJSON(connection: connection, data: ["error": "JS evaluation not available"])
-            return
-        }
-
-        let script = "window.__nakiGameAPI.testChi()"
-        evaluateJS(script) { [weak self] result, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-                } else if let result = result {
-                    self?.sendJSON(connection: connection, data: ["success": true, "data": result])
-                } else {
-                    self?.sendJSON(connection: connection, data: ["error": "No result"])
-                }
-            }
-        }
+        callToolAndRespond(tool: "bot_chi", connection: connection)
     }
 
     private func handleTestPon(connection: NWConnection) {
-        log("Test Pon requested")
-        guard let evaluateJS = evaluateJS else {
-            sendJSON(connection: connection, data: ["error": "JS evaluation not available"])
-            return
-        }
-
-        let script = "window.__nakiGameAPI.testPon()"
-        evaluateJS(script) { [weak self] result, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-                } else if let result = result {
-                    self?.sendJSON(connection: connection, data: ["success": true, "data": result])
-                } else {
-                    self?.sendJSON(connection: connection, data: ["error": "No result"])
-                }
-            }
-        }
+        callToolAndRespond(tool: "bot_pon", connection: connection)
     }
 
     // MARK: - UI Control Handlers
 
     private func handleGetPlayerNamesStatus(connection: NWConnection) {
-        log("Get player names status requested")
-        let script = "JSON.stringify(window.__nakiPlayerNames?.getStatus() || {available: false})"
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else if let jsonString = result as? String,
-                      let data = jsonString.data(using: .utf8),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                self?.sendJSON(connection: connection, data: json)
-            } else {
-                self?.sendJSON(connection: connection, data: ["available": false])
-            }
-        }
+        callToolAndRespond(tool: "ui_names_status", connection: connection)
     }
 
     private func handleHidePlayerNames(connection: NWConnection) {
-        log("Hide player names requested")
-        let script = "window.__nakiPlayerNames?.hide() || false"
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                let success = result as? Bool ?? false
-                self?.sendJSON(connection: connection, data: ["success": success, "hidden": true])
-            }
-        }
+        callToolAndRespond(tool: "ui_names_hide", connection: connection)
     }
 
     private func handleShowPlayerNames(connection: NWConnection) {
-        log("Show player names requested")
-        let script = "window.__nakiPlayerNames?.show() || false"
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                let success = result as? Bool ?? false
-                self?.sendJSON(connection: connection, data: ["success": success, "hidden": false])
-            }
-        }
+        callToolAndRespond(tool: "ui_names_show", connection: connection)
     }
 
     private func handleTogglePlayerNames(connection: NWConnection) {
-        log("Toggle player names requested")
-        let script = "window.__nakiPlayerNames?.toggle() || false"
-        executeJavaScript?(script) { [weak self] result, error in
-            if let error = error {
-                self?.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            } else {
-                let success = result as? Bool ?? false
-                // 獲取當前狀態
-                let statusScript = "window.__nakiPlayerNames?.hidden || false"
-                self?.executeJavaScript?(statusScript) { statusResult, _ in
-                    let hidden = statusResult as? Bool ?? false
-                    self?.sendJSON(connection: connection, data: ["success": success, "hidden": hidden])
-                }
-            }
-        }
+        callToolAndRespond(tool: "ui_names_toggle", connection: connection)
     }
 
     // MARK: - Response Helpers
@@ -953,7 +539,7 @@ class DebugServer {
             if data.isEmpty {
                 throw NSError(domain: "DebugServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty JSON data"])
             }
-            
+
             let sanitized = sanitizeForJSON(data) as! [String: Any]
             let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: .prettyPrinted)
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
@@ -983,6 +569,7 @@ class DebugServer {
             return value
         }
     }
+
     // MARK: - Logging
 
     private func log(_ message: String) {
@@ -999,594 +586,18 @@ class DebugServer {
         onLog?(logMessage)
     }
 
-    /// ⭐ 添加外部日誌
+    /// 添加外部日誌
     func addLog(_ message: String) {
         log(message)
     }
 
-    /// ⭐ 獲取所有日誌
+    /// 獲取所有日誌
     func getLogs() -> [String] {
         return logBuffer
     }
 
-    /// ⭐ 清空日誌
+    /// 清空日誌
     func clearLogs() {
         logBuffer.removeAll()
-    }
-
-    // MARK: - MCP Protocol Support
-
-    /// MCP 工具定義
-    private var mcpTools: [[String: Any]] {
-        [
-            // 系統類
-            [
-                "name": "get_status",
-                "description": "獲取 Debug Server 狀態和埠號",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "get_help",
-                "description": "獲取完整的 API 文檔（JSON 格式）",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "get_logs",
-                "description": "獲取 Debug 日誌（最多 10,000 條）",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "clear_logs",
-                "description": "清空所有日誌",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-
-            // Bot 控制類
-            [
-                "name": "bot_status",
-                "description": "獲取 Bot 狀態，包含手牌、AI 推薦動作、可用操作等完整信息",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "bot_trigger",
-                "description": "手動觸發自動打牌（執行 AI 推薦的動作）",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "bot_ops",
-                "description": "探索可用的副露操作（吃/碰/槓）",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "bot_deep",
-                "description": "深度探索 naki API（所有方法）",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "bot_chi",
-                "description": "測試吃操作",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "bot_pon",
-                "description": "測試碰操作",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-
-            // 遊戲狀態類
-            [
-                "name": "game_state",
-                "description": "獲取當前遊戲狀態",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "game_hand",
-                "description": "獲取手牌資訊",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "game_ops",
-                "description": "獲取當前可用操作",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "game_discard",
-                "description": "打出指定索引的牌",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "tileIndex": [
-                            "type": "integer",
-                            "description": "要打出的牌在手牌中的索引 (0-13)"
-                        ]
-                    ],
-                    "required": ["tileIndex"]
-                ]
-            ],
-            [
-                "name": "game_action",
-                "description": "執行遊戲動作（如 pass, chi, pon, kan, riichi, tsumo, ron）",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "action": [
-                            "type": "string",
-                            "description": "動作名稱"
-                        ],
-                        "params": [
-                            "type": "object",
-                            "description": "動作參數（可選）"
-                        ]
-                    ],
-                    "required": ["action"]
-                ]
-            ],
-
-            // JavaScript 執行
-            // ⚠️ WebPage.callJavaScript(functionBody:) 需要 return 語句
-            [
-                "name": "execute_js",
-                "description": "在遊戲 WebView 中執行 JavaScript 代碼。⚠️ 重要：必須使用 return 語句才能獲取返回值！例如：'return 1+1' 返回 2，'return document.title' 返回標題。返回 Object 時使用 JSON.stringify()。",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "code": [
-                            "type": "string",
-                            "description": "要執行的 JavaScript 代碼（函數體格式，需要 return 語句才能獲取返回值）"
-                        ]
-                    ],
-                    "required": ["code"]
-                ]
-            ],
-
-            // 探索類
-            [
-                "name": "detect",
-                "description": "檢測遊戲 API 是否可用",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "explore",
-                "description": "探索遊戲物件結構",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-
-            // UI 操作類
-            [
-                "name": "test_indicators",
-                "description": "顯示測試指示器（用於調試點擊位置）",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "click",
-                "description": "在指定座標點擊",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "x": ["type": "number", "description": "X 座標"],
-                        "y": ["type": "number", "description": "Y 座標"],
-                        "label": ["type": "string", "description": "點擊標籤（可選）"]
-                    ],
-                    "required": ["x", "y"]
-                ]
-            ],
-            [
-                "name": "calibrate",
-                "description": "設定校準參數",
-                "inputSchema": [
-                    "type": "object",
-                    "properties": [
-                        "tileSpacing": ["type": "number", "description": "牌間距（默認 96）"],
-                        "offsetX": ["type": "number", "description": "X 偏移（默認 -200）"],
-                        "offsetY": ["type": "number", "description": "Y 偏移（默認 0）"]
-                    ],
-                    "required": []
-                ]
-            ],
-
-            // UI 控制類
-            [
-                "name": "ui_names_status",
-                "description": "獲取玩家名稱的顯示狀態",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "ui_names_hide",
-                "description": "隱藏所有玩家名稱",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "ui_names_show",
-                "description": "顯示所有玩家名稱",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ],
-            [
-                "name": "ui_names_toggle",
-                "description": "切換玩家名稱的顯示狀態",
-                "inputSchema": ["type": "object", "properties": [:], "required": []]
-            ]
-        ]
-    }
-
-    /// 處理 MCP 請求
-    private func handleMCP(body: String, headers: [String], connection: NWConnection) {
-        log("MCP request received")
-
-        // 解析 JSON-RPC 請求
-        guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let method = json["method"] as? String else {
-            sendMCPError(connection: connection, id: nil, code: -32700, message: "Parse error")
-            return
-        }
-
-        let id = json["id"]  // 可以是 Int 或 String
-        let params = json["params"] as? [String: Any] ?? [:]
-
-        log("MCP method: \(method)")
-
-        // 路由 MCP 方法
-        switch method {
-        case "initialize":
-            handleMCPInitialize(id: id, params: params, connection: connection)
-
-        case "initialized":
-            // 客戶端確認初始化完成，直接返回空響應
-            sendMCPResult(connection: connection, id: id, result: [:])
-
-        case "tools/list":
-            handleMCPToolsList(id: id, connection: connection)
-
-        case "tools/call":
-            handleMCPToolsCall(id: id, params: params, connection: connection)
-
-        default:
-            sendMCPError(connection: connection, id: id, code: -32601, message: "Method not found: \(method)")
-        }
-    }
-
-    /// 處理 initialize 請求
-    private func handleMCPInitialize(id: Any?, params: [String: Any], connection: NWConnection) {
-        let result: [String: Any] = [
-            "protocolVersion": "2025-03-26",
-            "serverInfo": [
-                "name": "naki",
-                "version": "1.2.0"
-            ],
-            "capabilities": [
-                "tools": [:]
-            ]
-        ]
-        sendMCPResult(connection: connection, id: id, result: result)
-    }
-
-    /// 處理 tools/list 請求
-    private func handleMCPToolsList(id: Any?, connection: NWConnection) {
-        let result: [String: Any] = [
-            "tools": mcpTools
-        ]
-        sendMCPResult(connection: connection, id: id, result: result)
-    }
-
-    /// 處理 tools/call 請求
-    private func handleMCPToolsCall(id: Any?, params: [String: Any], connection: NWConnection) {
-        guard let toolName = params["name"] as? String else {
-            sendMCPError(connection: connection, id: id, code: -32602, message: "Missing tool name")
-            return
-        }
-
-        let arguments = params["arguments"] as? [String: Any] ?? [:]
-        log("MCP tools/call: \(toolName) with args: \(arguments)")
-
-        // 根據工具名稱執行對應的操作
-        switch toolName {
-        // 系統類
-        case "get_status":
-            let status: [String: Any] = [
-                "status": "running",
-                "port": actualPort,
-                "timestamp": ISO8601DateFormatter().string(from: Date())
-            ]
-            sendMCPToolResult(connection: connection, id: id, content: status)
-
-        case "get_help":
-            // 複用 handleHelp 的邏輯，但直接構建響應
-            let help = buildHelpContent()
-            sendMCPToolResult(connection: connection, id: id, content: help)
-
-        case "get_logs":
-            sendMCPToolResult(connection: connection, id: id, content: ["logs": logBuffer, "count": logBuffer.count])
-
-        case "clear_logs":
-            logBuffer.removeAll()
-            sendMCPToolResult(connection: connection, id: id, content: ["success": true, "message": "Logs cleared"])
-
-        // Bot 控制類
-        case "bot_status":
-            if let status = getBotStatus?() {
-                sendMCPToolResult(connection: connection, id: id, content: status)
-            } else {
-                sendMCPToolError(connection: connection, id: id, message: "Bot status not available")
-            }
-
-        case "bot_trigger":
-            log("MCP: Manual auto-play trigger requested")
-            triggerAutoPlay?()
-            sendMCPToolResult(connection: connection, id: id, content: ["success": true, "message": "Auto-play triggered"])
-
-        case "bot_ops":
-            executeJSForMCP("window.__nakiGameAPI.exploreOperationAPI()", id: id, connection: connection)
-
-        case "bot_deep":
-            executeJSForMCP("window.__nakiGameAPI.deepExploreNaki()", id: id, connection: connection)
-
-        case "bot_chi":
-            executeJSForMCP("window.__nakiGameAPI.testChi()", id: id, connection: connection)
-
-        case "bot_pon":
-            executeJSForMCP("window.__nakiGameAPI.testPon()", id: id, connection: connection)
-
-        // 遊戲狀態類
-        case "game_state":
-            executeJSForMCP("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getGameState()) : '{\"error\": \"API not loaded\"}'", id: id, connection: connection, parseJSON: true)
-
-        case "game_hand":
-            executeJSForMCP("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getHandInfo()) : '{\"error\": \"API not loaded\"}'", id: id, connection: connection, parseJSON: true)
-
-        case "game_ops":
-            executeJSForMCP("window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getAvailableOps()) : '[]'", id: id, connection: connection, parseJSON: true)
-
-        case "game_discard":
-            guard let tileIndex = arguments["tileIndex"] as? Int else {
-                sendMCPToolError(connection: connection, id: id, message: "Missing tileIndex parameter")
-                return
-            }
-            let script = "window.__nakiGameAPI ? __nakiGameAPI.discardTile(\(tileIndex)) : false"
-            executeJavaScript?(script) { [weak self] result, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else if let success = result as? Bool {
-                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "tileIndex": tileIndex])
-                } else {
-                    self?.sendMCPToolError(connection: connection, id: id, message: "Discard failed")
-                }
-            }
-
-        case "game_action":
-            guard let action = arguments["action"] as? String else {
-                sendMCPToolError(connection: connection, id: id, message: "Missing action parameter")
-                return
-            }
-            let actionParams = arguments["params"] as? [String: Any] ?? [:]
-            let paramsJson = (try? JSONSerialization.data(withJSONObject: actionParams))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            let script = "window.__nakiGameAPI ? __nakiGameAPI.smartExecute('\(action)', \(paramsJson)) : false"
-            executeJavaScript?(script) { [weak self] _, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else {
-                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": true, "action": action])
-                }
-            }
-
-        // JavaScript 執行
-        case "execute_js":
-            guard let code = arguments["code"] as? String, !code.isEmpty else {
-                sendMCPToolError(connection: connection, id: id, message: "Missing or empty code parameter")
-                return
-            }
-            executeJavaScript?(code) { [weak self] result, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else {
-                    self?.sendMCPToolResult(connection: connection, id: id, content: ["result": result ?? NSNull()])
-                }
-            }
-
-        // 探索類
-        case "detect":
-            executeJSForMCP("window.__nakiDetectGameAPI ? __nakiDetectGameAPI() : {error: 'Not loaded'}", id: id, connection: connection)
-
-        case "explore":
-            executeJSForMCP("window.__nakiExploreGameObjects ? __nakiExploreGameObjects() : {error: 'Not loaded'}", id: id, connection: connection)
-
-        // UI 操作類
-        case "test_indicators":
-            executeJSForMCP("window.__nakiTestIndicators ? (__nakiTestIndicators(), 'OK') : 'Not loaded'", id: id, connection: connection)
-
-        case "click":
-            guard let x = arguments["x"] as? Double,
-                  let y = arguments["y"] as? Double else {
-                sendMCPToolError(connection: connection, id: id, message: "Missing x or y parameter")
-                return
-            }
-            let label = arguments["label"] as? String ?? "MCP Click"
-            let script = "window.__nakiAutoPlay.click(\(x), \(y), '\(label)')"
-            executeJavaScript?(script) { [weak self] _, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else {
-                    self?.sendMCPToolResult(connection: connection, id: id, content: ["result": "clicked", "x": x, "y": y])
-                }
-            }
-
-        case "calibrate":
-            let tileSpacing = arguments["tileSpacing"] as? Double ?? 96
-            let offsetX = arguments["offsetX"] as? Double ?? -200
-            let offsetY = arguments["offsetY"] as? Double ?? 0
-            let script = """
-            if (window.__nakiAutoPlay) {
-                window.__nakiAutoPlay.calibration = {
-                    tileSpacing: \(tileSpacing),
-                    offsetX: \(offsetX),
-                    offsetY: \(offsetY)
-                };
-                JSON.stringify(window.__nakiAutoPlay.calibration);
-            } else {
-                'Not loaded';
-            }
-            """
-            executeJavaScript?(script) { [weak self] _, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else {
-                    self?.sendMCPToolResult(connection: connection, id: id, content: [
-                        "result": "calibrated",
-                        "tileSpacing": tileSpacing,
-                        "offsetX": offsetX,
-                        "offsetY": offsetY
-                    ])
-                }
-            }
-
-        // UI 控制類
-        case "ui_names_status":
-            executeJSForMCP("JSON.stringify(window.__nakiPlayerNames?.getStatus() || {available: false})", id: id, connection: connection, parseJSON: true)
-
-        case "ui_names_hide":
-            executeJavaScript?("window.__nakiPlayerNames?.hide() || false") { [weak self] result, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else {
-                    let success = result as? Bool ?? false
-                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "hidden": true])
-                }
-            }
-
-        case "ui_names_show":
-            executeJavaScript?("window.__nakiPlayerNames?.show() || false") { [weak self] result, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else {
-                    let success = result as? Bool ?? false
-                    self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "hidden": false])
-                }
-            }
-
-        case "ui_names_toggle":
-            executeJavaScript?("window.__nakiPlayerNames?.toggle() || false") { [weak self] result, error in
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else {
-                    let success = result as? Bool ?? false
-                    // 獲取當前狀態
-                    self?.executeJavaScript?("window.__nakiPlayerNames?.hidden || false") { statusResult, _ in
-                        let hidden = statusResult as? Bool ?? false
-                        self?.sendMCPToolResult(connection: connection, id: id, content: ["success": success, "hidden": hidden])
-                    }
-                }
-            }
-
-        default:
-            sendMCPToolError(connection: connection, id: id, message: "Unknown tool: \(toolName)")
-        }
-    }
-
-    // MARK: - MCP Helper Methods
-
-    /// 執行 JavaScript 並返回 MCP 結果
-    private func executeJSForMCP(_ script: String, id: Any?, connection: NWConnection, parseJSON: Bool = false) {
-        executeJavaScript?(script) { [weak self] result, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    self?.sendMCPToolError(connection: connection, id: id, message: error.localizedDescription)
-                } else if parseJSON, let jsonString = result as? String,
-                          let data = jsonString.data(using: .utf8),
-                          let json = try? JSONSerialization.jsonObject(with: data) {
-                    self?.sendMCPToolResult(connection: connection, id: id, content: json)
-                } else {
-                    self?.sendMCPToolResult(connection: connection, id: id, content: ["result": result ?? NSNull()])
-                }
-            }
-        }
-    }
-
-    /// 構建 Help 內容
-    private func buildHelpContent() -> [String: Any] {
-        return [
-            "name": "Naki Debug API",
-            "version": "1.0",
-            "description": "Naki 麻將 AI 助手的 Debug API，用於監控遊戲狀態、控制 Bot、執行遊戲操作",
-            "base_url": "http://localhost:\(actualPort)",
-            "mcp_endpoint": "http://localhost:\(actualPort)/mcp",
-            "tools_count": mcpTools.count,
-            "tile_notation": [
-                "數牌（Suited）": "1-9 + m(萬)/p(筒)/s(索)，如 1m, 5p, 9s",
-                "紅寶牌（Red 5s）": "5mr, 5pr, 5sr",
-                "字牌（Honor）": "E(東), S(南), W(西), N(北), P(白), F(發), C(中)"
-            ]
-        ]
-    }
-
-    /// 發送 MCP 成功結果
-    private func sendMCPResult(connection: NWConnection, id: Any?, result: [String: Any]) {
-        var response: [String: Any] = [
-            "jsonrpc": "2.0",
-            "result": result
-        ]
-        if let id = id {
-            response["id"] = id
-        }
-        sendMCPJSON(connection: connection, data: response)
-    }
-
-    /// 發送 MCP 工具執行結果
-    private func sendMCPToolResult(connection: NWConnection, id: Any?, content: Any) {
-        let contentText: String
-        if let dict = content as? [String: Any] {
-            contentText = (try? JSONSerialization.data(withJSONObject: sanitizeForJSON(dict), options: []))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        } else if let array = content as? [Any] {
-            contentText = (try? JSONSerialization.data(withJSONObject: sanitizeForJSON(array), options: []))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        } else {
-            contentText = String(describing: content)
-        }
-
-        let result: [String: Any] = [
-            "content": [
-                ["type": "text", "text": contentText]
-            ],
-            "isError": false
-        ]
-        sendMCPResult(connection: connection, id: id, result: result)
-    }
-
-    /// 發送 MCP 工具執行錯誤
-    private func sendMCPToolError(connection: NWConnection, id: Any?, message: String) {
-        let result: [String: Any] = [
-            "content": [
-                ["type": "text", "text": message]
-            ],
-            "isError": true
-        ]
-        sendMCPResult(connection: connection, id: id, result: result)
-    }
-
-    /// 發送 MCP 錯誤
-    private func sendMCPError(connection: NWConnection, id: Any?, code: Int, message: String) {
-        var response: [String: Any] = [
-            "jsonrpc": "2.0",
-            "error": [
-                "code": code,
-                "message": message
-            ]
-        ]
-        if let id = id {
-            response["id"] = id
-        }
-        sendMCPJSON(connection: connection, data: response)
-    }
-
-    /// 發送 MCP JSON 響應
-    private func sendMCPJSON(connection: NWConnection, data: [String: Any]) {
-        do {
-            let sanitized = sanitizeForJSON(data) as! [String: Any]
-            let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: [])
-            let body = String(data: jsonData, encoding: .utf8) ?? "{}"
-            sendResponse(connection: connection, status: 200, body: body, contentType: "application/json")
-        } catch {
-            sendResponse(connection: connection, status: 500, body: "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}", contentType: "application/json")
-        }
     }
 }
