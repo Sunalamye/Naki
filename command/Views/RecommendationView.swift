@@ -50,23 +50,33 @@ struct RecommendationRow: View {
             Spacer()
 
             // 機率
-            HStack(spacing: 3) {
-                // 機率條
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Rectangle()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 4)
-                            .cornerRadius(2)
-
-                        Rectangle()
-                            .fill(probabilityColor)
-                            .frame(width: geometry.size.width * recommendation.probability, height: 4)
-                            .cornerRadius(2)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 3) {
+                    
+                    // 機率條
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(Color.gray.opacity(0.2))
+                                .frame(height: 4)
+                                .cornerRadius(2)
+                            
+                            Rectangle()
+                                .fill(probabilityColor)
+                                .frame(width: geometry.size.width * recommendation.probability, height: 4)
+                                .cornerRadius(2)
+                        }
                     }
+                    .frame(width: 40, height: 4)
+                    
+                    // 百分比
+                    Text(recommendation.percentageString)
+                        .font(.system(.caption2, design: .monospaced))
+                        .fontWeight(isTop ? .bold : .regular)
+                        .foregroundColor(isTop ? .primary : .secondary)
+                        .frame(width: 40, alignment: .trailing)
                 }
-                .frame(width: 40, height: 4)
-
+                
                 // 百分比
                 Text(recommendation.percentageString)
                     .font(.system(.caption2, design: .monospaced))
