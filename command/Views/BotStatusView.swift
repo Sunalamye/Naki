@@ -13,6 +13,8 @@ import MortalSwift
 // MARK: - Bot Status View
 
 struct BotStatusView: View {
+    @Environment(\.webViewModel) private var viewModel
+
     var botStatus: BotStatus
     var gameState: GameState
 
@@ -26,7 +28,6 @@ struct BotStatusView: View {
                     .font(.headline)
 
                 Spacer()
-
                 // 運行狀態指示
                 HStack(spacing: 4) {
                     Circle()
@@ -36,6 +37,14 @@ struct BotStatusView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+                Button(action: {
+                    Task {
+                        await viewModel?.resyncBot()
+                    }
+                }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .help("重新載入")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

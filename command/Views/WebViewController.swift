@@ -3,7 +3,7 @@
 //  akagi
 //
 //  Created by Suoie on 2025/11/29.
-//  Updated: 2025/12/04 - 使用 WebPage API (macOS 26.0+)
+//  Updated: 2025/12/05 - 使用 @Environment 取得 WebViewModel
 //
 
 import SwiftUI
@@ -13,13 +13,13 @@ import WebKit
 
 /// 主要的 WebView 元件，使用 macOS 26.0+ 的 WebPage API
 struct NakiWebView: View {
-    var viewModel: WebViewModel
+    @Environment(\.webViewModel) private var viewModel
 
     var body: some View {
-        if let webPage = viewModel.webPage {
+        if let webPage = viewModel?.webPage {
             WebView(webPage)
                 .task {
-                    await viewModel.loadMajsoul()
+                    await viewModel?.loadMajsoul()
                 }
         } else {
             ProgressView("正在初始化...")

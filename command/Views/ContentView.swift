@@ -3,7 +3,7 @@
 //  Naki
 //
 //  Created by Suoie on 2025/11/29.
-//  Updated: 2025/12/04 - 支援 iOS/macOS 跨平台
+//  Updated: 2025/12/05 - 使用 @Environment 傳遞 WebViewModel
 //
 
 import SwiftUI
@@ -11,7 +11,7 @@ import WebKit
 
 struct ContentView: View {
     @State private var viewModel = WebViewModel()
-    
+
 #if os(macOS)
     @State private var showGamePanel = true
 #else
@@ -19,46 +19,49 @@ struct ContentView: View {
 #endif
     @State private var showAdvancedSettings = false
     @State private var showLog = false
-    
+
     // 自動打牌控制
     @AppStorage("AutoPlayMode") private var autoPlayMode: AutoPlayMode = .auto
     @State private var actionDelay: Double = 1.0
-    
+
     var body: some View {
+        Group {
 #if os(macOS)
-        macOSLayout
+            macOSLayout
 #else
-        iOSLayout
+            iOSLayout
 #endif
+        }
+        .environment(\.webViewModel, viewModel)
     }
-    
+
     // MARK: - macOS Layout
 #if os(macOS)
     private var macOSLayout: some View {
         HSplitView {
             // WebView
-            NakiWebView(viewModel: viewModel)
+            NakiWebView()
                 .frame(minWidth: 600)
-            
+
             // 遊戲面板（右側）
             if showGamePanel {
-                GamePanel(viewModel: viewModel, showLog: $showLog)
+                GamePanel(showLog: $showLog)
                     .frame(width: 320)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
-            StatusBar(viewModel: viewModel)
+            StatusBar()
         }
         .animation(.easeInOut(duration: 0.2), value: showGamePanel)
         .sheet(isPresented: $showAdvancedSettings) {
-            AdvancedSettingsSheet(viewModel: viewModel)
+            AdvancedSettingsSheet()
         }
         .toolbar {
             macOSToolbarContent
         }
     }
-    
+
     @ToolbarContentBuilder
     private var macOSToolbarContent: some ToolbarContent {
         // 進階設定
@@ -68,7 +71,7 @@ struct ContentView: View {
             }
             .help("進階設定")
         }
-        
+
         // 左側：自動打牌模式
         ToolbarItem(placement: .navigation) {
             Picker("", selection: $autoPlayMode) {
@@ -83,7 +86,7 @@ struct ContentView: View {
             }
             .help("AI 推薦模式")
         }
-        
+
         // 延遲調整
         ToolbarItem(placement: .navigation) {
             if autoPlayMode != .off {
@@ -91,7 +94,7 @@ struct ContentView: View {
                     Text("\(actionDelay, specifier: "%.1f")s")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.secondary)
-                    
+
                     Stepper("", value: $actionDelay, in: 0.5...3.0, step: 0.5)
                         .labelsHidden()
                         .onChange(of: actionDelay) { _, newValue in
@@ -102,7 +105,7 @@ struct ContentView: View {
                 .help("動作延遲")
             }
         }
-        
+
         // MCP Server
         ToolbarItem(placement: .navigation) {
             Button(action: { viewModel.toggleDebugServer() }) {
@@ -111,10 +114,10 @@ struct ContentView: View {
                         Circle()
                             .fill(viewModel.isDebugServerRunning ? Color.green : Color.gray)
                             .frame(width: 6, height: 6)
-                        
+
                         Text("\(viewModel.debugServerPort)")
                             .font(.system(.caption, design: .monospaced))
-                        
+
                     }
                     Text("MCP Server")
                         .font(.system(size: 8))
@@ -124,25 +127,23 @@ struct ContentView: View {
             .frame(width: 80)
             .help(viewModel.isDebugServerRunning ? "MCP Server 運行中" : "MCP Server 已停止")
         }
-        
+
         // 連接狀態
         ToolbarItem(placement: .navigation) {
-            ConnectionIndicator(viewModel: viewModel)
+            ConnectionIndicator()
                 .frame(width: 80)
         }
-        
+
         // 重新載入
         ToolbarItem(placement: .destructiveAction) {
             Button(action: {
-                Task {
-                    try? await viewModel.webPage?.reload()
-                }
+                viewModel.webPage?.reload()
             }) {
                 Image(systemName: "arrow.clockwise")
             }
             .help("重新載入")
         }
-        
+
         // 右側：日誌切換
         ToolbarItem(placement: .primaryAction) {
             Button(action: { showLog.toggle() }) {
@@ -150,7 +151,7 @@ struct ContentView: View {
             }
             .help("顯示/隱藏日誌")
         }
-        
+
         // 遊戲面板切換
         ToolbarItem(placement: .primaryAction) {
             Button(action: { showGamePanel.toggle() }) {
@@ -160,16 +161,16 @@ struct ContentView: View {
         }
     }
 #endif
-    
+
     // MARK: - iOS Layout
 #if os(iOS)
-    
+
     private var iOSLayout: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 HStack(alignment: .top){
                     iOSLeftView
-                    NakiWebView(viewModel: viewModel)
+                    NakiWebView()
                 }
                 //                // 底部浮動控制面板
                 iOSBottomPanel
@@ -186,15 +187,15 @@ struct ContentView: View {
                 iOSGamePanelSheet
             }
             .sheet(isPresented: $showAdvancedSettings) {
-                AdvancedSettingsSheet(viewModel: viewModel)
+                AdvancedSettingsSheet()
             }
         }
     }
-    
+
     private var iOSBottomPanel: some View {
         HStack(spacing: 0) {
             if !viewModel.statusMessage.isEmpty {
-                StatusBar(viewModel: viewModel)
+                StatusBar()
             }
         }
     }
@@ -208,12 +209,12 @@ struct ContentView: View {
                     Text(viewModel.isConnected ? "已連接" : "未連接")
                         .font(.caption)
                 }
-                
+
                 Text("WebSocket")
                     .font(.system(size: 8))
                     .foregroundColor(.secondary)
             }
-            
+
             RecommendationView(
                 recommendations: viewModel.recommendations,
                 maxDisplay: 5
@@ -221,7 +222,7 @@ struct ContentView: View {
         }
         .frame(width: 140)
     }
-    
+
     @ToolbarContentBuilder
     private var iOSToolbarContent: some ToolbarContent {
         // 左側：重新載入
@@ -232,7 +233,7 @@ struct ContentView: View {
                 Image(systemName: "arrow.clockwise")
             }
         }
-        
+
         ToolbarItem(placement: .automatic) {
             Picker("模式", selection: $autoPlayMode) {
                 Text("關").tag(AutoPlayMode.off)
@@ -245,14 +246,14 @@ struct ContentView: View {
                 viewModel.setAutoPlayMode(newValue)
             }
         }
-        
+
         // 右側：遊戲面板
         ToolbarItem(placement: .navigationBarTrailing) {
             Button(action: { showGamePanel = true }) {
                 Image(systemName: "sidebar.right")
             }
         }
-        
+
         // 右側：設定
         ToolbarItem(placement: .navigationBarTrailing) {
             Button(action: { showAdvancedSettings = true }) {
@@ -260,7 +261,7 @@ struct ContentView: View {
             }
         }
     }
-    
+
     private var iOSGamePanelSheet: some View {
         NavigationStack {
             ScrollView {
@@ -270,13 +271,13 @@ struct ContentView: View {
                         botStatus: viewModel.botStatus,
                         gameState: viewModel.gameState
                     )
-                    
+
                     // AI 推薦
                     RecommendationView(
                         recommendations: viewModel.recommendations,
                         maxDisplay: 5
                     )
-                    
+
                     // 日誌（可展開）
                     DisclosureGroup("日誌") {
                         LogPanel()
@@ -306,22 +307,22 @@ struct ContentView: View {
 
 #if os(macOS)
 struct GamePanel: View {
-    var viewModel: WebViewModel
+    @Environment(\.webViewModel) private var viewModel
     @Binding var showLog: Bool
-    
+
     var body: some View {
         VSplitView {
             // 上半部分：Bot 狀態和推薦
             VStack(spacing: 12) {
                 // Bot 狀態
                 BotStatusView(
-                    botStatus: viewModel.botStatus,
-                    gameState: viewModel.gameState
+                    botStatus: viewModel?.botStatus ?? BotStatus(),
+                    gameState: viewModel?.gameState ?? GameState()
                 )
 
                 // AI 推薦
                 RecommendationView(
-                    recommendations: viewModel.recommendations,
+                    recommendations: viewModel?.recommendations ?? [],
                     maxDisplay: 5
                 )
 
@@ -347,15 +348,15 @@ struct GamePanel: View {
 // MARK: - Connection Indicator
 
 struct ConnectionIndicator: View {
-    var viewModel: WebViewModel
+    @Environment(\.webViewModel) private var viewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
                 Circle()
-                    .fill(viewModel.isConnected ? Color.green : Color.red)
+                    .fill((viewModel?.isConnected ?? false) ? Color.green : Color.red)
                     .frame(width: 6, height: 6)
-                Text(viewModel.isConnected ? "已連接" : "未連接")
+                Text((viewModel?.isConnected ?? false) ? "已連接" : "未連接")
                     .font(.caption2)
             }
             Text("WebSocket")
@@ -368,7 +369,7 @@ struct ConnectionIndicator: View {
 // MARK: - Advanced Settings Sheet
 
 struct AdvancedSettingsSheet: View {
-    var viewModel: WebViewModel
+    @Environment(\.webViewModel) private var viewModel
     @Environment(\.dismiss) private var dismiss
 
     // AI 設定
@@ -467,7 +468,7 @@ struct AdvancedSettingsSheet: View {
                         }
                     }
                     .onChange(of: showRotatingEffect) { _, newValue in
-                        viewModel.setHighlightSettings(showRotatingEffect: newValue)
+                        viewModel?.setHighlightSettings(showRotatingEffect: newValue)
                     }
                 }
             } label: {
@@ -486,7 +487,7 @@ struct AdvancedSettingsSheet: View {
                         }
                     }
                     .onChange(of: hidePlayerNames) { _, newValue in
-                        viewModel.setHidePlayerNames(newValue)
+                        viewModel?.setHidePlayerNames(newValue)
                     }
                 }
             } label: {
@@ -567,13 +568,13 @@ struct AdvancedSettingsSheet: View {
                     HStack {
                         Button("重建 Bot") {
                             Task {
-                                await viewModel.resyncBot()
+                                await viewModel?.resyncBot()
                             }
                         }
                         .buttonStyle(.bordered)
 
                         Button("刪除 Bot") {
-                            viewModel.deleteNativeBot()
+                            viewModel?.deleteNativeBot()
                         }
                         .buttonStyle(.bordered)
                         #if os(macOS)
@@ -591,26 +592,26 @@ struct AdvancedSettingsSheet: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Circle()
-                            .fill(viewModel.isDebugServerRunning ? Color.green : Color.gray)
+                            .fill((viewModel?.isDebugServerRunning ?? false) ? Color.green : Color.gray)
                             .frame(width: 8, height: 8)
-                        Text(viewModel.isDebugServerRunning ? "運行中" : "已停止")
+                        Text((viewModel?.isDebugServerRunning ?? false) ? "運行中" : "已停止")
 
                         Spacer()
 
-                        Button(viewModel.isDebugServerRunning ? "停止" : "啟動") {
-                            viewModel.toggleDebugServer()
+                        Button((viewModel?.isDebugServerRunning ?? false) ? "停止" : "啟動") {
+                            viewModel?.toggleDebugServer()
                         }
                         .buttonStyle(.bordered)
-                        .tint(viewModel.isDebugServerRunning ? .red : .green)
+                        .tint((viewModel?.isDebugServerRunning ?? false) ? .red : .green)
                     }
 
-                    if viewModel.isDebugServerRunning {
+                    if viewModel?.isDebugServerRunning ?? false {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("http://localhost:\(viewModel.debugServerPort)")
+                            Text("http://localhost:\(viewModel?.debugServerPort ?? 8765)")
                                 .font(.system(.caption, design: .monospaced))
                                 .textSelection(.enabled)
 
-                            Text("curl http://localhost:\(viewModel.debugServerPort)/logs")
+                            Text("curl http://localhost:\(viewModel?.debugServerPort ?? 8765)/logs")
                                 .font(.system(.caption2, design: .monospaced))
                                 .foregroundColor(.secondary)
                                 .textSelection(.enabled)
@@ -633,21 +634,21 @@ struct AdvancedSettingsSheet: View {
 // MARK: - Status Bar
 
 struct StatusBar: View {
-    var viewModel: WebViewModel
+    @Environment(\.webViewModel) private var viewModel
 
     var body: some View {
-        if !viewModel.statusMessage.isEmpty {
+        if let vm = viewModel, !vm.statusMessage.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: statusIcon)
                     .foregroundColor(statusColor)
-                Text(viewModel.statusMessage)
+                Text(vm.statusMessage)
                     .font(.system(.caption, design: .monospaced))
                     .lineLimit(1)
                 Spacer()
 
                 // 顯示推薦數量
-                if viewModel.recommendationCount > 0 {
-                    Text("\(viewModel.recommendationCount) 推薦")
+                if vm.recommendationCount > 0 {
+                    Text("\(vm.recommendationCount) 推薦")
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
@@ -662,18 +663,20 @@ struct StatusBar: View {
     }
 
     private var statusIcon: String {
-        if viewModel.statusMessage.contains("錯誤") || viewModel.statusMessage.contains("Error") {
+        guard let vm = viewModel else { return "info.circle.fill" }
+        if vm.statusMessage.contains("錯誤") || vm.statusMessage.contains("Error") {
             return "exclamationmark.triangle.fill"
-        } else if viewModel.statusMessage.contains("成功") || viewModel.statusMessage.contains("已") {
+        } else if vm.statusMessage.contains("成功") || vm.statusMessage.contains("已") {
             return "checkmark.circle.fill"
         }
         return "info.circle.fill"
     }
 
     private var statusColor: Color {
-        if viewModel.statusMessage.contains("錯誤") || viewModel.statusMessage.contains("Error") {
+        guard let vm = viewModel else { return .blue }
+        if vm.statusMessage.contains("錯誤") || vm.statusMessage.contains("Error") {
             return .red
-        } else if viewModel.statusMessage.contains("成功") || viewModel.statusMessage.contains("已") {
+        } else if vm.statusMessage.contains("成功") || vm.statusMessage.contains("已") {
             return .green
         }
         return .blue

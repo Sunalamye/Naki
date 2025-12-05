@@ -1417,3 +1417,17 @@ extension WebViewModel: AutoPlayServiceDelegate {
     }
   }
 }
+
+// MARK: - Environment Key
+
+/// WebViewModel 的 Environment Key
+struct WebViewModelKey: EnvironmentKey {
+  static let defaultValue: WebViewModel? = nil
+}
+
+extension EnvironmentValues {
+  var webViewModel: WebViewModel? {
+    get { self[WebViewModelKey.self] }
+    set { self[WebViewModelKey.self] = newValue }
+  }
+}
