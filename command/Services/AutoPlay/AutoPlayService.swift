@@ -514,7 +514,7 @@ final class AutoPlayService {
         }
 
         if (foundTile) {
-            // 使用 NetAgent 發送打牌請求
+            // 優先使用 NetAgent API（與其他操作保持一致）
             if (window.app && window.app.NetAgent) {
                 window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
                     type: 1,
@@ -522,10 +522,10 @@ final class AutoPlayService {
                     moqie: false,
                     timeuse: 1
                 });
-                return JSON.stringify({success: true, index: foundIndex, tile: tileName});
+                return JSON.stringify({success: true, method: 'NetAgent', index: foundIndex, tile: tileName});
             }
 
-            // 備用：直接操作遊戲 API
+            // 備用：使用遊戲 UI 方法
             if (typeof mr.DoDiscardTile === 'function') {
                 mr.DoDiscardTile(foundTile);
                 return JSON.stringify({success: true, method: 'DoDiscardTile', index: foundIndex});
@@ -639,19 +639,20 @@ final class AutoPlayService {
         var dm = window.view.DesktopMgr.Inst;
         if (!dm) return JSON.stringify({success: false, error: 'no dm'});
 
-        var mr = dm.mainrole;
-        if (mr && typeof mr.QiPaiPass === 'function') {
-            mr.QiPaiPass();
-            return JSON.stringify({success: true, method: 'QiPaiPass'});
-        }
-
-        // 備用：使用 NetAgent
+        // 優先使用 NetAgent API（與其他操作保持一致）
         if (window.app && window.app.NetAgent) {
             window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
                 cancel_operation: true,
                 timeuse: 1
             });
             return JSON.stringify({success: true, method: 'NetAgent'});
+        }
+
+        // 備用：使用遊戲 UI 方法
+        var mr = dm.mainrole;
+        if (mr && typeof mr.QiPaiPass === 'function') {
+            mr.QiPaiPass();
+            return JSON.stringify({success: true, method: 'QiPaiPass'});
         }
 
         return JSON.stringify({success: false, error: 'no method available'});
