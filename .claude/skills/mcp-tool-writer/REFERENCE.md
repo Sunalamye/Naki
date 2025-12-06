@@ -248,18 +248,19 @@ protocol MCPContext: AnyObject {
 
 ### executeJavaScript Usage
 
+**⚠️ 重要**：必須使用 `return` 語句才能正確返回值！
+
 ```swift
-// 簡單返回值
+// ✅ 正確：使用 return 語句
 let title = try await context.executeJavaScript("return document.title")
-
-// 數值計算
 let sum = try await context.executeJavaScript("return 1 + 1")
-
-// 返回 JSON 字串（複雜物件）
 let json = try await context.executeJavaScript("return JSON.stringify({a:1})")
 
-// 調用遊戲 API
-let result = try await context.executeJavaScript("window.__nakiGameAPI.getGameState()")
+// ✅ 正確：調用遊戲 API 並返回結果
+let result = try await context.executeJavaScript("return window.__nakiGameAPI.getGameState()")
+
+// ❌ 錯誤：沒有 return，結果為 nil
+let title = try await context.executeJavaScript("document.title")  // 返回 nil！
 ```
 
 ### getBotStatus 返回結構

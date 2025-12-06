@@ -130,6 +130,36 @@ context.log("記錄訊息")
 let port = context.serverPort
 ```
 
+## ⚠️ JavaScript 執行注意事項
+
+**重要**：`context.executeJavaScript()` 必須使用 `return` 語句才能正確返回值！
+
+```swift
+// ✅ 正確：使用 return 語句
+let title = try await context.executeJavaScript("return document.title")
+let sum = try await context.executeJavaScript("return 1 + 1")
+let json = try await context.executeJavaScript("return JSON.stringify({a:1})")
+
+// ❌ 錯誤：沒有 return，結果為 nil
+let title = try await context.executeJavaScript("document.title")  // 返回 nil！
+```
+
+**常見模式**：
+
+```swift
+// 調用遊戲 API 並返回 JSON
+let script = "return JSON.stringify(window.__nakiGameAPI.getGameState())"
+let result = try await context.executeJavaScript(script)
+
+// 執行操作並返回布林值
+let script = "return window.__nakiGameAPI.discardTile(0)"
+let success = try await context.executeJavaScript(script) as? Bool ?? false
+
+// 檢查 API 是否存在
+let script = "return typeof window.__nakiGameAPI !== 'undefined'"
+let exists = try await context.executeJavaScript(script) as? Bool ?? false
+```
+
 ## Error Handling
 
 使用 `MCPToolError`（定義在 `MCPTool.swift:129-147`）處理錯誤：
