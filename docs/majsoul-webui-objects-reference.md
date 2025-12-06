@@ -1414,6 +1414,622 @@ function moveEffectToButton(actionType) {
 
 ---
 
+## 大廳 UI (Lobby UI)
+
+### 訪問路徑
+
+```javascript
+window.GameMgr.Inst                    // 遊戲管理器
+window.GameMgr.Inst.uimgr              // UI 管理器
+window.GameMgr.Inst.uimgr._ui_lobby    // 大廳 UI
+```
+
+### 核心結構
+
+```javascript
+GameMgr.Inst.uimgr
+├── _root                              // 根容器
+├── _lobby_root                        // 大廳根容器
+├── _mj_root                           // 麻將桌根容器
+├── _ui_lobby (主大廳 UI)
+│   ├── nowpage: number                // 當前頁面索引 (0=主頁, 1=段位場, ...)
+│   ├── locking: boolean               // 是否鎖定
+│   ├── page0 (主頁面)
+│   │   ├── btn_dajiangsai             // 大將賽按鈕
+│   │   ├── btn_yibanchang             // 段位場按鈕 (x:1183, y:368, w:543, h:190)
+│   │   └── btn_yourenfang             // 友人房按鈕
+│   ├── page_rank (段位場頁面)
+│   │   ├── me                         // 頁面容器
+│   │   ├── p0                         // 內容區域
+│   │   └── content0                   // 滾動內容
+│   ├── page_friend (好友頁面)
+│   ├── page_match (比賽頁面)
+│   │   ├── btns[0-4]                  // 比賽分類按鈕
+│   │   └── content                    // 比賽列表
+│   └── page_east_north (東北場?)
+├── _ui_waitingroom (等待房間 UI)
+│   ├── btnPrepare                     // 準備按鈕
+│   ├── btnStart                       // 開始按鈕
+│   ├── btnCancel                      // 取消按鈕
+│   ├── room_id                        // 房間 ID
+│   └── playerSeats                    // 玩家座位
+└── _uis[105] (匹配 UI - ⭐關鍵)
+    ├── addMatch(match_mode)           // 開始匹配
+    ├── cancelPiPei()                  // 取消匹配
+    ├── current_count                  // 當前匹配數量
+    ├── cells                          // 匹配項目列表
+    └── inopen                         // 是否已展開
+```
+
+### 遊戲狀態屬性
+
+```javascript
+GameMgr.Inst
+├── account_id: number                 // 帳戶 ID
+├── player_name: string                // 玩家名稱
+├── logined: boolean                   // 是否已登入
+├── ingame: boolean                    // 是否在遊戲中
+├── in_shilian: boolean                // 是否在試煉中
+├── in_ab_match: boolean               // 是否在 AB 賽中
+├── in_kuangdu: boolean                // 是否在狂賭模式
+├── in_activity_mode: number           // 活動模式
+├── custom_match_id: number            // 自定義比賽 ID
+├── beinvited_roomid: number           // 被邀請的房間 ID
+├── _current_scene: string             // 當前場景
+├── _scene_lobby                       // 大廳場景
+└── _scene_mj                          // 麻將場景
+```
+
+### 匹配模式 ID 對照表
+
+| ID | 房間 | 模式 | 段位限制 | 描述 |
+|---|---|---|---|---|
+| 1 | 銅之間 | 0 | 10101-10203 | 四麻東風 |
+| 2 | 銅之間 | 1 | 10101-10203 | 四麻半莊 |
+| 3 | 銅之間 | 2 | 10101-10203 | 四麻 |
+| 4 | 銀之間 | 0 | 10201-10303 | 四麻東風 |
+| 5 | 銀之間 | 1 | 10201-10303 | 四麻半莊 |
+| 6-8 | 金之間 | 0-2 | 10301-10403 | 四麻 |
+| 9-11 | 玉之間 | 0-2 | 10401-10503 | 四麻 |
+| 14-15 | 王座間 | - | 10501-10720 | 四麻 |
+| 17-18 | 銅之間 | 11-12 | 20101-20203 | 三麻 |
+| 19-20 | 銀之間 | 11-12 | 20201-20303 | 三麻 |
+| 26-29 | 休閒場 | - | - | 休閒普通場 |
+| 30 | 寶牌狂熱 | - | - | 特殊模式 |
+
+**段位編碼規則**:
+- `10xxx` = 四麻段位, `20xxx` = 三麻段位
+- 第二位: 1=雀士, 2=雀傑, 3=雀豪, 4=雀聖, 5=魂天
+- 第三位: 等級 (01-03)
+- 第四位: 星數 (1-3)
+
+### 自動開始遊戲完整流程
+
+#### 步驟 1: 切換到段位場頁面
+
+```javascript
+var lobby = window.GameMgr.Inst.uimgr._ui_lobby;
+lobby.setPage(1);  // 切換到段位場
+
+// 驗證
+console.log(lobby.nowpage);  // 應該是 1
+console.log(lobby.page_rank.me.visible);  // 應該是 true
+```
+
+#### 步驟 2: 開始匹配 (⭐關鍵 API)
+
+```javascript
+var matchUI = window.GameMgr.Inst.uimgr._uis[105];
+
+// 開始匹配 - 傳入 match_mode ID
+matchUI.addMatch(4);  // 銀之間東風
+
+// 驗證匹配狀態
+console.log(matchUI.current_count);  // 應該 >= 1
+console.log(matchUI.inopen);         // 應該是 true
+console.log(matchUI.cells[0].match_id);  // 應該是 4
+```
+
+#### 步驟 3: 取消匹配
+
+```javascript
+var matchUI = window.GameMgr.Inst.uimgr._uis[105];
+matchUI.cancelPiPei();
+
+// 驗證
+console.log(matchUI.current_count);  // 應該是 0
+```
+
+#### 步驟 4: 模擬按鈕點擊 (替代方案)
+
+```javascript
+// 模擬點擊段位場按鈕
+var btn = window.GameMgr.Inst.uimgr._ui_lobby.page0.btn_yibanchang;
+var fakeEvent = new Laya.Event();
+fakeEvent.type = 'click';
+fakeEvent.target = btn;
+btn.event('click', fakeEvent);
+```
+
+### 網絡 API 參考
+
+#### Protobuf 服務方法
+
+```javascript
+// 通過 sendReq2Lobby 調用
+app.NetAgent.sendReq2Lobby(action, method, data, callback);
+
+// 匹配相關
+'matchGame'              // 開始匹配 (ReqJoinMatchQueue)
+'cancelMatch'            // 取消匹配
+'startUnifiedMatch'      // 統一匹配開始 (ReqStartUnifiedMatch)
+'cancelUnifiedMatch'     // 統一匹配取消
+
+// 查詢相關
+'fetchCurrentMatchInfo'  // 當前匹配信息
+'fetchGamingInfo'        // 遊戲進行中信息
+'fetchAccountInfo'       // 帳戶信息 (含段位)
+'fetchQueueInfo'         // 隊列信息
+
+// 房間相關
+'fetchRoom'              // 獲取房間
+'createRoom'             // 創建房間
+'joinRoom'               // 加入房間
+'leaveRoom'              // 離開房間
+'readyPlay'              // 準備
+'startRoom'              // 開始房間
+```
+
+#### 請求結構
+
+```javascript
+// ReqJoinMatchQueue (matchGame)
+{
+  match_mode: number,           // 匹配模式 ID
+  client_version_string: string // 客戶端版本 (可選)
+}
+
+// ReqStartUnifiedMatch (startUnifiedMatch)
+{
+  match_sid: string,            // 匹配 Session ID
+  client_version_string: string // 客戶端版本 (可選)
+}
+```
+
+#### 錯誤碼參考
+
+| 錯誤碼 | 含義 |
+|-------|------|
+| 2 | 通用錯誤 |
+| 157 | 隊列信息不可用 |
+| 1302 | 未在匹配中 |
+| 1306 | 匹配失敗 (段位不符或其他限制) |
+
+### 帳戶段位查詢
+
+```javascript
+// 獲取帳戶信息
+app.NetAgent.sendReq2Lobby('Lobby', 'fetchAccountInfo', {
+    account_id: window.GameMgr.Inst.account_id
+}, function(err, res) {
+    if (res && res.account) {
+        console.log('四麻段位:', res.account.level.id);   // 如 10202
+        console.log('三麻段位:', res.account.level3.id);  // 如 20101
+        console.log('四麻分數:', res.account.level.score);
+    }
+});
+
+// 段位 ID 解析
+// 10202 = 四麻 雀士二 2星
+// 第1位: 1=四麻, 2=三麻
+// 第2位: 段位 (0=初心, 1=雀士, 2=雀傑, 3=雀豪, 4=雀聖, 5=魂天)
+// 第3-4位: 等級和星數
+```
+
+### 匹配配置查詢
+
+```javascript
+// 獲取匹配模式配置
+var matchmode = window.cfg.desktop.matchmode;
+
+matchmode.forEach(function(mode, id) {
+    console.log({
+        id: id,
+        room: mode.room,
+        room_name: mode.room_name_chs,
+        level_limit: mode.level_limit,      // 段位下限
+        level_limit_ceil: mode.level_limit_ceil,  // 段位上限
+        is_open: mode.is_open
+    });
+});
+```
+
+### 完整自動開始遊戲示例
+
+```javascript
+(function() {
+    var gm = window.GameMgr.Inst;
+    var uimgr = gm.uimgr;
+    var lobby = uimgr._ui_lobby;
+    var matchUI = uimgr._uis[105];
+
+    // 1. 檢查是否已登入且不在遊戲中
+    if (!gm.logined) {
+        console.error('未登入');
+        return;
+    }
+    if (gm.ingame) {
+        console.error('已在遊戲中');
+        return;
+    }
+
+    // 2. 切換到段位場頁面
+    if (lobby.nowpage !== 1) {
+        lobby.setPage(1);
+    }
+
+    // 3. 等待頁面切換完成後開始匹配
+    setTimeout(function() {
+        // 銀之間東風 (match_mode = 4)
+        var result = matchUI.addMatch(4);
+
+        if (result) {
+            console.log('✅ 開始匹配成功');
+            console.log('匹配數量:', matchUI.current_count);
+        } else {
+            console.error('❌ 匹配失敗');
+        }
+    }, 500);
+})();
+```
+
+---
+
+## 閒置檢測與心跳機制 (Idle Detection & Heartbeat)
+
+### 機制概述
+
+Majsoul 會在玩家閒置一段時間後自動登出，防止帳號長時間佔用資源。
+
+| 項目 | 值 | 說明 |
+|------|-----|------|
+| **心跳函數** | `GameMgr.Inst.clientHeatBeat()` | 重置閒置計時器 |
+| **上次心跳時間** | `GameMgr.Inst._last_heatbeat_time` | Unix 時間戳 (ms) |
+| **閒置檢測間隔** | 360 秒 (6 分鐘) | Laya.timer 定時器 |
+| **警告閾值** | 3000 秒 (50 分鐘) | 顯示 `UI_Hangup_Warn` |
+| **強制登出** | 警告後繼續閒置 | 顯示 `UI_Hanguplogout` |
+
+### 訪問路徑
+
+```javascript
+// 心跳相關
+window.GameMgr.Inst._last_heatbeat_time    // 上次心跳時間
+window.GameMgr.Inst.clientHeatBeat()       // 發送心跳
+window.GameMgr.Inst.sendLoginBeat()        // 登入心跳
+
+// 閒置警告 UI
+window.uiscript.UI_Hangup_Warn.Inst        // 閒置警告彈窗
+window.uiscript.UI_Hanguplogout.Inst       // 強制登出彈窗
+```
+
+### 手動發送心跳
+
+```javascript
+// 發送心跳並驗證
+var inst = window.GameMgr.Inst;
+var before = inst._last_heatbeat_time;
+inst.clientHeatBeat();
+var after = inst._last_heatbeat_time;
+
+console.log({
+    updated: before !== after,
+    previousTime: new Date(before).toISOString(),
+    currentTime: new Date(after).toISOString()
+});
+```
+
+### 檢查閒置狀態
+
+```javascript
+(function() {
+    var inst = window.GameMgr.Inst;
+    var now = Date.now();
+    var lastHeartbeat = inst._last_heatbeat_time;
+    var idleSeconds = Math.floor((now - lastHeartbeat) / 1000);
+    var warnThreshold = 3000;  // 50 分鐘
+
+    return {
+        idleSeconds: idleSeconds,
+        idleMinutes: Math.floor(idleSeconds / 60),
+        timeUntilWarn: Math.max(0, warnThreshold - idleSeconds),
+        recommendation: idleSeconds > 2400 ? "建議立即發送心跳" : "狀態正常"
+    };
+})()
+```
+
+### 使用 MCP 工具
+
+```
+# 發送心跳
+mcp__naki__lobby_heartbeat
+
+# 檢查閒置狀態
+mcp__naki__lobby_idle_status
+```
+
+### 定時器結構 (Laya.timer)
+
+遊戲使用 Laya 引擎的定時器系統：
+
+```javascript
+// 查看所有定時器
+var timer = window.Laya.timer;
+var handlers = timer._handlers;
+
+// 過濾特定間隔的定時器
+handlers.filter(h => h && h.delay === 360000);  // 6 分鐘
+handlers.filter(h => h && h.delay === 60000);   // 1 分鐘
+```
+
+### 閒置檢測源碼分析
+
+360 秒定時器中的關鍵邏輯（反混淆後）：
+
+```javascript
+function checkIdle() {
+    if (game.LobbyNetMgr.Inst.isOK) {
+        // 向伺服器請求時間同步
+        app.NetAgent.sendReq2Lobby('Lobby', 'serverTime', {}, function(err, res) {
+            if (!err && res.now) {
+                serverTimeDelta = 1000 * res.now - Laya.timer.currTimer;
+            }
+        });
+
+        // 計算閒置時間
+        var idleSeconds = (Laya.timer.currTimer - lastActiveTime) / 1000;
+
+        // 超過 3000 秒 (50 分鐘) 顯示警告
+        if (idleSeconds >= 3000) {
+            uiscript.UI_Hangup_Warn.Inst.show();
+        }
+    }
+}
+```
+
+---
+
+## 如何查找遊戲 UI 元素（逆向工程流程）
+
+本節記錄如何通過探索找到遊戲內部的 UI 元素和 API，以閒置檢測機制的發現過程為例。
+
+### 流程概述
+
+```
+1. 確定目標功能
+   ↓
+2. 搜尋相關關鍵字
+   ↓
+3. 追蹤物件引用
+   ↓
+4. 分析定時器和回調
+   ↓
+5. 驗證和測試
+```
+
+### 步驟 1: 確定目標功能
+
+**目標**: 找到遊戲中的閒置檢測機制，因為過一段時間會被自動登出。
+
+**思路**:
+- 登出時會有彈窗，可以搜尋相關的 UI
+- 可能有 "idle"、"timeout"、"logout"、"heartbeat" 等關鍵字
+
+### 步驟 2: 搜尋相關關鍵字
+
+#### 在 GameMgr 中搜尋
+
+```javascript
+// 搜尋心跳/超時相關屬性
+var inst = window.GameMgr.Inst;
+var allKeys = Object.keys(inst);
+
+var timeRelated = allKeys.filter(k =>
+    k.toLowerCase().includes('time') ||
+    k.toLowerCase().includes('heart') ||
+    k.toLowerCase().includes('timeout') ||
+    k.toLowerCase().includes('idle')
+);
+
+console.log(timeRelated);
+// 結果: ["_last_heatbeat_time", "account_refresh_time", ...]
+```
+
+#### 在 uiscript 中搜尋對話框
+
+```javascript
+// 搜尋登出/警告相關的 UI
+var uiscript = window.uiscript;
+var dialogKeys = Object.keys(uiscript).filter(k =>
+    k.toLowerCase().includes('logout') ||
+    k.toLowerCase().includes('hangup') ||
+    k.toLowerCase().includes('disconnect') ||
+    k.toLowerCase().includes('idle')
+);
+
+console.log(dialogKeys);
+// 結果: ["UI_Hangup_Warn", "UI_Hanguplogout", "UI_Disconnect", ...]
+```
+
+### 步驟 3: 追蹤物件引用
+
+#### 查看 GameMgr 原型上的方法
+
+```javascript
+var proto = Object.getPrototypeOf(window.GameMgr.Inst);
+var methods = Object.getOwnPropertyNames(proto);
+
+var heartbeatMethods = methods.filter(k =>
+    k.toLowerCase().includes('heart') ||
+    k.toLowerCase().includes('beat')
+);
+
+console.log(heartbeatMethods);
+// 結果: ["clientHeatBeat", "sendLoginBeat"]
+```
+
+#### 測試找到的函數
+
+```javascript
+// 測試 clientHeatBeat 是否能更新時間
+var inst = window.GameMgr.Inst;
+var before = inst._last_heatbeat_time;
+inst.clientHeatBeat();
+var after = inst._last_heatbeat_time;
+
+console.log({
+    before: before,
+    after: after,
+    changed: before !== after  // true = 函數有效
+});
+```
+
+### 步驟 4: 分析定時器和回調
+
+#### 查看 Laya 定時器
+
+```javascript
+// 獲取所有重複執行的定時器
+var timer = window.Laya.timer;
+var handlers = timer._handlers || [];
+
+// 統計不同間隔的定時器數量
+var delays = {};
+for (var i = 0; i < handlers.length; i++) {
+    var h = handlers[i];
+    if (h && h.repeat) {
+        var d = h.delay;
+        if (!delays[d]) delays[d] = 0;
+        delays[d]++;
+    }
+}
+
+console.log(delays);
+// 結果: {1: 26, 500: 13, 1000: 2, 15000: 1, 60000: 2, 180000: 1, 360000: 1}
+```
+
+#### 查看特定間隔的定時器內容
+
+```javascript
+// 查看 360 秒 (6 分鐘) 定時器
+var handler = handlers.find(h => h && h.delay === 360000);
+
+if (handler) {
+    console.log({
+        delay: handler.delay,
+        repeat: handler.repeat,
+        method: handler.method.toString().substring(0, 500)
+    });
+}
+```
+
+#### 分析混淆代碼
+
+360 秒定時器的混淆代碼：
+
+```javascript
+function(){
+    if(game[$E[3874]].Inst.isOK){
+        app[$g[296]][$B[300]]($I[339],$E[10982],{},function(P,q){
+            P||q[$E[54]]||(h[$6[4172]]=1000*q[$I[11006]]-Laya[$M[51]][$B[550]]);
+        });
+        var P=(Laya[$I[51]][$3[550]]-h[$g[10948]])/1000;
+        P>=3000 && uiscript[$3[7842]].Inst.show();
+    }
+}
+```
+
+**關鍵發現**:
+- `P >= 3000` → 3000 秒 (50 分鐘) 閾值
+- `uiscript[$3[7842]].Inst.show()` → 顯示某個 UI（警告彈窗）
+
+### 步驟 5: 驗證和測試
+
+#### 確認 UI 組件
+
+```javascript
+// 檢查找到的 UI 是否存在
+var hangupWarn = window.uiscript.UI_Hangup_Warn;
+var hangupLogout = window.uiscript.UI_Hanguplogout;
+
+console.log({
+    warnExists: !!hangupWarn,
+    logoutExists: !!hangupLogout,
+    warnMethods: hangupWarn.prototype ? Object.getOwnPropertyNames(hangupWarn.prototype) : [],
+    logoutMethods: hangupLogout.prototype ? Object.getOwnPropertyNames(hangupLogout.prototype) : []
+});
+// 結果: warnMethods: ["constructor", "onCreate", "show", "close"]
+```
+
+#### 測試完整流程
+
+```javascript
+// 驗證心跳機制
+var inst = window.GameMgr.Inst;
+var now = Date.now();
+var lastHeartbeat = inst._last_heatbeat_time;
+var idleSeconds = Math.floor((now - lastHeartbeat) / 1000);
+
+console.log({
+    idleSeconds: idleSeconds,
+    idleMinutes: Math.floor(idleSeconds / 60),
+    warnAt: 3000,  // 50 分鐘
+    willWarnIn: Math.max(0, 3000 - idleSeconds) + " 秒"
+});
+
+// 發送心跳重置計時器
+inst.clientHeatBeat();
+console.log("心跳已發送，計時器已重置");
+```
+
+### 常用搜尋模式
+
+| 目標 | 搜尋關鍵字 | 搜尋位置 |
+|------|-----------|----------|
+| **網絡相關** | socket, net, connect, ws | `window.net`, `app.NetAgent` |
+| **UI 彈窗** | dialog, popup, confirm, warn | `window.uiscript.UI_*` |
+| **遊戲狀態** | state, status, mode, phase | `GameMgr.Inst`, `DesktopMgr.Inst` |
+| **定時任務** | timer, interval, schedule | `Laya.timer._handlers` |
+| **用戶操作** | click, touch, input, action | `mainrole`, `oplist` |
+| **動畫效果** | effect, anim, bling | `effect_*`, `anim.*` |
+
+### 工具函數
+
+```javascript
+// 通用搜尋函數
+function searchObject(obj, keyword, maxDepth = 2, currentDepth = 0) {
+    if (currentDepth > maxDepth) return [];
+    var results = [];
+
+    Object.keys(obj).forEach(key => {
+        if (key.toLowerCase().includes(keyword.toLowerCase())) {
+            results.push({
+                path: key,
+                type: typeof obj[key],
+                value: typeof obj[key] === 'function' ? '[function]' : obj[key]
+            });
+        }
+    });
+
+    return results;
+}
+
+// 使用示例
+searchObject(window.GameMgr.Inst, 'heart');
+searchObject(window.uiscript, 'logout');
+```
+
+---
+
 ## 相關資源
 
 ### Shader 資源
@@ -1434,7 +2050,10 @@ function moveEffectToButton(actionType) {
 
 ---
 
-**文檔版本**: 1.1
-**更新日期**: 2025-12-05
+**文檔版本**: 1.3
+**更新日期**: 2025-12-06
 **驗證狀態**: ✅ 通過 Debug Server 和 JavaScript 直接查詢驗證
-**變更記錄**: 新增動作按鈕 UI (UI_ChiPengHu) 章節
+**變更記錄**:
+- v1.3: 新增閒置檢測與心跳機制章節、如何查找遊戲 UI 元素（逆向工程流程）章節
+- v1.2: 新增大廳 UI (Lobby UI) 章節，包含自動開始遊戲完整流程
+- v1.1: 新增動作按鈕 UI (UI_ChiPengHu) 章節

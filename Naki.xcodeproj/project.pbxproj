@@ -70,6 +70,7 @@
 				Services/MCP/MCPToolRegistry.swift,
 				Services/MCP/Tools/BotTools.swift,
 				Services/MCP/Tools/GameTools.swift,
+				Services/MCP/Tools/LobbyTools.swift,
 				Services/MCP/Tools/SystemTools.swift,
 				Services/MCP/Tools/UITools.swift,
 				ViewModels/GameStateManager.swift,

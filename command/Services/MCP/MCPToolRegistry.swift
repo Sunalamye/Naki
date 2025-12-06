@@ -179,5 +179,18 @@ extension MCPToolRegistry {
         register(UINameHideTool.self)
         register(UINameShowTool.self)
         register(UINameToggleTool.self)
+
+        // 大廳類
+        register(LobbyStatusTool.self)
+        register(MatchModeListTool.self)
+        register(StartMatchTool.self)
+        register(CancelMatchTool.self)
+        register(MatchStatusTool.self)
+        register(NavigateLobbyTool.self)
+        register(AccountLevelTool.self)
+
+        // 心跳/閒置管理
+        register(HeartbeatTool.self)
+        register(IdleStatusTool.self)
     }
 }
