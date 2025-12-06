@@ -193,5 +193,9 @@ extension MCPToolRegistry {
         register(HeartbeatTool.self)
         register(IdleStatusTool.self)
         register(AntiIdleToggleTool.self)
+
+        // 表情類
+        register(SendEmojiTool.self)
+        register(ListEmojiTool.self)
     }
 }
