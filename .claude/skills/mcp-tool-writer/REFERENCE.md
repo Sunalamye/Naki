@@ -2,8 +2,9 @@
 
 ## Complete Protocol Definition
 
+See `MCPTool.swift:15-32`:
+
 ```swift
-// MCPTool.swift
 protocol MCPTool {
     static var name: String { get }
     static var description: String { get }
@@ -14,15 +15,15 @@ protocol MCPTool {
 }
 ```
 
-## Full Example: Creating a New Tool
+## Full Examples from Current Codebase
 
-### Example 1: Simple Tool (No Parameters)
+### Example 1: Simple Tool (No Parameters) - SystemTools.swift
 
 ```swift
-/// 獲取系統時間
-struct GetTimeTool: MCPTool {
-    static let name = "get_time"
-    static let description = "獲取當前系統時間"
+/// 獲取 MCP Server 狀態
+struct GetStatusTool: MCPTool {
+    static let name = "get_status"
+    static let description = "獲取 MCP Server 狀態和埠號"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
@@ -32,28 +33,27 @@ struct GetTimeTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let formatter = ISO8601DateFormatter()
         return [
-            "timestamp": formatter.string(from: Date()),
-            "timezone": TimeZone.current.identifier
+            "status": "running",
+            "port": context.serverPort,
+            "timestamp": ISO8601DateFormatter().string(from: Date())
         ]
     }
 }
 ```
 
-### Example 2: Tool with Parameters
+### Example 2: Tool with Required Parameter - GameTools.swift
 
 ```swift
-/// 計算兩數相加
-struct AddNumbersTool: MCPTool {
-    static let name = "add_numbers"
-    static let description = "計算兩個數字相加的結果"
+/// 打出指定索引的牌
+struct GameDiscardTool: MCPTool {
+    static let name = "game_discard"
+    static let description = "打出指定索引的牌"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "a": .number("第一個數字"),
-            "b": .number("第二個數字")
+            "tileIndex": .integer("要打出的牌在手牌中的索引 (0-13)")
         ],
-        required: ["a", "b"]
+        required: ["tileIndex"]
     )
 
     private let context: MCPContext
@@ -63,28 +63,72 @@ struct AddNumbersTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let a = arguments["a"] as? Double else {
-            throw MCPToolError.missingParameter("a")
-        }
-        guard let b = arguments["b"] as? Double else {
-            throw MCPToolError.missingParameter("b")
+        guard let tileIndex = arguments["tileIndex"] as? Int else {
+            throw MCPToolError.missingParameter("tileIndex")
         }
 
+        let script = "window.__nakiGameAPI ? __nakiGameAPI.discardTile(\(tileIndex)) : false"
+        let result = try await context.executeJavaScript(script)
+        let success = result as? Bool ?? false
+
         return [
-            "result": a + b,
-            "calculation": "\(a) + \(b) = \(a + b)"
+            "success": success,
+            "tileIndex": tileIndex
         ]
     }
 }
 ```
 
-### Example 3: Tool with JavaScript Execution
+### Example 3: Tool with Multiple Parameters - UITools.swift
 
 ```swift
-/// 獲取網頁標題
-struct GetPageTitleTool: MCPTool {
-    static let name = "get_page_title"
-    static let description = "獲取當前遊戲頁面的標題"
+/// 在指定座標點擊
+struct ClickTool: MCPTool {
+    static let name = "click"
+    static let description = "在指定座標點擊"
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "x": .number("X 座標"),
+            "y": .number("Y 座標"),
+            "label": .string("點擊標籤（可選）")
+        ],
+        required: ["x", "y"]
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let x = arguments["x"] as? Double else {
+            throw MCPToolError.missingParameter("x")
+        }
+        guard let y = arguments["y"] as? Double else {
+            throw MCPToolError.missingParameter("y")
+        }
+
+        let label = arguments["label"] as? String ?? "MCP Click"
+        let script = "window.__nakiAutoPlay.click(\(x), \(y), '\(label)')"
+        _ = try await context.executeJavaScript(script)
+
+        return [
+            "result": "clicked",
+            "x": x,
+            "y": y
+        ]
+    }
+}
+```
+
+### Example 4: Tool with JavaScript + JSON Parsing - BotTools.swift
+
+```swift
+/// 請求遊戲同步以重建 Bot 狀態
+struct BotSyncTool: MCPTool {
+    static let name = "bot_sync"
+    static let description = "請求 syncGame 重新同步遊戲狀態。當 Bot 沒有出現推薦提示時使用"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
@@ -94,30 +138,47 @@ struct GetPageTitleTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let script = "return document.title"
+        context.log("MCP: Requesting syncGame to rebuild Bot state")
+
+        let script = "JSON.stringify(window.__nakiWebSocket?.requestSyncGame() || {success: false, message: 'WebSocket module not loaded'})"
         let result = try await context.executeJavaScript(script)
 
+        // 解析 JSON 結果
+        if let jsonString = result as? String,
+           let data = jsonString.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let success = json["success"] as? Bool ?? false
+            let message = json["message"] as? String ?? "Unknown"
+
+            return [
+                "success": success,
+                "message": message,
+                "note": success ? "syncGame 請求已發送" : "請求失敗"
+            ]
+        }
+
         return [
-            "title": result ?? "Unknown",
-            "success": result != nil
+            "success": false,
+            "message": "Failed to parse response"
         ]
     }
 }
 ```
 
-### Example 4: Tool with Optional Parameters
+### Example 5: Tool with Optional Parameters & Defaults - UITools.swift
 
 ```swift
-/// 搜尋日誌
-struct SearchLogsTool: MCPTool {
-    static let name = "search_logs"
-    static let description = "在日誌中搜尋關鍵字"
+/// 設定校準參數
+struct CalibrateTool: MCPTool {
+    static let name = "calibrate"
+    static let description = "設定校準參數"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "keyword": .string("搜尋關鍵字"),
-            "limit": .integer("最大結果數（默認 100）")
+            "tileSpacing": .number("牌間距（默認 96）"),
+            "offsetX": .number("X 偏移（默認 -200）"),
+            "offsetY": .number("Y 偏移（默認 0）")
         ],
-        required: ["keyword"]
+        required: []  // 全部可選
     )
 
     private let context: MCPContext
@@ -127,20 +188,30 @@ struct SearchLogsTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let keyword = arguments["keyword"] as? String else {
-            throw MCPToolError.missingParameter("keyword")
+        // 使用默認值處理可選參數
+        let tileSpacing = arguments["tileSpacing"] as? Double ?? 96
+        let offsetX = arguments["offsetX"] as? Double ?? -200
+        let offsetY = arguments["offsetY"] as? Double ?? 0
+
+        let script = """
+        if (window.__nakiAutoPlay) {
+            window.__nakiAutoPlay.calibration = {
+                tileSpacing: \(tileSpacing),
+                offsetX: \(offsetX),
+                offsetY: \(offsetY)
+            };
+            JSON.stringify(window.__nakiAutoPlay.calibration);
+        } else {
+            'Not loaded';
         }
-
-        let limit = arguments["limit"] as? Int ?? 100
-        let logs = context.getLogs()
-
-        let matches = logs.filter { $0.contains(keyword) }
-            .prefix(limit)
+        """
+        _ = try await context.executeJavaScript(script)
 
         return [
-            "matches": Array(matches),
-            "count": matches.count,
-            "keyword": keyword
+            "result": "calibrated",
+            "tileSpacing": tileSpacing,
+            "offsetX": offsetX,
+            "offsetY": offsetY
         ]
     }
 }
@@ -148,28 +219,52 @@ struct SearchLogsTool: MCPTool {
 
 ## MCPContext API Reference
 
-### executeJavaScript
+定義在 `MCPContext.swift:15-38`：
 
 ```swift
-/// 在 WebView 中執行 JavaScript
-/// - Parameter script: JavaScript 代碼（需要 return 語句）
-/// - Returns: 執行結果
-func executeJavaScript(_ script: String) async throws -> Any?
+protocol MCPContext: AnyObject {
+    /// 伺服器埠號
+    var serverPort: UInt16 { get }
 
-// 使用範例
-let title = try await context.executeJavaScript("return document.title")
-let sum = try await context.executeJavaScript("return 1 + 1")
-let json = try await context.executeJavaScript("return JSON.stringify({a:1})")
+    /// 執行 JavaScript（async/await）
+    func executeJavaScript(_ script: String) async throws -> Any?
+
+    /// 獲取 Bot 狀態
+    func getBotStatus() -> [String: Any]?
+
+    /// 觸發自動打牌
+    func triggerAutoPlay()
+
+    /// 獲取日誌
+    func getLogs() -> [String]
+
+    /// 清空日誌
+    func clearLogs()
+
+    /// 記錄日誌
+    func log(_ message: String)
+}
 ```
 
-### getBotStatus
+### executeJavaScript Usage
 
 ```swift
-/// 獲取 Bot 狀態
-/// - Returns: 包含 botStatus, recommendations, tehai 等的字典
-func getBotStatus() -> [String: Any]?
+// 簡單返回值
+let title = try await context.executeJavaScript("return document.title")
 
-// 返回結構
+// 數值計算
+let sum = try await context.executeJavaScript("return 1 + 1")
+
+// 返回 JSON 字串（複雜物件）
+let json = try await context.executeJavaScript("return JSON.stringify({a:1})")
+
+// 調用遊戲 API
+let result = try await context.executeJavaScript("window.__nakiGameAPI.getGameState()")
+```
+
+### getBotStatus 返回結構
+
+```swift
 {
     "botStatus": { "playerId": 0, "isActive": false },
     "recommendations": [...],
@@ -180,27 +275,9 @@ func getBotStatus() -> [String: Any]?
 }
 ```
 
-### triggerAutoPlay
-
-```swift
-/// 觸發自動打牌（執行 AI 推薦動作）
-func triggerAutoPlay()
-```
-
-### Logging
-
-```swift
-/// 獲取所有日誌
-func getLogs() -> [String]
-
-/// 清空日誌
-func clearLogs()
-
-/// 記錄新日誌
-func log(_ message: String)
-```
-
 ## MCPInputSchema Reference
+
+定義在 `MCPTool.swift:37-56`：
 
 ### Property Types
 
@@ -224,7 +301,7 @@ MCPInputSchema(
     required: ["code"]
 )
 
-// 多參數混合
+// 多參數混合（部分必填）
 MCPInputSchema(
     properties: [
         "x": .number("X 座標"),
@@ -233,9 +310,20 @@ MCPInputSchema(
     ],
     required: ["x", "y"]
 )
+
+// 全部可選參數
+MCPInputSchema(
+    properties: [
+        "limit": .integer("最大數量"),
+        "offset": .integer("起始位置")
+    ],
+    required: []
+)
 ```
 
 ## MCPToolError Reference
+
+定義在 `MCPTool.swift:129-147`：
 
 ```swift
 enum MCPToolError: LocalizedError {
@@ -244,50 +332,148 @@ enum MCPToolError: LocalizedError {
     case executionFailed(String)            // 執行失敗
     case notAvailable(String)               // 資源不可用
 }
+
+// 使用範例
+throw MCPToolError.missingParameter("code")
+throw MCPToolError.invalidParameter("x", expected: "number")
+throw MCPToolError.executionFailed("Game API not loaded")
+throw MCPToolError.notAvailable("Bot status")
+```
+
+## MCPToolResult Reference
+
+定義在 `MCPTool.swift:106-124`：
+
+```swift
+enum MCPToolResult {
+    case success(Any)
+    case error(String)
+
+    var isSuccess: Bool
+    var value: Any?
+    var errorMessage: String?
+}
 ```
 
 ## Registration in MCPToolRegistry
 
-```swift
-// MCPToolRegistry.swift - registerBuiltInTools()
-func registerBuiltInTools() {
-    // 系統類
-    register(GetStatusTool.self)
-    register(GetHelpTool.self)
-    // ...
+位置：`MCPToolRegistry.swift:142-182`
 
-    // 添加新工具
-    register(MyNewTool.self)
+```swift
+extension MCPToolRegistry {
+    func registerBuiltInTools() {
+        // 系統類
+        register(GetStatusTool.self)
+        register(GetHelpTool.self)
+        register(GetLogsTool.self)
+        register(ClearLogsTool.self)
+
+        // Bot 控制類
+        register(BotStatusTool.self)
+        register(BotTriggerTool.self)
+        register(BotOpsTool.self)
+        register(BotDeepTool.self)
+        register(BotChiTool.self)
+        register(BotPonTool.self)
+        register(BotSyncTool.self)
+
+        // 遊戲狀態類
+        register(GameStateTool.self)
+        register(GameHandTool.self)
+        register(GameOpsTool.self)
+        register(GameDiscardTool.self)
+        register(GameActionTool.self)
+
+        // JavaScript 執行
+        register(ExecuteJSTool.self)
+
+        // 探索類
+        register(DetectTool.self)
+        register(ExploreTool.self)
+
+        // UI 操作類
+        register(TestIndicatorsTool.self)
+        register(ClickTool.self)
+        register(CalibrateTool.self)
+
+        // UI 控制類
+        register(UINameStatusTool.self)
+        register(UINameHideTool.self)
+        register(UINameShowTool.self)
+        register(UINameToggleTool.self)
+    }
 }
 ```
 
 ## File Locations
 
-| 類型 | 路徑 |
-|------|------|
-| Protocol | `Services/MCP/MCPTool.swift` |
-| Context | `Services/MCP/MCPContext.swift` |
-| Registry | `Services/MCP/MCPToolRegistry.swift` |
-| Handler | `Services/MCP/MCPHandler.swift` |
-| Tools | `Services/MCP/Tools/*.swift` |
-
-## Xcode Project Integration
-
-新文件需要添加到 `project.pbxproj`:
-
-```
-membershipExceptions = (
-    ...
-    Services/MCP/Tools/MyNewTool.swift,
-    ...
-);
-```
+| 類型 | 路徑 | 行數範圍 |
+|------|------|---------|
+| Protocol | `command/Services/MCP/MCPTool.swift` | 15-32 |
+| InputSchema | `command/Services/MCP/MCPTool.swift` | 37-56 |
+| PropertySchema | `command/Services/MCP/MCPTool.swift` | 59-101 |
+| ToolResult | `command/Services/MCP/MCPTool.swift` | 106-124 |
+| ToolError | `command/Services/MCP/MCPTool.swift` | 129-147 |
+| Context Protocol | `command/Services/MCP/MCPContext.swift` | 15-38 |
+| DefaultContext | `command/Services/MCP/MCPContext.swift` | 44-102 |
+| Registry | `command/Services/MCP/MCPToolRegistry.swift` | 15-136 |
+| Registration | `command/Services/MCP/MCPToolRegistry.swift` | 142-182 |
+| Handler | `command/Services/MCP/MCPHandler.swift` | 16-314 |
+| SystemTools | `command/Services/MCP/Tools/SystemTools.swift` | 全部 |
+| BotTools | `command/Services/MCP/Tools/BotTools.swift` | 全部 |
+| GameTools | `command/Services/MCP/Tools/GameTools.swift` | 全部 |
+| UITools | `command/Services/MCP/Tools/UITools.swift` | 全部 |
 
 ## Testing Checklist
 
-1. ✅ `xcodebuild build` 成功
+1. ✅ `xcodebuild build -project Naki.xcodeproj -scheme Naki` 成功
 2. ✅ 啟動應用
 3. ✅ 使用 `mcp__naki__<tool_name>` 測試
 4. ✅ 檢查返回結果格式正確
-5. ✅ 測試錯誤處理
-6. ✅ 檢查日誌輸出
+5. ✅ 測試錯誤處理（缺少參數、無效參數）
+6. ✅ 檢查日誌輸出（`mcp__naki__get_logs`）
+
+## Common Patterns
+
+### Pattern 1: 調用遊戲 API 並解析 JSON
+
+```swift
+func execute(arguments: [String: Any]) async throws -> Any {
+    let script = """
+    window.__nakiGameAPI ? JSON.stringify(__nakiGameAPI.getGameState()) : '{"error": "API not loaded"}'
+    """
+    let result = try await context.executeJavaScript(script)
+
+    if let jsonString = result as? String,
+       let data = jsonString.data(using: .utf8),
+       let json = try? JSONSerialization.jsonObject(with: data) {
+        return json
+    }
+    return ["result": result ?? NSNull()]
+}
+```
+
+### Pattern 2: 執行操作並記錄日誌
+
+```swift
+func execute(arguments: [String: Any]) async throws -> Any {
+    context.log("MCP: Starting operation...")
+
+    // 執行操作
+    let result = try await context.executeJavaScript("...")
+
+    context.log("MCP: Operation completed")
+    return ["success": true, "result": result ?? NSNull()]
+}
+```
+
+### Pattern 3: 獲取 Bot 狀態並檢查可用性
+
+```swift
+func execute(arguments: [String: Any]) async throws -> Any {
+    guard let status = context.getBotStatus() else {
+        throw MCPToolError.notAvailable("Bot status")
+    }
+    return status
+}
+```

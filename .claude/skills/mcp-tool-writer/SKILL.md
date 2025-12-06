@@ -13,23 +13,33 @@ This skill helps create and modify MCP (Model Context Protocol) tools for the Na
 Naki uses a Protocol-based MCP architecture:
 
 ```
-Services/MCP/
+command/Services/MCP/
 ├── MCPTool.swift          - Protocol 定義 + Schema 類型
 ├── MCPContext.swift       - 執行上下文 (async/await 支持)
 ├── MCPToolRegistry.swift  - 工具註冊表 (單例)
 ├── MCPHandler.swift       - MCP 協議處理器
 └── Tools/
-    ├── SystemTools.swift  - 系統類工具
-    ├── BotTools.swift     - Bot 控制工具
-    ├── GameTools.swift    - 遊戲狀態工具
-    └── UITools.swift      - UI 操作工具
+    ├── SystemTools.swift  - 系統類工具 (get_status, get_help, get_logs, clear_logs)
+    ├── BotTools.swift     - Bot 控制工具 (bot_status, bot_trigger, bot_ops, bot_deep, bot_chi, bot_pon, bot_sync)
+    ├── GameTools.swift    - 遊戲狀態工具 (game_state, game_hand, game_ops, game_discard, game_action)
+    └── UITools.swift      - UI 操作工具 (execute_js, detect, explore, test_indicators, click, calibrate, ui_names_*)
 ```
+
+## Current Registered Tools (26 total)
+
+| Category | Tools |
+|----------|-------|
+| System | `get_status`, `get_help`, `get_logs`, `clear_logs` |
+| Bot | `bot_status`, `bot_trigger`, `bot_ops`, `bot_deep`, `bot_chi`, `bot_pon`, `bot_sync` |
+| Game | `game_state`, `game_hand`, `game_ops`, `game_discard`, `game_action` |
+| UI | `execute_js`, `detect`, `explore`, `test_indicators`, `click`, `calibrate` |
+| UI Names | `ui_names_status`, `ui_names_hide`, `ui_names_show`, `ui_names_toggle` |
 
 ## How to Create a New MCP Tool
 
 ### Step 1: Define the Tool Struct
 
-Create a new struct implementing `MCPTool` protocol:
+Create a new struct implementing `MCPTool` protocol in the appropriate `Tools/*.swift` file:
 
 ```swift
 struct MyNewTool: MCPTool {
@@ -57,7 +67,6 @@ struct MyNewTool: MCPTool {
 
     // 5. 執行邏輯
     func execute(arguments: [String: Any]) async throws -> Any {
-        // 獲取參數
         guard let param1 = arguments["param1"] as? String else {
             throw MCPToolError.missingParameter("param1")
         }
@@ -71,17 +80,13 @@ struct MyNewTool: MCPTool {
 
 ### Step 2: Register the Tool
 
-在 `MCPToolRegistry.swift` 的 `registerBuiltInTools()` 方法中添加：
+在 `MCPToolRegistry.swift:142-182` 的 `registerBuiltInTools()` 方法中添加：
 
 ```swift
 register(MyNewTool.self)
 ```
 
 **注意**: Tools 列表會自動從 Registry 生成，無需手動維護 JSON 檔案。
-
-### Step 3: Add to Xcode Project
-
-如果創建了新文件，需要在 `Naki.xcodeproj/project.pbxproj` 的 membershipExceptions 中添加路徑。
 
 ## Input Schema Types
 
@@ -104,10 +109,10 @@ static let inputSchema = MCPInputSchema(
 
 ## Context API
 
-工具可以通過 `context` 訪問以下功能：
+工具可以通過 `context` 訪問以下功能（定義在 `MCPContext.swift:15-38`）：
 
 ```swift
-// 執行 JavaScript
+// 執行 JavaScript（async/await）
 let result = try await context.executeJavaScript("return document.title")
 
 // 獲取 Bot 狀態
@@ -127,7 +132,7 @@ let port = context.serverPort
 
 ## Error Handling
 
-使用 `MCPToolError` 處理錯誤：
+使用 `MCPToolError`（定義在 `MCPTool.swift:129-147`）處理錯誤：
 
 ```swift
 throw MCPToolError.missingParameter("paramName")
@@ -136,26 +141,23 @@ throw MCPToolError.executionFailed("原因描述")
 throw MCPToolError.notAvailable("資源名稱")
 ```
 
-## Tool Categories
+## Tool Categories & File Locations
 
-按功能分類放置工具：
-
-| 類別 | 文件 | 工具範例 |
-|------|------|---------|
-| 系統 | SystemTools.swift | get_status, get_help, get_logs |
-| Bot | BotTools.swift | bot_status, bot_trigger |
-| 遊戲 | GameTools.swift | game_state, game_hand |
-| UI | UITools.swift | execute_js, click, calibrate |
+| Category | File | When to Add Here |
+|----------|------|-----------------|
+| 系統 | `SystemTools.swift` | Server status, logs, help |
+| Bot | `BotTools.swift` | Bot control, AI inference |
+| 遊戲 | `GameTools.swift` | Game state, hand, actions |
+| UI | `UITools.swift` | JS execution, clicks, detection |
 
 ## Checklist for New Tools
 
-- [ ] 定義唯一的 `name`
-- [ ] 寫清楚的 `description`（給 AI 理解）
+- [ ] 定義唯一的 `name`（snake_case 格式）
+- [ ] 寫清楚的 `description`（給 AI 理解，包含何時使用）
 - [ ] 定義正確的 `inputSchema`
-- [ ] 實現 `execute()` 方法
-- [ ] 處理所有錯誤情況
-- [ ] 在 Registry 中註冊
-- [ ] 添加到 Xcode 項目（如果是新文件）
+- [ ] 實現 `execute()` 方法（async throws）
+- [ ] 處理所有錯誤情況（使用 MCPToolError）
+- [ ] 在 `MCPToolRegistry.swift:142-182` 中註冊
 - [ ] 構建測試通過
 - [ ] 使用 MCP 工具測試功能
 
