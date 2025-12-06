@@ -494,7 +494,11 @@ git push origin --delete "v$VERSION"
 | 版本說明 | `RELEASE.md` |
 | README | `README.md` |
 
-## Reference Documents
+## Reference Documentation
 
-- See `@RELEASE.md` for detailed release process
-- See `@README.md` for version badge location
+For detailed specifications and version locations, see:
+- [Release Reference](references/reference.md) - Complete version locations, build configs, DMG/ZIP creation, GitHub release details
+
+External documentation:
+- `@RELEASE.md` - Detailed release process
+- `@README.md` - Version badge location

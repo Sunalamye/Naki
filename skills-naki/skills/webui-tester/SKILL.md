@@ -177,10 +177,8 @@ If `execute_js` returns null or undefined:
 3. Check for JavaScript errors in logs
 4. Ensure object path exists (use optional chaining `?.`)
 
-## Documentation Reference
+## Reference Documentation
 
-For complete Majsoul WebUI object documentation:
-- See `@docs/majsoul-webui-objects-reference.md`
-- Contains full Laya Sprite3D properties
-- Tile encoding/type mapping details
-- Effect control mechanisms
+For complete Majsoul WebUI object documentation, see:
+- [WebUI Objects Reference](references/reference.md) - Complete Laya Sprite3D properties, tile encoding, effect mechanisms
+- External: `@docs/majsoul-webui-objects-reference.md` for additional context

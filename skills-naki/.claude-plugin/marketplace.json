@@ -1,0 +1,40 @@
+{
+  "name": "naki-skills",
+  "owner": {
+    "name": "Naki",
+    "email": "sunalamye@pm.me"
+  },
+  "metadata": {
+    "description": "Skills for Naki mahjong AI assistant",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "mcp-tool-writer",
+      "description": "Create, modify, and manage MCP tools for Naki. Use when adding new MCP tools, modifying existing tools, or fixing tool-related issues.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/mcp-tool-writer"
+      ]
+    },
+    {
+      "name": "release-manager",
+      "description": "Build, package, tag, and release Naki app to GitHub. Use when releasing, publishing, tagging, building DMG/ZIP, or upgrading version.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/release-manager"
+      ]
+    },
+    {
+      "name": "webui-tester",
+      "description": "Test, debug, and modify Majsoul WebUI (Laya engine) within Naki. Use when adjusting game screen, executing JavaScript, or debugging tile manipulation.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/webui-tester"
+      ]
+    }
+  ]
+}

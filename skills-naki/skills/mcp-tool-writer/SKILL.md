@@ -203,4 +203,7 @@ xcodebuild build -project Naki.xcodeproj -scheme Naki
 mcp__naki__<tool_name>
 ```
 
-See REFERENCE.md for complete protocol specifications and more examples.
+## Reference Documentation
+
+For detailed specifications and more examples, see:
+- [Protocol Reference](references/reference.md) - Complete MCPTool protocol, context API, schema types, and code examples
