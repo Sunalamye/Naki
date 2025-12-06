@@ -1,7 +1,7 @@
 # Naki (鳴き) - 雀魂麻將 AI 助手
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-2.1.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/Version-2.1.1-green" alt="Version">
   <img src="https://img.shields.io/badge/Platform-macOS%2026+-blue" alt="Platform">
   <img src="https://img.shields.io/badge/Arch-Apple%20Silicon-red" alt="Architecture">
   <img src="https://img.shields.io/badge/Swift-5.9+-orange" alt="Swift">
