@@ -122,13 +122,13 @@ struct ClickTool: MCPTool {
 }
 ```
 
-### Example 4: Tool with JavaScript + JSON Parsing - BotTools.swift
+### Example 4: Tool with JavaScript Execution - BotTools.swift
 
 ```swift
-/// 請求遊戲同步以重建 Bot 狀態
+/// 強制重連以重建 Bot 狀態
 struct BotSyncTool: MCPTool {
     static let name = "bot_sync"
-    static let description = "請求 syncGame 重新同步遊戲狀態。當 Bot 沒有出現推薦提示時使用"
+    static let description = "強制斷線重連以重建 Bot 狀態。當 Bot 沒有推薦提示時使用"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
@@ -138,28 +138,18 @@ struct BotSyncTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        context.log("MCP: Requesting syncGame to rebuild Bot state")
+        context.log("MCP: Force reconnecting to rebuild Bot state")
 
-        let script = "JSON.stringify(window.__nakiWebSocket?.requestSyncGame() || {success: false, message: 'WebSocket module not loaded'})"
+        let script = "return window.__nakiWebSocket?.forceReconnect() || 0"
         let result = try await context.executeJavaScript(script)
 
-        // 解析 JSON 結果
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let success = json["success"] as? Bool ?? false
-            let message = json["message"] as? String ?? "Unknown"
-
-            return [
-                "success": success,
-                "message": message,
-                "note": success ? "syncGame 請求已發送" : "請求失敗"
-            ]
-        }
+        let closedCount = (result as? Int) ?? 0
+        let success = closedCount > 0
 
         return [
-            "success": false,
-            "message": "Failed to parse response"
+            "success": success,
+            "closedConnections": closedCount,
+            "message": success ? "已關閉 \(closedCount) 個連線，遊戲將自動重連" : "沒有找到可關閉的連線"
         ]
     }
 }

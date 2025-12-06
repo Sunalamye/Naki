@@ -568,10 +568,12 @@ struct AdvancedSettingsSheet: View {
                     HStack {
                         Button("重建 Bot") {
                             Task {
-                                await viewModel?.resyncBot()
+                                // 強制斷線重連以重建 Bot
+                                await viewModel?.forceReconnect()
                             }
                         }
                         .buttonStyle(.bordered)
+                        .help("強制斷線重連，伺服器會重新發送遊戲狀態重建 Bot")
 
                         Button("刪除 Bot") {
                             viewModel?.deleteNativeBot()

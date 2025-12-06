@@ -272,6 +272,38 @@
             return result;
         },
 
+        /**
+         * 強制關閉所有雀魂 WebSocket 連接
+         * 這會觸發遊戲重連，伺服器會發送 syncGame 恢復遊戲狀態
+         * @returns {number} 關閉的連接數
+         */
+        forceReconnect: function() {
+            let closedCount = 0;
+            const toClose = [];
+
+            // 先收集要關閉的連接，避免在遍歷時修改 Map
+            wsConnections.forEach((info, ws) => {
+                if (info.isMajsoul && ws.readyState === WebSocket.OPEN) {
+                    toClose.push({ ws, info });
+                }
+            });
+
+            // 關閉連接
+            for (const { ws, info } of toClose) {
+                console.log('[Naki WS] Force closing:', info.id, info.url);
+                try {
+                    ws.close(1000, 'Naki force reconnect');
+                    closedCount++;
+                } catch (e) {
+                    console.error('[Naki WS] Error closing:', info.id, e);
+                }
+            }
+
+            console.log('[Naki WS] Force reconnect: closed', closedCount, 'connections');
+            sendToSwift('force_reconnect', { closedCount: closedCount });
+            return closedCount;
+        },
+
         // Console 控制
         interceptConsole: interceptConsole,
         restoreConsole: restoreConsole,

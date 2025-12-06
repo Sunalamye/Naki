@@ -318,6 +318,31 @@ class WebViewModel {
     await coordinator.resyncBot()
   }
 
+  /// 強制 WebSocket 重連以重建 Bot 狀態
+  /// 這會關閉所有雀魂 WebSocket 連接，觸發遊戲重連
+  /// 伺服器會發送 authGame + syncGame 回應，從而完整重建 Bot
+  func forceReconnect() async {
+    guard let page = webPage else {
+      bridgeLog("[WebViewModel] Cannot force reconnect: no webPage")
+      statusMessage = "無法重連：WebView 不可用"
+      return
+    }
+
+    bridgeLog("[WebViewModel] Force reconnecting WebSocket...")
+    statusMessage = "正在強制重連..."
+
+    let script = "window.__nakiWebSocket?.forceReconnect() || 0"
+    do {
+      let result = try await page.callJavaScript(script)
+      let closedCount = (result as? Int) ?? 0
+      bridgeLog("[WebViewModel] Force reconnect: closed \(closedCount) connections")
+      statusMessage = closedCount > 0 ? "已關閉 \(closedCount) 個連接，等待重連..." : "沒有活躍的連接"
+    } catch {
+      bridgeLog("[WebViewModel] Force reconnect error: \(error)")
+      statusMessage = "重連失敗：\(error.localizedDescription)"
+    }
+  }
+
   /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
   private func updateUIAfterBotResponse(from controller: NativeBotController) {
     bridgeLog("[WebViewModel] ===== updateUIAfterBotResponse CALLED =====")

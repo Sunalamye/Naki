@@ -127,7 +127,7 @@ struct RecommendationView: View {
                 if recommendations.isEmpty {
                     Button(action: {
                         Task {
-                            await viewModel?.resyncBot()
+                            await viewModel?.forceReconnect()
                         }
                     }) {
                         Image(systemName: "arrow.clockwise")

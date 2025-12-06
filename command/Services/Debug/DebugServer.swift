@@ -65,10 +65,18 @@ class DebugServer {
             self?.triggerAutoPlay?()
         }
         mcpHandler.getLogs = { [weak self] in
-            self?.logBuffer ?? []
+            // 合併 DebugServer log 和 LogManager log
+            let serverLogs = self?.logBuffer ?? []
+            let managerLogs = LogManager.shared.entries.map { entry in
+                let timestamp = ISO8601DateFormatter().string(from: entry.timestamp)
+                return "[\(timestamp)] [\(entry.category.rawValue)] \(entry.message)"
+            }
+            // 按時間排序合併
+            return (serverLogs + managerLogs).sorted()
         }
         mcpHandler.clearLogs = { [weak self] in
             self?.logBuffer.removeAll()
+            LogManager.shared.clear()
         }
         mcpHandler.log = { [weak self] message in
             self?.log(message)

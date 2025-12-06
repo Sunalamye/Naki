@@ -153,6 +153,7 @@ extension MCPToolRegistry {
         register(BotDeepTool.self)
         register(BotChiTool.self)
         register(BotPonTool.self)
+        register(BotSyncTool.self)
 
         // 遊戲狀態類
         register(GameStateTool.self)

@@ -137,3 +137,36 @@ struct BotPonTool: MCPTool {
         return ["result": result ?? NSNull()]
     }
 }
+
+// MARK: - Bot Sync Tool
+
+/// 強制重連以重建 Bot 狀態
+struct BotSyncTool: MCPTool {
+    static let name = "bot_sync"
+    static let description = "強制斷線重連以重建 Bot 狀態。當 Bot 沒有推薦提示時使用，會關閉 WebSocket 連線觸發遊戲重連，伺服器會發送完整的遊戲歷史重建 Bot"
+    static let inputSchema = MCPInputSchema.empty
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        context.log("MCP: Force reconnecting to rebuild Bot state")
+
+        let script = "return window.__nakiWebSocket?.forceReconnect() || 0"
+        let result = try await context.executeJavaScript(script)
+
+        let closedCount = (result as? Int) ?? 0
+        let success = closedCount > 0
+
+        context.log("MCP: forceReconnect result: closed \(closedCount) connections")
+
+        return [
+            "success": success,
+            "closedConnections": closedCount,
+            "message": success ? "已關閉 \(closedCount) 個連線，遊戲將自動重連並重建 Bot" : "沒有找到可關閉的連線"
+        ]
+    }
+}

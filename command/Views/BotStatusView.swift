@@ -39,7 +39,7 @@ struct BotStatusView: View {
                 }
                 Button(action: {
                     Task {
-                        await viewModel?.resyncBot()
+                        await viewModel?.forceReconnect()
                     }
                 }) {
                     Image(systemName: "arrow.clockwise")
