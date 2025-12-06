@@ -145,3 +145,111 @@ struct ListEmojiTool: MCPTool {
         return ["result": result ?? NSNull()]
     }
 }
+
+// MARK: - Emoji Listen Tool
+
+/// 獲取收到的表情廣播記錄
+struct EmojiListenTool: MCPTool {
+    static let name = "game_emoji_listen"
+    static let description = "獲取收到的表情廣播記錄（包含其他玩家發送的表情）。首次調用會自動啟用監聽，可透過 clear 參數清空記錄"
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "clear": .boolean("是否清空記錄後返回 (預設 false)")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        let clear = (arguments["clear"] as? Bool) ?? false
+
+        let script = """
+        (function() {
+            // 確保監聽器已設置
+            if (!window.__nakiEmojiListenerInstalled) {
+                var netAgent = window.app?.NetAgent;
+                var routeGroup = netAgent?.netRouteGroup_mj;
+                var handlers = routeGroup?.notifyHander?.handlers;
+                var originalHandler = handlers?.['.lq.NotifyGameBroadcast'];
+
+                if (originalHandler && originalHandler[0] && !originalHandler[0].__nakiHooked) {
+                    window.__nakiEmojiBroadcasts = [];
+                    var origMethod = originalHandler[0].method;
+
+                    originalHandler[0].method = function(data) {
+                        // 記錄廣播
+                        window.__nakiEmojiBroadcasts.push({
+                            timestamp: Date.now(),
+                            data: data
+                        });
+
+                        // 只保留最近 50 條
+                        if (window.__nakiEmojiBroadcasts.length > 50) {
+                            window.__nakiEmojiBroadcasts.shift();
+                        }
+
+                        // 調用原始方法
+                        if (origMethod) {
+                            origMethod.call(this, data);
+                        }
+                    };
+
+                    originalHandler[0].__nakiHooked = true;
+                    window.__nakiEmojiListenerInstalled = true;
+                }
+            }
+
+            // 初始化記錄陣列
+            if (!window.__nakiEmojiBroadcasts) {
+                window.__nakiEmojiBroadcasts = [];
+            }
+
+            var broadcasts = window.__nakiEmojiBroadcasts;
+
+            // 解析記錄
+            var parsed = broadcasts.map(function(b) {
+                var content = null;
+                try {
+                    content = JSON.parse(b.data.content);
+                } catch(e) {}
+
+                return {
+                    timestamp: b.timestamp,
+                    seat: b.data.seat,
+                    emo_id: content ? content.emo : null
+                };
+            });
+
+            var result = {
+                success: true,
+                listener_installed: !!window.__nakiEmojiListenerInstalled,
+                count: parsed.length,
+                broadcasts: parsed
+            };
+
+            // 清空記錄
+            if (\(clear ? "true" : "false")) {
+                window.__nakiEmojiBroadcasts = [];
+                result.cleared = true;
+            }
+
+            return JSON.stringify(result);
+        })();
+        """
+
+        let result = try await context.executeJavaScript(script)
+
+        // 解析 JSON 結果
+        if let jsonString = result as? String,
+           let data = jsonString.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) {
+            return json
+        }
+        return ["result": result ?? NSNull()]
+    }
+}
