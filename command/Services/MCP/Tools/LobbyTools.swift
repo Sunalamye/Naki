@@ -458,6 +458,57 @@ struct HeartbeatTool: MCPTool {
     }
 }
 
+// MARK: - Anti-Idle Toggle Tool
+
+/// 切換自動防閒置開關
+struct AntiIdleToggleTool: MCPTool {
+    static let name = "lobby_anti_idle"
+    static let description = "切換自動防閒置功能。啟用時會在收到伺服器訊息時自動刷新心跳，防止被登出"
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "enabled": .boolean("是否啟用自動防閒置（不提供則返回當前狀態）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        // 如果有提供 enabled 參數，則設定開關
+        if let enabled = arguments["enabled"] as? Bool {
+            let script = enabled
+                ? "window.__nakiAntiIdle && window.__nakiAntiIdle.enable(); return JSON.stringify(window.__nakiAntiIdle ? window.__nakiAntiIdle.status() : {error: 'not loaded'});"
+                : "window.__nakiAntiIdle && window.__nakiAntiIdle.disable(); return JSON.stringify(window.__nakiAntiIdle ? window.__nakiAntiIdle.status() : {error: 'not loaded'});"
+
+            let result = try await context.executeJavaScript(script)
+
+            if let jsonString = result as? String,
+               let data = jsonString.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                context.log(enabled ? "🛡️ Anti-idle enabled" : "⏹️ Anti-idle disabled")
+                return json
+            }
+            return ["success": enabled, "error": "Failed to parse result"]
+        }
+
+        // 沒有參數，返回當前狀態
+        let script = "return JSON.stringify(window.__nakiAntiIdle ? window.__nakiAntiIdle.status() : {error: 'Anti-idle module not loaded'});"
+
+        let result = try await context.executeJavaScript(script)
+
+        if let jsonString = result as? String,
+           let data = jsonString.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) {
+            return json
+        }
+        return ["error": "Failed to get status"]
+    }
+}
+
 // MARK: - Idle Status Tool
 
 /// 獲取閒置狀態

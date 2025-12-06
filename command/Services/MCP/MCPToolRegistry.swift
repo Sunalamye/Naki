@@ -192,5 +192,6 @@ extension MCPToolRegistry {
         // 心跳/閒置管理
         register(HeartbeatTool.self)
         register(IdleStatusTool.self)
+        register(AntiIdleToggleTool.self)
     }
 }

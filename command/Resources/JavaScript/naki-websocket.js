@@ -128,6 +128,11 @@
         // 只處理雀魂連接的訊息
         if (!isMajsoul) return;
 
+        // 收到伺服器訊息時，刷新心跳防止閒置登出
+        if (direction === 'receive' && window.__nakiAntiIdle && window.__nakiAntiIdle.isEnabled()) {
+            window.__nakiAntiIdle.refresh();
+        }
+
         try {
             if (data instanceof ArrayBuffer) {
                 // ArrayBuffer：轉成 Base64
