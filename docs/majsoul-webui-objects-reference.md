@@ -1797,6 +1797,17 @@ window.GameMgr.Inst.sendLoginBeat()        // 登入心跳
 // 閒置警告 UI
 window.uiscript.UI_Hangup_Warn.Inst        // 閒置警告彈窗
 window.uiscript.UI_Hanguplogout.Inst       // 強制登出彈窗
+
+// 玩家連線狀態（遊戲中）
+window.view.DesktopMgr.player_link_state   // [3,3,3,3] = 全部 READY
+window.view.ELink_State                     // {NULL:0, AUTH:1, SYNCING:2, READY:3}
+
+// Naki 自動防閒置 API（需要 naki-core.js 載入）
+window.__nakiAntiIdle.status()             // 獲取防閒置狀態
+window.__nakiAntiIdle.refresh()            // 手動刷新心跳
+window.__nakiAntiIdle.enable()             // 啟用自動防閒置
+window.__nakiAntiIdle.disable()            // 停用自動防閒置
+window.__nakiAntiIdle.isEnabled()          // 檢查是否啟用
 ```
 
 ### 手動發送心跳
