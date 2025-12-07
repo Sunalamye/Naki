@@ -11,6 +11,7 @@
 		ECAAD5222EE1BBB50056F965 /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = ECAAD5212EE1BBB50056F965 /* MortalSwift */; };
 		ECAADCF72EE57B3F0056F965 /* MCPWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF62EE57B3F0056F965 /* MCPWebKit */; };
 		ECAADCF92EE57B420056F965 /* MCPWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF82EE57B420056F965 /* MCPWebKit */; };
+		ECAADDE82EE586F00056F965 /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC3077AF2EDC6A1600216E0C /* MortalSwift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -220,6 +221,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ECAADDE82EE586F00056F965 /* MortalSwift in Frameworks */,
 				EC3077B12EDDAFF200216E0C /* MortalSwift in Frameworks */,
 				ECAADCF72EE57B3F0056F965 /* MCPWebKit in Frameworks */,
 			);
@@ -921,7 +923,7 @@
 			repositoryURL = "https://github.com/Sunalamye/MCPWebKit";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.1.0;
+				minimumVersion = 0.2.2;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
