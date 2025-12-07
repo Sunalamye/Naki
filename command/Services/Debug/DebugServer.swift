@@ -8,6 +8,7 @@
 
 import Foundation
 import Network
+import MCPKit
 
 // MARK: - MCP Server
 

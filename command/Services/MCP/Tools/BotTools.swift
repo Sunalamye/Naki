@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import MCPKit
 
 // MARK: - Bot Status Tool
 
@@ -23,7 +24,8 @@ struct BotStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let status = context.getBotStatus() else {
+        guard let nakiContext = context as? NakiMCPContext,
+              let status = nakiContext.getBotStatus() else {
             throw MCPToolError.notAvailable("Bot status")
         }
         return status
@@ -45,8 +47,11 @@ struct BotTriggerTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
         context.log("MCP: Manual auto-play trigger requested")
-        context.triggerAutoPlay()
+        nakiContext.triggerAutoPlay()
         return [
             "success": true,
             "message": "Auto-play triggered"

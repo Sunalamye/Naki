@@ -8,6 +8,7 @@
 
 import Foundation
 import Network
+import MCPKit
 
 // MARK: - MCP Handler
 
@@ -18,7 +19,7 @@ final class MCPHandler {
     // MARK: - Properties
 
     /// 執行上下文
-    let context: DefaultMCPContext
+    let context: DefaultNakiMCPContext
 
     /// 發送 HTTP 響應的回調
     var sendResponse: ((NWConnection, Int, String, String) -> Void)?
@@ -26,7 +27,7 @@ final class MCPHandler {
     // MARK: - Initialization
 
     init() {
-        self.context = DefaultMCPContext()
+        self.context = DefaultNakiMCPContext()
 
         // 註冊所有內建工具
         MCPToolRegistry.shared.registerBuiltInTools()

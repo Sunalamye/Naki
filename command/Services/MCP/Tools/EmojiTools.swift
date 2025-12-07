@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import MCPKit
 
 // MARK: - Send Emoji Tool
 
