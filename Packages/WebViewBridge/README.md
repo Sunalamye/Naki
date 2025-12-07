@@ -1,6 +1,6 @@
 # WebViewBridge
 
-Swift 實現的通用 WKWebView / WebPage 雙向通訊框架，提供 JavaScript 注入、訊息處理和 WebSocket 攔截功能。
+Swift 實現的 WebPage 雙向通訊框架（macOS 26.0+），提供 JavaScript 注入、訊息處理和 WebSocket 攔截功能。
 
 ## 特點
 
@@ -9,7 +9,7 @@ Swift 實現的通用 WKWebView / WebPage 雙向通訊框架，提供 JavaScript
 - 🔌 **WebSocket 攔截** - 可選的 WebSocket 訊息攔截
 - 🎯 **型別安全** - 完整的 Swift 型別支援
 - 🧪 **可測試** - 易於單元測試的設計
-- 🍎 **雙 API 支援** - 同時支援 WKWebView 和 WebPage (macOS 26.0+)
+- 🍎 **WebPage API** - 專為 macOS 26.0+ WebPage API 設計
 
 ## 安裝
 
@@ -29,10 +29,11 @@ dependencies: [
 import WebViewBridge
 import WebKit
 
+@available(macOS 26.0, *)
 @MainActor
 class MyViewController: NSViewController {
     let bridge = WebViewBridge(handlerName: "myBridge")
-    var webView: WKWebView!
+    var webPage: WebPage?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -58,11 +59,15 @@ class MyViewController: NSViewController {
             print("Received: \(type) - \(data)")
         }
 
-        // 配置 WebView
-        let config = WKWebViewConfiguration()
-        bridge.configure(contentController: config.userContentController)
+        // 配置 WebPage
+        var configuration = WebPage.Configuration()
+        let userContentController = WKUserContentController()
+        bridge.configure(contentController: userContentController)
+        configuration.userContentController = userContentController
 
-        webView = WKWebView(frame: .zero, configuration: config)
+        // 創建 WebPage
+        webPage = WebPage(configuration: configuration)
+        bridge.configure(webPage: webPage!)
     }
 }
 ```
@@ -79,33 +84,20 @@ window.myApp.sendMessage('Hello from JavaScript!');
 
 ### 3. 從 Swift 執行 JavaScript
 
-**使用 WKWebView：**
-```swift
-Task {
-    // WKWebView 直接執行表達式
-    let result = try await bridge.executeJavaScript(
-        "document.title",
-        in: webView
-    )
-    print("Page title: \(result ?? "unknown")")
-}
-```
-
-**使用 WebPage (macOS 26.0+)：**
 ```swift
 Task {
     // ⚠️ WebPage.callJavaScript 需要函數體格式，必須使用 return
     let result = try await bridge.callJavaScript(
-        "return document.title",  // 注意：需要 return
-        in: webPage
+        "return document.title"  // 注意：需要 return
     )
     print("Page title: \(result ?? "unknown")")
 }
 ```
 
-> **重要差異**：
-> - `WKWebView.evaluateJavaScript()` - 直接執行表達式
+> **重要**：
 > - `WebPage.callJavaScript()` - 期望函數體格式，需使用 `return` 語句
+> - ❌ `"document.title"` → 返回 null
+> - ✅ `"return document.title"` → 返回實際標題
 
 ### 4. 攔截 WebSocket
 
@@ -154,8 +146,9 @@ WebViewBridge/
 | `onMessage` | 訊息回調 |
 | `registerModule(_:)` | 註冊 JS 模組 |
 | `registerCoreModules()` | 註冊內建模組 |
+| `configure(webPage:)` | 配置 WebPage 實例 |
 | `configure(contentController:)` | 配置 WKUserContentController |
-| `executeJavaScript(_:in:)` | 執行 JavaScript |
+| `callJavaScript(_:)` | 執行 JavaScript（需要 return 語句） |
 | `isWebSocketConnected` | WebSocket 連接狀態 |
 
 ### JavaScriptModule
