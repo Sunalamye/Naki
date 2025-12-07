@@ -101,7 +101,10 @@
                 if (!playerInfos) return false;
 
                 playerInfos.forEach(info => {
-                    if (info?.name) info.name.visible = false;
+                    if (info?.name) {
+                        info.name.visible = false;
+                        info.name.alpha = 0;
+                    }
                 });
                 this.hidden = true;
                 console.log('[Naki 玩家名稱] 已隱藏');
@@ -117,7 +120,10 @@
                 if (!playerInfos) return false;
 
                 playerInfos.forEach(info => {
-                    if (info?.name) info.name.visible = true;
+                    if (info?.name) {
+                        info.name.visible = true;
+                        info.name.alpha = 1;
+                    }
                 });
                 this.hidden = false;
                 console.log('[Naki 玩家名稱] 已顯示');
