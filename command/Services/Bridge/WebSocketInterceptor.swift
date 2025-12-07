@@ -212,6 +212,9 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     /// 自動打牌發送結果回調
     var onAutoPlayResult: ((Bool, String?) -> Void)?
 
+    /// 摸牌事件回調 (handCount: 摸牌後手牌數量)
+    var onAddHandPai: ((Int) -> Void)?
+
     /// 連接的 WebSocket 數量
     private var connectedSockets: Set<Int> = []
 
@@ -280,6 +283,13 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
                 wsLog("[AutoPlay] Error: \(error)")
                 onAutoPlayResult?(false, error)
             }
+
+        // 🎯 遊戲事件 Hook
+        case "addHandPai":
+            // 玩家摸牌事件
+            let handCount = data["handCount"] as? Int ?? 0
+            wsLog("[Hook] 摸牌事件: handCount=\(handCount)")
+            onAddHandPai?(handCount)
 
         default:
             break

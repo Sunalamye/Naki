@@ -641,19 +641,44 @@
         },
 
         /**
-         * 根據機率獲取顏色（用於牌顏色高亮）
-         * 閾值與 SwiftUI 側邊欄一致
+         * 根據排名獲取顏色（用於牌顏色高亮）
+         * alpha 根據排名線性遞減：rank 0 = 1.0, 最後一名 = 0.1
          * @param {number} probability - 機率值 (0.0 ~ 1.0)
-         * @returns {object|null} 顏色對象或 null（不顯示）
+         * @param {number} rank - 排名 (0 = 最推薦)
+         * @param {number} totalCount - 總推薦數
+         * @returns {object} 顏色對象
+         */
+        getColorForRank: function(probability, rank, totalCount) {
+            var baseColor;
+
+            // 顏色根據機率閾值（與 SwiftUI 一致）
+            if (probability > 0.5) {
+                baseColor = this.colors.green;
+            } else if (probability > 0.2) {
+                baseColor = this.colors.orange;
+            } else {
+                baseColor = this.colors.red;
+            }
+
+            // alpha 根據排名線性遞減：rank 0 = 1.0, 最後一名 = 0.2
+            var alpha;
+            if (totalCount <= 1) {
+                alpha = 1.0;
+            } else {
+                // rank 0 → 1.0, rank (totalCount-1) → 0.2
+                alpha = 1.0 - (rank / (totalCount - 1)) * 0.8;
+            }
+
+            return { r: baseColor.r, g: baseColor.g, b: baseColor.b, a: alpha };
+        },
+
+        /**
+         * 根據機率獲取顏色（用於牌顏色高亮）- 舊版相容
+         * @param {number} probability - 機率值 (0.0 ~ 1.0)
+         * @returns {object} 顏色對象
          */
         getColorForProbability: function(probability) {
-            if (probability > 0.5) {
-                return this.colors.green;   // 綠色：> 50%（強烈推薦）
-            } else if (probability > 0.2) {
-                return this.colors.orange;  // 橘色：20% - 50%（中等推薦）
-            } else {
-                return this.colors.red;     // 紅色：< 20%（弱推薦）
-            }
+            return this.getColorForRank(probability, 0, 1);
         },
 
         /**
@@ -851,31 +876,36 @@
             }
 
             let created = 0;
+            const totalCount = recommendations.length;
 
             // 🌟 使用牌顏色高亮（預設開啟）
             const useTileColor = this.settings.showTileColor !== false;
             if (useTileColor) {
-                for (const rec of recommendations) {
+                for (let i = 0; i < recommendations.length; i++) {
+                    const rec = recommendations[i];
                     const { tileIndex, probability } = rec;
+                    // 使用傳入的 rank，如果沒有則使用陣列索引
+                    const rank = rec.rank !== undefined ? rec.rank : i;
 
-                    // 根據機率獲取顏色
-                    const color = this.getColorForProbability(probability);
-                    if (!color) {
-                        continue;
-                    }
+                    // 根據排名獲取顏色（alpha 從 1.0 遞減到 0.1）
+                    const color = this.getColorForRank(probability, rank, totalCount);
 
                     // 設置牌顏色
                     if (this.setTileColor(tileIndex, color)) {
-                        // 記錄顏色類型（與 getColorForProbability 閾值一致）
+                        // 記錄顏色類型
                         const colorType = probability > 0.5 ? 'green' : (probability > 0.2 ? 'orange' : 'red');
                         this.activeEffects.push({
                             tileIndex: tileIndex,
                             probability: probability,
+                            rank: rank,
+                            alpha: color.a,
                             colorType: colorType
                         });
                         created++;
                         console.log('[Naki 高亮] 設置牌顏色:', tileIndex,
+                            '排名:', rank + 1, '/', totalCount,
                             '機率:', probability.toFixed(3),
+                            'alpha:', color.a.toFixed(2),
                             '顏色:', colorType === 'green' ? '綠色' : (colorType === 'orange' ? '橘色' : '紅色'));
 
                         // 驗證顏色是否真的設置成功
@@ -885,6 +915,24 @@
                             if (actualColor && Math.abs(actualColor.x - color.r) > 0.1) {
                                 console.warn('[Naki 高亮] 驗證失敗: 牌', tileIndex, '顏色未正確設置');
                             }
+                        }
+                    }
+                }
+
+                // 🌟 沒被推薦的牌設為紅色 alpha=0.2
+                const recommendedIndices = new Set(recommendations.map(r => r.tileIndex));
+                for (let i = 0; i < hand.length; i++) {
+                    if (!recommendedIndices.has(i) && hand[i]) {
+                        const color = { r: this.colors.red.r, g: this.colors.red.g, b: this.colors.red.b, a: 0.2 };
+                        if (this.setTileColor(i, color)) {
+                            this.activeEffects.push({
+                                tileIndex: i,
+                                probability: 0,
+                                rank: -1,
+                                alpha: 0.2,
+                                colorType: 'not_recommended'
+                            });
+                            console.log('[Naki 高亮] 未推薦牌:', i, 'alpha: 0.2');
                         }
                     }
                 }
@@ -1025,6 +1073,83 @@
             }
         }
     };
+
+    // ========================================
+    // 🎯 遊戲事件 Hook
+    // ========================================
+
+    /**
+     * Hook 手牌添加事件 (_AddHandPai)
+     * 當玩家摸牌時觸發，用於：
+     * 1. 通知 Swift 可以重新計算推薦
+     * 2. 重新應用推薦顏色（因為遊戲動畫會重置顏色）
+     */
+    function hookAddHandPai() {
+        const checkInterval = setInterval(function() {
+            const mgr = window.view?.DesktopMgr?.Inst;
+            const mr = mgr?.mainrole;
+
+            if (mr && mr._AddHandPai && !mr._naki_hooked_AddHandPai) {
+                // 保存原始函數
+                mr._original_AddHandPai = mr._AddHandPai;
+                mr._naki_hooked_AddHandPai = true;
+
+                // Hook 函數
+                mr._AddHandPai = function(h, q) {
+                    // 調用原始函數
+                    var result = this._original_AddHandPai.call(this, h, q);
+
+                    // 延遲處理（等待動畫完成）
+                    setTimeout(function() {
+                        // 1. 通知 Swift
+                        try {
+                            sendToSwift({
+                                type: 'addHandPai',
+                                timestamp: Date.now(),
+                                handCount: mr.hand ? mr.hand.length : 0
+                            });
+                            console.log('[Naki Hook] 已通知 Swift: addHandPai');
+                        } catch (e) {
+                            console.error('[Naki Hook] 通知 Swift 失敗:', e);
+                        }
+
+                        // 2. 重新應用已記錄的推薦顏色
+                        var highlight = window.__nakiRecommendHighlight;
+                        if (highlight && highlight.activeEffects && highlight.activeEffects.length > 0) {
+                            var effects = highlight.activeEffects;
+                            var recs = effects.filter(function(e) {
+                                return e.rank >= 0;  // 只重新應用有推薦的牌
+                            }).map(function(e) {
+                                return {
+                                    tileIndex: e.tileIndex,
+                                    probability: e.probability,
+                                    rank: e.rank
+                                };
+                            });
+
+                            if (recs.length > 0) {
+                                highlight.showMultiple(recs);
+                                console.log('[Naki Hook] 已重新應用', recs.length, '個推薦顏色');
+                            }
+                        }
+                    }, 150);
+
+                    return result;
+                };
+
+                console.log('[Naki Hook] _AddHandPai hook 已安裝');
+                clearInterval(checkInterval);
+            }
+        }, 500);
+
+        // 60 秒後停止嘗試
+        setTimeout(function() {
+            clearInterval(checkInterval);
+        }, 60000);
+    }
+
+    // 啟動 Hook
+    hookAddHandPai();
 
     console.log('[Naki] 自動打牌模組已載入');
 })();

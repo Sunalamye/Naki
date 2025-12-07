@@ -389,7 +389,8 @@ class WebViewModel {
   }
 
   /// 在遊戲 UI 上顯示多個推薦的原生高亮效果
-  /// 根據機率顯示不同顏色：> 0.5 綠色，0.2~0.5 紅色，< 0.2 不顯示
+  /// 顏色和透明度由 JavaScript 的 getColorForProbability 決定
+  /// 按鈕動作（chi/pon/kan/hora）需要機率 > 20% 才顯示
   private func showGameHighlightForRecommendations(
     _ recommendations: [Recommendation], controller: NativeBotController
   ) async {
@@ -423,9 +424,10 @@ class WebViewModel {
       }
     }
 
-    // 過濾出有效的打牌推薦（機率 > 0.2）
+    // 過濾出有效的打牌推薦（有牌面的推薦）
+    // 所有機率的推薦都傳給 JavaScript，由 getColorForProbability 決定顏色和透明度
     let validRecs = recommendations.filter { rec in
-      rec.tile != nil && rec.probability > 0.2
+      rec.tile != nil && rec.actionType == .discard
     }
 
     if validRecs.isEmpty {
@@ -434,12 +436,14 @@ class WebViewModel {
     }
 
     // 建構 JavaScript 來查找所有推薦牌的位置
+    // 加入 rank 資訊，讓 JavaScript 根據排名決定 alpha
     var tileDataArray: [[String: Any]] = []
-    for rec in validRecs {
+    for (index, rec) in validRecs.enumerated() {
       guard let tile = rec.tile else { continue }
       tileDataArray.append([
         "mjaiString": tile.mjaiString,
         "probability": rec.probability,
+        "rank": index,  // 0 = 最推薦, 1 = 第二推薦, ...
       ])
     }
 
@@ -468,6 +472,7 @@ class WebViewModel {
       for (var j = 0; j < tiles.length; j++) {
       var target = tiles[j].mjaiString;
       var probability = tiles[j].probability;
+      var rank = tiles[j].rank !== undefined ? tiles[j].rank : j;
 
       var tileType, tileValue, isRed = false;
 
@@ -483,7 +488,7 @@ class WebViewModel {
       isRed = target.length > 2 && target[2] === 'r';
       }
 
-      // 在手牌中查找
+      // 在手牌中查找（找出所有相同的牌）
       for (var i = 0; i < mr.hand.length; i++) {
       var t = mr.hand[i];
       if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
@@ -495,16 +500,18 @@ class WebViewModel {
           match = !t.val.dora;
       }
       if (match) {
-          results.push({ tileIndex: i, probability: probability });
-          break;
+          results.push({ tileIndex: i, probability: probability, rank: rank });
+          // 不 break，繼續找其他相同的牌
       }
       }
       }
       }
 
-      // 呼叫高亮模組（showMultiple 內部也會 hide，但這裡已經 hide 過了）
+      // 呼叫高亮模組，延遲 0.1 秒等摸牌動畫結束
       if (results.length > 0) {
-      window.__nakiRecommendHighlight?.showMultiple(results);
+      setTimeout(function() {
+          window.__nakiRecommendHighlight?.showMultiple(results);
+      }, 100);
       }
 
       return results;
@@ -595,6 +602,15 @@ class WebViewModel {
       await hideGameHighlight()
     }
     bridgeLog("[WebViewModel] Bot 已刪除並清除狀態")
+  }
+
+  // MARK: - Game Event Hooks
+
+  /// 處理摸牌事件（由 JavaScript _AddHandPai hook 觸發）
+  /// - Parameter handCount: 摸牌後手牌數量
+  func onAddHandPai(handCount: Int) async {
+    bridgeLog("[WebViewModel] 摸牌事件: handCount=\(handCount)")
+    // 推薦顏色的重新應用由 JavaScript 模組自動處理（使用已記錄的 activeEffects）
   }
 
   // MARK: - Auto Play Methods

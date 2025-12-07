@@ -141,6 +141,18 @@ class NakiWebCoordinator {
                 }
             }
         }
+
+        // 🎯 摸牌事件回調
+        websocketHandler.onAddHandPai = { [weak self] handCount in
+            guard let self = self else { return }
+
+            Task { @MainActor in
+                bridgeLog("[Hook] 收到摸牌事件: handCount=\(handCount)")
+                // 🎯 未來可在此觸發推薦刷新或自動打牌
+                // 目前推薦顏色會由 JavaScript 模組自動重新應用
+                await self.viewModel?.onAddHandPai(handCount: handCount)
+            }
+        }
     }
 
     /// 處理 MJAI 事件
