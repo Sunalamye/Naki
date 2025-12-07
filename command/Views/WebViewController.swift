@@ -64,16 +64,16 @@ class NakiDialogPresenter: WebPage.DialogPresenting {
     }
 
     func handleJavaScriptAlert(message: String, initiatedBy frame: WebPage.FrameInfo) async {
-        bridgeLog("[JS Alert] \(message)")
+        bridgeLog("[JS 警告] \(message)")
     }
 
     func handleJavaScriptConfirm(message: String, initiatedBy frame: WebPage.FrameInfo) async -> WebPage.JavaScriptConfirmResult {
-        bridgeLog("[JS Confirm] \(message)")
+        bridgeLog("[JS 確認] \(message)")
         return .ok
     }
 
     func handleJavaScriptPrompt(message: String, defaultText: String?, initiatedBy frame: WebPage.FrameInfo) async -> WebPage.JavaScriptPromptResult {
-        bridgeLog("[JS Prompt] \(message)")
+        bridgeLog("[JS 提示] \(message)")
         return .cancel
     }
 
@@ -126,18 +126,18 @@ class NakiWebCoordinator {
                     self.websocketHandler.reset()
 
                     if self.eventStream.canResync() {
-                        print("[Coordinator] WebSocket reconnected, attempting to resync bot...")
+                        print("[協調器] WebSocket 已重連, 嘗試重新同步 Bot...")
                         await self.resyncBot()
                     } else {
                         self.viewModel?.deleteNativeBot()
                         self.viewModel?.recommendations = []
                         self.viewModel?.tehaiTiles = []
                         self.viewModel?.tsumoTile = nil
-                        print("[Coordinator] Reset state on WebSocket connect (no game in progress)")
+                        print("[協調器] WebSocket 連線時重置狀態 (無進行中的遊戲)")
                     }
                 } else {
                     self.eventStream.stopConsumer()
-                    print("[Coordinator] WebSocket disconnected, consumer stopped (history preserved)")
+                    print("[協調器] WebSocket 已斷線, 消費者已停止 (歷史記錄已保留)")
                 }
             }
         }
@@ -147,16 +147,16 @@ class NakiWebCoordinator {
     private func handleMJAIEvent(_ event: [String: Any]) async {
         guard let eventType = event["type"] as? String else { return }
 
-        bridgeLog("[Coordinator] MJAI Event: \(eventType)")
+        bridgeLog("[協調器] MJAI 事件: \(eventType)")
 
         switch eventType {
         case "start_game":
             guard let playerId = event["id"] as? Int else {
-                bridgeLog("[Coordinator] ERROR: start_game has no id field!")
+                bridgeLog("[協調器] 錯誤: start_game 沒有 id 欄位!")
                 return
             }
 
-            bridgeLog("[Coordinator] start_game: starting new game for player \(playerId)")
+            bridgeLog("[協調器] start_game: 為玩家 \(playerId) 開始新遊戲")
 
             eventStream.startNewGame()
             eventStream.emit(event)
@@ -165,14 +165,14 @@ class NakiWebCoordinator {
             do {
                 try await viewModel?.createNativeBot(playerId: playerId)
                 viewModel?.statusMessage = "Bot 已建立 (Player \(playerId))"
-                bridgeLog("[Coordinator] Bot created for player \(playerId)")
+                bridgeLog("[協調器] 已為玩家 \(playerId) 建立 Bot")
                 startEventConsumer()
             } catch {
-                bridgeLog("[Coordinator] ERROR: Failed to create bot: \(error)")
+                bridgeLog("[協調器] 錯誤: 建立 Bot 失敗: \(error)")
             }
 
         case "end_game":
-            bridgeLog("[Coordinator] end_game: cleaning up")
+            bridgeLog("[協調器] end_game: 清理中")
             eventStream.emit(event)
             eventStream.endGame()
             viewModel?.deleteNativeBot()
@@ -188,7 +188,7 @@ class NakiWebCoordinator {
 
     /// 啟動事件消費者
     private func startEventConsumer() {
-        bridgeLog("[Coordinator] Starting event consumer...")
+        bridgeLog("[協調器] 啟動事件消費者...")
 
         eventStream.startConsumer { [weak self] event in
             guard let self = self else { return }
@@ -197,12 +197,12 @@ class NakiWebCoordinator {
 
             do {
                 if let response = try await self.viewModel?.processNativeEvent(event) {
-                    bridgeLog("[Consumer] \(eventType) → response: \(response)")
+                    bridgeLog("[消費者] \(eventType) → 回應: \(response)")
                 } else {
-                    bridgeLog("[Consumer] \(eventType) → response: none")
+                    bridgeLog("[消費者] \(eventType) → 回應: 無")
                 }
             } catch {
-                bridgeLog("[Consumer] ERROR processing \(eventType): \(error)")
+                bridgeLog("[消費者] 處理 \(eventType) 時發生錯誤: \(error)")
             }
         }
     }
@@ -210,11 +210,11 @@ class NakiWebCoordinator {
     /// 重新同步 Bot（WebSocket 重连时或手動重建時使用）
     func resyncBot() async {
         guard let playerId = eventStream.getPlayerId() else {
-            bridgeLog("[Coordinator] Cannot resync: no playerId found in history")
+            bridgeLog("[協調器] 無法重新同步: 歷史記錄中找不到 playerId")
             return
         }
 
-        bridgeLog("[Coordinator] Resyncing bot for player \(playerId) with \(eventStream.eventCount) historical events")
+        bridgeLog("[協調器] 為玩家 \(playerId) 重新同步 Bot, 歷史事件數: \(eventStream.eventCount)")
 
         viewModel?.deleteNativeBot()
 
@@ -222,9 +222,9 @@ class NakiWebCoordinator {
             try await viewModel?.createNativeBot(playerId: playerId)
             viewModel?.statusMessage = "Bot 已重新同步 (Player \(playerId))"
             startEventConsumer()
-            bridgeLog("[Coordinator] Bot resynced successfully")
+            bridgeLog("[協調器] Bot 重新同步成功")
         } catch {
-            bridgeLog("[Coordinator] ERROR: Failed to resync bot: \(error)")
+            bridgeLog("[協調器] 錯誤: Bot 重新同步失敗: \(error)")
         }
     }
 
@@ -237,6 +237,6 @@ class NakiWebCoordinator {
         viewModel?.tehaiTiles = []
         viewModel?.tsumoTile = nil
         viewModel?.isConnected = false
-        print("[Coordinator] Full reset on navigation start (including EventStream)")
+        print("[協調器] 導覽開始時完整重置 (包含 EventStream)")
     }
 }

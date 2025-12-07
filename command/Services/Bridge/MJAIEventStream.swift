@@ -34,7 +34,7 @@ class MJAIEventStream {
 
     /// 開始新遊戲
     func startNewGame() {
-        print("[MJAIEventStream] Starting new game, clearing history (\(eventHistory.count) events)")
+        print("[MJAIEventStream] 開始新遊戲, 清空歷史 (\(eventHistory.count) 個事件)")
 
         // Cancel 舊的 Task
         consumerTask?.cancel()
@@ -51,7 +51,7 @@ class MJAIEventStream {
 
     /// 結束遊戲
     func endGame() {
-        print("[MJAIEventStream] Ending game")
+        print("[MJAIEventStream] 結束遊戲")
 
         consumerTask?.cancel()
         consumerTask = nil
@@ -72,7 +72,7 @@ class MJAIEventStream {
         continuation?.yield(event)
 
         if let eventType = event["type"] as? String {
-            print("[MJAIEventStream] Emitted event: \(eventType), history count: \(eventHistory.count)")
+            print("[MJAIEventStream] 發送事件: \(eventType), 歷史數量: \(eventHistory.count)")
         }
     }
 
@@ -88,7 +88,7 @@ class MJAIEventStream {
         // 2. 快照當前歷史
         let historySnapshot = eventHistory
 
-        print("[MJAIEventStream] Starting consumer with \(historySnapshot.count) historical events")
+        print("[MJAIEventStream] 啟動消費者, 有 \(historySnapshot.count) 個歷史事件")
 
         // 3. 創建新的 AsyncStream
         let stream = AsyncStream<[String: Any]> { [weak self] continuation in
@@ -106,7 +106,7 @@ class MJAIEventStream {
         consumerTask = Task { [weak self] in
             for await event in stream {
                 guard !Task.isCancelled else {
-                    print("[MJAIEventStream] Consumer task cancelled")
+                    print("[MJAIEventStream] 消費者任務已取消")
                     break
                 }
                 await handler(event)
@@ -119,7 +119,7 @@ class MJAIEventStream {
 
     /// 停止消費者（保留歷史以便重連時重放）
     func stopConsumer() {
-        print("[MJAIEventStream] Stopping consumer (history preserved: \(eventHistory.count) events)")
+        print("[MJAIEventStream] 停止消費者 (歷史已保留: \(eventHistory.count) 個事件)")
         consumerTask?.cancel()
         consumerTask = nil
         continuation?.finish()
@@ -131,7 +131,7 @@ class MJAIEventStream {
     /// 檢查是否可以重新同步（是否有 start_game 歷史）
     func canResync() -> Bool {
         let hasStartGame = eventHistory.contains { ($0["type"] as? String) == "start_game" }
-        print("[MJAIEventStream] canResync check: hasStartGame=\(hasStartGame), eventCount=\(eventHistory.count)")
+        print("[MJAIEventStream] canResync 檢查: hasStartGame=\(hasStartGame), eventCount=\(eventHistory.count)")
         return hasStartGame
     }
 

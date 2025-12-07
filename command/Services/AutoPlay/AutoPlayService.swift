@@ -55,7 +55,7 @@ final class AutoPlayService {
     // MARK: - Initialization
 
     init() {
-        bridgeLog("\(logTag) Service initialized")
+        bridgeLog("\(logTag) 服務已初始化")
     }
 
     // MARK: - Configuration

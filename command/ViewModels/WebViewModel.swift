@@ -182,14 +182,14 @@ class WebViewModel {
             statusMessage = "雀魂已加載，等待連接..."
 
           case .finished:
-            print("[WebView] Page loaded successfully")
+            print("[WebView] 頁面載入成功")
 
           case .receivedServerRedirect:
             break
           }
         }
       } catch {
-        print("[WebView] Navigation error: \(error)")
+        print("[WebView] 導覽錯誤: \(error)")
         statusMessage = "加載失敗: \(error.localizedDescription)"
       }
     }
@@ -233,7 +233,7 @@ class WebViewModel {
       do {
         let result = try await page.callJavaScript(checkScript)
         if let hasOp = result as? Bool, hasOp {
-          debugServer?.addLog("⏰ Timer: retrigger auto-play")
+          debugServer?.addLog("⏰ 計時器: 重新觸發自動打牌")
           triggerAutoPlayNow(delay: 0.1)
         }
       } catch {
@@ -258,7 +258,7 @@ class WebViewModel {
       do {
         let result = try await page.callJavaScript(checkScript)
         if let effectCount = result as? Int, effectCount == 0 {
-          debugServer?.addLog("⏰ Timer: refresh highlights")
+          debugServer?.addLog("⏰ 計時器: 刷新高亮")
           await showGameHighlightForRecommendations(recommendations, controller: controller)
         }
       } catch {
@@ -304,13 +304,13 @@ class WebViewModel {
   /// 會使用 EventStream 重放歷史事件，讓新 Bot 恢復到當前遊戲狀態
   func resyncBot() async {
     guard let coordinator = webCoordinator else {
-      bridgeLog("[WebViewModel] Cannot resync: coordinator not available")
+      bridgeLog("[WebViewModel] 無法重新同步: 協調器不可用")
       statusMessage = "無法重建：協調器不可用"
       return
     }
 
     if !coordinator.eventStream.canResync() {
-      bridgeLog("[WebViewModel] Cannot resync: no game in progress")
+      bridgeLog("[WebViewModel] 無法重新同步: 無進行中的遊戲")
       statusMessage = "無法重建：沒有進行中的遊戲"
       return
     }
@@ -323,29 +323,29 @@ class WebViewModel {
   /// 伺服器會發送 authGame + syncGame 回應，從而完整重建 Bot
   func forceReconnect() async {
     guard let page = webPage else {
-      bridgeLog("[WebViewModel] Cannot force reconnect: no webPage")
+      bridgeLog("[WebViewModel] 無法強制重連: 無 webPage")
       statusMessage = "無法重連：WebView 不可用"
       return
     }
 
-    bridgeLog("[WebViewModel] Force reconnecting WebSocket...")
+    bridgeLog("[WebViewModel] 強制重連 WebSocket...")
     statusMessage = "正在強制重連..."
 
     let script = "window.__nakiWebSocket?.forceReconnect() || 0"
     do {
       let result = try await page.callJavaScript(script)
       let closedCount = (result as? Int) ?? 0
-      bridgeLog("[WebViewModel] Force reconnect: closed \(closedCount) connections")
+      bridgeLog("[WebViewModel] 強制重連: 關閉了 \(closedCount) 個連線")
       statusMessage = closedCount > 0 ? "已關閉 \(closedCount) 個連接，等待重連..." : "沒有活躍的連接"
     } catch {
-      bridgeLog("[WebViewModel] Force reconnect error: \(error)")
+      bridgeLog("[WebViewModel] 強制重連錯誤: \(error)")
       statusMessage = "重連失敗：\(error.localizedDescription)"
     }
   }
 
   /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
   private func updateUIAfterBotResponse(from controller: NativeBotController) {
-    bridgeLog("[WebViewModel] ===== updateUIAfterBotResponse CALLED =====")
+    bridgeLog("[WebViewModel] ===== updateUIAfterBotResponse 被調用 =====")
 
     // 更新遊戲狀態
     gameState = controller.gameState
@@ -355,7 +355,7 @@ class WebViewModel {
     recommendations = controller.lastRecommendations
     recommendationCount = recommendations.count
 
-    bridgeLog("[WebViewModel] Updated recommendations: \(recommendations.count)")
+    bridgeLog("[WebViewModel] 已更新推薦: \(recommendations.count)")
 
     // 同步到 GameStateManager（供 UI 回應式更新）
     gameStateManager.syncFrom(controller: controller)
@@ -415,9 +415,9 @@ class WebViewModel {
         let script = "window.__nakiRecommendHighlight?.moveNativeEffectToButton('\(jsAction)')"
         do {
           _ = try await page.callJavaScript(script)
-          bridgeLog("[WebViewModel] Highlighted button: \(jsAction)")
+          bridgeLog("[WebViewModel] 高亮按鈕: \(jsAction)")
         } catch {
-          bridgeLog("[WebViewModel] Error highlighting button: \(error.localizedDescription)")
+          bridgeLog("[WebViewModel] 高亮按鈕錯誤: \(error.localizedDescription)")
         }
         return
       }
@@ -447,7 +447,7 @@ class WebViewModel {
     guard let jsonData = try? JSONSerialization.data(withJSONObject: tileDataArray),
       let jsonString = String(data: jsonData, encoding: .utf8)
     else {
-      bridgeLog("[WebViewModel] Failed to serialize recommendations")
+      bridgeLog("[WebViewModel] 無法序列化推薦")
       return
     }
 
@@ -513,10 +513,10 @@ class WebViewModel {
     do {
       let result = try await page.callJavaScript(script)
       if let results = result as? [[String: Any]] {
-        bridgeLog("[WebViewModel] Highlighted \(results.count) recommendations")
+        bridgeLog("[WebViewModel] 已高亮 \(results.count) 個推薦")
       }
     } catch {
-      bridgeLog("[WebViewModel] Error showing highlights: \(error.localizedDescription)")
+      bridgeLog("[WebViewModel] 顯示高亮錯誤: \(error.localizedDescription)")
     }
   }
 
@@ -527,9 +527,9 @@ class WebViewModel {
     let script = "window.__nakiRecommendHighlight?.hide()"
     do {
       _ = try await page.callJavaScript(script)
-      bridgeLog("[WebViewModel] Hidden game highlight")
+      bridgeLog("[WebViewModel] 已隱藏遊戲高亮")
     } catch {
-      bridgeLog("[WebViewModel] Error hiding highlight: \(error.localizedDescription)")
+      bridgeLog("[WebViewModel] 隱藏高亮錯誤: \(error.localizedDescription)")
     }
   }
 
@@ -565,7 +565,7 @@ class WebViewModel {
     lastTriggerKey = triggerKey
     lastTriggerTime = now
 
-    debugServer?.addLog("AutoCheck: \(firstAction.rawValue)-\(tileName) (delay: \(delay)s)")
+    debugServer?.addLog("自動檢查: \(firstAction.rawValue)-\(tileName) (延遲: \(delay)秒)")
     triggerAutoPlayNow(delay: delay)
   }
 
@@ -594,7 +594,7 @@ class WebViewModel {
     Task {
       await hideGameHighlight()
     }
-    bridgeLog("[WebViewModel] Bot deleted and state cleared")
+    bridgeLog("[WebViewModel] Bot 已刪除並清除狀態")
   }
 
   // MARK: - Auto Play Methods
@@ -602,8 +602,8 @@ class WebViewModel {
   /// 設定自動打牌模式
   func setAutoPlayMode(_ mode: AutoPlayMode) {
     autoPlayController?.setMode(mode)
-    bridgeLog("[WebViewModel] Auto-play mode set to: \(mode.rawValue)")
-    debugServer?.addLog("Mode changed: \(mode.rawValue), recs: \(recommendations.count)")
+    bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
+    debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
 
     // 根據模式處理推薦顯示
     if mode.showRecommendation {
@@ -635,7 +635,7 @@ class WebViewModel {
         delay = 1.8
       }
       debugServer?.addLog(
-        "Auto-triggering on mode change: \(firstAction?.rawValue ?? "?") (delay: \(delay)s)")
+        "模式變更時自動觸發: \(firstAction?.rawValue ?? "?") (延遲: \(delay)秒)")
       triggerAutoPlayNow(delay: delay)
     }
   }
@@ -658,9 +658,9 @@ class WebViewModel {
     Task {
       do {
         _ = try await page.callJavaScript(script)
-        bridgeLog("[WebViewModel] Highlight settings: rotating=\(showRotatingEffect)")
+        bridgeLog("[WebViewModel] 高亮設定: 旋轉=\(showRotatingEffect)")
       } catch {
-        bridgeLog("[WebViewModel] Error setting highlight: \(error.localizedDescription)")
+        bridgeLog("[WebViewModel] 設定高亮錯誤: \(error.localizedDescription)")
       }
     }
   }
@@ -675,9 +675,9 @@ class WebViewModel {
       do {
         let result = try await page.callJavaScript(script)
         bridgeLog(
-          "[WebViewModel] Hide player names: \(hide), result: \(String(describing: result))")
+          "[WebViewModel] 隱藏玩家名稱: \(hide), 結果: \(String(describing: result))")
       } catch {
-        bridgeLog("[WebViewModel] Error setting hide names: \(error.localizedDescription)")
+        bridgeLog("[WebViewModel] 設定隱藏名稱錯誤: \(error.localizedDescription)")
       }
     }
   }
@@ -697,7 +697,7 @@ class WebViewModel {
         return status
       }
     } catch {
-      bridgeLog("[WebViewModel] Error getting names status: \(error.localizedDescription)")
+      bridgeLog("[WebViewModel] 取得名稱狀態錯誤: \(error.localizedDescription)")
     }
     return nil
   }
@@ -726,7 +726,7 @@ class WebViewModel {
           // API 可用，套用設定
           setHidePlayerNames(true)
           hasAppliedHideNamesSettings = true
-          bridgeLog("[WebViewModel] Auto-applied hide player names setting")
+          bridgeLog("[WebViewModel] 已自動套用隱藏玩家名稱設定")
         }
       } catch {
         // 忽略錯誤，下次定期檢查時會再嘗試
@@ -754,7 +754,7 @@ class WebViewModel {
     guard let page = webPage,
       let firstRec = recommendations.first
     else {
-      bridgeLog("[WebViewModel] Cannot trigger: no WebPage or recommendations")
+      bridgeLog("[WebViewModel] 無法觸發: 無 WebPage 或推薦")
       return
     }
 
@@ -765,8 +765,8 @@ class WebViewModel {
     let executionId = UUID()
     currentExecutionId = executionId
 
-    bridgeLog("[WebViewModel] Triggering: \(actionType.rawValue) - \(tileName) (delay: \(delay)s)")
-    debugServer?.addLog("Trigger: \(actionType.rawValue) - \(tileName)")
+    bridgeLog("[WebViewModel] 觸發: \(actionType.rawValue) - \(tileName) (延遲: \(delay)秒)")
+    debugServer?.addLog("觸發: \(actionType.rawValue) - \(tileName)")
 
     // 延遲執行避免太快
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -774,7 +774,7 @@ class WebViewModel {
 
       // 檢查是否被更新的觸發取代
       if self.currentExecutionId != executionId {
-        self.debugServer?.addLog("Skip: superseded by newer trigger")
+        self.debugServer?.addLog("跳過: 已被新觸發取代")
         return
       }
 
@@ -798,7 +798,7 @@ class WebViewModel {
 
     // 檢查是否被新的觸發取代
     if currentExecutionId != executionId {
-      debugServer?.addLog("⏭️ Retry cancelled: superseded (attempt \(attempt))")
+      debugServer?.addLog("⏭️ 重試已取消: 被取代 (第 \(attempt) 次)")
       return
     }
 
@@ -817,7 +817,7 @@ class WebViewModel {
 
       // 再次檢查是否被取代
       if currentExecutionId != executionId {
-        debugServer?.addLog("⏭️ Retry cancelled after JS: superseded")
+        debugServer?.addLog("⏭️ JS 執行後重試已取消: 被取代")
         return
       }
 
@@ -833,10 +833,10 @@ class WebViewModel {
 
           // 打牌 (discard) 不需要等待 oplist，直接執行
           if actionType == .discard {
-            debugServer?.addLog("Discard: no oplist, exec directly")
+            debugServer?.addLog("打牌: 無 oplist, 直接執行")
             await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
             try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3s
-            debugServer?.addLog("✅ Discard sent")
+            debugServer?.addLog("✅ 打牌已發送")
             currentExecutionId = nil
             return
           }
@@ -844,7 +844,7 @@ class WebViewModel {
           // 其他動作需要等待 oplist
           if attempt < maxRetryAttempts {
             if attempt == 1 || attempt % 10 == 0 {
-              debugServer?.addLog("Wait oplist \(attempt)/\(maxRetryAttempts) (\(reason))")
+              debugServer?.addLog("等待 oplist \(attempt)/\(maxRetryAttempts) (\(reason))")
             }
             try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
             await executeAutoPlayActionWithRetry(
@@ -852,9 +852,9 @@ class WebViewModel {
               executionId: executionId)
           } else {
             if actionType == .none {
-              debugServer?.addLog("✅ Pass: no oplist after \(attempt) attempts, no opportunity")
+              debugServer?.addLog("✅ Pass: \(attempt) 次嘗試後無 oplist, 無機會")
             } else {
-              debugServer?.addLog("❌ No oplist after \(attempt) attempts, giving up")
+              debugServer?.addLog("❌ \(attempt) 次嘗試後無 oplist, 放棄")
             }
             currentExecutionId = nil
           }
@@ -863,7 +863,7 @@ class WebViewModel {
 
         // 有操作，執行動作
         let opInfo = dict["opTypes"] as? [Int] ?? []
-        debugServer?.addLog("Attempt \(attempt): ops=\(opInfo)")
+        debugServer?.addLog("第 \(attempt) 次嘗試: ops=\(opInfo)")
 
         await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
 
@@ -871,7 +871,7 @@ class WebViewModel {
         if actionType == .none {
           let maxPassRetries = 5
           if attempt >= maxPassRetries {
-            debugServer?.addLog("✅ Pass sent (\(attempt) attempts)")
+            debugServer?.addLog("✅ Pass 已發送 (第 \(attempt) 次)")
             return
           }
           try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
@@ -888,11 +888,11 @@ class WebViewModel {
           executionId: executionId)
       } else {
         // 無法解析，直接執行一次
-        debugServer?.addLog("Attempt \(attempt): check failed, exec anyway")
+        debugServer?.addLog("第 \(attempt) 次嘗試: 檢查失敗, 仍執行")
         await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
       }
     } catch {
-      debugServer?.addLog("JS error: \(error.localizedDescription)")
+      debugServer?.addLog("JS 錯誤: \(error.localizedDescription)")
     }
   }
 
@@ -904,7 +904,7 @@ class WebViewModel {
 
     // 檢查是否被新的觸發取代
     if currentExecutionId != executionId {
-      debugServer?.addLog("⏭️ Check cancelled: superseded")
+      debugServer?.addLog("⏭️ 檢查已取消: 被取代")
       return
     }
 
@@ -964,7 +964,7 @@ class WebViewModel {
 
         if success {
           let reason = dict["reason"] as? String ?? "ok"
-          debugServer?.addLog("✅ Action success after \(attempt) attempts (\(reason))")
+          debugServer?.addLog("✅ 動作成功, 第 \(attempt) 次 (\(reason))")
           currentExecutionId = nil
           return
         }
@@ -973,19 +973,19 @@ class WebViewModel {
         let opInfo = dict["opTypes"] as? [Int] ?? []
 
         if attempt >= maxRetryAttempts {
-          debugServer?.addLog("❌ Max retries reached (\(attempt)), ops=\(opInfo)")
+          debugServer?.addLog("❌ 已達最大重試次數 (\(attempt)), ops=\(opInfo)")
           currentExecutionId = nil
           return
         }
 
         // 重試
-        debugServer?.addLog("Retry \(attempt + 1): ops still present \(opInfo)")
+        debugServer?.addLog("重試 \(attempt + 1): ops 仍存在 \(opInfo)")
         await executeAutoPlayActionWithRetry(
           page: page, actionType: actionType, tileName: tileName, attempt: attempt + 1,
           executionId: executionId)
       }
     } catch {
-      debugServer?.addLog("Check error: \(error.localizedDescription)")
+      debugServer?.addLog("檢查錯誤: \(error.localizedDescription)")
     }
   }
 
@@ -997,13 +997,13 @@ class WebViewModel {
 
     switch actionType {
     case .riichi:
-      debugServer?.addLog("Exec: riichi...")
+      debugServer?.addLog("執行: 立直...")
       let script = "return JSON.stringify(window.naki.action.riichi())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("riichi result: \(String(describing: result))")
+        debugServer?.addLog("立直結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("riichi error: \(error.localizedDescription)")
+        debugServer?.addLog("立直錯誤: \(error.localizedDescription)")
       }
 
     case .discard:
@@ -1012,19 +1012,19 @@ class WebViewModel {
       do {
         let result = try await page.callJavaScript(findScript)
         if let tileIndex = result as? Int, tileIndex >= 0 {
-          debugServer?.addLog("Find: \(tileName) → idx=\(tileIndex)")
+          debugServer?.addLog("查找: \(tileName) → idx=\(tileIndex)")
           let discardScript = "return JSON.stringify(window.naki.action.discard(\(tileIndex)))"
           do {
             let discardResult = try await page.callJavaScript(discardScript)
-            debugServer?.addLog("discard result: \(String(describing: discardResult))")
+            debugServer?.addLog("打牌結果: \(String(describing: discardResult))")
           } catch {
-            debugServer?.addLog("discard error: \(error.localizedDescription)")
+            debugServer?.addLog("打牌錯誤: \(error.localizedDescription)")
           }
         } else {
-          debugServer?.addLog("Tile not found: \(tileName)")
+          debugServer?.addLog("找不到牌: \(tileName)")
         }
       } catch {
-        debugServer?.addLog("Find error: \(error.localizedDescription)")
+        debugServer?.addLog("查找錯誤: \(error.localizedDescription)")
       }
 
     case .chi:
@@ -1049,68 +1049,68 @@ class WebViewModel {
           let available = dict["available"] as? Bool, available,
           let count = dict["count"] as? Int
         else {
-          debugServer?.addLog("Chi: no combinations available")
+          debugServer?.addLog("吃: 無可用組合")
           return
         }
 
         // 計算組合索引
         let combIndex = count == 1 ? 0 : max(0, count - 1 - chiType)
         let combInfo = (dict["combinations"] as? [String])?.joined(separator: ", ") ?? ""
-        debugServer?.addLog("Chi: mortal=chi_\(chiType) → gameIdx=\(combIndex) [\(combInfo)]")
+        debugServer?.addLog("吃: mortal=chi_\(chiType) → gameIdx=\(combIndex) [\(combInfo)]")
 
         let chiScript = "return JSON.stringify(window.naki.action.chi(\(combIndex)))"
         do {
           let chiResult = try await page.callJavaScript(chiScript)
-          debugServer?.addLog("chi result: \(String(describing: chiResult))")
+          debugServer?.addLog("吃結果: \(String(describing: chiResult))")
         } catch {
-          debugServer?.addLog("chi error: \(error.localizedDescription)")
+          debugServer?.addLog("吃錯誤: \(error.localizedDescription)")
         }
       } catch {
-        debugServer?.addLog("Chi query error: \(error.localizedDescription)")
+        debugServer?.addLog("吃查詢錯誤: \(error.localizedDescription)")
       }
 
     case .pon:
-      debugServer?.addLog("Exec: pon...")
+      debugServer?.addLog("執行: 碰...")
       let script = "return JSON.stringify(window.naki.action.pon())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("pon result: \(String(describing: result))")
+        debugServer?.addLog("碰結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("pon error: \(error.localizedDescription)")
+        debugServer?.addLog("碰錯誤: \(error.localizedDescription)")
       }
 
     case .kan:
-      debugServer?.addLog("Exec: kan...")
+      debugServer?.addLog("執行: 槓...")
       let script = "return JSON.stringify(window.naki.action.kan())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("kan result: \(String(describing: result))")
+        debugServer?.addLog("槓結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("kan error: \(error.localizedDescription)")
+        debugServer?.addLog("槓錯誤: \(error.localizedDescription)")
       }
 
     case .hora:
-      debugServer?.addLog("Exec: hora...")
+      debugServer?.addLog("執行: 和牌...")
       let script = "return JSON.stringify(window.naki.action.hora())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("hora result: \(String(describing: result))")
+        debugServer?.addLog("和牌結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("hora error: \(error.localizedDescription)")
+        debugServer?.addLog("和牌錯誤: \(error.localizedDescription)")
       }
 
     case .none:
-      debugServer?.addLog("Exec: pass...")
+      debugServer?.addLog("執行: 過...")
       let script = "return JSON.stringify(window.naki.action.pass())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("pass result: \(String(describing: result))")
+        debugServer?.addLog("過結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("pass error: \(error.localizedDescription)")
+        debugServer?.addLog("過錯誤: \(error.localizedDescription)")
       }
 
     case .unknown:
-      bridgeLog("[WebViewModel] Unknown action type, skipping")
+      bridgeLog("[WebViewModel] 未知動作類型, 跳過")
     }
   }
 
@@ -1146,11 +1146,11 @@ class WebViewModel {
       Task { @MainActor in
         do {
           let result = try await page.callJavaScript(script)
-          print("[JS Debug] Script: \(script.prefix(50))...")
-          print("[JS Debug] Result type: \(type(of: result)), value: \(String(describing: result))")
+          print("[JS 除錯] 腳本: \(script.prefix(50))...")
+          print("[JS 除錯] 結果類型: \(type(of: result)), 值: \(String(describing: result))")
           completion(result, nil)
         } catch {
-          print("[JS Debug] Error: \(error)")
+          print("[JS 除錯] 錯誤: \(error)")
           completion(nil, error)
         }
       }
@@ -1208,7 +1208,7 @@ class WebViewModel {
       if let controller = self.nativeBotController,
         let lastAction = controller.lastAction
       {
-        self.debugServer?.addLog("Triggering with lastAction")
+        self.debugServer?.addLog("使用 lastAction 觸發")
         self.autoPlayController?.handleRecommendedAction(
           lastAction,
           tehai: controller.tehai,
@@ -1274,7 +1274,7 @@ class WebViewModel {
 
   func callJS(function: String, params: [String: Any]) async {
     guard let page = webPage else {
-      print("WebPage not ready")
+      print("WebPage 尚未準備好")
       return
     }
 
@@ -1286,7 +1286,7 @@ class WebViewModel {
 
       _ = try await page.callJavaScript(script)
     } catch {
-      print("JavaScript Error: \(error.localizedDescription)")
+      print("JavaScript 錯誤: \(error.localizedDescription)")
     }
   }
 
@@ -1326,7 +1326,7 @@ extension WebViewModel: AutoPlayServiceDelegate {
   func autoPlayService(
     _ service: AutoPlayService, didComplete actionType: Recommendation.ActionType
   ) {
-    bridgeLog("[WebViewModel] AutoPlayService completed: \(actionType.rawValue)")
+    bridgeLog("[WebViewModel] AutoPlayService 完成: \(actionType.rawValue)")
     statusMessage = "動作完成: \(actionType.displayName)"
     Task {
       await hideGameHighlight()
@@ -1336,7 +1336,7 @@ extension WebViewModel: AutoPlayServiceDelegate {
   func autoPlayService(
     _ service: AutoPlayService, didFail actionType: Recommendation.ActionType, error: String
   ) {
-    bridgeLog("[WebViewModel] AutoPlayService failed: \(actionType.rawValue) - \(error)")
+    bridgeLog("[WebViewModel] AutoPlayService 失敗: \(actionType.rawValue) - \(error)")
     statusMessage = "動作失敗: \(error)"
     Task {
       await hideGameHighlight()

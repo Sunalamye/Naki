@@ -99,7 +99,7 @@ class AutoPlayController: ObservableObject {
     // MARK: - Initialization
 
     init() {
-        bridgeLog("\(logTag) Controller initialized (UI mode)")
+        bridgeLog("\(logTag) 控制器已初始化 (UI 模式)")
     }
 
     // MARK: - Configuration
@@ -107,13 +107,13 @@ class AutoPlayController: ObservableObject {
     /// 設置 WebPage 引用
     func setWebPage(_ webPage: WebPage?) {
         self.webPage = webPage
-        bridgeLog("\(logTag) WebPage set")
+        bridgeLog("\(logTag) WebPage 已設定")
     }
 
     /// 設置自動打牌模式
     func setMode(_ mode: AutoPlayMode) {
         state.mode = mode
-        bridgeLog("\(logTag) Mode set to: \(mode.rawValue)")
+        bridgeLog("\(logTag) 模式設定為: \(mode.rawValue)")
 
         if mode == .off {
             cancelPendingAction()
@@ -136,7 +136,7 @@ class AutoPlayController: ObservableObject {
     /// 通知輪到自己的回合
     func notifyMyTurn(canDiscard: Bool, canRiichi: Bool, canChi: Bool, canPon: Bool, canKan: Bool, canAgari: Bool) {
         state.isMyTurn = true
-        bridgeLog("\(logTag) My turn - canDiscard=\(canDiscard), canRiichi=\(canRiichi), canChi=\(canChi), canPon=\(canPon), canKan=\(canKan), canAgari=\(canAgari)")
+        bridgeLog("\(logTag) 我的回合 - 可打牌=\(canDiscard), 可立直=\(canRiichi), 可吃=\(canChi), 可碰=\(canPon), 可槓=\(canKan), 可和=\(canAgari)")
     }
 
     /// 通知回合結束
@@ -162,7 +162,7 @@ class AutoPlayController: ObservableObject {
 
         // 轉換為自動打牌動作
         guard let autoPlayAction = createUIAction(from: action) else {
-            bridgeLog("\(logTag) Cannot convert action: \(action)")
+            bridgeLog("\(logTag) 無法轉換動作: \(action)")
             return
         }
 
@@ -177,7 +177,7 @@ class AutoPlayController: ObservableObject {
             }
         } else {
             // 推薦確認模式：等待用戶確認
-            bridgeLog("\(logTag) Action pending confirmation: \(autoPlayAction)")
+            bridgeLog("\(logTag) 動作等待確認: \(autoPlayAction)")
         }
     }
 
@@ -204,7 +204,7 @@ class AutoPlayController: ObservableObject {
                 return .discard(tileIndex: 13, isRiichi: isRiichi)
             }
 
-            bridgeLog("\(logTag) Tile \(tile.mjaiString) not found in hand")
+            bridgeLog("\(logTag) 手牌中找不到 \(tile.mjaiString)")
             return nil
 
         case .reach:
@@ -239,7 +239,7 @@ class AutoPlayController: ObservableObject {
     /// 確認並執行待處理動作
     func confirmPendingAction() {
         guard let action = state.pendingAction else {
-            bridgeLog("\(logTag) No pending action to confirm")
+            bridgeLog("\(logTag) 沒有待確認的動作")
             return
         }
 
@@ -258,7 +258,7 @@ class AutoPlayController: ObservableObject {
         actionTimer?.invalidate()
 
         let delay = state.actionDelay
-        bridgeLog("\(logTag) Scheduling action with \(delay)s delay")
+        bridgeLog("\(logTag) 排程動作, 延遲 \(delay) 秒")
 
         actionTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.executeAction(action)
@@ -268,21 +268,21 @@ class AutoPlayController: ObservableObject {
     /// 執行動作 (透過 UI 自動化)
     private func executeAction(_ action: AutoPlayAction) {
         guard let webPage = webPage else {
-            bridgeLog("\(logTag) Error: WebPage not available")
+            bridgeLog("\(logTag) 錯誤: WebPage 不可用")
             lastError = "WebPage 不可用"
             return
         }
 
         let script = generateJavaScript(for: action)
-        bridgeLog("\(logTag) Executing: \(script)")
+        bridgeLog("\(logTag) 執行: \(script)")
 
         Task { @MainActor [weak self] in
             do {
                 _ = try await webPage.callJavaScript(script)
-                bridgeLog("\(self?.logTag ?? "") Action executed successfully")
+                bridgeLog("\(self?.logTag ?? "") 動作執行成功")
                 self?.handleActionSuccess()
             } catch {
-                bridgeLog("\(self?.logTag ?? "") JS error: \(error.localizedDescription)")
+                bridgeLog("\(self?.logTag ?? "") JS 錯誤: \(error.localizedDescription)")
                 self?.handleActionError(error.localizedDescription)
             }
         }
@@ -336,7 +336,7 @@ class AutoPlayController: ObservableObject {
         lastError = error
 
         if state.errorCount >= state.maxErrors {
-            bridgeLog("\(logTag) Too many errors, disabling auto-play")
+            bridgeLog("\(logTag) 錯誤過多, 停用自動打牌")
             setMode(.off)
             lastError = "錯誤過多，已停止自動打牌"
         }

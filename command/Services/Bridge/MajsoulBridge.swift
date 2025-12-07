@@ -102,7 +102,7 @@ class MajsoulBridge {
         pendingReachAccepted = nil
         syncing = false
         hasReceivedAuthGame = false
-        bridgeLog("[MajsoulBridge] Reset (accountId preserved: \(accountId))")
+        bridgeLog("[MajsoulBridge] 重置 (accountId 已保留: \(accountId))")
     }
 
     /// 完整重置橋接器狀態（包括 accountId，用於頁面重新載入）
@@ -116,7 +116,7 @@ class MajsoulBridge {
         pendingReachAccepted = nil
         syncing = false
         hasReceivedAuthGame = false
-        bridgeLog("[MajsoulBridge] Full reset (accountId cleared)")
+        bridgeLog("[MajsoulBridge] 完整重置 (accountId 已清除)")
     }
 
     /// 設置帳號 ID
@@ -163,30 +163,30 @@ class MajsoulBridge {
         // 處理登入響應 - 獲取帳號 ID
         if (method == ".lq.Lobby.login" || method == ".lq.Lobby.oauth2Login" ||
             method == ".lq.Lobby.oauth2Auth" || method == ".lq.Lobby.emailLogin") && msgType == "response" {
-            bridgeLog("[MajsoulBridge] Login response detected: \(method)")
-            bridgeLog("[MajsoulBridge] Login data keys: \(msgData.keys)")
+            bridgeLog("[MajsoulBridge] 偵測到登入回應: \(method)")
+            bridgeLog("[MajsoulBridge] 登入資料鍵: \(msgData.keys)")
 
             // 嘗試從不同結構獲取 account_id
             if let accId = msgData["accountId"] as? Int, accId > 0 {
                 accountId = accId
-                bridgeLog("[MajsoulBridge] Got accountId from direct field: \(accountId)")
+                bridgeLog("[MajsoulBridge] 從直接欄位獲取 accountId: \(accountId)")
             } else if let account = msgData["account"] as? [String: Any] {
                 if let accId = account["accountId"] as? Int {
                     accountId = accId
-                    bridgeLog("[MajsoulBridge] Got accountId from account.accountId: \(accountId)")
+                    bridgeLog("[MajsoulBridge] 從 account.accountId 獲取 accountId: \(accountId)")
                 } else if let accId = account["account_id"] as? Int {
                     accountId = accId
-                    bridgeLog("[MajsoulBridge] Got accountId from account.account_id: \(accountId)")
+                    bridgeLog("[MajsoulBridge] 從 account.account_id 獲取 accountId: \(accountId)")
                 }
             } else if let accId = msgData["account_id"] as? Int, accId > 0 {
                 accountId = accId
-                bridgeLog("[MajsoulBridge] Got accountId from account_id: \(accountId)")
+                bridgeLog("[MajsoulBridge] 從 account_id 獲取 accountId: \(accountId)")
             }
         }
 
         // 處理 authGame 請求 - 重置狀態（新遊戲開始）
         if method == ".lq.FastTest.authGame" && msgType == "request" {
-            bridgeLog("[MajsoulBridge] authGame request detected - resetting state for new game")
+            bridgeLog("[MajsoulBridge] 偵測到 authGame 請求 - 重置狀態以開始新遊戲")
             // 重置遊戲狀態，但保留 accountId
             seat = 0
             lastDiscard = nil
@@ -197,41 +197,41 @@ class MajsoulBridge {
             // 從請求中獲取 accountId
             if let accId = msgData["accountId"] as? Int, accId > 0 {
                 accountId = accId
-                bridgeLog("[MajsoulBridge] Got accountId from authGame request: \(accountId)")
+                bridgeLog("[MajsoulBridge] 從 authGame 請求獲取 accountId: \(accountId)")
             }
         }
 
         // 處理 authGame 響應
         if method == ".lq.FastTest.authGame" && msgType == "response" {
-            bridgeLog("[MajsoulBridge] authGame response detected")
-            bridgeLog("[MajsoulBridge] Current accountId: \(accountId)")
-            bridgeLog("[MajsoulBridge] authGame data keys: \(msgData.keys)")
+            bridgeLog("[MajsoulBridge] 偵測到 authGame 回應")
+            bridgeLog("[MajsoulBridge] 目前 accountId: \(accountId)")
+            bridgeLog("[MajsoulBridge] authGame 資料鍵: \(msgData.keys)")
 
             hasReceivedAuthGame = true  // 標記已收到 authGame
 
             if let seatList = msgData["seatList"] as? [Int] {
-                bridgeLog("[MajsoulBridge] seatList: \(seatList)")
+                bridgeLog("[MajsoulBridge] 座位列表: \(seatList)")
                 is3P = seatList.count == 3
 
                 if let index = seatList.firstIndex(of: accountId) {
                     seat = index
-                    bridgeLog("[MajsoulBridge] Found seat index: \(seat)")
+                    bridgeLog("[MajsoulBridge] 找到座位索引: \(seat)")
                     results.append([
                         "type": "start_game",
                         "id": seat
                     ])
                 } else {
-                    bridgeLog("[MajsoulBridge] ERROR: accountId \(accountId) not found in seatList!")
+                    bridgeLog("[MajsoulBridge] 錯誤: accountId \(accountId) 在 seatList 中找不到!")
                     // 如果找不到，暫時使用座位 0
                     seat = 0
-                    bridgeLog("[MajsoulBridge] Defaulting to seat 0")
+                    bridgeLog("[MajsoulBridge] 預設使用座位 0")
                     results.append([
                         "type": "start_game",
                         "id": seat
                     ])
                 }
             } else {
-                bridgeLog("[MajsoulBridge] ERROR: seatList not found in authGame response!")
+                bridgeLog("[MajsoulBridge] 錯誤: authGame 回應中找不到 seatList!")
             }
         }
 
@@ -248,7 +248,7 @@ class MajsoulBridge {
         // 處理遊戲同步（活動模式、斷線重連等）
         // 重要：只處理 gameRestore.actions，不發送額外的 start_game（與 Akagi 行為一致）
         if method == ".lq.FastTest.syncGame" || method == ".lq.FastTest.enterGame" {
-            bridgeLog("[MajsoulBridge] syncGame/enterGame detected, hasReceivedAuthGame=\(hasReceivedAuthGame)")
+            bridgeLog("[MajsoulBridge] 偵測到 syncGame/enterGame, hasReceivedAuthGame=\(hasReceivedAuthGame)")
             syncing = true
             if let gameRestore = msgData["gameRestore"] as? [String: Any] {
                 if let events = parseSyncGameRestore(gameRestore) {
@@ -270,7 +270,7 @@ class MajsoulBridge {
     private func parseAction(name: String, data: [String: Any]) -> [[String: Any]]? {
         var results: [[String: Any]] = []
 
-        bridgeLog("[MajsoulBridge] parseAction: name=\(name)")
+        bridgeLog("[MajsoulBridge] 解析動作: name=\(name)")
 
         // 添加待處理的立直接受消息
         if let pending = pendingReachAccepted {
@@ -280,12 +280,12 @@ class MajsoulBridge {
 
         switch name {
         case "ActionNewRound":
-            bridgeLog("[MajsoulBridge] parseAction: ActionNewRound data keys: \(data.keys)")
+            bridgeLog("[MajsoulBridge] 解析動作: ActionNewRound 資料鍵: \(data.keys)")
             if let events = parseNewRound(data) {
-                bridgeLog("[MajsoulBridge] parseAction: ActionNewRound generated \(events.count) events")
+                bridgeLog("[MajsoulBridge] 解析動作: ActionNewRound 產生了 \(events.count) events")
                 results.append(contentsOf: events)
             } else {
-                bridgeLog("[MajsoulBridge] parseAction: ActionNewRound returned nil!")
+                bridgeLog("[MajsoulBridge] 解析動作: ActionNewRound 返回 nil!")
             }
 
         case "ActionDealTile":
@@ -350,16 +350,16 @@ class MajsoulBridge {
     private func parseNewRound(_ data: [String: Any]) -> [[String: Any]]? {
         var results: [[String: Any]] = []
 
-        bridgeLog("[MajsoulBridge] parseNewRound called with data keys: \(data.keys)")
+        bridgeLog("[MajsoulBridge] parseNewRound 調用, 資料鍵: \(data.keys)")
 
         guard let chang = data["chang"] as? Int,
               let ju = data["ju"] as? Int else {
-            bridgeLog("[MajsoulBridge] parseNewRound: Missing chang or ju!")
+            bridgeLog("[MajsoulBridge] parseNewRound: 缺少 chang 或 ju!")
             return nil
         }
 
         let tiles = data["tiles"] as? [String] ?? []
-        bridgeLog("[MajsoulBridge] parseNewRound: chang=\(chang), ju=\(ju), tiles.count=\(tiles.count)")
+        bridgeLog("[MajsoulBridge] parseNewRound: 場=\(chang), ju=\(ju), tiles.count=\(tiles.count)")
 
         let bakaze = BAKAZE_NAMES[chang % 4]
         let kyoku = ju + 1
@@ -408,17 +408,17 @@ class MajsoulBridge {
         if tiles.count >= 14 {
             if let tsumoTile = tiles.last,
                let mjaiTile = MS_TILE_TO_MJAI[tsumoTile] {
-                bridgeLog("[MajsoulBridge] parseNewRound: Adding synthetic tsumo for oya, tile=\(tsumoTile) -> \(mjaiTile)")
+                bridgeLog("[MajsoulBridge] parseNewRound: 為親家添加合成摸牌, tile=\(tsumoTile) -> \(mjaiTile)")
                 results.append([
                     "type": "tsumo",
                     "actor": seat,
                     "pai": mjaiTile
                 ])
             } else {
-                bridgeLog("[MajsoulBridge] parseNewRound: ERROR - Failed to convert 14th tile")
+                bridgeLog("[MajsoulBridge] parseNewRound: 錯誤 - 無法轉換第 14 張牌")
             }
         } else {
-            bridgeLog("[MajsoulBridge] parseNewRound: Not oya, no synthetic tsumo")
+            bridgeLog("[MajsoulBridge] parseNewRound: 非親家, 無合成摸牌")
         }
 
         return results
@@ -434,13 +434,13 @@ class MajsoulBridge {
         // 如果是自己的摸牌但 tile 為空，這是一個解析錯誤
         // 不應該發送給 Bot，否則會導致狀態損壞
         if actor == seat && mjaiTile == "?" {
-            bridgeLog("[MajsoulBridge] WARNING: Own tsumo has no tile data! Skipping event.")
-            bridgeLog("[MajsoulBridge] parseDealTile data: \(data)")
+            bridgeLog("[MajsoulBridge] 警告: 自己的摸牌沒有牌資料! 跳過事件。")
+            bridgeLog("[MajsoulBridge] parseDealTile 資料: \(data)")
             // 返回 nil 跳過這個事件，防止 Bot 崩潰
             return nil
         }
 
-        bridgeLog("[MajsoulBridge] parseDealTile: actor=\(actor), tile=\(tile), mjaiTile=\(mjaiTile)")
+        bridgeLog("[MajsoulBridge] parseDealTile: 玩家=\(actor), tile=\(tile), mjaiTile=\(mjaiTile)")
 
         return [
             "type": "tsumo",
@@ -494,7 +494,7 @@ class MajsoulBridge {
     private func parseChiPengGang(_ data: [String: Any]) -> [String: Any]? {
         guard let actor = data["seat"] as? Int,
               let opType = data["type"] as? Int else {
-            bridgeLog("[MajsoulBridge] parseChiPengGang: missing seat or type")
+            bridgeLog("[MajsoulBridge] parseChiPengGang: 缺少 seat 或 type")
             return nil
         }
 
@@ -513,7 +513,7 @@ class MajsoulBridge {
             froms = fromsArray
         }
 
-        bridgeLog("[MajsoulBridge] parseChiPengGang: actor=\(actor), opType=\(opType), tiles=\(tiles), froms=\(froms)")
+        bridgeLog("[MajsoulBridge] parseChiPengGang: 玩家=\(actor), opType=\(opType), tiles=\(tiles), froms=\(froms)")
 
         // 如果 froms 為空，嘗試從 lastDiscard 獲取 target
         var target = lastDiscard ?? ((actor + 3) % 4)
@@ -530,7 +530,7 @@ class MajsoulBridge {
                         // 這張牌來自其他玩家
                         target = fromSeat
                         pai = mjaiTile
-                        bridgeLog("[MajsoulBridge] parseChiPengGang: found pai=\(pai) from target=\(target)")
+                        bridgeLog("[MajsoulBridge] parseChiPengGang: 找到 pai=\(pai) from target=\(target)")
                     } else {
                         // 這張牌來自自己手中
                         consumed.append(mjaiTile)
@@ -539,7 +539,7 @@ class MajsoulBridge {
             }
         } else {
             // 備用邏輯：沒有 froms 或長度不匹配
-            bridgeLog("[MajsoulBridge] parseChiPengGang: froms missing or mismatched, using fallback")
+            bridgeLog("[MajsoulBridge] parseChiPengGang: froms 缺失或不匹配, 使用備用方案")
             if let firstTile = tiles.first {
                 pai = MS_TILE_TO_MJAI[firstTile] ?? firstTile
             }
@@ -578,7 +578,7 @@ class MajsoulBridge {
             }
         }
 
-        bridgeLog("[MajsoulBridge] parseChiPengGang result: target=\(target), pai=\(pai), consumed=\(consumed)")
+        bridgeLog("[MajsoulBridge] parseChiPengGang 結果: target=\(target), pai=\(pai), consumed=\(consumed)")
 
         switch opType {
         case 0: // Chi
@@ -674,7 +674,7 @@ class MajsoulBridge {
     private func parseSyncGameRestore(_ gameRestore: [String: Any]) -> [[String: Any]]? {
         var results: [[String: Any]] = []
 
-        bridgeLog("[MajsoulBridge] Parsing gameRestore: \(gameRestore.keys)")
+        bridgeLog("[MajsoulBridge] 解析 gameRestore: \(gameRestore.keys)")
 
         // 從 gameRestore 中提取遊戲狀態
         // 通常包含 actions（歷史動作列表）和當前狀態信息
@@ -685,7 +685,7 @@ class MajsoulBridge {
 
         // 嘗試解析遊戲狀態（用於構建 start_kyoku）
         if let gameState = gameRestore["gameState"] as? [String: Any] {
-            bridgeLog("[MajsoulBridge] Found gameState: \(gameState.keys)")
+            bridgeLog("[MajsoulBridge] 找到 gameState: \(gameState.keys)")
 
             // 解析當前局數信息
             if let events = parseGameState(gameState) {
@@ -695,7 +695,7 @@ class MajsoulBridge {
 
         // 如果有 actions 列表，逐一處理（與 Akagi 的 parse_syncGame 行為一致）
         if let actions = gameRestore["actions"] as? [[String: Any]] {
-            bridgeLog("[MajsoulBridge] Found \(actions.count) actions to replay")
+            bridgeLog("[MajsoulBridge] 找到 \(actions.count) 個動作需要重播")
             for action in actions {
                 if let name = action["name"] as? String,
                    let data = action["data"] as? [String: Any] {
@@ -976,7 +976,7 @@ class MajsoulBridge {
 
         // 自己的摸牌必須有牌面
         if actor == seat && tileStr.isEmpty {
-            bridgeLog("[MajsoulBridge] WARNING: Own tsumo has no tile data!")
+            bridgeLog("[MajsoulBridge] 警告: 自己的摸牌沒有牌資料!")
             return nil
         }
 

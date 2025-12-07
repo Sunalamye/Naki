@@ -89,7 +89,7 @@ final class GameStateManager: ObservableObject {
     // MARK: - Initialization
 
     init() {
-        bridgeLog("\(logTag) Initialized")
+        bridgeLog("\(logTag) 已初始化")
     }
 
     // MARK: - State Updates
@@ -101,7 +101,7 @@ final class GameStateManager: ObservableObject {
             guard let self = self else { return }
             self.gameState = state
             self.lastUpdateTime = Date()
-            bridgeLog("\(self.logTag) Game state updated: \(state.kyokuDisplayName)")
+            bridgeLog("\(self.logTag) 遊戲狀態已更新: \(state.kyokuDisplayName)")
         }
     }
 
@@ -111,7 +111,7 @@ final class GameStateManager: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.botStatus = status
-            bridgeLog("\(self.logTag) Bot status updated: active=\(status.isActive)")
+            bridgeLog("\(self.logTag) Bot 狀態已更新: active=\(status.isActive)")
         }
     }
 
@@ -126,9 +126,9 @@ final class GameStateManager: ObservableObject {
             self.lastUpdateTime = Date()
 
             if let first = recs.first {
-                bridgeLog("\(self.logTag) \(recs.count) recommendations, top: \(first.displayLabel) (\(first.percentageString))")
+                bridgeLog("\(self.logTag) \(recs.count) 個推薦, 最佳: \(first.displayLabel) (\(first.percentageString))")
             } else {
-                bridgeLog("\(self.logTag) No recommendations")
+                bridgeLog("\(self.logTag) 無推薦")
             }
         }
     }
@@ -209,7 +209,7 @@ final class GameStateManager: ObservableObject {
             self.isCalculating = false
             self.errorMessage = nil
             self.lastUpdateTime = nil
-            bridgeLog("\(self.logTag) State reset")
+            bridgeLog("\(self.logTag) 狀態已重置")
         }
     }
 
