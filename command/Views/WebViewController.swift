@@ -103,7 +103,7 @@ class NakiWebCoordinator {
         setupWebSocketCallbacks()
     }
 
-    /// 設定 WebSocket 回调
+    /// 設定 WebSocket 回調
     private func setupWebSocketCallbacks() {
         websocketHandler.onMJAIEvent = { [weak self] event in
             guard let self = self else { return }
@@ -179,7 +179,7 @@ class NakiWebCoordinator {
             viewModel?.recommendations = []
             viewModel?.tehaiTiles = []
             viewModel?.tsumoTile = nil
-            viewModel?.statusMessage = "游戏結束"
+            viewModel?.statusMessage = "遊戲結束"
 
         default:
             eventStream.emit(event)
@@ -207,7 +207,7 @@ class NakiWebCoordinator {
         }
     }
 
-    /// 重新同步 Bot（WebSocket 重连时或手動重建時使用）
+    /// 重新同步 Bot（WebSocket 重連時或手動重建時使用）
     func resyncBot() async {
         guard let playerId = eventStream.getPlayerId() else {
             bridgeLog("[協調器] 無法重新同步: 歷史記錄中找不到 playerId")
@@ -228,7 +228,7 @@ class NakiWebCoordinator {
         }
     }
 
-    /// 页面開始加载时的重置
+    /// 頁面開始載入時的重置
     func handleNavigationStarted() {
         websocketHandler.fullReset()
         eventStream.endGame()

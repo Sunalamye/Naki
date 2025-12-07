@@ -668,7 +668,7 @@ class NativeBotController {
             // 根據手牌生成可打牌的 mask (使用 PlayerState.actionSpace)
             mask = [UInt8](repeating: 0, count: PlayerState.actionSpace)
 
-            // 遍歷手牌，標記可以打的牌
+            // 走訪手牌，標記可以打的牌
             for tile in tehai {
                 if let actionIndex = tileToDiscardActionIndex(tile) {
                     mask[actionIndex] = 1

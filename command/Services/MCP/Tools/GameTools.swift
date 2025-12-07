@@ -184,7 +184,7 @@ struct GameActionVerifyTool: MCPTool {
             "tileIndex": .integer("打牌/立直時的牌索引（可選）"),
             "combinationIndex": .integer("吃牌時的組合索引（可選，預設 0）"),
             "useBuiltin": .boolean("是否使用遊戲內建自動功能（可選，對 pass/hora 有效）"),
-            "timeout": .integer("驗證超時時間 ms（可選，預設 2000）")
+            "timeout": .integer("驗證逾時時間 ms（可選，預設 2000）")
         ],
         required: ["action"]
     )

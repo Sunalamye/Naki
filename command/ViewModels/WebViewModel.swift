@@ -1131,7 +1131,7 @@ class WebViewModel {
     //   ❌ "1+1"              → 返回 null
     //   ✅ "return 1+1"       → 返回 2
     //   ❌ "document.title"   → 返回 null
-    //   ✅ "return document.title" → 返回 "雀魂麻将"
+    //   ✅ "return document.title" → 返回 "雀魂麻將"
     // 返回 Object 時使用 JSON.stringify()，Swift 端用 JSONSerialization 解析
     debugServer?.executeJavaScript = { [weak self] script, completion in
       guard let page = self?.webPage else {
