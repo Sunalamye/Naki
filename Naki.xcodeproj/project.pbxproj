@@ -7,13 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		EC3077B02EDC6A1600216E0C /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC3077AF2EDC6A1600216E0C /* MortalSwift */; };
 		EC3077B12EDDAFF200216E0C /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC3076D42EDBE64400216E0C /* MortalSwift */; };
 		ECAAD5222EE1BBB50056F965 /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = ECAAD5212EE1BBB50056F965 /* MortalSwift */; };
-		ECAADCED2EE570540056F965 /* WebViewBridge in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCEC2EE570540056F965 /* WebViewBridge */; };
-		ECAADCF02EE5707A0056F965 /* MCPKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCEF2EE5707A0056F965 /* MCPKit */; };
-		ECAADCF22EE570860056F965 /* WebViewBridge in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF12EE570860056F965 /* WebViewBridge */; };
-		ECAADCF42EE570860056F965 /* MCPKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF32EE570860056F965 /* MCPKit */; };
+		ECAADCF72EE57B3F0056F965 /* MCPWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF62EE57B3F0056F965 /* MCPWebKit */; };
+		ECAADCF92EE57B420056F965 /* MCPWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF82EE57B420056F965 /* MCPWebKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -223,10 +220,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				ECAADCED2EE570540056F965 /* WebViewBridge in Frameworks */,
 				EC3077B12EDDAFF200216E0C /* MortalSwift in Frameworks */,
-				ECAADCF02EE5707A0056F965 /* MCPKit in Frameworks */,
-				EC3077B02EDC6A1600216E0C /* MortalSwift in Frameworks */,
+				ECAADCF72EE57B3F0056F965 /* MCPWebKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -235,8 +230,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				ECAAD5222EE1BBB50056F965 /* MortalSwift in Frameworks */,
-				ECAADCF42EE570860056F965 /* MCPKit in Frameworks */,
-				ECAADCF22EE570860056F965 /* WebViewBridge in Frameworks */,
+				ECAADCF92EE57B420056F965 /* MCPWebKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -310,8 +304,7 @@
 			packageProductDependencies = (
 				EC3076D42EDBE64400216E0C /* MortalSwift */,
 				EC3077AF2EDC6A1600216E0C /* MortalSwift */,
-				ECAADCEC2EE570540056F965 /* WebViewBridge */,
-				ECAADCEF2EE5707A0056F965 /* MCPKit */,
+				ECAADCF62EE57B3F0056F965 /* MCPWebKit */,
 			);
 			productName = akagi;
 			productReference = EC30765E2EDAFD2300216E0C /* Naki.app */;
@@ -335,8 +328,7 @@
 			name = "Naki-M";
 			packageProductDependencies = (
 				ECAAD5212EE1BBB50056F965 /* MortalSwift */,
-				ECAADCF12EE570860056F965 /* WebViewBridge */,
-				ECAADCF32EE570860056F965 /* MCPKit */,
+				ECAADCF82EE57B420056F965 /* MCPWebKit */,
 			);
 			productName = "Naki-M";
 			productReference = ECAAD41C2EE1BAB40056F965 /* Naki-M.app */;
@@ -425,8 +417,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				EC3077AE2EDC6A1600216E0C /* XCRemoteSwiftPackageReference "MortalSwift" */,
-				ECAADCEB2EE570540056F965 /* XCRemoteSwiftPackageReference "WebViewBridge" */,
-				ECAADCEE2EE5706E0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */,
+				ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EC30765F2EDAFD2300216E0C /* Products */;
@@ -925,20 +916,12 @@
 				minimumVersion = 0.3.0;
 			};
 		};
-		ECAADCEB2EE570540056F965 /* XCRemoteSwiftPackageReference "WebViewBridge" */ = {
+		ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Sunalamye/WebViewBridge";
+			repositoryURL = "https://github.com/Sunalamye/MCPWebKit";
 			requirement = {
-				kind = exactVersion;
-				version = 0.1.1;
-			};
-		};
-		ECAADCEE2EE5706E0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Sunalamye/MCPKit";
-			requirement = {
-				kind = exactVersion;
-				version = 0.1.0;
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.1.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -958,25 +941,15 @@
 			package = EC3077AE2EDC6A1600216E0C /* XCRemoteSwiftPackageReference "MortalSwift" */;
 			productName = MortalSwift;
 		};
-		ECAADCEC2EE570540056F965 /* WebViewBridge */ = {
+		ECAADCF62EE57B3F0056F965 /* MCPWebKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = ECAADCEB2EE570540056F965 /* XCRemoteSwiftPackageReference "WebViewBridge" */;
-			productName = WebViewBridge;
+			package = ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */;
+			productName = MCPWebKit;
 		};
-		ECAADCEF2EE5707A0056F965 /* MCPKit */ = {
+		ECAADCF82EE57B420056F965 /* MCPWebKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = ECAADCEE2EE5706E0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */;
-			productName = MCPKit;
-		};
-		ECAADCF12EE570860056F965 /* WebViewBridge */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = ECAADCEB2EE570540056F965 /* XCRemoteSwiftPackageReference "WebViewBridge" */;
-			productName = WebViewBridge;
-		};
-		ECAADCF32EE570860056F965 /* MCPKit */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = ECAADCEE2EE5706E0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */;
-			productName = MCPKit;
+			package = ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */;
+			productName = MCPWebKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

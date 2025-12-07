@@ -8,6 +8,7 @@
 
 import Foundation
 import MCPKit
+import MCPWebKit
 
 // MARK: - Naki MCP Context Protocol
 
@@ -24,12 +25,12 @@ protocol NakiMCPContext: MCPContext {
 // MARK: - Default Naki Context Implementation
 
 /// Naki 專用的 MCP 上下文實現
-/// 將回調模式橋接到 async/await
+/// 包裝 WebViewMCPContext，添加 Naki 特有功能
+@MainActor
 final class DefaultNakiMCPContext: NakiMCPContext {
-    var serverPort: UInt16 = 8765
 
-    /// 執行 JavaScript 的回調（從外部注入）
-    var executeJavaScriptCallback: ((String, @escaping (Any?, Error?) -> Void) -> Void)?
+    /// 內部使用的 WebViewMCPContext
+    private let webContext = WebViewMCPContext()
 
     /// 獲取 Bot 狀態的回調
     var getBotStatusCallback: (() -> [String: Any])?
@@ -37,32 +38,50 @@ final class DefaultNakiMCPContext: NakiMCPContext {
     /// 觸發自動打牌的回調
     var triggerAutoPlayCallback: (() -> Void)?
 
-    /// 獲取日誌的回調
-    var getLogsCallback: (() -> [String])?
+    // MARK: - MCPContext Implementation (委託給 webContext)
 
-    /// 清空日誌的回調
-    var clearLogsCallback: (() -> Void)?
+    var serverPort: UInt16 {
+        get { webContext.serverPort }
+        set { webContext.serverPort = newValue }
+    }
 
-    /// 記錄日誌的回調
-    var logCallback: ((String) -> Void)?
+    var executeJavaScriptCallback: ((String, @escaping (Any?, Error?) -> Void) -> Void)? {
+        get { webContext.executeJavaScriptCallback }
+        set { webContext.executeJavaScriptCallback = newValue }
+    }
 
-    // MARK: - MCPContext Implementation
+    var getLogsCallback: (() -> [String])? {
+        get { webContext.getLogsCallback }
+        set { webContext.getLogsCallback = newValue }
+    }
+
+    var clearLogsCallback: (() -> Void)? {
+        get { webContext.clearLogsCallback }
+        set { webContext.clearLogsCallback = newValue }
+    }
+
+    var logCallback: ((String) -> Void)? {
+        get { webContext.logCallback }
+        set { webContext.logCallback = newValue }
+    }
 
     func executeJavaScript(_ script: String) async throws -> Any? {
-        guard let callback = executeJavaScriptCallback else {
-            throw MCPToolError.notAvailable("JavaScript execution")
-        }
-
-        return try await withCheckedThrowingContinuation { continuation in
-            callback(script) { result, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: result)
-                }
-            }
-        }
+        try await webContext.executeJavaScript(script)
     }
+
+    func getLogs() -> [String] {
+        webContext.getLogs()
+    }
+
+    func clearLogs() {
+        webContext.clearLogs()
+    }
+
+    func log(_ message: String) {
+        webContext.log(message)
+    }
+
+    // MARK: - NakiMCPContext Implementation
 
     func getBotStatus() -> [String: Any]? {
         return getBotStatusCallback?()
@@ -70,17 +89,5 @@ final class DefaultNakiMCPContext: NakiMCPContext {
 
     func triggerAutoPlay() {
         triggerAutoPlayCallback?()
-    }
-
-    func getLogs() -> [String] {
-        return getLogsCallback?() ?? []
-    }
-
-    func clearLogs() {
-        clearLogsCallback?()
-    }
-
-    func log(_ message: String) {
-        logCallback?(message)
     }
 }
