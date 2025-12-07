@@ -2,8 +2,12 @@
 //  WebViewBridge.swift
 //  WebViewBridge
 //
-//  WKWebView 與 Swift 的雙向通訊橋接層
+//  WKWebView / WebPage 與 Swift 的雙向通訊橋接層
 //  提供 JavaScript 注入、訊息處理、模組管理等功能
+//
+//  支援：
+//  - WKWebView (iOS 16+ / macOS 13+)
+//  - WebPage API (macOS 26.0+)
 //
 
 import Foundation
@@ -27,6 +31,46 @@ public protocol WebViewBridgeDelegate: AnyObject {
 public extension WebViewBridgeDelegate {
     func bridge(_ bridge: WebViewBridge, webSocketStatusChanged connected: Bool) {}
     func bridge(_ bridge: WebViewBridge, didEncounterError error: Error) {}
+}
+
+// MARK: - JavaScript Executor Protocol
+
+/// JavaScript 執行器協議
+/// 統一 WKWebView 和 WebPage 的 JavaScript 執行介面
+public protocol JavaScriptExecutor: AnyObject {
+    /// 執行 JavaScript 並返回結果
+    /// - Parameter script: JavaScript 代碼
+    ///   - 對於 WKWebView：直接執行表達式
+    ///   - 對於 WebPage：需要是函數體格式（使用 return 語句）
+    /// - Returns: 執行結果
+    func executeJavaScript(_ script: String) async throws -> Any?
+}
+
+// MARK: - WKWebView Extension
+
+extension WKWebView: JavaScriptExecutor {
+    public func executeJavaScript(_ script: String) async throws -> Any? {
+        return try await withCheckedThrowingContinuation { continuation in
+            self.evaluateJavaScript(script) { result, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: result)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - WebPage Extension (macOS 26.0+)
+
+@available(macOS 26.0, *)
+extension WebPage: JavaScriptExecutor {
+    public func executeJavaScript(_ script: String) async throws -> Any? {
+        // WebPage.callJavaScript 期望函數體格式
+        // 例如: "return document.title" 而非 "document.title"
+        return try await self.callJavaScript(script)
+    }
 }
 
 // MARK: - JavaScript Module
@@ -196,17 +240,29 @@ public final class WebViewBridge: NSObject {
 
     // MARK: - JavaScript Execution
 
-    /// 在 WebView 中執行 JavaScript
+    /// 在 WebView/WebPage 中執行 JavaScript
+    /// - Parameters:
+    ///   - script: JavaScript 代碼
+    ///     - WKWebView: 直接執行表達式（如 "document.title"）
+    ///     - WebPage: 需要函數體格式（如 "return document.title"）
+    ///   - executor: 實現 JavaScriptExecutor 的物件（WKWebView 或 WebPage）
+    /// - Returns: 執行結果
+    public func executeJavaScript(_ script: String, in executor: JavaScriptExecutor) async throws -> Any? {
+        return try await executor.executeJavaScript(script)
+    }
+
+    /// 在 WKWebView 中執行 JavaScript（向後兼容）
     public func executeJavaScript(_ script: String, in webView: WKWebView) async throws -> Any? {
-        return try await withCheckedThrowingContinuation { continuation in
-            webView.evaluateJavaScript(script) { result, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: result)
-                }
-            }
-        }
+        return try await webView.executeJavaScript(script)
+    }
+
+    /// 在 WebPage 中執行 JavaScript (macOS 26.0+)
+    /// - Note: WebPage.callJavaScript 期望函數體格式，必須使用 return 語句
+    ///   - ❌ "document.title" → 返回 null
+    ///   - ✅ "return document.title" → 返回實際標題
+    @available(macOS 26.0, *)
+    public func callJavaScript(_ script: String, in webPage: WebPage) async throws -> Any? {
+        return try await webPage.callJavaScript(script)
     }
 
     // MARK: - State

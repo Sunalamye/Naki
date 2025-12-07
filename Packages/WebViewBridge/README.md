@@ -1,6 +1,6 @@
 # WebViewBridge
 
-Swift 實現的通用 WKWebView 雙向通訊框架，提供 JavaScript 注入、訊息處理和 WebSocket 攔截功能。
+Swift 實現的通用 WKWebView / WebPage 雙向通訊框架，提供 JavaScript 注入、訊息處理和 WebSocket 攔截功能。
 
 ## 特點
 
@@ -9,6 +9,7 @@ Swift 實現的通用 WKWebView 雙向通訊框架，提供 JavaScript 注入、
 - 🔌 **WebSocket 攔截** - 可選的 WebSocket 訊息攔截
 - 🎯 **型別安全** - 完整的 Swift 型別支援
 - 🧪 **可測試** - 易於單元測試的設計
+- 🍎 **雙 API 支援** - 同時支援 WKWebView 和 WebPage (macOS 26.0+)
 
 ## 安裝
 
@@ -78,8 +79,10 @@ window.myApp.sendMessage('Hello from JavaScript!');
 
 ### 3. 從 Swift 執行 JavaScript
 
+**使用 WKWebView：**
 ```swift
 Task {
+    // WKWebView 直接執行表達式
     let result = try await bridge.executeJavaScript(
         "document.title",
         in: webView
@@ -87,6 +90,22 @@ Task {
     print("Page title: \(result ?? "unknown")")
 }
 ```
+
+**使用 WebPage (macOS 26.0+)：**
+```swift
+Task {
+    // ⚠️ WebPage.callJavaScript 需要函數體格式，必須使用 return
+    let result = try await bridge.callJavaScript(
+        "return document.title",  // 注意：需要 return
+        in: webPage
+    )
+    print("Page title: \(result ?? "unknown")")
+}
+```
+
+> **重要差異**：
+> - `WKWebView.evaluateJavaScript()` - 直接執行表達式
+> - `WebPage.callJavaScript()` - 期望函數體格式，需使用 `return` 語句
 
 ### 4. 攔截 WebSocket
 
