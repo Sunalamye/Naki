@@ -11,6 +11,13 @@ import Network
 import MCPKit
 import MCPWebKit
 
+// MARK: - Request Models
+
+/// JavaScript 執行請求
+private struct ExecuteJSRequest: Codable {
+    let code: String
+}
+
 // MARK: - MCP Server
 
 /// 本地 HTTP MCP Server
@@ -394,7 +401,18 @@ class DebugServer {
             sendJSON(connection: connection, data: ["error": "No JavaScript code provided"])
             return
         }
-        callToolAndRespond(tool: "execute_js", arguments: ["code": body], connection: connection)
+
+        // 解析 JSON 請求，支持 {"code": "..."} 或純文本
+        let code: String
+        if let data = body.data(using: .utf8),
+           let request = try? JSONDecoder().decode(ExecuteJSRequest.self, from: data) {
+            code = request.code
+        } else {
+            // 向後兼容：純文本作為 code
+            code = body
+        }
+
+        callToolAndRespond(tool: "execute_js", arguments: ["code": code], connection: connection)
     }
 
     private func handleDetect(connection: NWConnection) {
