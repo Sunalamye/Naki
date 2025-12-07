@@ -217,15 +217,15 @@
             // 檢查冷卻
             if (timeSinceLastReply < emojiAutoReplyConfig.cooldownMs) {
                 emojiAutoReplyConfig.stats.skipped++;
-                console.log('[Naki] Emoji auto-reply: cooling down (' +
-                    Math.ceil((emojiAutoReplyConfig.cooldownMs - timeSinceLastReply) / 1000) + 's left)');
+                console.log('[Naki] 自動回應表情: 冷卻中 (剩餘 ' +
+                    Math.ceil((emojiAutoReplyConfig.cooldownMs - timeSinceLastReply) / 1000) + ' 秒)');
                 return;
             }
 
             // 如果已有待處理的回應，合併（忽略後續表情，只用第一個）
             if (emojiAutoReplyConfig.pendingTimeout) {
                 emojiAutoReplyConfig.stats.merged++;
-                console.log('[Naki] Emoji auto-reply: merged with pending (seat ' + data.seat + ')');
+                console.log('[Naki] 自動回應表情: 已合併 (座位 ' + data.seat + ')');
                 return;
             }
 
@@ -252,19 +252,19 @@
                             if (!err) {
                                 emojiAutoReplyConfig.lastReplyTime = Date.now();
                                 emojiAutoReplyConfig.stats.replied++;
-                                console.log('[Naki] Emoji auto-reply: sent emoji #' + emoToSend);
+                                console.log('[Naki] 自動回應表情: 已發送表情 #' + emoToSend);
                             }
                         });
                     }
                 } else {
                     emojiAutoReplyConfig.stats.skipped++;
-                    console.log('[Naki] Emoji auto-reply: skipped (probability)');
+                    console.log('[Naki] 自動回應表情: 跳過 (機率未中)');
                 }
                 emojiAutoReplyConfig.pendingTimeout = null;
                 emojiAutoReplyConfig.pendingEmoId = null;
             }, emojiAutoReplyConfig.delayMs);
 
-            console.log('[Naki] Emoji auto-reply: scheduled for 5s later (emoji #' + emoId + ')');
+            console.log('[Naki] 自動回應表情: 已排程 5 秒後回應 (表情 #' + emoId + ')');
         } catch (e) {
             // 忽略非 JSON 內容
         }
@@ -301,11 +301,11 @@
                 };
 
                 window.__nakiEmojiListenerInstalled = true;
-                console.log('[Naki] Emoji listener installed');
+                console.log('[Naki] 表情監聽器已安裝');
                 return true;
             }
         } catch (e) {
-            console.error('[Naki] Failed to install emoji listener:', e);
+            console.error('[Naki] 安裝表情監聽器失敗:', e);
         }
         return false;
     }
@@ -316,7 +316,7 @@
     function enableEmojiAutoReply() {
         emojiAutoReplyConfig.enabled = true;
         installEmojiListener();
-        console.log('[Naki] Emoji auto-reply enabled');
+        console.log('[Naki] 自動回應表情已啟用');
         return true;
     }
 
@@ -331,7 +331,7 @@
             emojiAutoReplyConfig.pendingTimeout = null;
             emojiAutoReplyConfig.pendingEmoId = null;
         }
-        console.log('[Naki] Emoji auto-reply disabled');
+        console.log('[Naki] 自動回應表情已停用');
         return true;
     }
 
@@ -371,7 +371,7 @@
         installListener: installEmojiListener
     };
 
-    console.log('[Naki] Emoji auto-reply module ready (enabled by default)');
+    console.log('[Naki] 自動回應表情模組已載入 (預設啟用)');
 
     // ========================================
     // 導出到全域
