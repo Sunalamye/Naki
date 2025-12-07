@@ -1097,40 +1097,38 @@
                     // 調用原始函數
                     var result = this._original_AddHandPai.call(this, h, q);
 
-                    // 延遲處理（等待動畫完成）
-                    setTimeout(function() {
-                        // 1. 通知 Swift
-                        try {
-                            sendToSwift({
-                                type: 'addHandPai',
-                                timestamp: Date.now(),
-                                handCount: mr.hand ? mr.hand.length : 0
-                            });
-                            console.log('[Naki Hook] 已通知 Swift: addHandPai');
-                        } catch (e) {
-                            console.error('[Naki Hook] 通知 Swift 失敗:', e);
-                        }
+                    // 立即處理（_AddHandPai 已經是在牌加入手牌後調用）
+                    // 1. 通知 Swift
+                    try {
+                        sendToSwift({
+                            type: 'addHandPai',
+                            timestamp: Date.now(),
+                            handCount: mr.hand ? mr.hand.length : 0
+                        });
+                        console.log('[Naki Hook] 已通知 Swift: addHandPai');
+                    } catch (e) {
+                        console.error('[Naki Hook] 通知 Swift 失敗:', e);
+                    }
 
-                        // 2. 重新應用已記錄的推薦顏色
-                        var highlight = window.__nakiRecommendHighlight;
-                        if (highlight && highlight.activeEffects && highlight.activeEffects.length > 0) {
-                            var effects = highlight.activeEffects;
-                            var recs = effects.filter(function(e) {
-                                return e.rank >= 0;  // 只重新應用有推薦的牌
-                            }).map(function(e) {
-                                return {
-                                    tileIndex: e.tileIndex,
-                                    probability: e.probability,
-                                    rank: e.rank
-                                };
-                            });
+                    // 2. 重新應用已記錄的推薦顏色
+                    var highlight = window.__nakiRecommendHighlight;
+                    if (highlight && highlight.activeEffects && highlight.activeEffects.length > 0) {
+                        var effects = highlight.activeEffects;
+                        var recs = effects.filter(function(e) {
+                            return e.rank >= 0;  // 只重新應用有推薦的牌
+                        }).map(function(e) {
+                            return {
+                                tileIndex: e.tileIndex,
+                                probability: e.probability,
+                                rank: e.rank
+                            };
+                        });
 
-                            if (recs.length > 0) {
-                                highlight.showMultiple(recs);
-                                console.log('[Naki Hook] 已重新應用', recs.length, '個推薦顏色');
-                            }
+                        if (recs.length > 0) {
+                            highlight.showMultiple(recs);
+                            console.log('[Naki Hook] 已重新應用', recs.length, '個推薦顏色');
                         }
-                    }, 150);
+                    }
 
                     return result;
                 };
