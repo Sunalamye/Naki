@@ -19,7 +19,7 @@
     // ========================================
 
     window.NakiCoordinator = {
-        version: '1.0.0',
+        version: '1.1.0',
 
         // ========================================
         // 核心管理器參考 (快取)
@@ -30,6 +30,18 @@
             gm: null,           // GameMgr.Inst
             netAgent: null,     // app.NetAgent
             lastUpdate: 0
+        },
+
+        // ========================================
+        // 動作追蹤 (用於檢測動作是否執行成功)
+        // ========================================
+        _actionTracker: {
+            lastAction: null,           // 上次執行的動作
+            lastActionTime: 0,          // 上次動作時間
+            lastHandCount: -1,          // 上次手牌數量
+            lastOplistLength: -1,       // 上次 oplist 長度
+            pendingVerification: null,  // 待驗證的動作
+            verificationTimeout: null   // 驗證超時定時器
         },
 
         /**
@@ -77,6 +89,128 @@
         get net() {
             this._refreshCache();
             return this._cache.netAgent;
+        },
+
+        // ========================================
+        // 動作驗證方法
+        // ========================================
+
+        /**
+         * 記錄動作執行前的狀態快照
+         */
+        _snapshotBeforeAction: function(actionType) {
+            const mr = this.mr;
+            const dm = this.dm;
+
+            this._actionTracker.lastAction = actionType;
+            this._actionTracker.lastActionTime = Date.now();
+            this._actionTracker.lastHandCount = mr ? mr.hand?.length : -1;
+            this._actionTracker.lastOplistLength = dm?.oplist?.length || 0;
+
+            console.log('[Naki Tracker] Snapshot before:', actionType,
+                'hand:', this._actionTracker.lastHandCount,
+                'oplist:', this._actionTracker.lastOplistLength);
+        },
+
+        /**
+         * 驗證動作是否執行成功
+         * @param {string} actionType - 動作類型
+         * @param {number} timeout - 超時時間 (ms)，預設 2000ms
+         * @returns {Promise<{success: boolean, verified: boolean, reason: string}>}
+         */
+        verifyAction: function(actionType, timeout = 2000) {
+            const self = this;
+            const startSnapshot = {
+                handCount: this._actionTracker.lastHandCount,
+                oplistLength: this._actionTracker.lastOplistLength,
+                actionRunning: this.state.isActionRunning(),
+                operationShowing: this.state.isOperationShowing()
+            };
+
+            return new Promise((resolve) => {
+                const startTime = Date.now();
+                const checkInterval = 100; // 每 100ms 檢查一次
+
+                const checker = setInterval(() => {
+                    const elapsed = Date.now() - startTime;
+                    const mr = self.mr;
+                    const dm = self.dm;
+
+                    const currentHandCount = mr ? mr.hand?.length : -1;
+                    const currentOplistLength = dm?.oplist?.length || 0;
+                    const currentActionRunning = self.state.isActionRunning();
+                    const currentOpShowing = self.state.isOperationShowing();
+
+                    let verified = false;
+                    let reason = '';
+
+                    // 根據動作類型判斷是否成功
+                    switch (actionType) {
+                        case 'discard':
+                            // 打牌後手牌應該減少 1 張
+                            if (currentHandCount === startSnapshot.handCount - 1) {
+                                verified = true;
+                                reason = 'hand count decreased';
+                            }
+                            break;
+
+                        case 'pass':
+                        case 'chi':
+                        case 'pon':
+                        case 'kan':
+                            // 副露/pass 後 oplist 應該清空
+                            if (startSnapshot.oplistLength > 0 && currentOplistLength === 0) {
+                                verified = true;
+                                reason = 'oplist cleared';
+                            }
+                            // 或者 operation_showing 從 true 變 false
+                            if (startSnapshot.operationShowing && !currentOpShowing) {
+                                verified = true;
+                                reason = 'operation_showing cleared';
+                            }
+                            break;
+
+                        case 'hora':
+                        case 'tsumo':
+                        case 'ron':
+                            // 和牌後遊戲應該結束或 action_running 變化
+                            if (!self.state.isInGame() || currentActionRunning !== startSnapshot.actionRunning) {
+                                verified = true;
+                                reason = 'game state changed';
+                            }
+                            break;
+
+                        case 'riichi':
+                            // 立直後 oplist 應該變化
+                            if (currentOplistLength !== startSnapshot.oplistLength) {
+                                verified = true;
+                                reason = 'oplist changed after riichi';
+                            }
+                            break;
+                    }
+
+                    if (verified) {
+                        clearInterval(checker);
+                        console.log('[Naki Tracker] Action verified:', actionType, reason, 'in', elapsed, 'ms');
+                        resolve({ success: true, verified: true, reason: reason, elapsed: elapsed });
+                    } else if (elapsed >= timeout) {
+                        clearInterval(checker);
+                        console.warn('[Naki Tracker] Action verification timeout:', actionType);
+                        resolve({ success: false, verified: false, reason: 'timeout', elapsed: elapsed });
+                    }
+                }, checkInterval);
+            });
+        },
+
+        /**
+         * 獲取上次動作資訊
+         */
+        getLastAction: function() {
+            return {
+                action: this._actionTracker.lastAction,
+                time: this._actionTracker.lastActionTime,
+                elapsed: Date.now() - this._actionTracker.lastActionTime
+            };
         },
 
         // ========================================
@@ -314,8 +448,10 @@
 
             /**
              * 執行打牌
+             * @param {number} tileIndex - 手牌索引
+             * @param {Object} options - 選項 {verify: boolean, verifyTimeout: number}
              */
-            discard: function(tileIndex) {
+            discard: function(tileIndex, options = {}) {
                 const mr = NakiCoordinator.mr;
                 if (!mr || !mr.hand) {
                     console.error('[Naki Action] mainrole not available');
@@ -335,11 +471,22 @@
                     return { success: false, error: 'tile not found' };
                 }
 
+                // 記錄動作前快照
+                NakiCoordinator._snapshotBeforeAction('discard');
+
                 try {
                     mr.setChoosePai(tile, true);
                     mr.DoDiscardTile();
                     console.log('[Naki Action] Discard tile:', actualIndex);
-                    return { success: true, tileIndex: actualIndex };
+
+                    const result = { success: true, tileIndex: actualIndex };
+
+                    // 如果需要驗證
+                    if (options.verify) {
+                        result.verifyPromise = NakiCoordinator.verifyAction('discard', options.verifyTimeout || 2000);
+                    }
+
+                    return result;
                 } catch (e) {
                     console.error('[Naki Action] Discard error:', e);
                     return { success: false, error: e.message };
@@ -348,13 +495,33 @@
 
             /**
              * 執行跳過
+             * @param {Object} options - 選項 {useBuiltin: boolean, verify: boolean}
              */
-            pass: function() {
+            pass: function(options = {}) {
+                // 如果啟用內建方式，使用 setAutoNoFulu 臨時開啟
+                if (options.useBuiltin) {
+                    const dm = NakiCoordinator.dm;
+                    if (dm && typeof dm.setAutoNoFulu === 'function') {
+                        // 臨時開啟自動 pass
+                        dm.setAutoNoFulu(true);
+                        // 200ms 後關閉
+                        setTimeout(() => {
+                            dm.setAutoNoFulu(false);
+                            console.log('[Naki Action] Auto no-fulu disabled');
+                        }, 200);
+                        console.log('[Naki Action] Pass via builtin auto-nofulu');
+                        return { success: true, method: 'builtin' };
+                    }
+                }
+
                 const net = NakiCoordinator.net;
                 if (!net) {
                     console.error('[Naki Action] NetAgent not available');
                     return { success: false, error: 'NetAgent not available' };
                 }
+
+                // 記錄動作前快照
+                NakiCoordinator._snapshotBeforeAction('pass');
 
                 try {
                     net.sendReq2MJ('FastTest', 'inputOperation', {
@@ -362,7 +529,14 @@
                         timeuse: 1
                     });
                     console.log('[Naki Action] Pass sent');
-                    return { success: true };
+
+                    const result = { success: true, method: 'network' };
+
+                    if (options.verify) {
+                        result.verifyPromise = NakiCoordinator.verifyAction('pass', options.verifyTimeout || 2000);
+                    }
+
+                    return result;
                 } catch (e) {
                     console.error('[Naki Action] Pass error:', e);
                     return { success: false, error: e.message };
@@ -371,22 +545,26 @@
 
             /**
              * 執行吃
+             * @param {number} combinationIndex - 組合索引
+             * @param {Object} options - 選項 {verify: boolean}
              */
-            chi: function(combinationIndex = 0) {
-                return this._executeNaki(2, combinationIndex);
+            chi: function(combinationIndex = 0, options = {}) {
+                return this._executeNaki(2, combinationIndex, 'chi', options);
             },
 
             /**
              * 執行碰
+             * @param {Object} options - 選項 {verify: boolean}
              */
-            pon: function() {
-                return this._executeNaki(3, 0);
+            pon: function(options = {}) {
+                return this._executeNaki(3, 0, 'pon', options);
             },
 
             /**
-             * 執行槓 (明槓)
+             * 執行槓 (明槓/暗槓/加槓)
+             * @param {Object} options - 選項 {verify: boolean}
              */
-            kan: function() {
+            kan: function(options = {}) {
                 // 嘗試明槓(5)、暗槓(4)、加槓(6)
                 const dm = NakiCoordinator.dm;
                 if (!dm || !dm.oplist) {
@@ -398,14 +576,35 @@
                     return { success: false, error: 'no kan operation available' };
                 }
 
-                return this._executeNaki(kanOp.type, 0);
+                return this._executeNaki(kanOp.type, 0, 'kan', options);
             },
 
             /**
              * 執行和牌 (自摸或榮和)
+             * @param {Object} options - 選項 {useBuiltin: boolean, verify: boolean}
              */
-            hora: function() {
+            hora: function(options = {}) {
                 const dm = NakiCoordinator.dm;
+
+                // 方法 1: 使用內建自動和功能 (最可靠)
+                if (options.useBuiltin !== false) {  // 預設啟用
+                    if (dm && typeof dm.setAutoHule === 'function') {
+                        dm.setAutoHule(true);
+                        console.log('[Naki Action] Auto-hule enabled (will auto win)');
+
+                        // 2 秒後關閉自動和，避免影響後續遊戲
+                        setTimeout(() => {
+                            if (dm && typeof dm.setAutoHule === 'function') {
+                                dm.setAutoHule(false);
+                                console.log('[Naki Action] Auto-hule disabled');
+                            }
+                        }, 2000);
+
+                        return { success: true, method: 'builtin', type: 'auto_hule' };
+                    }
+                }
+
+                // 方法 2: 直接發送請求
                 if (!dm || !dm.oplist) {
                     return { success: false, error: 'oplist not available' };
                 }
@@ -420,13 +619,23 @@
                     return { success: false, error: 'NetAgent not available' };
                 }
 
+                // 記錄動作前快照
+                NakiCoordinator._snapshotBeforeAction('hora');
+
                 try {
                     net.sendReq2MJ('FastTest', 'inputOperation', {
                         type: horaOp.type,
                         timeuse: 1
                     });
                     console.log('[Naki Action] Hora sent:', horaOp.type === 8 ? 'tsumo' : 'ron');
-                    return { success: true, type: horaOp.type };
+
+                    const result = { success: true, method: 'network', type: horaOp.type };
+
+                    if (options.verify) {
+                        result.verifyPromise = NakiCoordinator.verifyAction('hora', options.verifyTimeout || 3000);
+                    }
+
+                    return result;
                 } catch (e) {
                     return { success: false, error: e.message };
                 }
@@ -434,14 +643,21 @@
 
             /**
              * 執行立直
+             * @param {number} tileIndex - 要打的牌索引
+             * @param {Object} options - 選項 {verify: boolean}
              */
-            riichi: function(tileIndex) {
+            riichi: function(tileIndex, options = {}) {
                 const dm = NakiCoordinator.dm;
                 const mr = NakiCoordinator.mr;
                 const net = NakiCoordinator.net;
 
                 if (!dm || !dm.oplist || !net) {
                     return { success: false, error: 'not available' };
+                }
+
+                // 增強狀態檢查
+                if (!NakiCoordinator.state.isInGame()) {
+                    return { success: false, error: 'not in game' };
                 }
 
                 const riichiOp = dm.oplist.find(o => o.type === 7);
@@ -457,6 +673,9 @@
 
                 const isMoqie = mr && mr.hand && mr.hand.length === 14;
 
+                // 記錄動作前快照
+                NakiCoordinator._snapshotBeforeAction('riichi');
+
                 try {
                     net.sendReq2MJ('FastTest', 'inputOperation', {
                         type: 7,
@@ -465,7 +684,14 @@
                         timeuse: 1
                     });
                     console.log('[Naki Action] Riichi sent:', tile);
-                    return { success: true, tile: tile };
+
+                    const result = { success: true, tile: tile };
+
+                    if (options.verify) {
+                        result.verifyPromise = NakiCoordinator.verifyAction('riichi', options.verifyTimeout || 2000);
+                    }
+
+                    return result;
                 } catch (e) {
                     return { success: false, error: e.message };
                 }
@@ -473,13 +699,26 @@
 
             /**
              * 內部方法：執行副露操作
+             * @param {number} opType - 操作類型
+             * @param {number} combinationIndex - 組合索引
+             * @param {string} actionName - 動作名稱 (用於驗證)
+             * @param {Object} options - 選項
              */
-            _executeNaki: function(opType, combinationIndex) {
+            _executeNaki: function(opType, combinationIndex, actionName = 'naki', options = {}) {
                 const dm = NakiCoordinator.dm;
                 const net = NakiCoordinator.net;
 
                 if (!dm || !dm.oplist || !net) {
                     return { success: false, error: 'not available' };
+                }
+
+                // 增強狀態檢查
+                if (!NakiCoordinator.state.isInGame()) {
+                    return { success: false, error: 'not in game' };
+                }
+
+                if (NakiCoordinator.state.isActionRunning()) {
+                    return { success: false, error: 'action already running' };
                 }
 
                 const op = dm.oplist.find(o => o.type === opType);
@@ -489,6 +728,9 @@
 
                 const combIdx = Math.min(combinationIndex, (op.combination?.length || 1) - 1);
 
+                // 記錄動作前快照
+                NakiCoordinator._snapshotBeforeAction(actionName);
+
                 try {
                     net.sendReq2MJ('FastTest', 'inputChiPengGang', {
                         type: opType,
@@ -496,7 +738,14 @@
                         timeuse: 1
                     });
                     console.log('[Naki Action] Naki sent:', opType, 'combIdx:', combIdx);
-                    return { success: true, opType: opType, combIdx: combIdx };
+
+                    const result = { success: true, opType: opType, combIdx: combIdx };
+
+                    if (options.verify) {
+                        result.verifyPromise = NakiCoordinator.verifyAction(actionName, options.verifyTimeout || 2000);
+                    }
+
+                    return result;
                 } catch (e) {
                     return { success: false, error: e.message };
                 }
@@ -504,30 +753,38 @@
 
             /**
              * 智能執行：根據動作名稱自動選擇方法
+             * @param {string} actionName - 動作名稱
+             * @param {Object} params - 參數，可包含 verify, verifyTimeout, useBuiltin 等選項
              */
             execute: function(actionName, params = {}) {
                 console.log('[Naki Action] Execute:', actionName, params);
 
+                const options = {
+                    verify: params.verify || false,
+                    verifyTimeout: params.verifyTimeout,
+                    useBuiltin: params.useBuiltin
+                };
+
                 switch (actionName.toLowerCase()) {
                     case 'discard':
-                        return this.discard(params.tileIndex);
+                        return this.discard(params.tileIndex, options);
                     case 'pass':
-                        return this.pass();
+                        return this.pass(options);
                     case 'chi':
-                        return this.chi(params.combinationIndex || params.chiIndex || 0);
+                        return this.chi(params.combinationIndex || params.chiIndex || 0, options);
                     case 'pon':
-                        return this.pon();
+                        return this.pon(options);
                     case 'kan':
                     case 'ankan':
                     case 'minkan':
                     case 'kakan':
-                        return this.kan();
+                        return this.kan(options);
                     case 'hora':
                     case 'tsumo':
                     case 'ron':
-                        return this.hora();
+                        return this.hora(options);
                     case 'riichi':
-                        return this.riichi(params.tileIndex);
+                        return this.riichi(params.tileIndex, options);
                     default:
                         return { success: false, error: 'unknown action: ' + actionName };
                 }
@@ -1040,8 +1297,42 @@
                     },
                     state: NakiCoordinator.state.getFullState(),
                     auto: NakiCoordinator.auto.getSettings(),
-                    heartbeat: NakiCoordinator.heartbeat.getIdleStatus()
+                    heartbeat: NakiCoordinator.heartbeat.getIdleStatus(),
+                    lastAction: NakiCoordinator.getLastAction()
                 };
+            },
+
+            /**
+             * 獲取上次動作資訊
+             */
+            getLastAction: function() {
+                return NakiCoordinator.getLastAction();
+            },
+
+            /**
+             * 執行動作並驗證結果 (高階 API)
+             * @param {string} actionType - 動作類型
+             * @param {Object} params - 動作參數
+             * @returns {Promise<{success: boolean, verified: boolean}>}
+             */
+            executeAndVerify: async function(actionType, params = {}) {
+                const result = NakiCoordinator.action.execute(actionType, { ...params, verify: true });
+
+                if (!result.success) {
+                    return { success: false, verified: false, error: result.error };
+                }
+
+                if (result.verifyPromise) {
+                    const verification = await result.verifyPromise;
+                    return {
+                        success: true,
+                        verified: verification.verified,
+                        reason: verification.reason,
+                        elapsed: verification.elapsed
+                    };
+                }
+
+                return { success: true, verified: false, reason: 'no verification' };
             },
 
             /**
