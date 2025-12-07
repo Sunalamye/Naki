@@ -28,12 +28,16 @@ playground.xcworkspace
 ## Swift Package Manager
 #
 # Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
-Packages/
+# Packages/  # Commented out - we have our own local packages
 Package.pins
 Package.resolved
 *.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 .swiftpm/
 .build/
+
+# Ignore build artifacts inside our local packages
+Packages/*/.build/
+Packages/*/.swiftpm/
 
 ## CocoaPods
 #

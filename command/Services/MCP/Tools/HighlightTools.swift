@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import MCPKit
 
 // MARK: - Highlight Tile Tool
 
