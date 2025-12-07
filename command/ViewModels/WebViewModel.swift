@@ -990,6 +990,7 @@ class WebViewModel {
   }
 
   /// 實際執行自動打牌動作
+  /// 使用 NakiCoordinator 統一 API
   private func executeAutoPlayAction(
     page: WebPage, actionType: Recommendation.ActionType, tileName: String
   ) async {
@@ -997,182 +998,67 @@ class WebViewModel {
     switch actionType {
     case .riichi:
       debugServer?.addLog("Exec: riichi...")
-      let script = """
-        var dm = window.view.DesktopMgr.Inst;
-        if (!dm || !dm.oplist) return JSON.stringify({success: false, error: 'no oplist'});
-
-        var riichiOp = null;
-        for (var i = 0; i < dm.oplist.length; i++) {
-        if (dm.oplist[i].type === 7) { riichiOp = dm.oplist[i]; break; }
-        }
-        if (!riichiOp) return JSON.stringify({success: false, error: 'no riichi op'});
-
-        if (window.app && window.app.NetAgent) {
-        var combination = riichiOp.combination || [];
-        var tileToDiscard = combination.length > 0 ? combination[0] : null;
-
-        window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
-        type: 7,
-        tile: tileToDiscard,
-        timeuse: 1
-        });
-        return JSON.stringify({success: true, tile: tileToDiscard, combinations: combination});
-        }
-        return JSON.stringify({success: false, error: 'no NetAgent'});
-        """
+      let script = "return JSON.stringify(window.naki.action.riichi())"
       do {
         let result = try await page.callJavaScript(script)
-        if let jsonString = result as? String {
-          debugServer?.addLog("riichi result: \(jsonString)")
-        }
+        debugServer?.addLog("riichi result: \(String(describing: result))")
       } catch {
         debugServer?.addLog("riichi error: \(error.localizedDescription)")
       }
 
     case .discard:
-      // WebPage.callJavaScript 的 functionBody 需要 return 語句
-      let findScript = """
-        var mr = window.view.DesktopMgr.Inst.mainrole;
-        if (!mr || !mr.hand) return JSON.stringify({index: -1, debug: 'no mainrole'});
-
-        var target = '\(tileName)';
-
-        var handInfo = [];
-        for (var i = 0; i < mr.hand.length; i++) {
-        var t = mr.hand[i];
-        if (t && t.val) {
-        handInfo.push('i' + i + ':t' + t.val.type + 'v' + t.val.index + (t.val.dora ? 'r' : ''));
-        }
-        }
-
-        var typeMap = {'m': 1, 'p': 0, 's': 2};
-        var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
-
-        var tileType, tileValue, isRed = false;
-
-        if (honorMap[target]) {
-        tileType = honorMap[target][0];
-        tileValue = honorMap[target][1];
-        } else {
-        tileValue = parseInt(target[0]);
-        var suitChar = target[1];
-        tileType = typeMap[suitChar];
-        isRed = target.length > 2 && target[2] === 'r';
-        }
-
-        var debugInfo = 'want:' + target + '(t' + tileType + 'v' + tileValue + ') hand:[' + handInfo.join(',') + ']';
-
-        for (var i = 0; i < mr.hand.length; i++) {
-        var t = mr.hand[i];
-        if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
-        if (isRed) {
-            if (t.val.dora) return JSON.stringify({index: i, debug: debugInfo + ' =>found red@' + i});
-        } else {
-            if (!t.val.dora) return JSON.stringify({index: i, debug: debugInfo + ' =>found@' + i});
-        }
-        }
-        }
-
-        for (var i = 0; i < mr.hand.length; i++) {
-        var t = mr.hand[i];
-        if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
-        return JSON.stringify({index: i, debug: debugInfo + ' =>found(any)@' + i});
-        }
-        }
-
-        if (mr.drewPai && mr.drewPai.val) {
-        var t = mr.drewPai;
-        debugInfo += ' tsumo:t' + t.val.type + 'v' + t.val.index;
-        if (t.val.type === tileType && t.val.index === tileValue) {
-        return JSON.stringify({index: mr.hand.length, debug: debugInfo + ' =>tsumo'});
-        }
-        }
-
-        return JSON.stringify({index: -1, debug: debugInfo + ' =>NOT_FOUND'});
-        """
+      // 使用 NakiCoordinator.utils.findTileInHand 查找牌
+      let findScript = "return window.naki.utils.findTileInHand('\(tileName)')"
       do {
         let result = try await page.callJavaScript(findScript)
-        // 解析 JSON 字符串
-        if let jsonString = result as? String,
-          let jsonData = jsonString.data(using: .utf8),
-          let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-          let tileIndex = dict["index"] as? Int,
-          let debug = dict["debug"] as? String
-        {
-          debugServer?.addLog("Find: \(debug)")
-
-          if tileIndex >= 0 {
-            let discardScript =
-              "window.__nakiGameAPI.smartExecute('discard', {tileIndex: \(tileIndex)})"
-            do {
-              _ = try await page.callJavaScript(discardScript)
-              debugServer?.addLog("discard idx=\(tileIndex) OK")
-            } catch {
-              debugServer?.addLog("discard error: \(error.localizedDescription)")
-            }
-          } else {
-            debugServer?.addLog("Tile not found, skipping")
+        if let tileIndex = result as? Int, tileIndex >= 0 {
+          debugServer?.addLog("Find: \(tileName) → idx=\(tileIndex)")
+          let discardScript = "return JSON.stringify(window.naki.action.discard(\(tileIndex)))"
+          do {
+            let discardResult = try await page.callJavaScript(discardScript)
+            debugServer?.addLog("discard result: \(String(describing: discardResult))")
+          } catch {
+            debugServer?.addLog("discard error: \(error.localizedDescription)")
           }
         } else {
-          debugServer?.addLog("Find result parse failed: \(String(describing: result))")
+          debugServer?.addLog("Tile not found: \(tileName)")
         }
       } catch {
         debugServer?.addLog("Find error: \(error.localizedDescription)")
       }
 
     case .chi:
+      // 從 tileName 解析 chi 類型 (chi_0, chi_1, chi_2)
       var chiType = 0
       if tileName.hasPrefix("chi_"), let idx = Int(String(tileName.dropFirst(4))) {
         chiType = idx
       }
 
+      // 查詢可用組合數
       let queryScript = """
-        var dm = window.view.DesktopMgr.Inst;
-        if (!dm || !dm.oplist) return JSON.stringify({available: false, error: 'no oplist'});
-
-        var chiOp = null;
-        for (var i = 0; i < dm.oplist.length; i++) {
-        if (dm.oplist[i].type === 2) { chiOp = dm.oplist[i]; break; }
-        }
-        if (!chiOp) return JSON.stringify({available: false, error: 'no chi op'});
-
-        var combinations = chiOp.combination || [];
-
-        var targetPai = null;
-        if (dm.lastpai && dm.lastpai.val) {
-        targetPai = {type: dm.lastpai.val.type, index: dm.lastpai.val.index};
-        }
-
-        return JSON.stringify({
-        available: true,
-        combinations: combinations,
-        count: combinations.length,
-        targetPai: targetPai
-        });
+        var ops = window.naki.state.getAvailableOps();
+        var chiOp = ops.find(function(o) { return o.type === 2; });
+        if (!chiOp) return JSON.stringify({available: false});
+        return JSON.stringify({available: true, count: chiOp.combination.length, combinations: chiOp.combination});
         """
-
       do {
         let result = try await page.callJavaScript(queryScript)
         guard let jsonString = result as? String,
           let jsonData = jsonString.data(using: .utf8),
           let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
           let available = dict["available"] as? Bool, available,
-          let combinations = dict["combinations"] as? [String]
+          let count = dict["count"] as? Int
         else {
           debugServer?.addLog("Chi: no combinations available")
           return
         }
 
-        let combIndex: Int
-        if combinations.count == 1 {
-          combIndex = 0
-        } else {
-          combIndex = max(0, combinations.count - 1 - chiType)
-        }
-        let combInfo = combinations.isEmpty ? "" : " [\(combinations.joined(separator: ", "))]"
-        debugServer?.addLog("Chi: mortal=chi_\(chiType) → gameIdx=\(combIndex)\(combInfo)")
+        // 計算組合索引
+        let combIndex = count == 1 ? 0 : max(0, count - 1 - chiType)
+        let combInfo = (dict["combinations"] as? [String])?.joined(separator: ", ") ?? ""
+        debugServer?.addLog("Chi: mortal=chi_\(chiType) → gameIdx=\(combIndex) [\(combInfo)]")
 
-        let chiScript = "window.__nakiGameAPI.smartExecute('chi', {chiIndex: \(combIndex)})"
+        let chiScript = "return JSON.stringify(window.naki.action.chi(\(combIndex)))"
         do {
           let chiResult = try await page.callJavaScript(chiScript)
           debugServer?.addLog("chi result: \(String(describing: chiResult))")
@@ -1183,27 +1069,42 @@ class WebViewModel {
         debugServer?.addLog("Chi query error: \(error.localizedDescription)")
       }
 
-    case .pon, .kan, .hora:
-      let action = actionType.rawValue
-      debugServer?.addLog("Exec: \(action)...")
-      let script = "window.__nakiGameAPI.smartExecute('\(action)', {})"
+    case .pon:
+      debugServer?.addLog("Exec: pon...")
+      let script = "return JSON.stringify(window.naki.action.pon())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("\(action) result: \(String(describing: result))")
+        debugServer?.addLog("pon result: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("\(action) error: \(error.localizedDescription)")
+        debugServer?.addLog("pon error: \(error.localizedDescription)")
+      }
+
+    case .kan:
+      debugServer?.addLog("Exec: kan...")
+      let script = "return JSON.stringify(window.naki.action.kan())"
+      do {
+        let result = try await page.callJavaScript(script)
+        debugServer?.addLog("kan result: \(String(describing: result))")
+      } catch {
+        debugServer?.addLog("kan error: \(error.localizedDescription)")
+      }
+
+    case .hora:
+      debugServer?.addLog("Exec: hora...")
+      let script = "return JSON.stringify(window.naki.action.hora())"
+      do {
+        let result = try await page.callJavaScript(script)
+        debugServer?.addLog("hora result: \(String(describing: result))")
+      } catch {
+        debugServer?.addLog("hora error: \(error.localizedDescription)")
       }
 
     case .none:
       debugServer?.addLog("Exec: pass...")
-      let script = "window.__nakiGameAPI.smartExecute('pass', {})"
+      let script = "return JSON.stringify(window.naki.action.pass())"
       do {
         let result = try await page.callJavaScript(script)
-        if let resultNum = result as? Int, resultNum > 0 {
-          debugServer?.addLog("pass OK")
-        } else {
-          debugServer?.addLog("pass result: \(String(describing: result))")
-        }
+        debugServer?.addLog("pass result: \(String(describing: result))")
       } catch {
         debugServer?.addLog("pass error: \(error.localizedDescription)")
       }

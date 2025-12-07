@@ -289,40 +289,36 @@ class AutoPlayController: ObservableObject {
     }
 
     /// 生成執行動作的 JavaScript 代碼
-    /// ⭐ 使用 smartExecute：優先直接 API，失敗則備用座標點擊
+    /// 使用 NakiCoordinator 統一 API
     private func generateJavaScript(for action: AutoPlayAction) -> String {
-        // 手牌數量（用於計算摸牌位置）
-        let handCount = currentTehai.count
-
         switch action {
         case .discard(let tileIndex, let isRiichi):
-            // 傳遞 handCount 讓 JS 知道實際手牌數
             if isRiichi {
-                return "window.__nakiGameAPI.smartExecute('riichi', {tileIndex: \(tileIndex), handCount: \(handCount)})"
+                return "window.naki.action.riichi(\(tileIndex))"
             } else {
-                return "window.__nakiGameAPI.smartExecute('discard', {tileIndex: \(tileIndex), handCount: \(handCount)})"
+                return "window.naki.action.discard(\(tileIndex))"
             }
 
         case .pass:
-            return "window.__nakiGameAPI.smartExecute('pass', {})"
+            return "window.naki.action.pass()"
 
         case .chi:
-            return "window.__nakiGameAPI.smartExecute('chi', {})"
+            return "window.naki.action.chi()"
 
         case .pon:
-            return "window.__nakiGameAPI.smartExecute('pon', {})"
+            return "window.naki.action.pon()"
 
         case .kan:
-            return "window.__nakiGameAPI.smartExecute('kan', {})"
+            return "window.naki.action.kan()"
 
         case .hora:
-            return "window.__nakiGameAPI.smartExecute('hora', {})"
+            return "window.naki.action.hora()"
 
         case .ryukyoku:
-            return "window.__nakiGameAPI.smartExecute('ryukyoku', {})"
+            return "window.naki.action.execute('ryukyoku', {})"
 
         case .kyushukyuhai:
-            return "window.__nakiGameAPI.smartExecute('kyushu', {})"
+            return "window.naki.action.execute('kyushu', {})"
         }
     }
 
