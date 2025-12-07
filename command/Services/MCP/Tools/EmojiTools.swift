@@ -146,6 +146,67 @@ struct ListEmojiTool: MCPTool {
     }
 }
 
+// MARK: - Emoji Auto Reply Tool
+
+/// 自動回應表情功能
+struct EmojiAutoReplyTool: MCPTool {
+    static let name = "game_emoji_auto_reply"
+    static let description = "切換自動回應表情功能（預設開啟）。啟用後，當其他玩家發送表情時，會在 5 秒後以 50% 機率回應相同表情，並有 60 秒冷卻時間。5 秒內多人發表情只會回應一次"
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "enabled": .boolean("是否啟用自動回應（不提供則返回當前狀態）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        let enabled = arguments["enabled"] as? Bool
+
+        let script: String
+        if let enabled = enabled {
+            script = """
+            (function() {
+                if (!window.__nakiEmojiAutoReply) {
+                    return JSON.stringify({ success: false, error: 'Emoji auto-reply module not loaded' });
+                }
+
+                if (\(enabled)) {
+                    window.__nakiEmojiAutoReply.enable();
+                } else {
+                    window.__nakiEmojiAutoReply.disable();
+                }
+
+                return JSON.stringify(window.__nakiEmojiAutoReply.status());
+            })();
+            """
+        } else {
+            script = """
+            (function() {
+                if (!window.__nakiEmojiAutoReply) {
+                    return JSON.stringify({ success: false, error: 'Emoji auto-reply module not loaded' });
+                }
+                return JSON.stringify(window.__nakiEmojiAutoReply.status());
+            })();
+            """
+        }
+
+        let result = try await context.executeJavaScript(script)
+
+        if let jsonString = result as? String,
+           let data = jsonString.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) {
+            return json
+        }
+        return ["result": result ?? NSNull()]
+    }
+}
+
 // MARK: - Emoji Listen Tool
 
 /// 獲取收到的表情廣播記錄

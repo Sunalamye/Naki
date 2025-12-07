@@ -199,5 +199,6 @@ extension MCPToolRegistry {
         register(SendEmojiTool.self)
         register(ListEmojiTool.self)
         register(EmojiListenTool.self)
+        register(EmojiAutoReplyTool.self)
     }
 }

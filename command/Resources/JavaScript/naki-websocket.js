@@ -133,6 +133,11 @@
             window.__nakiAntiIdle.refresh();
         }
 
+        // 嘗試安裝表情自動回應監聽器（需要等 NetAgent 準備好）
+        if (direction === 'receive' && window.__nakiEmojiAutoReply && !window.__nakiEmojiListenerInstalled) {
+            window.__nakiEmojiAutoReply.installListener();
+        }
+
         try {
             if (data instanceof ArrayBuffer) {
                 // ArrayBuffer：轉成 Base64
