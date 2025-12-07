@@ -942,9 +942,7 @@
             if (this.settings.showNativeEffect && recommendations.length > 0) {
                 const sorted = [...recommendations].sort((a, b) => b.probability - a.probability);
                 const best = sorted[0];
-                if (best.probability > 0.2) {
-                    this.moveNativeEffect(best.tileIndex);
-                }
+                this.moveNativeEffect(best.tileIndex);
             }
 
             // 如果旋轉效果被啟用（預設關閉）
