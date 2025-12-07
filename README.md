@@ -147,7 +147,7 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 <details>
 <summary><b>🤖 MCP Server (Claude Code 整合)</b></summary>
 
-Naki 支援 [Model Context Protocol](https://modelcontextprotocol.io/)，提供 50+ 個工具讓 AI 助手直接操作遊戲。
+Naki 支援 [Model Context Protocol](https://modelcontextprotocol.io/)，提供 47 個工具讓 AI 助手直接操作遊戲。
 
 **配置 Claude Code：**
 ```bash

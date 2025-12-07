@@ -1,19 +1,19 @@
 # MCP Server 指南
 
-**日期**: 2025-12-05
-**版本**: 1.0.0
+**版本**: 2.0.0
+**工具數量**: 47 個
 **協議版本**: MCP 2025-03-26
 
 ---
 
 ## 概述
 
-Naki 的 Debug Server 支援 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)，讓 AI 助手（如 Claude Code）可以直接調用 Naki 的功能，實現遊戲狀態監控、Bot 控制、JavaScript 執行等操作。
+Naki 支援 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)，讓 AI 助手（如 Claude Code）可以直接調用 Naki 的功能，實現遊戲狀態監控、Bot 控制、自動打牌等操作。
 
 ### 特點
 
-- **無需 Node.js** - 純 Swift 實現，HTTP transport
-- **22 個工具** - 涵蓋 Bot 控制、遊戲操作、調試功能
+- **純 Swift 實現** - 無需 Node.js，HTTP transport
+- **47 個工具** - 完整的遊戲控制能力
 - **向後相容** - 現有 HTTP 端點繼續可用
 - **JSON-RPC 2.0** - 標準 MCP 協議
 
@@ -23,7 +23,7 @@ Naki 的 Debug Server 支援 [Model Context Protocol (MCP)](https://modelcontext
 
 ### 1. 啟動 Naki
 
-確保 Naki app 已啟動，Debug Server 會自動在 port 8765 運行。
+確保 Naki app 已啟動，MCP Server 會自動在 port 8765 運行。
 
 ### 2. 配置 Claude Code
 
@@ -34,293 +34,161 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 ### 3. 驗證連接
 
 ```bash
-# 測試 MCP 端點
 curl -X POST http://localhost:8765/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}'
 ```
 
-成功響應：
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "protocolVersion": "2025-03-26",
-    "serverInfo": {
-      "name": "naki",
-      "version": "1.2.0"
-    },
-    "capabilities": {
-      "tools": {}
-    }
-  }
-}
-```
+---
+
+## 工具列表 (47 個)
+
+### 系統類 (4 個)
+
+| 工具名稱 | 說明 |
+|---------|------|
+| `get_status` | 獲取 Server 狀態和埠號 |
+| `get_help` | 獲取完整 API 文檔 (JSON) |
+| `get_logs` | 獲取 Debug 日誌（最多 10,000 條） |
+| `clear_logs` | 清空所有日誌 |
+
+### Bot 控制類 (7 個)
+
+| 工具名稱 | 說明 |
+|---------|------|
+| `bot_status` | 獲取 Bot 狀態、手牌、AI 推薦 |
+| `bot_trigger` | 手動觸發自動打牌 |
+| `bot_ops` | 探索可用的副露操作（吃/碰/槓） |
+| `bot_deep` | 深度探索 naki API |
+| `bot_chi` | 測試吃操作 |
+| `bot_pon` | 測試碰操作 |
+| `bot_sync` | 強制斷線重連以重建 Bot 狀態 |
+
+### 遊戲狀態類 (6 個)
+
+| 工具名稱 | 說明 | 參數 |
+|---------|------|------|
+| `game_state` | 獲取當前遊戲狀態 | - |
+| `game_hand` | 獲取手牌資訊 | - |
+| `game_ops` | 獲取當前可用操作 | - |
+| `game_discard` | 打出指定索引的牌 | `tileIndex`: 0-13 |
+| `game_action` | 執行遊戲動作 | `action`: string |
+| `game_action_verify` | 執行動作並驗證結果 | `action`: string |
+
+### 高亮控制類 (6 個)
+
+| 工具名稱 | 說明 | 參數 |
+|---------|------|------|
+| `highlight_tile` | 高亮指定手牌 | `tileIndex`, `color` |
+| `reset_tile_color` | 重置手牌顏色 | `tileIndex` (可選) |
+| `highlight_status` | 獲取高亮狀態 | - |
+| `highlight_settings` | 設置高亮選項 | `showTileColor`, `showNativeEffect` |
+| `show_recommendations` | 顯示多個推薦高亮 | `recommendations`: JSON |
+| `hide_highlight` | 隱藏所有高亮 | - |
+
+**顏色選項**: `green` (推薦度高), `orange` (中), `red` (低), `white` (重置), 或自訂 RGBA
+
+### 表情類 (4 個)
+
+| 工具名稱 | 說明 | 參數 |
+|---------|------|------|
+| `game_emoji` | 發送表情 | `emo_id`: 0-8, `count`: 1-5 |
+| `game_emoji_list` | 獲取可用表情列表 | - |
+| `game_emoji_auto_reply` | 切換自動回應表情 | `enabled` (可選) |
+| `game_emoji_listen` | 獲取表情廣播記錄 | `clear` (可選) |
+
+### 大廳類 (9 個)
+
+| 工具名稱 | 說明 | 參數 |
+|---------|------|------|
+| `lobby_status` | 獲取大廳狀態 | - |
+| `lobby_match_modes` | 獲取匹配模式列表 | - |
+| `lobby_start_match` | 開始段位場匹配 | `match_mode` |
+| `lobby_cancel_match` | 取消匹配 | - |
+| `lobby_match_status` | 獲取匹配狀態 | - |
+| `lobby_navigate` | 導航到指定頁面 | `page`: 0-3 |
+| `lobby_heartbeat` | 發送心跳防閒置 | - |
+| `lobby_anti_idle` | 切換自動防閒置 | `enabled` (可選) |
+| `lobby_idle_status` | 獲取閒置狀態 | - |
+| `lobby_account_level` | 獲取帳號段位 | - |
+
+**匹配模式 ID**:
+| ID | 段位場 |
+|----|-------|
+| 1, 2 | 銅東, 銅半 |
+| 4, 5 | 銀東, 銀半 |
+| 7, 8 | 金東, 金半 |
+| 10, 11 | 玉東, 玉半 |
+| 13, 14 | 王座東, 王座半 |
+
+### UI 控制類 (11 個)
+
+| 工具名稱 | 說明 | 參數 |
+|---------|------|------|
+| `execute_js` | 執行 JavaScript | `code`: string |
+| `detect` | 檢測遊戲 API 可用性 | - |
+| `explore` | 探索遊戲物件結構 | - |
+| `test_indicators` | 顯示測試指示器 | - |
+| `click` | 在指定座標點擊 | `x`, `y`, `label` |
+| `calibrate` | 設定校準參數 | `tileSpacing`, `offsetX`, `offsetY` |
+| `ui_names_status` | 獲取玩家名稱顯示狀態 | - |
+| `ui_names_hide` | 隱藏所有玩家名稱 | - |
+| `ui_names_show` | 顯示所有玩家名稱 | - |
+| `ui_names_toggle` | 切換玩家名稱顯示 | - |
 
 ---
 
-## MCP 端點
+## Claude Code 使用範例
 
-### 端點資訊
-
-| 項目 | 值 |
-|-----|---|
-| URL | `http://localhost:8765/mcp` |
-| Method | POST |
-| Content-Type | application/json |
-| Protocol | JSON-RPC 2.0 |
-
-### 支援的方法
-
-| 方法 | 說明 |
-|-----|------|
-| `initialize` | 初始化連接，返回服務器能力 |
-| `initialized` | 客戶端確認初始化完成 |
-| `tools/list` | 列出所有可用工具 |
-| `tools/call` | 調用指定工具 |
-
----
-
-## 工具列表 (22 個)
-
-### 系統類
-
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `get_status` | 獲取 Debug Server 狀態和埠號 | 無 |
-| `get_help` | 獲取完整的 API 文檔 | 無 |
-| `get_logs` | 獲取 Debug 日誌（最多 10,000 條） | 無 |
-| `clear_logs` | 清空所有日誌 | 無 |
-
-### Bot 控制類
-
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `bot_status` | 獲取 Bot 狀態、手牌、AI 推薦動作 | 無 |
-| `bot_trigger` | 手動觸發自動打牌 | 無 |
-| `bot_ops` | 探索可用的副露操作（吃/碰/槓） | 無 |
-| `bot_deep` | 深度探索 naki API（所有方法） | 無 |
-| `bot_chi` | 測試吃操作 | 無 |
-| `bot_pon` | 測試碰操作 | 無 |
-
-### 遊戲狀態類
-
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `game_state` | 獲取當前遊戲狀態 | 無 |
-| `game_hand` | 獲取手牌資訊 | 無 |
-| `game_ops` | 獲取當前可用操作 | 無 |
-| `game_discard` | 打出指定索引的牌 | `tileIndex`: integer (0-13) |
-| `game_action` | 執行遊戲動作 | `action`: string, `params`: object (可選) |
-
-### JavaScript 執行
-
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `execute_js` | 在遊戲 WebView 中執行 JavaScript | `code`: string |
-
-### 探索類
-
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `detect` | 檢測遊戲 API 是否可用 | 無 |
-| `explore` | 探索遊戲物件結構 | 無 |
-
-### UI 操作類
-
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `test_indicators` | 顯示測試指示器 | 無 |
-| `click` | 在指定座標點擊 | `x`: number, `y`: number, `label`: string (可選) |
-| `calibrate` | 設定校準參數 | `tileSpacing`, `offsetX`, `offsetY`: number |
-
----
-
-## 使用範例
-
-### 獲取工具列表
-
-```bash
-curl -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
-
-### 獲取 Bot 狀態
-
-```bash
-curl -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":2,
-    "method":"tools/call",
-    "params":{
-      "name":"bot_status",
-      "arguments":{}
-    }
-  }'
-```
-
-### 執行 JavaScript
-
-```bash
-curl -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":3,
-    "method":"tools/call",
-    "params":{
-      "name":"execute_js",
-      "arguments":{
-        "code":"window.view.DesktopMgr.Inst.mainrole.hand.length"
-      }
-    }
-  }'
-```
-
-### 打出指定牌
-
-```bash
-curl -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":4,
-    "method":"tools/call",
-    "params":{
-      "name":"game_discard",
-      "arguments":{
-        "tileIndex":3
-      }
-    }
-  }'
-```
-
-### 執行遊戲動作
-
-```bash
-curl -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":5,
-    "method":"tools/call",
-    "params":{
-      "name":"game_action",
-      "arguments":{
-        "action":"pass"
-      }
-    }
-  }'
-```
-
----
-
-## Claude Code 使用
-
-配置完成後，Claude Code 可以直接使用這些工具：
+配置完成後，直接使用 MCP 工具：
 
 ```
-# 在 Claude Code 中使用
+# 獲取 Bot 狀態和 AI 推薦
 mcp__naki__bot_status
-mcp__naki__execute_js --code "window.location.href"
-mcp__naki__game_discard --tileIndex 5
+
+# 手動觸發自動打牌
 mcp__naki__bot_trigger
+
+# 開始銀之間半莊匹配
+mcp__naki__lobby_start_match --match_mode 5
+
+# 發送表情
+mcp__naki__game_emoji --emo_id 3 --count 2
+
+# 高亮第 5 張牌為綠色
+mcp__naki__highlight_tile --tileIndex 5 --color green
+
+# 執行 JavaScript
+mcp__naki__execute_js --code "return window.location.href"
 ```
 
 ### 常見工作流程
 
-#### 1. 監控遊戲狀態
+#### 1. 自動段位場
 
 ```
-1. mcp__naki__bot_status     # 查看 Bot 狀態和推薦
-2. mcp__naki__game_hand      # 查看手牌詳情
-3. mcp__naki__get_logs       # 查看操作日誌
+1. mcp__naki__lobby_status           # 確認在大廳
+2. mcp__naki__lobby_navigate --page 1  # 前往段位場
+3. mcp__naki__lobby_start_match --match_mode 5  # 開始銀半
+4. mcp__naki__bot_status             # 等待遊戲開始，查看推薦
 ```
 
-#### 2. 手動控制打牌
+#### 2. 調試遊戲狀態
 
 ```
-1. mcp__naki__bot_status     # 查看 AI 推薦
-2. mcp__naki__bot_trigger    # 執行推薦動作
-3. mcp__naki__get_logs       # 確認執行結果
+1. mcp__naki__detect                 # 檢測 API 可用性
+2. mcp__naki__game_state             # 獲取遊戲狀態
+3. mcp__naki__game_hand              # 查看手牌
+4. mcp__naki__get_logs               # 查看操作日誌
 ```
 
-#### 3. JavaScript 調試
+#### 3. 手牌高亮測試
 
 ```
-1. mcp__naki__detect         # 檢測 API 可用性
-2. mcp__naki__explore        # 探索遊戲物件
-3. mcp__naki__execute_js     # 執行自定義腳本
+1. mcp__naki__highlight_status       # 查看當前高亮狀態
+2. mcp__naki__highlight_tile --tileIndex 0 --color green  # 高亮第一張
+3. mcp__naki__hide_highlight         # 清除所有高亮
 ```
-
----
-
-## 響應格式
-
-### 成功響應
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "{\"status\":\"running\",\"port\":8765}"
-      }
-    ],
-    "isError": false
-  }
-}
-```
-
-### 錯誤響應
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "Error message here"
-      }
-    ],
-    "isError": true
-  }
-}
-```
-
-### JSON-RPC 錯誤
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "error": {
-    "code": -32601,
-    "message": "Method not found"
-  }
-}
-```
-
----
-
-## 錯誤代碼
-
-| 代碼 | 說明 |
-|-----|------|
-| -32700 | Parse error - JSON 解析失敗 |
-| -32600 | Invalid Request - 無效請求 |
-| -32601 | Method not found - 方法不存在 |
-| -32602 | Invalid params - 參數錯誤 |
-| -32603 | Internal error - 內部錯誤 |
 
 ---
 
@@ -338,28 +206,19 @@ MCP 工具中使用的牌記號遵循 MJAI 格式：
 
 ---
 
-## 與 HTTP API 的對應
+## HTTP API 對照表
 
-MCP 工具與現有 HTTP 端點的對應關係：
+MCP 工具與 HTTP 端點對應：
 
 | MCP 工具 | HTTP 端點 |
 |---------|----------|
 | `get_status` | GET /status |
-| `get_help` | GET /help |
 | `get_logs` | GET /logs |
-| `clear_logs` | DELETE /logs |
 | `bot_status` | GET /bot/status |
 | `bot_trigger` | POST /bot/trigger |
 | `game_state` | GET /game/state |
-| `game_hand` | GET /game/hand |
-| `game_ops` | GET /game/ops |
 | `game_discard` | POST /game/discard |
-| `game_action` | POST /game/action |
 | `execute_js` | POST /js |
-| `detect` | GET /detect |
-| `explore` | GET /explore |
-| `click` | POST /click |
-| `calibrate` | POST /calibrate |
 
 ---
 
@@ -369,22 +228,21 @@ MCP 工具與現有 HTTP 端點的對應關係：
 
 1. 確認 Naki app 已啟動
 2. 確認 port 8765 未被佔用：`lsof -i :8765`
-3. 測試 HTTP 端點：`curl http://localhost:8765/status`
+3. 測試 HTTP：`curl http://localhost:8765/status`
 
-### 工具調用失敗
+### 工具找不到
 
-1. 檢查參數格式是否正確
-2. 查看日誌：`mcp__naki__get_logs`
-3. 確認遊戲已加載：`mcp__naki__detect`
+```bash
+# 重新添加 MCP server
+claude mcp remove naki
+claude mcp add --transport http naki http://localhost:8765/mcp
+```
 
-### Claude Code 找不到工具
+### 遊戲 API 不可用
 
-1. 重新添加 MCP server：
-   ```bash
-   claude mcp remove naki
-   claude mcp add --transport http naki http://localhost:8765/mcp
-   ```
-2. 重啟 Claude Code
+```
+mcp__naki__detect  # 檢查遊戲是否已載入
+```
 
 ---
 
@@ -396,6 +254,4 @@ MCP 工具與現有 HTTP 端點的對應關係：
 
 ---
 
-**文檔版本**: 1.0.0
-**更新日期**: 2025-12-05
-**驗證狀態**: 已通過構建測試
+**更新日期**: 2025-12-07
