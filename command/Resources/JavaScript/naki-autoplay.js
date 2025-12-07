@@ -687,8 +687,28 @@
                 }
 
                 const tile = hand[tileIndex];
+                if (!tile._SetColor) {
+                    console.log('[Naki 高亮] 牌沒有 _SetColor 方法:', tileIndex);
+                    return false;
+                }
+
                 const layaColor = new Laya.Vector4(color.r, color.g, color.b, color.a);
                 tile._SetColor(layaColor);
+
+                // 驗證設置成功（某些情況下 _SetColor 會被遊戲重置）
+                // 使用 requestAnimationFrame 延遲驗證
+                const self = this;
+                requestAnimationFrame(function() {
+                    if (tile.getColor) {
+                        const actual = tile.getColor();
+                        if (actual && Math.abs(actual.x - color.r) > 0.1) {
+                            // 顏色被重置，嘗試再次設置
+                            console.log('[Naki 高亮] 重試設置牌', tileIndex, '顏色');
+                            tile._SetColor(layaColor);
+                        }
+                    }
+                });
+
                 return true;
             } catch (e) {
                 console.error('[Naki 高亮] 設置牌顏色失敗:', e);
@@ -833,8 +853,9 @@
 
             let created = 0;
 
-            // 🌟 使用牌顏色高亮（新功能）
-            if (this.settings.showTileColor) {
+            // 🌟 使用牌顏色高亮（預設開啟）
+            const useTileColor = this.settings.showTileColor !== false;
+            if (useTileColor) {
                 for (const rec of recommendations) {
                     const { tileIndex, probability } = rec;
 
@@ -846,15 +867,26 @@
 
                     // 設置牌顏色
                     if (this.setTileColor(tileIndex, color)) {
+                        // 記錄顏色類型（與 getColorForProbability 閾值一致）
+                        const colorType = probability > 0.3 ? 'green' : (probability > 0.15 ? 'orange' : 'red');
                         this.activeEffects.push({
                             tileIndex: tileIndex,
                             probability: probability,
-                            colorType: probability > 0.5 ? 'green' : (probability > 0.3 ? 'orange' : 'red')
+                            colorType: colorType
                         });
                         created++;
                         console.log('[Naki 高亮] 設置牌顏色:', tileIndex,
                             '機率:', probability.toFixed(3),
-                            '顏色:', probability > 0.5 ? '綠色' : (probability > 0.3 ? '橘色' : '紅色'));
+                            '顏色:', colorType === 'green' ? '綠色' : (colorType === 'orange' ? '橘色' : '紅色'));
+
+                        // 驗證顏色是否真的設置成功
+                        const tile = hand[tileIndex];
+                        if (tile && tile.getColor) {
+                            const actualColor = tile.getColor();
+                            if (actualColor && Math.abs(actualColor.x - color.r) > 0.1) {
+                                console.warn('[Naki 高亮] 驗證失敗: 牌', tileIndex, '顏色未正確設置');
+                            }
+                        }
                     }
                 }
             }
