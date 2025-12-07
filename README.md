@@ -6,8 +6,9 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Version-2.3.0-green" alt="Version">
-  <img src="https://img.shields.io/badge/Platform-macOS%2013+-blue" alt="Platform">
-  <img src="https://img.shields.io/badge/Apple%20Silicon-M1%2FM2%2FM3%2FM4-red" alt="Architecture">
+  <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
+  <img src="https://img.shields.io/badge/iOS-26.0+-blue" alt="iOS">
+  <img src="https://img.shields.io/badge/Apple%20Silicon-Required-red" alt="Architecture">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License">
 </p>
 
@@ -19,13 +20,25 @@
 
 ---
 
+## ⚠️ 使用前必讀
+
+> **本專案僅供學習與研究用途！**
+>
+> - 🚫 **請勿使用主帳號** — 強烈建議使用小號或測試帳號
+> - ⚖️ 使用本工具可能違反雀魂服務條款，可能導致帳號被封禁
+> - 🙅 作者不對任何因使用本工具造成的損失負責
+>
+> **繼續使用即表示您已理解並接受以上風險。**
+
+---
+
 > **鳴き (Naki)** — 日麻術語，指「吃」「碰」「槓」等副露動作。
 >
 > 這款 AI 會在關鍵時刻告訴你：**該鳴！**
 
 ## 這是什麼？
 
-Naki 是一款 **原生 macOS 應用**，內建雀魂遊戲和 AI 助手。它會即時分析你的牌局，告訴你最佳打法，甚至可以幫你全自動打牌。
+Naki 是一款**原生 Apple 應用**，內建雀魂遊戲和 AI 助手。它會即時分析你的牌局，告訴你最佳打法，甚至可以幫你全自動打牌。
 
 **不需要** Python、Docker、瀏覽器外掛，開箱即用。
 
@@ -41,7 +54,7 @@ Naki 是一款 **原生 macOS 應用**，內建雀魂遊戲和 AI 助手。它�
 
 - 顏色越亮 = 越推薦
 - 側邊欄顯示完整分析
-- 支援吃/碰/槓/立直推薦
+- 支援吃/碰/槓/立直/和牌推薦
 
 </td>
 <td width="50%">
@@ -60,27 +73,43 @@ Naki 是一款 **原生 macOS 應用**，內建雀魂遊戲和 AI 助手。它�
 
 ### 📱 跨平台支援
 
-macOS 和 iOS 都能用（iOS 僅查看推薦）
+macOS 和 iOS 都能用！
 
-- 響應式 UI 設計
-- 深色模式支援
-- 資訊一目了然
+- macOS：完整功能，含自動打牌
+- iOS/iPhone：查看 AI 推薦
+- 響應式 UI，深色模式支援
 
 </td>
 </tr>
 </table>
 
-### 🤖 全自動模式
-
-懶得動手？三種模式任你選：
+### 🤖 三種模式任你選
 
 | 模式 | 說明 |
 |:---:|-----|
-| **關閉** | 純觀察，AI 只給建議 |
-| **半自動** | 只自動打牌，吃碰槓手動決定 |
-| **全自動** | 躺平看戲，AI 全權代理 |
+| **關閉** | AI 背景運算但不顯示，完全手動 |
+| **推薦** | 顯示 AI 推薦，你來決定怎麼打 |
+| **自動** | AI 全權代理，躺平看戲 |
+
+### 🎮 更多功能
+
+- **手牌顏色高亮** — AI 推薦的牌直接在遊戲畫面中標色
+- **動作按鈕高亮** — 吃/碰/槓/立直按鈕也會高亮提示
+- **自動回應表情** — 被立直、被和牌時自動發表情
+- **隱藏玩家名稱** — 保護隱私，錄影時更安心
+- **MCP Server** — 讓 Claude Code 等 AI 助手直接操作遊戲
 
 ## 🚀 快速開始
+
+### 系統需求
+
+| 平台 | 最低版本 | 架構 |
+|-----|---------|-----|
+| **macOS** | 26.0+ (Tahoe) | Apple Silicon (M1/M2/M3/M4) |
+| **iOS** | 26.0+ | A12+ / Apple Silicon |
+
+> **為什麼不支援 Intel Mac？**
+> AI 模型使用 Apple Neural Engine 加速運算，這是 Apple Silicon 獨有的硬體。
 
 ### 下載安裝
 
@@ -88,40 +117,12 @@ macOS 和 iOS 都能用（iOS 僅查看推薦）
 2. 拖入 Applications 資料夾
 3. 首次開啟：右鍵 → 打開（繞過 Gatekeeper）
 
-### 系統需求
-
-- **macOS 13.0+** (Ventura 或更新)
-- **Apple Silicon** (M1/M2/M3/M4) — 不支援 Intel Mac
-
-> 為什麼不支援 Intel？因為 AI 模型使用 Apple Neural Engine 加速，這是 Apple Silicon 獨有的。
-
 ### 開始使用
 
-1. 打開 Naki，遊戲會自動載入
-2. 登入你的雀魂帳號
-3. 開始對局，AI 推薦會即時顯示在側邊欄
-4. （可選）開啟自動打牌模式
-
-## ⚠️ 重要提醒
-
-<table>
-<tr>
-<td>⚠️</td>
-<td>
-
-**請使用小號！** 本工具可能違反雀魂服務條款，存在封號風險。
-
-本專案僅供學習研究，旨在探索：
-- Swift/SwiftUI 原生開發
-- Core ML 機器學習整合
-- WebSocket 協議攔截
-- Protobuf 解析技術
-
-**作者不對任何帳號損失負責。**
-
-</td>
-</tr>
-</table>
+1. 打開 Naki，雀魂會自動載入
+2. 登入你的帳號（**建議使用小號**）
+3. 開始對局，AI 推薦會即時顯示
+4. 在側邊欄選擇你想要的模式
 
 ## 🔧 進階功能
 
@@ -146,19 +147,22 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 <details>
 <summary><b>🤖 MCP Server (Claude Code 整合)</b></summary>
 
-Naki 支援 [Model Context Protocol](https://modelcontextprotocol.io/)，讓 AI 助手直接操作遊戲：
+Naki 支援 [Model Context Protocol](https://modelcontextprotocol.io/)，提供 50+ 個工具讓 AI 助手直接操作遊戲。
 
+**配置 Claude Code：**
 ```bash
-# 配置 Claude Code
 claude mcp add --transport http naki http://localhost:8765/mcp
 ```
 
-在 Claude Code 中使用：
-```
-mcp__naki__bot_status      # 獲取狀態
-mcp__naki__bot_trigger     # 觸發打牌
-mcp__naki__execute_js      # 執行 JS
-```
+**主要工具分類：**
+
+| 類別 | 工具範例 |
+|-----|---------|
+| Bot 控制 | `bot_status`, `bot_trigger`, `bot_sync` |
+| 遊戲操作 | `game_state`, `game_discard`, `game_action` |
+| 大廳控制 | `lobby_start_match`, `lobby_cancel_match` |
+| UI 控制 | `ui_names_hide`, `execute_js` |
+| 表情系統 | `game_emoji`, `game_emoji_list` |
 
 詳見 [MCP Server 指南](docs/mcp-server-guide.md)
 
@@ -172,18 +176,24 @@ mcp__naki__execute_js      # 執行 JS
 │                  WebPage (雀魂遊戲)                      │
 │                         │                               │
 │              JavaScript 攔截模組                         │
+│     naki-core / naki-websocket / naki-autoplay         │
 └─────────────────────────┼───────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   Swift 服務層                           │
 │                                                         │
-│   LiqiParser → MajsoulBridge → NativeBotController     │
-│   (Protobuf)    (Liqi→MJAI)    (Rust FFI + Core ML)    │
+│   MajsoulBridge → NativeBotController → AutoPlayService│
+│   (Liqi→MJAI)    (Rust FFI + Core ML)   (自動打牌)      │
 │                         │                               │
-│   AutoPlayService ← GameStateManager → SwiftUI Views   │
-│   (自動打牌)         (狀態管理)         (響應式 UI)       │
+│         GameStateManager ← → SwiftUI Views             │
+│          (@Observable)       (響應式 UI)                │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**核心技術：**
+- **協議轉換**：Liqi Protobuf → MJAI JSON
+- **AI 推論**：Core ML + Mortal 神經網絡
+- **狀態管理**：Swift @Observable 響應式架構
 
 </details>
 
@@ -191,7 +201,7 @@ mcp__naki__execute_js      # 執行 JS
 
 - [x] AI 推薦高亮
 - [x] 全自動打牌
-- [x] 動作按鈕推薦（吃/碰/槓/立直）
+- [x] 動作按鈕推薦
 - [x] MCP Server 支援
 - [x] 手牌顏色高亮
 - [x] 自動回應表情
@@ -208,12 +218,14 @@ mcp__naki__execute_js      # 執行 JS
 
 [AGPL-3.0 with Commons Clause](LICENSE) — 開源但禁止商業銷售
 
+---
+
 ## ⚖️ 免責聲明
 
 ### 教育與學習目的
 
 本專案的開發目的是為了：
-- 學習 Swift/SwiftUI 原生 macOS 應用開發
+- 學習 Swift/SwiftUI 原生 macOS/iOS 應用開發
 - 研究 Core ML 機器學習模型整合
 - 理解 WebSocket 通訊協議與攔截技術
 - 探索 Protobuf 協議解析
