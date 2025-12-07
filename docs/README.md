@@ -1,137 +1,40 @@
-# 📚 @docs - 核心文檔索引
+# 📚 Naki 文檔中心
 
-這個目錄包含 CLAUDE.md 直接引用的核心指南文檔。
+本目錄包含 Naki 專案的所有技術文檔。
 
----
-
-## 📖 6 個核心文檔
-
-### 1. **architecture-deep-dive.md** - 架構深度詳解
-
-**引用位置**: CLAUDE.md → Important Patterns, Common Tasks
-
-**內容**:
-- Observable 狀態模式詳解
-- 協議轉換流程 (WebSocket → MJAI)
-- 服務初始化順序
-- JavaScript 注入詳情
-- AutoPlay 重試機制
-- MortalSwift FFI 整合
-- 遊戲生命週期狀態機
-- XOR 加密/解密算法
-- 常見除錯模式
-
-**使用場景**:
-- 理解服務初始化順序
-- 深入學習架構設計
-- 調試複雜的協議問題
+**最後更新**: 2025-12-07
 
 ---
 
-### 2. **shell-tools-guide.md** - Shell 工具使用指南
+## 📖 文檔分類
 
-**引用位置**: CLAUDE.md → Shell Tools 部分
+### 🎯 用戶指南
 
-**內容**:
-- 6 個現代 shell 工具詳細教程
-  - `fd` - 快速檔案查找
-  - `rg` (ripgrep) - 高效文字搜尋
-  - `ast-grep` - AST 代碼分析
-  - `fzf` - 互動式模糊查找
-  - `jq` - JSON 處理
-  - `yq` - YAML/XML 處理
-- 性能對比和使用原則
-- 實際應用場景
+| 文檔 | 說明 | 行數 |
+|------|------|------|
+| [mcp-server-guide.md](mcp-server-guide.md) | MCP Server 完整指南，47 個工具 | 257 |
 
-**使用場景**:
-- 提升開發效率
-- 代碼搜尋和分析
-- JSON/YAML 處理
+### 🏗 架構與技術
 
----
+| 文檔 | 說明 | 行數 |
+|------|------|------|
+| [architecture-deep-dive.md](architecture-deep-dive.md) | 架構深度詳解、協議轉換、服務初始化 | 240 |
+| [majsoul-webui-objects-reference.md](majsoul-webui-objects-reference.md) | Majsoul WebUI 物件完整參考 | 2,157 |
+| [majsoul-webui-api-architecture.md](majsoul-webui-api-architecture.md) | Majsoul API 架構設計 | 1,410 |
 
-### 3. **majsoul-webui-objects-reference.md** - WebUI 物件完整參考
+### 🛠 開發工具
 
-**引用位置**: CLAUDE.md → Majsoul WebUI Objects 部分
+| 文檔 | 說明 | 行數 |
+|------|------|------|
+| [shell-tools-guide.md](shell-tools-guide.md) | 現代 Shell 工具使用規範 | 262 |
+| [debug-api-help-endpoint.md](debug-api-help-endpoint.md) | Debug Server API 說明 | 396 |
 
-**內容**:
-- Majsoul WebUI 物件結構詳解
-- 遊戲管理器 (DesktopMgr)
-- 手牌物件 (Tile) 屬性
-- 效果控制 (Dora, Recommendation)
-- Laya Sprite3D 屬性
-- 類型映射和編碼
+### 📝 開發筆記
 
-**使用場景**:
-- JavaScript 交互開發
-- 效果控制和修改
-- WebUI 物件查詢
-
----
-
-### 4. **debug-api-help-endpoint.md** - Debug Server API 完整列表
-
-**引用位置**: CLAUDE.md → Debug 部分
-
-**內容**:
-- `/help` 端點文檔
-- 所有 Debug 端點詳解
-- 常見工作流程
-- Tile 標記法
-- 使用範例
-
-**使用場景**:
-- 調試應用行為
-- 自動化測試
-- 遠程診斷
-
----
-
-### 5. **mcp-server-guide.md** - MCP Server 指南 (NEW)
-
-**引用位置**: README.md → MCP Server 部分
-
-**內容**:
-- MCP 協議支援說明
-- 22 個工具完整列表
-- Claude Code 配置方式
-- JSON-RPC 2.0 請求/響應格式
-- 使用範例和工作流程
-- 故障排除指南
-
-**使用場景**:
-- 配置 Claude Code 整合
-- AI 助手操作遊戲
-- MCP 工具開發參考
-
----
-
-### 6. **claude-md-refactoring-journal.md** - CLAUDE.md 重構歷程
-
-**引用位置**: CLAUDE.md → Verifying Changes 部分
-
-**內容**:
-- CLAUDE.md 重構過程記錄
-- HumanLayer 最佳實踐分析
-- 文件結構改進
-- 維護指南
-- 對話記錄和決策
-
-**使用場景**:
-- 理解 CLAUDE.md 的設計決策
-- 學習文檔最佳實踐
-- 維護和改進指南
-
----
-
-## 🗂️ dev-notes 子目錄
-
-```
-dev-notes/
-└── 2025-12-03-auto-confirm-game-end.md
-```
-
-開發筆記集合，記錄特定功能實現的細節。
+| 文檔 | 說明 |
+|------|------|
+| [dev-notes/](dev-notes/) | 功能開發過程記錄 |
+| [claude-md-refactoring-journal.md](claude-md-refactoring-journal.md) | CLAUDE.md 重構歷程 |
 
 ---
 
@@ -139,49 +42,42 @@ dev-notes/
 
 ### 我想...
 
-| 目標 | 查看... |
+| 目標 | 查看文檔 |
 |------|---------|
-| 理解架構 | architecture-deep-dive.md |
-| 提升開發效率 | shell-tools-guide.md |
-| JavaScript 開發 | majsoul-webui-objects-reference.md |
-| 調試應用 | debug-api-help-endpoint.md |
-| AI 整合 (MCP) | mcp-server-guide.md |
-| 學習最佳實踐 | claude-md-refactoring-journal.md |
-| 了解開發過程 | dev-notes/ |
+| 配置 Claude Code | [mcp-server-guide.md](mcp-server-guide.md) |
+| 理解架構設計 | [architecture-deep-dive.md](architecture-deep-dive.md) |
+| JavaScript 開發 | [majsoul-webui-objects-reference.md](majsoul-webui-objects-reference.md) |
+| 調試應用 | [debug-api-help-endpoint.md](debug-api-help-endpoint.md) |
+| 使用 Shell 工具 | [shell-tools-guide.md](shell-tools-guide.md) |
 
 ---
 
 ## 📊 統計
 
-```
-@docs 核心文檔
-├─ architecture-deep-dive.md (240 行)
-├─ shell-tools-guide.md (262 行)
-├─ majsoul-webui-objects-reference.md (798 行)
-├─ debug-api-help-endpoint.md (200 行)
-├─ mcp-server-guide.md (350 行) [NEW]
-├─ claude-md-refactoring-journal.md (475 行)
-└─ dev-notes/ (開發筆記集合)
-
-總行數: ~2,300+ 行
-```
+| 類別 | 文檔數 | 總行數 |
+|------|--------|--------|
+| 用戶指南 | 1 | 257 |
+| 架構與技術 | 3 | 3,807 |
+| 開發工具 | 2 | 658 |
+| 開發筆記 | 3 | ~1,400 |
+| **總計** | **9** | **~6,100** |
 
 ---
 
-## 💡 與 @note 的區別
+## 🔄 文檔維護
 
-| 特點 | @docs | @note |
-|------|-------|-------|
-| 目的 | 核心指南 | 知識庫 |
-| 引用 | 被 CLAUDE.md 引用 | 未被 CLAUDE.md 引用 |
-| 內容 | 架構/工具/參考 | 記錄/診斷/問題解決 |
-| 更新頻率 | 少（架構穩定） | 多（新發現） |
+### 更新頻率
 
-詳見 `@note/README.md`
+- **mcp-server-guide.md** - 每次新增 MCP 工具時更新
+- **architecture-deep-dive.md** - 架構變更時更新
+- **majsoul-webui-*.md** - Majsoul 更新後驗證
+- **shell-tools-guide.md** - 工具版本更新時檢查
+
+### 已知問題
+
+- WebUI 文檔可能因 Majsoul 更新而過時，使用前建議驗證
+- dev-notes 部分文件為開發中記錄，可能不完整
 
 ---
 
-**Created**: 2025-12-04
-**Last Updated**: 2025-12-05
-**Purpose**: 核心指南文檔導覽
-
+**維護者**: Claude Code + User
