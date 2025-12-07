@@ -642,19 +642,18 @@
 
         /**
          * 根據機率獲取顏色（用於牌顏色高亮）
-         * 閾值設計考慮：麻將推薦通常分散，最高推薦往往只有 15-30%
+         * 閾值與 SwiftUI 側邊欄一致
          * @param {number} probability - 機率值 (0.0 ~ 1.0)
          * @returns {object|null} 顏色對象或 null（不顯示）
          */
         getColorForProbability: function(probability) {
-            if (probability > 0.3) {
-                return this.colors.green;   // 綠色：> 30%（強烈推薦）
-            } else if (probability > 0.15) {
-                return this.colors.orange;  // 橘色：15% - 30%（中等推薦）
-            } else if (probability > 0.08) {
-                return this.colors.red;     // 紅色：8% - 15%（弱推薦）
+            if (probability > 0.5) {
+                return this.colors.green;   // 綠色：> 50%（強烈推薦）
+            } else if (probability > 0.2) {
+                return this.colors.orange;  // 橘色：20% - 50%（中等推薦）
+            } else {
+                return this.colors.red;     // 紅色：< 20%（弱推薦）
             }
-            return null;  // probability <= 8% 不顯示
         },
 
         /**
@@ -868,7 +867,7 @@
                     // 設置牌顏色
                     if (this.setTileColor(tileIndex, color)) {
                         // 記錄顏色類型（與 getColorForProbability 閾值一致）
-                        const colorType = probability > 0.3 ? 'green' : (probability > 0.15 ? 'orange' : 'red');
+                        const colorType = probability > 0.5 ? 'green' : (probability > 0.2 ? 'orange' : 'red');
                         this.activeEffects.push({
                             tileIndex: tileIndex,
                             probability: probability,

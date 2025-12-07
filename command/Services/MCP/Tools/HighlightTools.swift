@@ -219,7 +219,7 @@ struct HighlightSettingsTool: MCPTool {
 /// 顯示推薦高亮
 struct ShowRecommendationsTool: MCPTool {
     static let name = "show_recommendations"
-    static let description = "顯示多個推薦牌的高亮效果。根據機率自動選擇顏色：>0.5 綠色、0.3-0.5 橘色、0.2-0.3 紅色"
+    static let description = "顯示多個推薦牌的高亮效果。根據機率自動選擇顏色：>50% 綠色、20-50% 橘色、<20% 紅色"
     static let inputSchema = MCPInputSchema(
         properties: [
             "recommendations": .string("推薦列表 JSON，格式: [{\"tileIndex\": 0, \"probability\": 0.8}, ...]")
