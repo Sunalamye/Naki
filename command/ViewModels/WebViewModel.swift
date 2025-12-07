@@ -488,8 +488,11 @@ class WebViewModel {
       isRed = target.length > 2 && target[2] === 'r';
       }
 
-      // 在手牌中查找（找出所有相同的牌）
-      for (var i = 0; i < mr.hand.length; i++) {
+      // 在手牌中查找
+      // rank 0（最推薦）: 從右往左找，優先找到剛摸的牌
+      // 其他 rank: 全部顯示相同的牌
+      var foundFirst = false;
+      for (var i = mr.hand.length - 1; i >= 0; i--) {
       var t = mr.hand[i];
       if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
       // 如果是紅寶牌，檢查 dora 標記
@@ -501,7 +504,10 @@ class WebViewModel {
       }
       if (match) {
           results.push({ tileIndex: i, probability: probability, rank: rank });
-          // 不 break，繼續找其他相同的牌
+          // rank 0 只取第一個找到的（最右邊），其他 rank 全部顯示
+          if (rank === 0) {
+          break;
+          }
       }
       }
       }
