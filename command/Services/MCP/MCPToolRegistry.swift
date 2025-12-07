@@ -200,5 +200,13 @@ extension MCPToolRegistry {
         register(ListEmojiTool.self)
         register(EmojiListenTool.self)
         register(EmojiAutoReplyTool.self)
+
+        // 高亮類
+        register(HighlightTileTool.self)
+        register(ResetTileColorTool.self)
+        register(HighlightStatusTool.self)
+        register(HighlightSettingsTool.self)
+        register(ShowRecommendationsTool.self)
+        register(HideHighlightTool.self)
     }
 }

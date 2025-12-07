@@ -457,27 +457,39 @@
     };
 
     // ========================================
-    // 🌟 推薦高亮管理模組 (RunUV 效果版)
+    // 🌟 推薦高亮管理模組 (手牌顏色版)
     // ========================================
     /**
      * 管理推薦牌的視覺高亮效果
-     * 使用 effect_doraPlane + anim.RunUV 實現
-     * 支援多個推薦同時顯示，根據機率顯示不同顏色
+     * 使用 tile._SetColor() 直接改變手牌顏色
+     * 支援多個推薦同時顯示，根據機率顯示不同顏色：
+     * - 綠色：probability > 0.5
+     * - 橘色：0.3 < probability <= 0.5
+     * - 紅色：0.2 < probability <= 0.3
      */
     window.__nakiRecommendHighlight = {
-        activeEffects: [],  // 存儲所有活躍的效果 { effect, runUV, tileIndex }
+        activeEffects: [],  // 存儲所有已著色的牌 { tileIndex, originalColor }
         nativeEffectActive: false,  // 追蹤原生 effect_recommend 狀態
 
         // 🔧 設定選項
         settings: {
             showRotatingEffect: false,  // 是否顯示旋轉 Bling 效果（預設關閉）
-            showNativeEffect: true      // 是否顯示原生 effect_recommend（預設開啟）
+            showNativeEffect: true,     // 是否顯示原生 effect_recommend（預設開啟）
+            showTileColor: true         // 是否使用牌顏色高亮（預設開啟）
         },
 
-        // 顏色配置
+        // 顏色配置 (Laya.Vector4 格式: r, g, b, a)
         colors: {
-            green: { r: 0, g: 2, b: 0, a: 2 },   // probability > 0.5
-            red: { r: 2, g: 0, b: 0, a: 2 }      // 0.2 < probability <= 0.5
+            green:  { r: 0.4, g: 0.9, b: 0.4, a: 1 },   // probability > 0.5 綠色
+            orange: { r: 1.0, g: 0.6, b: 0.2, a: 1 },   // 0.3 < probability <= 0.5 橘色
+            red:    { r: 1.0, g: 0.4, b: 0.4, a: 1 },   // 0.2 < probability <= 0.3 紅色
+            white:  { r: 1.0, g: 1.0, b: 1.0, a: 1 }    // 原始顏色（白色）
+        },
+
+        // 舊版顏色配置（用於旋轉效果，保留向後兼容）
+        legacyColors: {
+            green: { r: 0, g: 2, b: 0, a: 2 },
+            red: { r: 2, g: 0, b: 0, a: 2 }
         },
 
         /**
@@ -629,17 +641,89 @@
         },
 
         /**
-         * 根據機率獲取顏色
+         * 根據機率獲取顏色（用於牌顏色高亮）
          * @param {number} probability - 機率值 (0.0 ~ 1.0)
          * @returns {object|null} 顏色對象或 null（不顯示）
          */
         getColorForProbability: function(probability) {
             if (probability > 0.5) {
-                return this.colors.green;
+                return this.colors.green;   // 綠色
+            } else if (probability > 0.3) {
+                return this.colors.orange;  // 橘色
             } else if (probability > 0.2) {
-                return this.colors.red;
+                return this.colors.red;     // 紅色
             }
             return null;  // probability <= 0.2 不顯示
+        },
+
+        /**
+         * 根據機率獲取顏色（用於舊版旋轉效果）
+         * @param {number} probability - 機率值 (0.0 ~ 1.0)
+         * @returns {object|null} 顏色對象或 null（不顯示）
+         */
+        getLegacyColorForProbability: function(probability) {
+            if (probability > 0.5) {
+                return this.legacyColors.green;
+            } else if (probability > 0.2) {
+                return this.legacyColors.red;
+            }
+            return null;
+        },
+
+        /**
+         * 設置單張牌的顏色
+         * @param {number} tileIndex - 牌在手中的位置
+         * @param {object} color - 顏色 { r, g, b, a }
+         * @returns {boolean} 成功或失敗
+         */
+        setTileColor: function(tileIndex, color) {
+            try {
+                const mgr = window.view?.DesktopMgr?.Inst;
+                const hand = mgr?.mainrole?.hand;
+                if (!hand || !hand[tileIndex]) {
+                    console.log('[Naki 高亮] 找不到索引處的牌:', tileIndex);
+                    return false;
+                }
+
+                const tile = hand[tileIndex];
+                const layaColor = new Laya.Vector4(color.r, color.g, color.b, color.a);
+                tile._SetColor(layaColor);
+                return true;
+            } catch (e) {
+                console.error('[Naki 高亮] 設置牌顏色失敗:', e);
+                return false;
+            }
+        },
+
+        /**
+         * 重置單張牌的顏色為白色
+         * @param {number} tileIndex - 牌在手中的位置
+         * @returns {boolean} 成功或失敗
+         */
+        resetTileColor: function(tileIndex) {
+            return this.setTileColor(tileIndex, this.colors.white);
+        },
+
+        /**
+         * 重置所有手牌的顏色
+         */
+        resetAllTileColors: function() {
+            try {
+                const mgr = window.view?.DesktopMgr?.Inst;
+                const hand = mgr?.mainrole?.hand;
+                if (!hand) return;
+
+                const white = new Laya.Vector4(1, 1, 1, 1);
+                for (let i = 0; i < hand.length; i++) {
+                    const tile = hand[i];
+                    if (tile && tile._SetColor) {
+                        tile._SetColor(white);
+                    }
+                }
+                console.log('[Naki 高亮] 已重置所有手牌顏色');
+            } catch (e) {
+                console.error('[Naki 高亮] 重置手牌顏色失敗:', e);
+            }
         },
 
         // 旋轉動畫 interval ID
@@ -736,14 +820,42 @@
 
             const mgr = window.view?.DesktopMgr?.Inst;
             if (!mgr) {
-                console.log('[Naki Highlight] Game manager not available');
+                console.log('[Naki 高亮] 遊戲管理器不可用');
                 return 0;
             }
 
             const hand = mgr.mainrole?.hand;
             if (!hand) {
-                console.log('[Naki Highlight] Hand not available');
+                console.log('[Naki 高亮] 手牌不可用');
                 return 0;
+            }
+
+            let created = 0;
+
+            // 🌟 使用牌顏色高亮（新功能）
+            if (this.settings.showTileColor) {
+                for (const rec of recommendations) {
+                    const { tileIndex, probability } = rec;
+
+                    // 根據機率獲取顏色
+                    const color = this.getColorForProbability(probability);
+                    if (!color) {
+                        continue;
+                    }
+
+                    // 設置牌顏色
+                    if (this.setTileColor(tileIndex, color)) {
+                        this.activeEffects.push({
+                            tileIndex: tileIndex,
+                            probability: probability,
+                            colorType: probability > 0.5 ? 'green' : (probability > 0.3 ? 'orange' : 'red')
+                        });
+                        created++;
+                        console.log('[Naki 高亮] 設置牌顏色:', tileIndex,
+                            '機率:', probability.toFixed(3),
+                            '顏色:', probability > 0.5 ? '綠色' : (probability > 0.3 ? '橘色' : '紅色'));
+                    }
+                }
             }
 
             // 🌟 找出最高概率的推薦，移動原生 effect_recommend
@@ -755,52 +867,36 @@
                 }
             }
 
-            // 如果旋轉效果被禁用，直接返回
-            if (!this.settings.showRotatingEffect) {
-                console.log('[Naki Highlight] Rotating effect disabled, using native only');
-                return 0;
-            }
+            // 如果旋轉效果被啟用（預設關閉）
+            if (this.settings.showRotatingEffect) {
+                for (const rec of recommendations) {
+                    const { tileIndex, probability } = rec;
 
-            let created = 0;
-            for (const rec of recommendations) {
-                const { tileIndex, probability } = rec;
+                    // 使用舊版顏色
+                    const color = this.getLegacyColorForProbability(probability);
+                    if (!color) continue;
 
-                // 根據機率獲取顏色
-                const color = this.getColorForProbability(probability);
-                if (!color) {
-                    console.log('[Naki Highlight] Skipping tile', tileIndex, 'probability too low:', probability);
-                    continue;
+                    const tile = hand[tileIndex];
+                    if (!tile) continue;
+
+                    const result = this.createEffect(tile, color, false);
+                    if (result) {
+                        this.activeEffects.push({
+                            effects: result.effects,
+                            blings: result.blings,
+                            tileIndex: tileIndex,
+                            probability: probability
+                        });
+                    }
                 }
 
-                // 獲取牌物件
-                const tile = hand[tileIndex];
-                if (!tile) {
-                    console.log('[Naki 高亮] 找不到索引處的牌:', tileIndex);
-                    continue;
-                }
-
-                // 創建雙層效果
-                const result = this.createEffect(tile, color, false);
-                if (result) {
-                    this.activeEffects.push({
-                        effects: result.effects,
-                        blings: result.blings,
-                        tileIndex: tileIndex,
-                        probability: probability
-                    });
-                    created++;
-                    console.log('[Naki Highlight] Created effect for tile', tileIndex,
-                        'probability:', probability.toFixed(3),
-                        'color:', probability > 0.5 ? 'green' : 'red');
+                // 啟動旋轉動畫
+                if (this.activeEffects.some(e => e.effects)) {
+                    this.startRotation();
                 }
             }
 
-            // 啟動旋轉動畫
-            if (created > 0) {
-                this.startRotation();
-            }
-
-            console.log('[Naki Highlight] Created', created, 'effects');
+            console.log('[Naki 高亮] 已創建', created, '個顏色效果');
             return created;
         },
 
@@ -827,7 +923,10 @@
                 // 🌟 隱藏原生 effect_recommend
                 this.hideNativeEffect();
 
-                // 銷毀所有效果
+                // 🌟 重置所有手牌顏色
+                this.resetAllTileColors();
+
+                // 銷毀所有旋轉效果
                 for (const item of this.activeEffects) {
                     if (item.effects) {
                         item.effects.forEach(effect => {
@@ -840,10 +939,10 @@
                     }
                 }
                 this.activeEffects = [];
-                console.log('[Naki Highlight] All effects hidden');
+                console.log('[Naki 高亮] 所有效果已隱藏');
                 return true;
             } catch (e) {
-                console.error('[Naki Highlight] hide failed:', e);
+                console.error('[Naki 高亮] 隱藏效果失敗:', e);
                 return false;
             }
         },
@@ -859,14 +958,15 @@
                 settings: this.settings,
                 effects: this.activeEffects.map(e => ({
                     tileIndex: e.tileIndex,
-                    probability: e.probability
+                    probability: e.probability,
+                    colorType: e.colorType || 'unknown'
                 }))
             };
         },
 
         /**
          * 更新設定
-         * @param {object} newSettings - { showRotatingEffect, showNativeEffect }
+         * @param {object} newSettings - { showRotatingEffect, showNativeEffect, showTileColor }
          */
         setSettings: function(newSettings) {
             if (typeof newSettings.showRotatingEffect === 'boolean') {
@@ -875,7 +975,22 @@
             if (typeof newSettings.showNativeEffect === 'boolean') {
                 this.settings.showNativeEffect = newSettings.showNativeEffect;
             }
+            if (typeof newSettings.showTileColor === 'boolean') {
+                this.settings.showTileColor = newSettings.showTileColor;
+            }
             console.log('[Naki 高亮] 設定已更新:', this.settings);
+        },
+
+        /**
+         * 設置自定義顏色
+         * @param {string} colorName - 顏色名稱 (green, orange, red)
+         * @param {object} color - 顏色值 { r, g, b, a }
+         */
+        setColor: function(colorName, color) {
+            if (this.colors[colorName]) {
+                this.colors[colorName] = color;
+                console.log('[Naki 高亮] 顏色已更新:', colorName, color);
+            }
         }
     };
 
