@@ -44,6 +44,35 @@ mcp__naki__get_logs
 | 列出手牌 | `mcp__naki__execute_js({ code: "return window.view.DesktopMgr.Inst.mainrole.hand.map((t,i)=>({i,t:t.val.type,n:t.val.index}))" })` |
 | Bot 狀態 | `mcp__naki__bot_status` |
 | 遊戲狀態 | `mcp__naki__game_state` |
+| 執行動作並驗證 | `mcp__naki__game_action_verify` |
+
+### 🆕 動作驗證 (game_action_verify)
+
+執行動作並等待驗證結果，確認動作是否成功：
+
+```javascript
+// Pass 並驗證（使用內建 auto-nofulu）
+mcp__naki__game_action_verify({ action: "pass", useBuiltin: true })
+
+// 打牌並驗證
+mcp__naki__game_action_verify({ action: "discard", tileIndex: 5 })
+
+// 吃牌並驗證（指定組合索引）
+mcp__naki__game_action_verify({ action: "chi", combinationIndex: 0, timeout: 3000 })
+
+// 和牌（使用內建 auto-hule）
+mcp__naki__game_action_verify({ action: "hora", useBuiltin: true })
+```
+
+**返回值**:
+```json
+{
+  "success": true,
+  "verified": true,
+  "reason": "oplist cleared",
+  "elapsed": 150
+}
+```
 
 ---
 

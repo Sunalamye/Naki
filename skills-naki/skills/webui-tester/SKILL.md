@@ -8,6 +8,41 @@ allowed-tools: Read, Glob, Grep, mcp__naki__execute_js, mcp__naki__bot_status, m
 
 This skill helps test and modify Majsoul's WebUI (game interface) running inside Naki's WKWebView.
 
+## 🆕 NakiCoordinator - 統一協調器 (推薦)
+
+Naki 提供了統一的 JavaScript 協調器，**優先使用**它而非直接訪問遊戲物件：
+
+```javascript
+// 快捷訪問
+window.naki === window.NakiCoordinator
+
+// 遊戲狀態 (取代直接訪問 DesktopMgr)
+naki.state.isInGame()           // 是否在遊戲中
+naki.state.canExecuteAction()   // 是否可執行操作
+naki.state.getFullState()       // 完整狀態
+naki.state.getHandInfo()        // 手牌資訊
+naki.state.getAvailableOps()    // 可用操作
+
+// 遊戲操作 (安全封裝，含驗證)
+naki.action.discard(tileIndex, {verify: true})  // 打牌並驗證
+naki.action.pass({useBuiltin: true})            // 使用內建 auto-nofulu
+naki.action.chi(combIndex)      // 吃
+naki.action.pon()               // 碰
+naki.action.hora({useBuiltin: true})            // 使用內建 auto-hule
+naki.action.execute('pass', {}) // 通用執行
+
+// 自動設定控制
+naki.auto.setHule(true)         // 自動和牌
+naki.auto.setNoFulu(true)       // 自動 pass
+naki.auto.setMoqie(true)        // 自動摸切
+
+// 診斷
+naki.debug.getDiagnostics()     // 完整診斷
+naki.debug.listMethods()        // 列出所有方法
+```
+
+**完整 API**: 見 [references/api-architecture.md](references/api-architecture.md)
+
 ## Critical Distinction: WebUI vs App UI
 
 When the user says "adjust the screen" or "modify UI", ALWAYS clarify:
@@ -180,5 +215,15 @@ If `execute_js` returns null or undefined:
 ## Reference Documentation
 
 For complete Majsoul WebUI object documentation, see:
-- [WebUI Objects Reference](references/reference.md) - Complete Laya Sprite3D properties, tile encoding, effect mechanisms
-- External: `@docs/majsoul-webui-objects-reference.md` for additional context
+- [API Architecture](references/api-architecture.md) - **完整 API 架構** (NakiCoordinator, NetAgent, 配置系統, 音效系統等)
+- [WebUI Objects Reference](references/reference.md) - Laya Sprite3D 屬性, 牌編碼, 效果機制
+
+### NakiCoordinator 優先使用指南
+
+| 任務 | 舊方法 | 新方法 (推薦) |
+|------|--------|---------------|
+| 檢查遊戲狀態 | `view.DesktopMgr.Inst.gameing` | `naki.state.isInGame()` |
+| 獲取手牌 | `dm.mainrole.hand` | `naki.state.getHandInfo()` |
+| 執行打牌 | `mr.setChoosePai(); mr.DoDiscardTile()` | `naki.action.discard(idx)` |
+| 執行 pass | 手動發送網路請求 | `naki.action.pass()` |
+| 驗證動作 | 自己寫輪詢 | `naki.action.execute('pass', {verify: true})` |

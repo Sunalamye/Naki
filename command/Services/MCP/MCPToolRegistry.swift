@@ -161,6 +161,7 @@ extension MCPToolRegistry {
         register(GameOpsTool.self)
         register(GameDiscardTool.self)
         register(GameActionTool.self)
+        register(GameActionVerifyTool.self)
 
         // JavaScript 執行
         register(ExecuteJSTool.self)

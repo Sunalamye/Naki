@@ -171,3 +171,83 @@ struct GameActionTool: MCPTool {
         ]
     }
 }
+
+// MARK: - Game Action Verify Tool
+
+/// 執行遊戲動作並驗證結果
+struct GameActionVerifyTool: MCPTool {
+    static let name = "game_action_verify"
+    static let description = "執行遊戲動作並等待驗證結果。使用 NakiCoordinator 的動作驗證機制，確認動作是否成功執行（例如 oplist 清空、手牌數量變化等）"
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "action": .string("動作名稱 (discard, pass, chi, pon, kan, hora, riichi)"),
+            "tileIndex": .integer("打牌/立直時的牌索引（可選）"),
+            "combinationIndex": .integer("吃牌時的組合索引（可選，預設 0）"),
+            "useBuiltin": .boolean("是否使用遊戲內建自動功能（可選，對 pass/hora 有效）"),
+            "timeout": .integer("驗證超時時間 ms（可選，預設 2000）")
+        ],
+        required: ["action"]
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let action = arguments["action"] as? String else {
+            throw MCPToolError.missingParameter("action")
+        }
+
+        let tileIndex = arguments["tileIndex"] as? Int
+        let combinationIndex = arguments["combinationIndex"] as? Int ?? 0
+        let useBuiltin = arguments["useBuiltin"] as? Bool ?? true
+        let timeout = arguments["timeout"] as? Int ?? 2000
+
+        // 構建參數物件
+        var params: [String: Any] = [
+            "verify": true,
+            "verifyTimeout": timeout,
+            "useBuiltin": useBuiltin
+        ]
+
+        if let idx = tileIndex {
+            params["tileIndex"] = idx
+        }
+        params["combinationIndex"] = combinationIndex
+
+        let paramsJson = (try? JSONSerialization.data(withJSONObject: params))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+
+        // 使用 NakiCoordinator 的 executeAndVerify
+        let script = """
+        (async function() {
+            if (!window.NakiCoordinator) {
+                return JSON.stringify({success: false, error: 'NakiCoordinator not loaded'});
+            }
+            try {
+                const result = await window.NakiCoordinator.debug.executeAndVerify('\(action)', \(paramsJson));
+                return JSON.stringify(result);
+            } catch (e) {
+                return JSON.stringify({success: false, error: e.message});
+            }
+        })()
+        """
+
+        let result = try await context.executeJavaScript(script)
+
+        // 解析結果
+        if let jsonString = result as? String,
+           let data = jsonString.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return json
+        }
+
+        return [
+            "success": false,
+            "error": "Failed to parse result",
+            "rawResult": result ?? NSNull()
+        ]
+    }
+}
