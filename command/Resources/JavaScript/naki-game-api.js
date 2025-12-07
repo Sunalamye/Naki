@@ -68,9 +68,9 @@
 
         // 向後兼容的 smartExecute
         smartExecute: function(actionType, params) {
-            console.log('[Naki GameAPI] smartExecute (legacy) →', actionType, params);
+            console.log('[Naki GameAPI] smartExecute (舊版) →', actionType, params);
             if (!window.NakiCoordinator) {
-                console.error('[Naki GameAPI] NakiCoordinator not available');
+                console.error('[Naki GameAPI] NakiCoordinator 不可用');
                 return { success: false, error: 'coordinator not available' };
             }
             return window.NakiCoordinator.action.execute(actionType, params);
@@ -104,7 +104,7 @@
                     if (info?.name) info.name.visible = false;
                 });
                 this.hidden = true;
-                console.log('[Naki PlayerNames] Hidden');
+                console.log('[Naki 玩家名稱] 已隱藏');
                 return true;
             } catch (e) {
                 return false;
@@ -120,7 +120,7 @@
                     if (info?.name) info.name.visible = true;
                 });
                 this.hidden = false;
-                console.log('[Naki PlayerNames] Shown');
+                console.log('[Naki 玩家名稱] 已顯示');
                 return true;
             } catch (e) {
                 return false;
@@ -208,5 +208,5 @@
         window.__nakiHighlightInit.init();
     }, 500);
 
-    console.log('[Naki] Game API module loaded (slim version, uses NakiCoordinator)');
+    console.log('[Naki] 遊戲 API 模組已載入 (精簡版, 使用 NakiCoordinator)');
 })();

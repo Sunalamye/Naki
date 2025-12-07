@@ -9,7 +9,7 @@
 
     // 避免重複注入
     if (window.__nakiCoordinatorLoaded) {
-        console.log('[Naki Coordinator] Already loaded');
+        console.log('[Naki Coordinator] 已載入，跳過重複載入');
         return;
     }
     window.__nakiCoordinatorLoaded = true;
@@ -107,7 +107,7 @@
             this._actionTracker.lastHandCount = mr ? mr.hand?.length : -1;
             this._actionTracker.lastOplistLength = dm?.oplist?.length || 0;
 
-            console.log('[Naki Tracker] Snapshot before:', actionType,
+            console.log('[Naki 追蹤] 快照前:', actionType,
                 'hand:', this._actionTracker.lastHandCount,
                 'oplist:', this._actionTracker.lastOplistLength);
         },
@@ -191,11 +191,11 @@
 
                     if (verified) {
                         clearInterval(checker);
-                        console.log('[Naki Tracker] Action verified:', actionType, reason, 'in', elapsed, 'ms');
+                        console.log('[Naki 追蹤] 動作已驗證:', actionType, reason, 'in', elapsed, 'ms');
                         resolve({ success: true, verified: true, reason: reason, elapsed: elapsed });
                     } else if (elapsed >= timeout) {
                         clearInterval(checker);
-                        console.warn('[Naki Tracker] Action verification timeout:', actionType);
+                        console.warn('[Naki 追蹤] 動作驗證超時:', actionType);
                         resolve({ success: false, verified: false, reason: 'timeout', elapsed: elapsed });
                     }
                 }, checkInterval);
@@ -365,7 +365,7 @@
                 const dm = NakiCoordinator.dm;
                 if (dm && typeof dm.setAutoHule === 'function') {
                     dm.setAutoHule(enabled);
-                    console.log('[Naki Coordinator] Auto hule:', enabled);
+                    console.log('[Naki Coordinator] 自動和牌:', enabled);
                     return true;
                 }
                 return false;
@@ -378,7 +378,7 @@
                 const dm = NakiCoordinator.dm;
                 if (dm && typeof dm.setAutoNoFulu === 'function') {
                     dm.setAutoNoFulu(enabled);
-                    console.log('[Naki Coordinator] Auto no-fulu:', enabled);
+                    console.log('[Naki Coordinator] 自動不副露:', enabled);
                     return true;
                 }
                 return false;
@@ -391,7 +391,7 @@
                 const dm = NakiCoordinator.dm;
                 if (dm && typeof dm.setAutoMoQie === 'function') {
                     dm.setAutoMoQie(enabled);
-                    console.log('[Naki Coordinator] Auto moqie:', enabled);
+                    console.log('[Naki Coordinator] 自動摸切:', enabled);
                     return true;
                 }
                 return false;
@@ -404,7 +404,7 @@
                 const dm = NakiCoordinator.dm;
                 if (dm && typeof dm.setAutoLiPai === 'function') {
                     dm.setAutoLiPai(enabled);
-                    console.log('[Naki Coordinator] Auto liqi:', enabled);
+                    console.log('[Naki Coordinator] 自動立直:', enabled);
                     return true;
                 }
                 return false;
@@ -418,7 +418,7 @@
                 this.setNoFulu(true);
                 this.setMoqie(true);
                 this.setLiqi(true);
-                console.log('[Naki Coordinator] All auto settings enabled');
+                console.log('[Naki Coordinator] 所有自動設定已啟用');
             },
 
             /**
@@ -429,7 +429,7 @@
                 this.setNoFulu(false);
                 this.setMoqie(false);
                 this.setLiqi(false);
-                console.log('[Naki Coordinator] All auto settings disabled');
+                console.log('[Naki Coordinator] 所有自動設定已停用');
             }
         },
 
@@ -454,12 +454,12 @@
             discard: function(tileIndex, options = {}) {
                 const mr = NakiCoordinator.mr;
                 if (!mr || !mr.hand) {
-                    console.error('[Naki Action] mainrole not available');
+                    console.error('[Naki 動作] mainrole 不可用');
                     return { success: false, error: 'mainrole not available' };
                 }
 
                 if (!NakiCoordinator.state.canExecuteAction()) {
-                    console.error('[Naki Action] Cannot execute action now');
+                    console.error('[Naki 動作] 目前無法執行動作');
                     return { success: false, error: 'cannot execute action' };
                 }
 
@@ -467,7 +467,7 @@
                 const tile = mr.hand[actualIndex];
 
                 if (!tile) {
-                    console.error('[Naki Action] Tile not found:', actualIndex);
+                    console.error('[Naki 動作] 找不到牌:', actualIndex);
                     return { success: false, error: 'tile not found' };
                 }
 
@@ -477,7 +477,7 @@
                 try {
                     mr.setChoosePai(tile, true);
                     mr.DoDiscardTile();
-                    console.log('[Naki Action] Discard tile:', actualIndex);
+                    console.log('[Naki 動作] 打牌:', actualIndex);
 
                     const result = { success: true, tileIndex: actualIndex };
 
@@ -488,7 +488,7 @@
 
                     return result;
                 } catch (e) {
-                    console.error('[Naki Action] Discard error:', e);
+                    console.error('[Naki 動作] 打牌錯誤:', e);
                     return { success: false, error: e.message };
                 }
             },
@@ -507,16 +507,16 @@
                         // 200ms 後關閉
                         setTimeout(() => {
                             dm.setAutoNoFulu(false);
-                            console.log('[Naki Action] Auto no-fulu disabled');
+                            console.log('[Naki 動作] 自動不副露已停用');
                         }, 200);
-                        console.log('[Naki Action] Pass via builtin auto-nofulu');
+                        console.log('[Naki 動作] 透過內建自動不副露跳過');
                         return { success: true, method: 'builtin' };
                     }
                 }
 
                 const net = NakiCoordinator.net;
                 if (!net) {
-                    console.error('[Naki Action] NetAgent not available');
+                    console.error('[Naki 動作] NetAgent 不可用');
                     return { success: false, error: 'NetAgent not available' };
                 }
 
@@ -528,7 +528,7 @@
                         cancel_operation: true,
                         timeuse: 1
                     });
-                    console.log('[Naki Action] Pass sent');
+                    console.log('[Naki 動作] 跳過已發送');
 
                     const result = { success: true, method: 'network' };
 
@@ -538,7 +538,7 @@
 
                     return result;
                 } catch (e) {
-                    console.error('[Naki Action] Pass error:', e);
+                    console.error('[Naki 動作] 跳過錯誤:', e);
                     return { success: false, error: e.message };
                 }
             },
@@ -590,13 +590,13 @@
                 if (options.useBuiltin !== false) {  // 預設啟用
                     if (dm && typeof dm.setAutoHule === 'function') {
                         dm.setAutoHule(true);
-                        console.log('[Naki Action] Auto-hule enabled (will auto win)');
+                        console.log('[Naki 動作] 自動和牌已啟用 (將自動和牌)');
 
                         // 2 秒後關閉自動和，避免影響後續遊戲
                         setTimeout(() => {
                             if (dm && typeof dm.setAutoHule === 'function') {
                                 dm.setAutoHule(false);
-                                console.log('[Naki Action] Auto-hule disabled');
+                                console.log('[Naki 動作] 自動和牌已停用');
                             }
                         }, 2000);
 
@@ -627,7 +627,7 @@
                         type: horaOp.type,
                         timeuse: 1
                     });
-                    console.log('[Naki Action] Hora sent:', horaOp.type === 8 ? 'tsumo' : 'ron');
+                    console.log('[Naki 動作] 和牌已發送:', horaOp.type === 8 ? 'tsumo' : 'ron');
 
                     const result = { success: true, method: 'network', type: horaOp.type };
 
@@ -683,7 +683,7 @@
                         moqie: isMoqie,
                         timeuse: 1
                     });
-                    console.log('[Naki Action] Riichi sent:', tile);
+                    console.log('[Naki 動作] 立直已發送:', tile);
 
                     const result = { success: true, tile: tile };
 
@@ -737,7 +737,7 @@
                         index: combIdx,
                         timeuse: 1
                     });
-                    console.log('[Naki Action] Naki sent:', opType, 'combIdx:', combIdx);
+                    console.log('[Naki 動作] 副露已發送:', opType, 'combIdx:', combIdx);
 
                     const result = { success: true, opType: opType, combIdx: combIdx };
 
@@ -757,7 +757,7 @@
              * @param {Object} params - 參數，可包含 verify, verifyTimeout, useBuiltin 等選項
              */
             execute: function(actionName, params = {}) {
-                console.log('[Naki Action] Execute:', actionName, params);
+                console.log('[Naki 動作] 執行:', actionName, params);
 
                 const options = {
                     verify: params.verify || false,
@@ -842,12 +842,12 @@
                         match_mode: matchMode
                     }, function(err, res) {
                         if (err) {
-                            console.error('[Naki Lobby] Match error:', err);
+                            console.error('[Naki 大廳] 配對錯誤:', err);
                         } else {
-                            console.log('[Naki Lobby] Match started:', res);
+                            console.log('[Naki 大廳] 配對已開始:', res);
                         }
                     });
-                    console.log('[Naki Lobby] Match request sent, mode:', matchMode);
+                    console.log('[Naki 大廳] 配對請求已發送, 模式:', matchMode);
                     return { success: true, matchMode: matchMode };
                 } catch (e) {
                     return { success: false, error: e.message };
@@ -866,9 +866,9 @@
                 try {
                     net.sendReq2Lobby('Lobby', 'cancelMatch', {}, function(err, res) {
                         if (err) {
-                            console.error('[Naki Lobby] Cancel error:', err);
+                            console.error('[Naki 大廳] 取消錯誤:', err);
                         } else {
-                            console.log('[Naki Lobby] Match cancelled:', res);
+                            console.log('[Naki 大廳] 配對已取消:', res);
                         }
                     });
                     return { success: true };
@@ -910,7 +910,7 @@
                 const gm = NakiCoordinator.gm;
                 if (gm && typeof gm.clientHeatBeat === 'function') {
                     gm.clientHeatBeat();
-                    console.log('[Naki Heartbeat] Sent');
+                    console.log('[Naki 心跳] 已發送');
                     return { success: true };
                 }
                 return { success: false, error: 'GameMgr not available' };
@@ -1111,7 +1111,7 @@
                 const dm = NakiCoordinator.dm;
                 if (dm && typeof dm.trySyncGame === 'function') {
                     dm.trySyncGame();
-                    console.log('[Naki Sync] trySyncGame called');
+                    console.log('[Naki 同步] trySyncGame 已呼叫');
                     return { success: true };
                 }
                 return { success: false, error: 'trySyncGame not available' };
@@ -1124,7 +1124,7 @@
                 const dm = NakiCoordinator.dm;
                 if (dm && typeof dm.Reset === 'function') {
                     dm.Reset();
-                    console.log('[Naki Sync] Reset called');
+                    console.log('[Naki 同步] 重置已呼叫');
                     return { success: true };
                 }
                 return { success: false, error: 'Reset not available' };
@@ -1154,7 +1154,7 @@
                     }, i * 100);
                 }
 
-                console.log('[Naki Emoji] Sent:', emoId, 'x', sendCount);
+                console.log('[Naki 表情] 已發送:', emoId, 'x', sendCount);
                 return { success: true, emoId: emoId, count: sendCount };
             },
 
@@ -1365,8 +1365,8 @@
     // ========================================
     window.naki = window.NakiCoordinator;
 
-    console.log('[Naki Coordinator] v' + window.NakiCoordinator.version + ' loaded');
-    console.log('[Naki Coordinator] Use NakiCoordinator.debug.getDiagnostics() for status');
-    console.log('[Naki Coordinator] Use NakiCoordinator.debug.listMethods() for available methods');
+    console.log('[Naki Coordinator] v' + window.NakiCoordinator.version + ' 已載入');
+    console.log('[Naki Coordinator] 使用 NakiCoordinator.debug.getDiagnostics() 查看狀態');
+    console.log('[Naki Coordinator] 使用 NakiCoordinator.debug.listMethods() 查看可用方法');
 
 })();

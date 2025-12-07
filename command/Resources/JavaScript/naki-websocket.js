@@ -7,7 +7,7 @@
 
     // 避免重複注入
     if (window.__nakiWebSocketLoaded) {
-        console.log('[Naki] WebSocket module already loaded');
+        console.log('[Naki] WebSocket 模組已載入，跳過重複載入');
         return;
     }
     window.__nakiWebSocketLoaded = true;
@@ -52,7 +52,7 @@
         const wsId = ++wsIdCounter;
         const isMajsoul = isMajsoulWebSocket(url);
 
-        console.log('[Naki WS] New connection:', wsId, url, isMajsoul ? '(Majsoul)' : '');
+        console.log('[Naki WS] 新連線:', wsId, url, isMajsoul ? '(雀魂)' : '');
 
         // 記錄連接信息
         wsConnections.set(ws, {
@@ -76,7 +76,7 @@
 
         // 監聽打開
         ws.addEventListener('open', function() {
-            console.log('[Naki WS] Opened:', wsId);
+            console.log('[Naki WS] 已開啟:', wsId);
             // 發送兩種格式確保兼容
             sendToSwift('websocket_open', { id: wsId, socketId: wsId, url: url });
             sendToSwift('websocket_connected', { socketId: wsId, url: url });
@@ -84,7 +84,7 @@
 
         // 監聽關閉
         ws.addEventListener('close', function(event) {
-            console.log('[Naki WS] Closed:', wsId, event.code, event.reason);
+            console.log('[Naki WS] 已關閉:', wsId, event.code, event.reason);
             sendToSwift('websocket_close', {
                 socketId: wsId,
                 id: wsId,
@@ -96,7 +96,7 @@
 
         // 監聽錯誤
         ws.addEventListener('error', function(event) {
-            console.error('[Naki WS] Error:', wsId, event);
+            console.error('[Naki WS] 錯誤:', wsId, event);
             sendToSwift('websocket_error', {
                 socketId: wsId,
                 id: wsId,
@@ -172,7 +172,7 @@
                 });
             }
         } catch (e) {
-            console.error('[Naki WS] handleMessage error:', e);
+            console.error('[Naki WS] 處理訊息錯誤:', e);
         }
     }
 
@@ -212,7 +212,7 @@
             sendToSwift('console_log', { level: 'error', args: formatArgs(args) });
         };
 
-        console.log('[Naki] Console interception enabled');
+        console.log('[Naki] 主控台攔截已啟用');
     }
 
     /**
@@ -244,7 +244,7 @@
         console.warn = originalConsole.warn;
         console.error = originalConsole.error;
 
-        console.log('[Naki] Console interception disabled');
+        console.log('[Naki] 主控台攔截已停用');
     }
 
     // ========================================
@@ -300,16 +300,16 @@
 
             // 關閉連接
             for (const { ws, info } of toClose) {
-                console.log('[Naki WS] Force closing:', info.id, info.url);
+                console.log('[Naki WS] 強制關閉:', info.id, info.url);
                 try {
                     ws.close(1000, 'Naki force reconnect');
                     closedCount++;
                 } catch (e) {
-                    console.error('[Naki WS] Error closing:', info.id, e);
+                    console.error('[Naki WS] 關閉錯誤:', info.id, e);
                 }
             }
 
-            console.log('[Naki WS] Force reconnect: closed', closedCount, 'connections');
+            console.log('[Naki WS] 強制重連: 已關閉', closedCount, '個連線');
             sendToSwift('force_reconnect', { closedCount: closedCount });
             return closedCount;
         },
@@ -331,5 +331,5 @@
         return window.__nakiWebSocket.getConnections();
     };
 
-    console.log('[Naki] WebSocket module loaded');
+    console.log('[Naki] WebSocket 模組已載入');
 })();

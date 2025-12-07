@@ -43,25 +43,25 @@
          * 顯示點擊指示器
          */
         showClickIndicator: function(x, y, label) {
-            console.log('[Naki] showClickIndicator called:', x, y, label);
+            console.log('[Naki] 顯示點擊指示器:', x, y, label);
 
             if (!this.debugMode) {
-                console.log('[Naki] debugMode is off, skipping indicator');
+                console.log('[Naki] 除錯模式已關閉，跳過指示器');
                 return;
             }
 
             const canvas = this.getCanvas();
             if (!canvas) {
-                console.log('[Naki] No canvas found for indicator');
+                console.log('[Naki] 找不到畫布，無法顯示指示器');
                 return;
             }
 
             const rect = canvas.getBoundingClientRect();
-            console.log('[Naki] Canvas rect:', rect.left, rect.top, rect.width, rect.height);
+            console.log('[Naki] 畫布範圍:', rect.left, rect.top, rect.width, rect.height);
 
             const absoluteX = rect.left + x;
             const absoluteY = rect.top + y;
-            console.log('[Naki] Creating indicator at absolute position:', absoluteX, absoluteY);
+            console.log('[Naki] 建立指示器於絕對位置:', absoluteX, absoluteY);
 
             // 創建點擊指示器容器
             const indicator = document.createElement('div');
@@ -138,7 +138,7 @@
             indicator.appendChild(lineV);
             indicator.appendChild(labelDiv);
             document.body.appendChild(indicator);
-            console.log('[Naki] Indicator added to DOM:', indicator, 'at', absoluteX, absoluteY);
+            console.log('[Naki] 指示器已加入 DOM:', indicator, '位於', absoluteX, absoluteY);
 
             // 動畫效果：放大後縮小消失
             indicator.animate([
@@ -183,7 +183,7 @@
         click: function(x, y, label) {
             const canvas = this.getCanvas();
             if (!canvas) {
-                console.error('[Naki] Canvas not found');
+                console.error('[Naki] 找不到畫布');
                 sendToSwift('autoplay_error', { error: 'Canvas not found' });
                 return false;
             }
@@ -191,7 +191,7 @@
             // 顯示點擊指示器
             this.showClickIndicator(x, y, label);
 
-            console.log('[Naki] Clicking at:', x, y);
+            console.log('[Naki] 點擊位置:', x, y);
             this.simulateMouseEvent(canvas, 'mousedown', x, y);
             setTimeout(() => {
                 this.simulateMouseEvent(canvas, 'mouseup', x, y);
@@ -247,7 +247,7 @@
             }
             y = baseY * scaleY;
 
-            console.log('[Naki] Clicking tile index:', tileIndex, 'handCount:', actualHandCount, 'isTsumo:', isTsumo, 'at', x, y);
+            console.log('[Naki] 點擊手牌索引:', tileIndex, '手牌數:', actualHandCount, '是否摸牌:', isTsumo, '位置', x, y);
             sendToSwift('autoplay_tile_click', { index: tileIndex, handCount: actualHandCount, isTsumo: isTsumo, x: x, y: y });
             return this.click(x, y, label);
         },
@@ -291,7 +291,7 @@
 
             const pos = buttonPositions[action];
             if (!pos) {
-                console.error('[Naki] Unknown action:', action);
+                console.error('[Naki] 未知動作:', action);
                 sendToSwift('autoplay_error', { error: 'Unknown action: ' + action });
                 return false;
             }
@@ -299,7 +299,7 @@
             const x = (baseX + pos.tileIndex * cal.tileSpacing) * scaleX;
             const y = buttonY * scaleY;
 
-            console.log('[Naki] Clicking button:', action, 'at', x, y, '(above tile #' + (pos.tileIndex + 1) + ')');
+            console.log('[Naki] 點擊按鈕:', action, '位置', x, y, '(手牌 #' + (pos.tileIndex + 1) + ' 上方)');
             sendToSwift('autoplay_button_click', { action: action, x: x, y: y });
             return this.click(x, y, pos.label);
         },
@@ -312,7 +312,7 @@
          * 執行複合動作 (例如：立直 + 打牌)
          */
         executeAction: function(actionType, params) {
-            console.log('[Naki] Executing action:', actionType, params);
+            console.log('[Naki] 執行動作:', actionType, params);
 
             switch (actionType) {
                 case 'discard':
@@ -352,7 +352,7 @@
                     return this.clickButton(actionType);
 
                 default:
-                    console.error('[Naki] Unknown action type:', actionType);
+                    console.error('[Naki] 未知動作類型:', actionType);
                     return false;
             }
         }
@@ -385,15 +385,15 @@
         const autoPlay = window.__nakiAutoPlay;
         const canvas = autoPlay.getCanvas();
         if (!canvas) {
-            console.error('[Naki] Canvas not found!');
-            alert('Canvas not found!');
+            console.error('[Naki] 找不到畫布!');
+            alert('找不到畫布!');
             return;
         }
 
         const rect = canvas.getBoundingClientRect();
-        console.log('[Naki] Canvas internal size:', canvas.width, 'x', canvas.height);
-        console.log('[Naki] Canvas rendered size:', rect.width, 'x', rect.height);
-        console.log('[Naki] Calibration:', JSON.stringify(autoPlay.calibration));
+        console.log('[Naki] 畫布內部大小:', canvas.width, 'x', canvas.height);
+        console.log('[Naki] 畫布渲染大小:', rect.width, 'x', rect.height);
+        console.log('[Naki] 校準參數:', JSON.stringify(autoPlay.calibration));
 
         const cal = autoPlay.calibration;
         const base = autoPlay.baseCoords;
@@ -489,13 +489,13 @@
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 if (!mgr?.effect_recommend?._childs?.[0]) {
-                    console.log('[Naki Highlight] Native effect_recommend not available');
+                    console.log('[Naki 高亮] 原生 effect_recommend 不可用');
                     return false;
                 }
 
                 const hand = mgr.mainrole?.hand;
                 if (!hand || !hand[tileIndex]) {
-                    console.log('[Naki Highlight] Tile not found at index:', tileIndex);
+                    console.log('[Naki 高亮] 找不到索引處的牌:', tileIndex);
                     return false;
                 }
 
@@ -511,10 +511,10 @@
                 effect.active = true;
                 this.nativeEffectActive = true;
 
-                console.log('[Naki Highlight] Native effect moved to tile', tileIndex, 'x:', targetX);
+                console.log('[Naki 高亮] 原生效果已移至牌', tileIndex, 'x:', targetX);
                 return true;
             } catch (e) {
-                console.error('[Naki Highlight] moveNativeEffect failed:', e);
+                console.error('[Naki 高亮] 移動原生效果失敗:', e);
                 return false;
             }
         },
@@ -528,10 +528,10 @@
                 if (effect) {
                     effect.active = false;
                     this.nativeEffectActive = false;
-                    console.log('[Naki Highlight] Native effect hidden');
+                    console.log('[Naki 高亮] 原生效果已隱藏');
                 }
             } catch (e) {
-                console.error('[Naki Highlight] hideNativeEffect failed:', e);
+                console.error('[Naki 高亮] 隱藏原生效果失敗:', e);
             }
         },
 
@@ -544,13 +544,13 @@
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 if (!mgr?.effect_recommend?._childs?.[0]) {
-                    console.log('[Naki Highlight] Native effect_recommend not available');
+                    console.log('[Naki 高亮] 原生 effect_recommend 不可用');
                     return false;
                 }
 
                 const ui = window.uiscript?.UI_ChiPengHu?.Inst;
                 if (!ui?.container_btns) {
-                    console.log('[Naki Highlight] UI_ChiPengHu not available');
+                    console.log('[Naki 高亮] UI_ChiPengHu 不可用');
                     return false;
                 }
 
@@ -572,7 +572,7 @@
 
                 const targetBtnName = btnNameMap[actionType];
                 if (!targetBtnName) {
-                    console.log('[Naki Highlight] Unknown action type:', actionType);
+                    console.log('[Naki 高亮] 未知動作類型:', actionType);
                     return false;
                 }
 
@@ -603,7 +603,7 @@
                 }
 
                 if (btnIndex === -1) {
-                    console.log('[Naki Highlight] Target button not visible:', targetBtnName);
+                    console.log('[Naki 高亮] 目標按鈕不可見:', targetBtnName);
                     return false;
                 }
 
@@ -618,12 +618,12 @@
                 effect.active = true;
                 this.nativeEffectActive = true;
 
-                console.log('[Naki Highlight] Moved to button:', actionType,
+                console.log('[Naki 高亮] 已移至按鈕:', actionType,
                     'btnName:', targetBtnName, 'index:', btnIndex,
                     'pos:', posX, posY, posZ);
                 return true;
             } catch (e) {
-                console.error('[Naki Highlight] moveNativeEffectToButton failed:', e);
+                console.error('[Naki 高亮] 移動原生效果至按鈕失敗:', e);
                 return false;
             }
         },
@@ -775,7 +775,7 @@
                 // 獲取牌物件
                 const tile = hand[tileIndex];
                 if (!tile) {
-                    console.log('[Naki Highlight] Tile not found at index:', tileIndex);
+                    console.log('[Naki 高亮] 找不到索引處的牌:', tileIndex);
                     continue;
                 }
 
@@ -875,9 +875,9 @@
             if (typeof newSettings.showNativeEffect === 'boolean') {
                 this.settings.showNativeEffect = newSettings.showNativeEffect;
             }
-            console.log('[Naki Highlight] Settings updated:', this.settings);
+            console.log('[Naki 高亮] 設定已更新:', this.settings);
         }
     };
 
-    console.log('[Naki] AutoPlay module loaded');
+    console.log('[Naki] 自動打牌模組已載入');
 })();

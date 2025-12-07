@@ -107,11 +107,11 @@
                 gm.Inst.clientHeatBeat();
                 antiIdleConfig.lastHeartbeat = now;
                 antiIdleConfig.heartbeatCount++;
-                console.log('[Naki] Anti-idle: heartbeat refreshed (#' + antiIdleConfig.heartbeatCount + ')');
+                console.log('[Naki] 防閒置: 心跳已刷新 (#' + antiIdleConfig.heartbeatCount + ')');
                 return true;
             }
         } catch (e) {
-            console.error('[Naki] Anti-idle heartbeat failed:', e);
+            console.error('[Naki] 防閒置心跳失敗:', e);
         }
         return false;
     }
@@ -121,7 +121,7 @@
      */
     function enableAntiIdle() {
         antiIdleConfig.enabled = true;
-        console.log('[Naki] Anti-idle enabled');
+        console.log('[Naki] 防閒置已啟用');
         return true;
     }
 
@@ -130,7 +130,7 @@
      */
     function disableAntiIdle() {
         antiIdleConfig.enabled = false;
-        console.log('[Naki] Anti-idle disabled');
+        console.log('[Naki] 防閒置已停用');
         return true;
     }
 
@@ -173,7 +173,7 @@
         isEnabled: function() { return antiIdleConfig.enabled; }
     };
 
-    console.log('[Naki] Anti-idle module ready (passive mode, enabled by default)');
+    console.log('[Naki] 防閒置模組已載入 (被動模式, 預設啟用)');
 
     // ========================================
     // 自動回應表情 (Emoji Auto-Reply)
@@ -394,5 +394,5 @@
     window.__nakiBlobToBase64 = blobToBase64;
     window.__nakiSendToSwift = sendToSwift;
 
-    console.log('[Naki] Core module loaded');
+    console.log('[Naki] 核心模組已載入');
 })();
