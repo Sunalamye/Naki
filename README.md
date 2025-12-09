@@ -255,3 +255,7 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 <p align="center">
   <sub>Made with ❤️ by a Mahjong lover who got tired of losing</sub>
 </p>
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Sunalamye/Naki&type=Date)](https://star-history.com/#Sunalamye/Naki&Date)
