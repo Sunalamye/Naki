@@ -6,6 +6,12 @@ allowed-tools: Read, Glob, Grep, Write, Edit, Bash
 
 # Naki MCP Tool Writer
 
+Base directory: {baseDir}
+
+<IMPORTANT>
+**MCP 調用規則**: 測試新建的 MCP 工具時，使用 `/naki-mcp-proxy` skill 調用。
+</IMPORTANT>
+
 This skill helps create and modify MCP (Model Context Protocol) tools for the Naki project using the Protocol-based architecture.
 
 ## Architecture Overview
@@ -25,15 +31,19 @@ command/Services/MCP/
     └── UITools.swift      - UI 操作工具 (execute_js, detect, explore, test_indicators, click, calibrate, ui_names_*)
 ```
 
-## Current Registered Tools (26 total)
+## Current Registered Tools (47 total)
 
-| Category | Tools |
-|----------|-------|
-| System | `get_status`, `get_help`, `get_logs`, `clear_logs` |
-| Bot | `bot_status`, `bot_trigger`, `bot_ops`, `bot_deep`, `bot_chi`, `bot_pon`, `bot_sync` |
-| Game | `game_state`, `game_hand`, `game_ops`, `game_discard`, `game_action` |
-| UI | `execute_js`, `detect`, `explore`, `test_indicators`, `click`, `calibrate` |
-| UI Names | `ui_names_status`, `ui_names_hide`, `ui_names_show`, `ui_names_toggle` |
+| Category | Count | Examples |
+|----------|-------|----------|
+| System | 4 | `get_status`, `get_help`, `get_logs`, `clear_logs` |
+| Bot | 7 | `bot_status`, `bot_trigger`, `bot_ops`, `bot_deep`, `bot_chi`, `bot_pon`, `bot_sync` |
+| Game | 6 | `game_state`, `game_hand`, `game_ops`, `game_discard`, `game_action`, `game_emoji` |
+| Highlight | 6 | `highlight_tile`, `highlight_status`, `show_recommendations`, `hide_highlight` |
+| Emoji | 4 | `game_emoji`, `game_emoji_list`, `game_emoji_random` |
+| Lobby | 9 | `lobby_status`, `lobby_navigate`, `lobby_start_match`, `lobby_cancel_match` |
+| UI | 11 | `execute_js`, `detect`, `explore`, `click`, `calibrate`, `ui_names_*` |
+
+See `/naki-mcp-proxy` for complete tool catalog.
 
 ## How to Create a New MCP Tool
 

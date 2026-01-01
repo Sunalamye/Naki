@@ -1,8 +1,12 @@
 ---
 name: webui-tester
 description: Test, debug, and modify Majsoul WebUI (Laya engine) within the Naki app. Use when the user asks to adjust "the screen" or "UI" - clarify whether they mean Naki's SwiftUI app or Majsoul's WebUI. This skill handles WebUI JavaScript execution, tile manipulation, and visual debugging.
-allowed-tools: Read, Glob, Grep, mcp__naki__execute_js, mcp__naki__bot_status, mcp__naki__game_state, mcp__naki__game_hand
+allowed-tools: Read, Glob, Grep, Task
 ---
+
+<IMPORTANT>
+**MCP 調用規則**: 所有 Naki MCP 工具必須透過 `/naki-mcp-proxy` skill 調用，禁止直接調用 `mcp__naki__*` 工具。
+</IMPORTANT>
 
 # WebUI Tester Skill
 
