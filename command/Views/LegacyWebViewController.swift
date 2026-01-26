@@ -365,7 +365,7 @@ struct AdaptiveNakiWebView: View {
     @Environment(\.webViewModel) private var viewModel
 
     var body: some View {
-        if false, #available(iOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, *) {
             // 使用新版 WebPage API
             NakiWebView()
         } else {

@@ -97,9 +97,8 @@ extension WebViewModelProtocol {
 @MainActor
 enum WebViewModelFactory {
     static func create() -> any WebViewModelProtocol {
-        // 暫時強制使用 Legacy 版本，因為新版 WebPage API 尚未完全測試
-        // 與 AdaptiveNakiWebView 的 `if false` 邏輯保持一致
-        if false, #available(macOS 26.0, iOS 26.0, *) {
+        // 與 AdaptiveNakiWebView 的版本判斷保持一致
+        if #available(macOS 26.0, iOS 26.0, *) {
             return WebViewModel()
         } else {
             return LegacyWebViewModel()
