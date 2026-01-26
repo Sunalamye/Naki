@@ -6,29 +6,29 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Version-2.3.0-green" alt="Version">
-  <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
-  <img src="https://img.shields.io/badge/iOS-26.0+-blue" alt="iOS">
+  <img src="https://img.shields.io/badge/macOS-14.0+-blue" alt="macOS">
+  <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-Required-red" alt="Architecture">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License">
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sunalamye/Naki/releases/latest"><strong>📥 立即下載</strong></a> ·
+  <a href="https://github.com/Sunalamye/Naki/releases/latest"><strong>📥 下載</strong></a> ·
   <a href="#-快速開始"><strong>🚀 快速開始</strong></a> ·
-  <a href="#-功能展示"><strong>✨ 功能展示</strong></a>
+  <a href="#-功能展示"><strong>✨ 功能</strong></a>
 </p>
 
 ---
 
 ## ⚠️ 使用前必讀
 
-> **本專案僅供學習與研究用途！**
+> **本專案僅供學習與研究用途**
 >
-> - 🚫 **請勿使用主帳號** — 強烈建議使用小號或測試帳號
-> - ⚖️ 使用本工具可能違反雀魂服務條款，可能導致帳號被封禁
+> - 🚫 **請勿使用主帳號** — 建議使用小號
+> - ⚖️ 使用本工具可能違反雀魂服務條款，帳號有被封禁的風險
 > - 🙅 作者不對任何因使用本工具造成的損失負責
 >
-> **繼續使用即表示您已理解並接受以上風險。**
+> **繼續使用即表示您已理解並接受風險。**
 
 ---
 
@@ -38,9 +38,9 @@
 
 ## 這是什麼？
 
-Naki 是一款**原生 Apple 應用**，內建雀魂遊戲和 AI 助手。
+Naki 是一款 **原生 Apple 應用**，內建雀魂遊戲和 AI 助手。
 
-**不需要** Python、Docker、瀏覽器外掛，開箱即用。
+不需要 Python、Docker、瀏覽器外掛，開箱即用。
 
 ## ✨ 功能展示
 
@@ -50,7 +50,7 @@ Naki 是一款**原生 Apple 應用**，內建雀魂遊戲和 AI 助手。
 
 ### 🎯 即時 AI 推薦
 
-每張牌都有 AI 評分，最佳選擇會直接在遊戲中高亮顯示。
+每張牌都有 AI 評分，最佳選擇直接在遊戲中高亮。
 
 - 顏色越亮 = 越推薦
 - 側邊欄顯示完整分析
@@ -73,7 +73,7 @@ Naki 是一款**原生 Apple 應用**，內建雀魂遊戲和 AI 助手。
 
 ### 📱 跨平台支援
 
-macOS 和 iOS 都能用！
+macOS 和 iOS 都能用。
 
 - macOS：完整功能，含自動打牌
 - iOS/iPhone：查看 AI 推薦
@@ -83,7 +83,7 @@ macOS 和 iOS 都能用！
 </tr>
 </table>
 
-### 🤖 三種模式任你選
+### 🤖 三種模式
 
 | 模式 | 說明 |
 |:---:|-----|
@@ -91,7 +91,7 @@ macOS 和 iOS 都能用！
 | **推薦** | 顯示 AI 推薦，你來決定怎麼打 |
 | **自動** | AI 全權代理，躺平看戲 |
 
-### 🎮 更多功能
+### 🎮 其他功能
 
 - **手牌顏色高亮** — AI 推薦的牌直接在遊戲畫面中標色
 - **動作按鈕高亮** — 吃/碰/槓/立直按鈕也會高亮提示
@@ -105,11 +105,17 @@ macOS 和 iOS 都能用！
 
 | 平台 | 最低版本 | 架構 |
 |-----|---------|-----|
-| **macOS** | 26.0+ (Tahoe) | Apple Silicon (M1/M2/M3/M4) |
-| **iOS** | 26.0+ | A12+ / Apple Silicon |
+| **macOS** | 14.0+ (Sonoma) | Apple Silicon (M1/M2/M3/M4) |
+| **iOS** | 17.0+ | A12+ / Apple Silicon |
 
 > **為什麼不支援 Intel Mac？**
 > AI 模型使用 Apple Neural Engine 加速運算，這是 Apple Silicon 獨有的硬體。
+
+### ⚠️ 已知問題
+
+> **macOS 14/15 向下相容版本目前有個 bug**：AI Bot 可能會在某些情況下無法正常運作，不會顯示 AI 推薦提示。原因還在調查中。
+>
+> 如果遇到這個問題，可以嘗試重新載入頁面。
 
 ### 下載安裝
 
@@ -210,9 +216,9 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 
 ## 🙏 致謝
 
-- [Mortal](https://github.com/Equim-chan/Mortal) — 強大的麻將 AI 引擎
+- [Mortal](https://github.com/Equim-chan/Mortal) — 麻將 AI 引擎
 - [Akagi](https://github.com/shinkuan/Akagi) — Python 版參考實現
-- 雀魂 (Majsoul) — 優秀的麻將遊戲平台
+- 雀魂 (Majsoul) — 麻將遊戲平台
 
 ## 📄 許可證
 
@@ -224,7 +230,7 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 
 ### 教育與學習目的
 
-本專案的開發目的是為了：
+本專案的開發目的：
 - 學習 Swift/SwiftUI 原生 macOS/iOS 應用開發
 - 研究 Core ML 機器學習模型整合
 - 理解 WebSocket 通訊協議與攔截技術
@@ -232,15 +238,15 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 
 ### 使用風險
 
-1. **帳號風險**：使用本工具可能違反雀魂 (Majsoul) 的服務條款，可能導致您的遊戲帳號被暫停或永久封禁。**強烈建議使用小號或測試帳號**。
+1. **帳號風險**：使用本工具可能違反雀魂 (Majsoul) 的服務條款，可能導致遊戲帳號被暫停或封禁。**建議使用小號或測試帳號**。
 
-2. **法律風險**：在某些地區，使用此類工具可能涉及法律問題。請確保您了解並遵守當地法律法規。
+2. **法律風險**：在某些地區，使用此類工具可能涉及法律問題。請確保了解並遵守當地法律法規。
 
-3. **無擔保**：本軟體按「現狀」提供，不提供任何明示或暗示的擔保，包括但不限於對適銷性、特定用途適用性和非侵權性的擔保。
+3. **無擔保**：本軟體按「現狀」提供，不提供任何明示或暗示的擔保。
 
 ### 責任限制
 
-在任何情況下，作者或版權持有人均不對任何索賠、損害或其他責任負責，無論是在合約訴訟、侵權行為或其他方面，由軟體或軟體的使用或其他交易引起或與之相關。
+在任何情況下，作者或版權持有人均不對任何索賠、損害或其他責任負責，無論是在合約訴訟、侵權行為或其他方面。
 
 ### 第三方內容
 
