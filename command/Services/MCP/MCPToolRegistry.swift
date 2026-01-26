@@ -6,6 +6,8 @@
 //  MCP 工具註冊表
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -211,3 +213,5 @@ extension MCPToolRegistry {
         register(HideHighlightTool.self)
     }
 }
+
+#endif  // os(macOS)

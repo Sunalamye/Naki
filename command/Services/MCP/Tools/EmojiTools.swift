@@ -6,6 +6,8 @@
 //  表情相關 MCP 工具
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -315,3 +317,5 @@ struct EmojiListenTool: MCPTool {
         return ["result": result ?? NSNull()]
     }
 }
+
+#endif  // os(macOS)

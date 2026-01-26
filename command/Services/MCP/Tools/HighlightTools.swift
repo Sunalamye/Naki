@@ -6,6 +6,8 @@
 //  手牌高亮 MCP 工具
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -288,3 +290,5 @@ struct HideHighlightTool: MCPTool {
         return result ?? ["success": false, "error": "執行失敗"]
     }
 }
+
+#endif  // os(macOS)

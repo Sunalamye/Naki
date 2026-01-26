@@ -20,9 +20,12 @@ import MortalSwift
 import SwiftUI
 import WebKit
 
+/// 新版 WebViewModel，使用 macOS 26.0+ / iOS 26.0+ 的 WebPage API
+/// 舊版系統請使用 LegacyWebViewModel
+@available(macOS 26.0, iOS 26.0, *)
 @Observable
 @MainActor
-class WebViewModel {
+class WebViewModel: WebViewModelProtocol {
   var statusMessage = ""
 
   // 連線狀態
@@ -52,16 +55,18 @@ class WebViewModel {
   private var autoPlayController: AutoPlayController?
 
   // MCP Server
+  #if os(macOS)
   private var debugServer: DebugServer?
+  #endif
   var isDebugServerRunning = false
   var debugServerPort: UInt16 = 8765
 
-  // MARK: - WebPage (macOS 26.0+)
+  // MARK: - WebPage
 
   /// WebPage 實例
   var webPage: WebPage?
 
-  /// Web 協調器（處理 WebSocket 訊息和導覽事件）
+  /// Web 協調器（處理 WebSocket 訊息和導覽事件）- 新版
   private var webCoordinator: NakiWebCoordinator?
 
   /// 導覽決策器
@@ -92,6 +97,43 @@ class WebViewModel {
   private var autoPlayCheckTimer: Timer?
 
   init() {
+    // 初始化 WebPage API
+    initializeModernWebPage()
+
+    // 初始化原生 Bot 控制器
+    nativeBotController = NativeBotController()
+
+    // 初始化自動打牌控制器
+    autoPlayController = AutoPlayController()
+
+    // 設定 AutoPlayService 委託
+    autoPlayService.delegate = self
+    autoPlayService.setJSExecutor { [weak self] script in
+      try await self?.executeJavaScript(script)
+    }
+    autoPlayController?.setJSExecutor { [weak self] script in
+      try await self?.executeJavaScript(script)
+    }
+
+    // 自動啟動 MCP Server
+    #if os(macOS)
+    startDebugServer()
+    #endif
+
+    // 自動設定全自動打牌模式
+    autoPlayController?.setMode(.auto)
+
+    // 啟動定期檢查計時器（每 2 秒檢查一次）
+    startAutoPlayCheckTimer()
+
+    // 監聽導航事件
+    observeNavigations()
+
+    statusMessage = "準備就緒 (全自動模式)"
+  }
+
+  /// 初始化 WebPage API
+  private func initializeModernWebPage() {
     // 初始化協調器和輔助類別
     webCoordinator = NakiWebCoordinator(viewModel: self)
     navigationDecider = NakiNavigationDecider(viewModel: self)
@@ -114,12 +156,6 @@ class WebViewModel {
 
     configuration.userContentController = userContentController
 
-    // 啟用 Web Inspector（僅用於開發除錯）
-    #if DEBUG
-      // WebPage 使用 isInspectable 屬性
-      webPage?.isInspectable = true
-    #endif
-
     // 建立 WebPage
     if let decider = navigationDecider, let presenter = dialogPresenter {
       webPage = WebPage(
@@ -136,32 +172,7 @@ class WebViewModel {
       webPage?.isInspectable = true
     #endif
 
-    // 初始化原生 Bot 控制器
-    nativeBotController = NativeBotController()
-
-    // 初始化自動打牌控制器
-    autoPlayController = AutoPlayController()
-
-    // 設定 AutoPlayService 委託
-    autoPlayService.delegate = self
-    autoPlayService.setWebPage(webPage)
-
-    // 設定 AutoPlayController 的 WebPage
-    autoPlayController?.setWebPage(webPage)
-
-    // 自動啟動 MCP Server
-    startDebugServer()
-
-    // 自動設定全自動打牌模式
-    autoPlayController?.setMode(.auto)
-
-    // 啟動定期檢查計時器（每 2 秒檢查一次）
-    startAutoPlayCheckTimer()
-
-    // 監聽導航事件
-    observeNavigations()
-
-    statusMessage = "準備就緒 (全自動模式)"
+    print("[WebViewModel] 使用新版 WebPage API (macOS 26+ / iOS 26+)")
   }
 
   /// 監聽導航事件
@@ -193,6 +204,18 @@ class WebViewModel {
         statusMessage = "加載失敗: \(error.localizedDescription)"
       }
     }
+  }
+
+  // MARK: - JavaScript Execution
+
+  /// 執行 JavaScript（使用 WebPage.callJavaScript）
+  /// - Parameter script: JavaScript 腳本（函數體格式，需要 return 語句）
+  /// - Returns: JavaScript 執行結果
+  func executeJavaScript(_ script: String) async throws -> Any? {
+    guard let page = webPage else {
+      throw NSError(domain: "Naki", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebPage not available"])
+    }
+    return try await page.callJavaScript(script)
   }
 
   /// 啟動定期檢查計時器
@@ -233,7 +256,7 @@ class WebViewModel {
       do {
         let result = try await page.callJavaScript(checkScript)
         if let hasOp = result as? Bool, hasOp {
-          debugServer?.addLog("⏰ 計時器: 重新觸發自動打牌")
+          debugLog("⏰ 計時器: 重新觸發自動打牌")
           triggerAutoPlayNow(delay: 0.1)
         }
       } catch {
@@ -258,7 +281,7 @@ class WebViewModel {
       do {
         let result = try await page.callJavaScript(checkScript)
         if let effectCount = result as? Int, effectCount == 0 {
-          debugServer?.addLog("⏰ 計時器: 刷新高亮")
+          debugLog("⏰ 計時器: 刷新高亮")
           await showGameHighlightForRecommendations(recommendations, controller: controller)
         }
       } catch {
@@ -578,7 +601,7 @@ class WebViewModel {
     lastTriggerKey = triggerKey
     lastTriggerTime = now
 
-    debugServer?.addLog("自動檢查: \(firstAction.rawValue)-\(tileName) (延遲: \(delay)秒)")
+    debugLog("自動檢查: \(firstAction.rawValue)-\(tileName) (延遲: \(delay)秒)")
     triggerAutoPlayNow(delay: delay)
   }
 
@@ -625,7 +648,7 @@ class WebViewModel {
   func setAutoPlayMode(_ mode: AutoPlayMode) {
     autoPlayController?.setMode(mode)
     bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
-    debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
+    debugLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
 
     // 根據模式處理推薦顯示
     if mode.showRecommendation {
@@ -656,7 +679,7 @@ class WebViewModel {
       default:
         delay = 1.8
       }
-      debugServer?.addLog(
+      debugLog(
         "模式變更時自動觸發: \(firstAction?.rawValue ?? "?") (延遲: \(delay)秒)")
       triggerAutoPlayNow(delay: delay)
     }
@@ -788,7 +811,7 @@ class WebViewModel {
     currentExecutionId = executionId
 
     bridgeLog("[WebViewModel] 觸發: \(actionType.rawValue) - \(tileName) (延遲: \(delay)秒)")
-    debugServer?.addLog("觸發: \(actionType.rawValue) - \(tileName)")
+    debugLog("觸發: \(actionType.rawValue) - \(tileName)")
 
     // 延遲執行避免太快
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -796,7 +819,7 @@ class WebViewModel {
 
       // 檢查是否被更新的觸發取代
       if self.currentExecutionId != executionId {
-        self.debugServer?.addLog("跳過: 已被新觸發取代")
+        self.debugLog("跳過: 已被新觸發取代")
         return
       }
 
@@ -820,7 +843,7 @@ class WebViewModel {
 
     // 檢查是否被新的觸發取代
     if currentExecutionId != executionId {
-      debugServer?.addLog("⏭️ 重試已取消: 被取代 (第 \(attempt) 次)")
+      debugLog("⏭️ 重試已取消: 被取代 (第 \(attempt) 次)")
       return
     }
 
@@ -839,7 +862,7 @@ class WebViewModel {
 
       // 再次檢查是否被取代
       if currentExecutionId != executionId {
-        debugServer?.addLog("⏭️ JS 執行後重試已取消: 被取代")
+        debugLog("⏭️ JS 執行後重試已取消: 被取代")
         return
       }
 
@@ -855,10 +878,10 @@ class WebViewModel {
 
           // 打牌 (discard) 不需要等待 oplist，直接執行
           if actionType == .discard {
-            debugServer?.addLog("打牌: 無 oplist, 直接執行")
+            debugLog("打牌: 無 oplist, 直接執行")
             await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
             try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3s
-            debugServer?.addLog("✅ 打牌已發送")
+            debugLog("✅ 打牌已發送")
             currentExecutionId = nil
             return
           }
@@ -866,7 +889,7 @@ class WebViewModel {
           // 其他動作需要等待 oplist
           if attempt < maxRetryAttempts {
             if attempt == 1 || attempt % 10 == 0 {
-              debugServer?.addLog("等待 oplist \(attempt)/\(maxRetryAttempts) (\(reason))")
+              debugLog("等待 oplist \(attempt)/\(maxRetryAttempts) (\(reason))")
             }
             try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
             await executeAutoPlayActionWithRetry(
@@ -874,9 +897,9 @@ class WebViewModel {
               executionId: executionId)
           } else {
             if actionType == .none {
-              debugServer?.addLog("✅ Pass: \(attempt) 次嘗試後無 oplist, 無機會")
+              debugLog("✅ Pass: \(attempt) 次嘗試後無 oplist, 無機會")
             } else {
-              debugServer?.addLog("❌ \(attempt) 次嘗試後無 oplist, 放棄")
+              debugLog("❌ \(attempt) 次嘗試後無 oplist, 放棄")
             }
             currentExecutionId = nil
           }
@@ -885,7 +908,7 @@ class WebViewModel {
 
         // 有操作，執行動作
         let opInfo = dict["opTypes"] as? [Int] ?? []
-        debugServer?.addLog("第 \(attempt) 次嘗試: ops=\(opInfo)")
+        debugLog("第 \(attempt) 次嘗試: ops=\(opInfo)")
 
         await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
 
@@ -893,7 +916,7 @@ class WebViewModel {
         if actionType == .none {
           let maxPassRetries = 5
           if attempt >= maxPassRetries {
-            debugServer?.addLog("✅ Pass 已發送 (第 \(attempt) 次)")
+            debugLog("✅ Pass 已發送 (第 \(attempt) 次)")
             return
           }
           try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
@@ -910,11 +933,11 @@ class WebViewModel {
           executionId: executionId)
       } else {
         // 無法解析，直接執行一次
-        debugServer?.addLog("第 \(attempt) 次嘗試: 檢查失敗, 仍執行")
+        debugLog("第 \(attempt) 次嘗試: 檢查失敗, 仍執行")
         await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
       }
     } catch {
-      debugServer?.addLog("JS 錯誤: \(error.localizedDescription)")
+      debugLog("JS 錯誤: \(error.localizedDescription)")
     }
   }
 
@@ -926,7 +949,7 @@ class WebViewModel {
 
     // 檢查是否被新的觸發取代
     if currentExecutionId != executionId {
-      debugServer?.addLog("⏭️ 檢查已取消: 被取代")
+      debugLog("⏭️ 檢查已取消: 被取代")
       return
     }
 
@@ -986,7 +1009,7 @@ class WebViewModel {
 
         if success {
           let reason = dict["reason"] as? String ?? "ok"
-          debugServer?.addLog("✅ 動作成功, 第 \(attempt) 次 (\(reason))")
+          debugLog("✅ 動作成功, 第 \(attempt) 次 (\(reason))")
           currentExecutionId = nil
           return
         }
@@ -995,19 +1018,19 @@ class WebViewModel {
         let opInfo = dict["opTypes"] as? [Int] ?? []
 
         if attempt >= maxRetryAttempts {
-          debugServer?.addLog("❌ 已達最大重試次數 (\(attempt)), ops=\(opInfo)")
+          debugLog("❌ 已達最大重試次數 (\(attempt)), ops=\(opInfo)")
           currentExecutionId = nil
           return
         }
 
         // 重試
-        debugServer?.addLog("重試 \(attempt + 1): ops 仍存在 \(opInfo)")
+        debugLog("重試 \(attempt + 1): ops 仍存在 \(opInfo)")
         await executeAutoPlayActionWithRetry(
           page: page, actionType: actionType, tileName: tileName, attempt: attempt + 1,
           executionId: executionId)
       }
     } catch {
-      debugServer?.addLog("檢查錯誤: \(error.localizedDescription)")
+      debugLog("檢查錯誤: \(error.localizedDescription)")
     }
   }
 
@@ -1019,13 +1042,13 @@ class WebViewModel {
 
     switch actionType {
     case .riichi:
-      debugServer?.addLog("執行: 立直...")
+      debugLog("執行: 立直...")
       let script = "return JSON.stringify(window.naki.action.riichi())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("立直結果: \(String(describing: result))")
+        debugLog("立直結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("立直錯誤: \(error.localizedDescription)")
+        debugLog("立直錯誤: \(error.localizedDescription)")
       }
 
     case .discard:
@@ -1034,19 +1057,19 @@ class WebViewModel {
       do {
         let result = try await page.callJavaScript(findScript)
         if let tileIndex = result as? Int, tileIndex >= 0 {
-          debugServer?.addLog("查找: \(tileName) → idx=\(tileIndex)")
+          debugLog("查找: \(tileName) → idx=\(tileIndex)")
           let discardScript = "return JSON.stringify(window.naki.action.discard(\(tileIndex)))"
           do {
             let discardResult = try await page.callJavaScript(discardScript)
-            debugServer?.addLog("打牌結果: \(String(describing: discardResult))")
+            debugLog("打牌結果: \(String(describing: discardResult))")
           } catch {
-            debugServer?.addLog("打牌錯誤: \(error.localizedDescription)")
+            debugLog("打牌錯誤: \(error.localizedDescription)")
           }
         } else {
-          debugServer?.addLog("找不到牌: \(tileName)")
+          debugLog("找不到牌: \(tileName)")
         }
       } catch {
-        debugServer?.addLog("查找錯誤: \(error.localizedDescription)")
+        debugLog("查找錯誤: \(error.localizedDescription)")
       }
 
     case .chi:
@@ -1071,64 +1094,64 @@ class WebViewModel {
           let available = dict["available"] as? Bool, available,
           let count = dict["count"] as? Int
         else {
-          debugServer?.addLog("吃: 無可用組合")
+          debugLog("吃: 無可用組合")
           return
         }
 
         // 計算組合索引
         let combIndex = count == 1 ? 0 : max(0, count - 1 - chiType)
         let combInfo = (dict["combinations"] as? [String])?.joined(separator: ", ") ?? ""
-        debugServer?.addLog("吃: mortal=chi_\(chiType) → gameIdx=\(combIndex) [\(combInfo)]")
+        debugLog("吃: mortal=chi_\(chiType) → gameIdx=\(combIndex) [\(combInfo)]")
 
         let chiScript = "return JSON.stringify(window.naki.action.chi(\(combIndex)))"
         do {
           let chiResult = try await page.callJavaScript(chiScript)
-          debugServer?.addLog("吃結果: \(String(describing: chiResult))")
+          debugLog("吃結果: \(String(describing: chiResult))")
         } catch {
-          debugServer?.addLog("吃錯誤: \(error.localizedDescription)")
+          debugLog("吃錯誤: \(error.localizedDescription)")
         }
       } catch {
-        debugServer?.addLog("吃查詢錯誤: \(error.localizedDescription)")
+        debugLog("吃查詢錯誤: \(error.localizedDescription)")
       }
 
     case .pon:
-      debugServer?.addLog("執行: 碰...")
+      debugLog("執行: 碰...")
       let script = "return JSON.stringify(window.naki.action.pon())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("碰結果: \(String(describing: result))")
+        debugLog("碰結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("碰錯誤: \(error.localizedDescription)")
+        debugLog("碰錯誤: \(error.localizedDescription)")
       }
 
     case .kan:
-      debugServer?.addLog("執行: 槓...")
+      debugLog("執行: 槓...")
       let script = "return JSON.stringify(window.naki.action.kan())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("槓結果: \(String(describing: result))")
+        debugLog("槓結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("槓錯誤: \(error.localizedDescription)")
+        debugLog("槓錯誤: \(error.localizedDescription)")
       }
 
     case .hora:
-      debugServer?.addLog("執行: 和牌...")
+      debugLog("執行: 和牌...")
       let script = "return JSON.stringify(window.naki.action.hora())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("和牌結果: \(String(describing: result))")
+        debugLog("和牌結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("和牌錯誤: \(error.localizedDescription)")
+        debugLog("和牌錯誤: \(error.localizedDescription)")
       }
 
     case .none:
-      debugServer?.addLog("執行: 過...")
+      debugLog("執行: 過...")
       let script = "return JSON.stringify(window.naki.action.pass())"
       do {
         let result = try await page.callJavaScript(script)
-        debugServer?.addLog("過結果: \(String(describing: result))")
+        debugLog("過結果: \(String(describing: result))")
       } catch {
-        debugServer?.addLog("過錯誤: \(error.localizedDescription)")
+        debugLog("過錯誤: \(error.localizedDescription)")
       }
 
     case .unknown:
@@ -1138,6 +1161,14 @@ class WebViewModel {
 
   // MARK: - MCP Server
 
+  /// 寫入除錯日誌 (跨平台)
+  private func debugLog(_ message: String) {
+    #if os(macOS)
+    debugLog(message)
+    #endif
+  }
+
+  #if os(macOS)
   /// 啟動 MCP Server
   func startDebugServer() {
     guard debugServer == nil else {
@@ -1230,7 +1261,7 @@ class WebViewModel {
       if let controller = self.nativeBotController,
         let lastAction = controller.lastAction
       {
-        self.debugServer?.addLog("使用 lastAction 觸發")
+        self.debugLog("使用 lastAction 觸發")
         self.autoPlayController?.handleRecommendedAction(
           lastAction,
           tehai: controller.tehai,
@@ -1269,13 +1300,13 @@ class WebViewModel {
       startDebugServer()
     }
   }
+  #endif  // os(macOS)
 
   // MARK: - Load URL
 
   /// 加載雀魂麻將
   func loadMajsoul() async {
     guard let page = webPage else { return }
-
     if let url = URL(string: "https://game.maj-soul.com/1/") {
       page.load(url)
       statusMessage = "正在加載雀魂麻將..."
@@ -1285,11 +1316,15 @@ class WebViewModel {
   /// 加載指定 URL
   func loadURL(_ urlString: String) async {
     guard let page = webPage else { return }
-
     if let url = URL(string: urlString) {
       page.load(url)
       statusMessage = "正在加載 \(urlString)"
     }
+  }
+
+  /// 重新載入頁面
+  func reload() {
+    webPage?.reload()
   }
 
   // MARK: - Call JavaScript
@@ -1340,9 +1375,10 @@ class WebViewModel {
 
 // MARK: - AutoPlayServiceDelegate
 
+@available(macOS 26.0, iOS 26.0, *)
 extension WebViewModel: AutoPlayServiceDelegate {
   func autoPlayService(_ service: AutoPlayService, didLog message: String) {
-    debugServer?.addLog(message)
+    debugLog(message)
   }
 
   func autoPlayService(
@@ -1366,16 +1402,3 @@ extension WebViewModel: AutoPlayServiceDelegate {
   }
 }
 
-// MARK: - Environment Key
-
-/// WebViewModel 的 Environment Key
-struct WebViewModelKey: EnvironmentKey {
-  static let defaultValue: WebViewModel? = nil
-}
-
-extension EnvironmentValues {
-  var webViewModel: WebViewModel? {
-    get { self[WebViewModelKey.self] }
-    set { self[WebViewModelKey.self] = newValue }
-  }
-}

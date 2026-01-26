@@ -6,6 +6,8 @@
 //  Naki 專用的 MCP 上下文擴展
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 import MCPWebKit
@@ -91,3 +93,5 @@ final class DefaultNakiMCPContext: NakiMCPContext {
         triggerAutoPlayCallback?()
     }
 }
+
+#endif  // os(macOS)

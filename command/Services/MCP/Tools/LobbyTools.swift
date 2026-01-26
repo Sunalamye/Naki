@@ -6,6 +6,8 @@
 //  大廳相關 MCP 工具 - 自動開始遊戲功能
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -648,3 +650,5 @@ struct AccountLevelTool: MCPTool {
         return ["available": false, "error": "Failed to parse result"]
     }
 }
+
+#endif  // os(macOS)

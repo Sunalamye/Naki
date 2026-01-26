@@ -6,6 +6,8 @@
 //  UI 操作類 MCP 工具
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -302,3 +304,5 @@ struct UINameToggleTool: MCPTool {
         ]
     }
 }
+
+#endif  // os(macOS)

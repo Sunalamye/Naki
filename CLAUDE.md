@@ -68,6 +68,28 @@ WKWebView → WebSocketInterceptor/MajsoulBridge (Liqi→MJAI)
 ### Tile Index Mapping
 Swift `tehai` array ≠ Majsoul UI order. Use `executeAutoPlayAction` in `WebViewModel.swift:226-266`.
 
+### 字牌編碼格式（Honor Tile Encoding）⚠️
+**MJAI 格式**與 **Majsoul API 格式**不同，這是常見錯誤來源：
+
+| 字牌 | MJAI 格式 | Majsoul API 格式 |
+|------|-----------|------------------|
+| 東 (East) | `E` | `1z` |
+| 南 (South) | `S` | `2z` |
+| 西 (West) | `W` | `3z` |
+| 北 (North) | `N` | `4z` |
+| 白 (Haku) | `P` | `5z` |
+| 發 (Hatsu) | `F` | `6z` |
+| 中 (Chun) | `C` | `7z` |
+
+**使用規則**：
+- **匹配 Bot 推薦**：使用 MJAI 格式（`E`, `S`, `W`, `N`, `P`, `F`, `C`）
+- **調用 Majsoul API**：使用 Majsoul 格式（`1z`-`7z`）
+- **數字牌**：兩種格式相同（`5m`, `3p`, `7s`）
+
+**tile.val 結構**：`{type: number, index: number, dora: boolean}`
+- type: 0=筒(p), 1=萬(m), 2=索(s), 3=字(z)
+- index: 數字牌=牌號(1-9)，字牌=1-7
+
 ### Game Lifecycle
 Each `authGame` must trigger fresh Bot creation. See `FLOW_COMPARISON.md:290-295`.
 

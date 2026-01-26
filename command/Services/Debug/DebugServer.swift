@@ -6,6 +6,8 @@
 //  本地 HTTP MCP Server - 允許外部工具控制 App
 //
 
+#if os(macOS)
+
 import Foundation
 import Network
 import MCPKit
@@ -21,6 +23,7 @@ private struct ExecuteJSRequest: Codable {
 // MARK: - MCP Server
 
 /// 本地 HTTP MCP Server
+/// 支援 macOS 14.0+，使用回調式 JavaScript 執行抽象
 class DebugServer {
 
     // MARK: - Properties
@@ -629,3 +632,5 @@ class DebugServer {
         logBuffer.removeAll()
     }
 }
+
+#endif  // os(macOS)

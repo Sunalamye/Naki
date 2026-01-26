@@ -4,13 +4,15 @@
 //
 //  Created by Suoie on 2025/11/29.
 //  Updated: 2025/12/05 - 使用 @Environment 傳遞 WebViewModel
+//  Updated: 2026/01/26 - 使用 AdaptiveNakiWebView 支援 macOS 14+/iOS 17+
 //
 
 import SwiftUI
 import WebKit
 
 struct ContentView: View {
-    @State private var viewModel = WebViewModel()
+    /// 使用 Factory 模式創建適當版本的 ViewModel
+    @State private var viewModel: any WebViewModelProtocol = WebViewModelFactory.create()
 
 #if os(macOS)
     @State private var showGamePanel = true
@@ -39,8 +41,8 @@ struct ContentView: View {
 #if os(macOS)
     private var macOSLayout: some View {
         HSplitView {
-            // WebView
-            NakiWebView()
+            // WebView (自動選擇新版或舊版實現)
+            AdaptiveNakiWebView()
                 .frame(minWidth: 600)
 
             // 遊戲面板（右側）
@@ -137,7 +139,7 @@ struct ContentView: View {
         // 重新載入
         ToolbarItem(placement: .destructiveAction) {
             Button(action: {
-                viewModel.webPage?.reload()
+                viewModel.reload()
             }) {
                 Image(systemName: "arrow.clockwise")
             }
@@ -170,7 +172,7 @@ struct ContentView: View {
             ZStack(alignment: .bottom) {
                 HStack(alignment: .top){
                     iOSLeftView
-                    NakiWebView()
+                    AdaptiveNakiWebView()
                 }
                 //                // 底部浮動控制面板
                 iOSBottomPanel
@@ -228,7 +230,7 @@ struct ContentView: View {
         // 左側：重新載入
         ToolbarItem(placement: .navigationBarLeading) {
             Button(action: {
-                viewModel.webPage?.reload()
+                viewModel.reload()
             }) {
                 Image(systemName: "arrow.clockwise")
             }

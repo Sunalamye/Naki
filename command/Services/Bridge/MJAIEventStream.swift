@@ -145,4 +145,16 @@ class MJAIEventStream {
         }
         return nil
     }
+
+    /// 從歷史事件推斷是否為三麻
+    /// 檢查 start_game 事件中的 names 陣列長度
+    func is3PlayerGame() -> Bool {
+        for event in eventHistory {
+            if (event["type"] as? String) == "start_game",
+               let names = event["names"] as? [String] {
+                return names.count == 3
+            }
+        }
+        return false
+    }
 }

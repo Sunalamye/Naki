@@ -5,16 +5,22 @@
 //  Created by Claude on 2025/12/03.
 //  自動打牌服務 - 協調重試機制與動作執行
 //  Updated: 2025/12/04 - 遷移至 WebPage API (macOS 26.0+)
+//  Updated: 2026/01/26 - 使用 JSExecutor 抽象，支援 macOS 14.0+
 //
 
 import Combine
 import Foundation
 import WebKit
 
+// MARK: - JS Executor Type
+
+/// JavaScript 執行器類型別名
+/// 用於抽象化 WebPage.callJavaScript 和 WKWebView.evaluateJavaScript
+typealias JSExecutor = (String) async throws -> Any?
+
 // MARK: - Auto Play Service Delegate
 
 /// 自動打牌服務的委託協議
-@available(macOS 26.0, *)
 protocol AutoPlayServiceDelegate: AnyObject {
     /// 記錄日誌
     func autoPlayService(_ service: AutoPlayService, didLog message: String)
@@ -28,8 +34,7 @@ protocol AutoPlayServiceDelegate: AnyObject {
 
 /// 自動打牌服務
 /// 負責協調動作執行、重試機制和狀態管理
-/// 使用 WebPage API (macOS 26.0+)
-@available(macOS 26.0, *)
+/// 使用 JSExecutor 抽象，支援 macOS 14.0+ 和 macOS 26.0+
 final class AutoPlayService {
 
     // MARK: - Properties
@@ -37,8 +42,8 @@ final class AutoPlayService {
     /// 委託
     weak var delegate: AutoPlayServiceDelegate?
 
-    /// WebPage 引用
-    private weak var webPage: WebPage?
+    /// JavaScript 執行器
+    private var jsExecutor: JSExecutor?
 
     /// 當前執行 ID（用於取消舊任務）
     private var currentExecutionId: UUID?
@@ -60,9 +65,9 @@ final class AutoPlayService {
 
     // MARK: - Configuration
 
-    /// 設置 WebPage 引用
-    func setWebPage(_ webPage: WebPage?) {
-        self.webPage = webPage
+    /// 設置 JavaScript 執行器
+    func setJSExecutor(_ executor: JSExecutor?) {
+        self.jsExecutor = executor
     }
 
     // MARK: - Action Execution
@@ -73,9 +78,9 @@ final class AutoPlayService {
     ///   - tileName: 牌名（用於顯示和日誌）
     ///   - delay: 延遲執行的秒數
     func triggerAction(actionType: Recommendation.ActionType, tileName: String, delay: TimeInterval = 0) {
-        guard let webPage = webPage else {
-            log("Cannot trigger: no WebPage")
-            delegate?.autoPlayService(self, didFail: actionType, error: "WebPage 不可用")
+        guard let executor = jsExecutor else {
+            log("Cannot trigger: no JSExecutor")
+            delegate?.autoPlayService(self, didFail: actionType, error: "JSExecutor 不可用")
             return
         }
 
@@ -88,10 +93,10 @@ final class AutoPlayService {
 
         if delay > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.startExecution(webPage: webPage, actionType: actionType, tileName: tileName, executionId: executionId)
+                self?.startExecution(executor: executor, actionType: actionType, tileName: tileName, executionId: executionId)
             }
         } else {
-            startExecution(webPage: webPage, actionType: actionType, tileName: tileName, executionId: executionId)
+            startExecution(executor: executor, actionType: actionType, tileName: tileName, executionId: executionId)
         }
     }
 
@@ -107,19 +112,19 @@ final class AutoPlayService {
     // MARK: - Private Methods
 
     /// 開始執行（檢查是否被取代）
-    private func startExecution(webPage: WebPage, actionType: Recommendation.ActionType, tileName: String, executionId: UUID) {
+    private func startExecution(executor: @escaping JSExecutor, actionType: Recommendation.ActionType, tileName: String, executionId: UUID) {
         // 檢查是否被更新的觸發取代
         if currentExecutionId != executionId {
             log("Skip: superseded by newer trigger")
             return
         }
 
-        executeWithRetry(webPage: webPage, actionType: actionType, tileName: tileName, attempt: 1, executionId: executionId)
+        executeWithRetry(executor: executor, actionType: actionType, tileName: tileName, attempt: 1, executionId: executionId)
     }
 
     /// 帶重試的執行邏輯
     /// - 如果 oplist 還沒準備好，會等待並重試
-    private func executeWithRetry(webPage: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+    private func executeWithRetry(executor: @escaping JSExecutor, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
 
         // 檢查是否被新的觸發取代
         if currentExecutionId != executionId {
@@ -141,7 +146,7 @@ final class AutoPlayService {
             guard let self = self else { return }
 
             do {
-                let result = try await webPage.callJavaScript(checkScript)
+                let result = try await executor(checkScript)
 
                 // 再次檢查是否被取代
                 if self.currentExecutionId != executionId {
@@ -151,7 +156,7 @@ final class AutoPlayService {
 
                 self.handleCheckResult(
                     result: result,
-                    webPage: webPage,
+                    executor: executor,
                     actionType: actionType,
                     tileName: tileName,
                     attempt: attempt,
@@ -160,13 +165,13 @@ final class AutoPlayService {
             } catch {
                 // JavaScript 執行失敗，嘗試直接執行
                 self.log("Check script failed: \(error.localizedDescription)")
-                self.executeAction(webPage: webPage, actionType: actionType, tileName: tileName)
+                self.executeAction(executor: executor, actionType: actionType, tileName: tileName)
             }
         }
     }
 
     /// 處理檢查結果
-    private func handleCheckResult(result: Any?, webPage: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+    private func handleCheckResult(result: Any?, executor: @escaping JSExecutor, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
 
         // 解析 JSON 字符串
         guard let jsonString = result as? String,
@@ -175,14 +180,14 @@ final class AutoPlayService {
               let hasOp = dict["hasOp"] as? Bool else {
             // 無法解析，直接執行一次
             log("Attempt \(attempt): check failed, exec anyway")
-            executeAction(webPage: webPage, actionType: actionType, tileName: tileName)
+            executeAction(executor: executor, actionType: actionType, tileName: tileName)
             return
         }
 
         if !hasOp {
             handleNoOplist(
                 reason: dict["reason"] as? String ?? "unknown",
-                webPage: webPage,
+                executor: executor,
                 actionType: actionType,
                 tileName: tileName,
                 attempt: attempt,
@@ -195,7 +200,7 @@ final class AutoPlayService {
         let opInfo = dict["opTypes"] as? [Int] ?? []
         log("Attempt \(attempt): ops=\(opInfo)")
 
-        executeAction(webPage: webPage, actionType: actionType, tileName: tileName)
+        executeAction(executor: executor, actionType: actionType, tileName: tileName)
 
         // pass 操作：較長間隔 (0.5s)，最多重試 5 次
         if actionType == .none {
@@ -207,7 +212,7 @@ final class AutoPlayService {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 self?.checkAndRetryIfNeeded(
-                    webPage: webPage,
+                    executor: executor,
                     actionType: actionType,
                     tileName: tileName,
                     attempt: attempt,
@@ -220,7 +225,7 @@ final class AutoPlayService {
         // 其他操作：0.1 秒後檢查是否成功
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             self?.checkAndRetryIfNeeded(
-                webPage: webPage,
+                executor: executor,
                 actionType: actionType,
                 tileName: tileName,
                 attempt: attempt,
@@ -230,12 +235,12 @@ final class AutoPlayService {
     }
 
     /// 處理沒有 oplist 的情況
-    private func handleNoOplist(reason: String, webPage: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+    private func handleNoOplist(reason: String, executor: @escaping JSExecutor, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
 
         // 打牌 (discard) 不需要等待 oplist，直接執行
         if actionType == .discard {
             log("Discard: no oplist, exec directly")
-            executeAction(webPage: webPage, actionType: actionType, tileName: tileName)
+            executeAction(executor: executor, actionType: actionType, tileName: tileName)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 self?.log("✅ Discard sent")
                 self?.completeExecution(actionType: actionType)
@@ -250,7 +255,7 @@ final class AutoPlayService {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.executeWithRetry(
-                    webPage: webPage,
+                    executor: executor,
                     actionType: actionType,
                     tileName: tileName,
                     attempt: attempt + 1,
@@ -270,7 +275,7 @@ final class AutoPlayService {
     }
 
     /// 檢查動作是否成功，失敗則重試
-    private func checkAndRetryIfNeeded(webPage: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
+    private func checkAndRetryIfNeeded(executor: @escaping JSExecutor, actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID) {
 
         // 檢查是否被新的觸發取代
         if currentExecutionId != executionId {
@@ -284,7 +289,7 @@ final class AutoPlayService {
             guard let self = self else { return }
 
             do {
-                let result = try await webPage.callJavaScript(checkScript)
+                let result = try await executor(checkScript)
 
                 // 解析 JSON 字符串
                 guard let jsonString = result as? String,
@@ -313,7 +318,7 @@ final class AutoPlayService {
                 // 重試
                 self.log("Retry \(attempt + 1): ops still present \(opInfo)")
                 self.executeWithRetry(
-                    webPage: webPage,
+                    executor: executor,
                     actionType: actionType,
                     tileName: tileName,
                     attempt: attempt + 1,
@@ -372,12 +377,12 @@ final class AutoPlayService {
     }
 
     /// 實際執行動作
-    private func executeAction(webPage: WebPage, actionType: Recommendation.ActionType, tileName: String) {
+    private func executeAction(executor: @escaping JSExecutor, actionType: Recommendation.ActionType, tileName: String) {
         let script = generateActionScript(actionType: actionType, tileName: tileName)
 
         Task { @MainActor [weak self] in
             do {
-                let result = try await webPage.callJavaScript(script)
+                let result = try await executor(script)
                 if let dict = result as? [String: Any] {
                     self?.log("Result: \(dict)")
                 }
@@ -470,6 +475,7 @@ final class AutoPlayService {
         var tileName = '\(tileName)';
         var foundTile = null;
         var foundIndex = -1;
+        var apiTileStr = null;
         var isRedDora = tileName.charAt(tileName.length - 1) === 'r';
         var normalTileName = isRedDora ? tileName.slice(0, -1) : tileName;
 
@@ -482,53 +488,48 @@ final class AutoPlayService {
             var idx = t.val.index;
             var dora = t.val.dora === true;
 
+            // Majsoul API 格式: "5m", "1z", "2z", etc.
             var suits = ['p', 'm', 's', 'z'];
             var suit = suits[type] || '?';
-            var tName = idx + suit;
+            var majsoulTile = idx + suit;
 
-            // 處理字牌
+            // MJAI 格式用於匹配: "5m", "E", "S", "W", "N", "P", "F", "C"
+            var mjaiTile = majsoulTile;
             if (type === 3) {
                 var honors = ['?', 'E', 'S', 'W', 'N', 'P', 'F', 'C'];
-                tName = honors[idx] || tName;
+                mjaiTile = honors[idx] || majsoulTile;
             }
 
-            // 精確匹配
+            // 精確匹配（使用 MJAI 格式）
             if (isRedDora) {
-                if (tName === normalTileName && dora) {
+                if (mjaiTile === normalTileName && dora) {
                     foundTile = t;
                     foundIndex = i;
+                    apiTileStr = majsoulTile;  // 使用 Majsoul 格式
                     break;
                 }
             } else {
-                if (tName === tileName && !dora) {
+                if (mjaiTile === tileName && !dora) {
                     foundTile = t;
                     foundIndex = i;
+                    apiTileStr = majsoulTile;  // 使用 Majsoul 格式
                     break;
                 }
                 // 如果找不到普通牌但有赤牌，也可以使用
-                if (tName === tileName && foundTile === null) {
+                if (mjaiTile === tileName && foundTile === null) {
                     foundTile = t;
                     foundIndex = i;
+                    apiTileStr = majsoulTile;  // 使用 Majsoul 格式
                 }
             }
         }
 
-        if (foundTile) {
-            // 優先使用 NetAgent API（與其他操作保持一致）
-            if (window.app && window.app.NetAgent) {
-                window.app.NetAgent.sendReq2MJ('FastTest', 'inputOperation', {
-                    type: 1,
-                    tile: foundTile.val.toString(),
-                    moqie: false,
-                    timeuse: 1
-                });
-                return JSON.stringify({success: true, method: 'NetAgent', index: foundIndex, tile: tileName});
-            }
-
-            // 備用：使用遊戲 UI 方法
-            if (typeof mr.DoDiscardTile === 'function') {
-                mr.DoDiscardTile(foundTile);
-                return JSON.stringify({success: true, method: 'DoDiscardTile', index: foundIndex});
+        if (foundTile && apiTileStr) {
+            // 使用遊戲 UI 方法（經測試有效）
+            if (typeof mr.setChoosePai === 'function' && typeof mr.DoDiscardTile === 'function') {
+                mr.setChoosePai(foundTile, true);
+                mr.DoDiscardTile();
+                return JSON.stringify({success: true, method: 'UI', index: foundIndex, tile: apiTileStr});
             }
         }
 

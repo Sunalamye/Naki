@@ -6,6 +6,8 @@
 //  Bot 控制類 MCP 工具
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -175,3 +177,5 @@ struct BotSyncTool: MCPTool {
         ]
     }
 }
+
+#endif  // os(macOS)

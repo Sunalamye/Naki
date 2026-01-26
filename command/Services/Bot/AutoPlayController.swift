@@ -5,6 +5,7 @@
 //  Created by Claude on 2025/12/01.
 //  自動打牌控制器 - 管理自動打牌模式 (UI 自動化方案)
 //  Updated: 2025/12/04 - 遷移至 WebPage API (macOS 26.0+)
+//  Updated: 2026/01/26 - 使用 JSExecutor 抽象，支援 macOS 14.0+
 //
 
 import Combine
@@ -70,8 +71,7 @@ struct AutoPlayState {
 // MARK: - Auto Play Controller
 
 /// 自動打牌控制器 (UI 自動化版本)
-/// 使用 WebPage API (macOS 26.0+)
-@available(macOS 26.0, *)
+/// 使用 JSExecutor 抽象，支援 macOS 14.0+ 和 macOS 26.0+
 class AutoPlayController: ObservableObject {
 
     // MARK: - Published Properties
@@ -81,8 +81,8 @@ class AutoPlayController: ObservableObject {
 
     // MARK: - Private Properties
 
-    /// WebPage 引用（用於執行 JavaScript）
-    private weak var webPage: WebPage?
+    /// JavaScript 執行器
+    private var jsExecutor: JSExecutor?
 
     /// 動作執行計時器
     private var actionTimer: Timer?
@@ -104,10 +104,10 @@ class AutoPlayController: ObservableObject {
 
     // MARK: - Configuration
 
-    /// 設置 WebPage 引用
-    func setWebPage(_ webPage: WebPage?) {
-        self.webPage = webPage
-        bridgeLog("\(logTag) WebPage 已設定")
+    /// 設置 JavaScript 執行器
+    func setJSExecutor(_ executor: JSExecutor?) {
+        self.jsExecutor = executor
+        bridgeLog("\(logTag) JSExecutor 已設定")
     }
 
     /// 設置自動打牌模式
@@ -267,9 +267,9 @@ class AutoPlayController: ObservableObject {
 
     /// 執行動作 (透過 UI 自動化)
     private func executeAction(_ action: AutoPlayAction) {
-        guard let webPage = webPage else {
-            bridgeLog("\(logTag) 錯誤: WebPage 不可用")
-            lastError = "WebPage 不可用"
+        guard let executor = jsExecutor else {
+            bridgeLog("\(logTag) 錯誤: JSExecutor 不可用")
+            lastError = "JSExecutor 不可用"
             return
         }
 
@@ -278,7 +278,7 @@ class AutoPlayController: ObservableObject {
 
         Task { @MainActor [weak self] in
             do {
-                _ = try await webPage.callJavaScript(script)
+                _ = try await executor(script)
                 bridgeLog("\(self?.logTag ?? "") 動作執行成功")
                 self?.handleActionSuccess()
             } catch {

@@ -6,6 +6,8 @@
 //  遊戲狀態類 MCP 工具
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -252,3 +254,5 @@ struct GameActionVerifyTool: MCPTool {
         ]
     }
 }
+
+#endif  // os(macOS)
