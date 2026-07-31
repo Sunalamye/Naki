@@ -12,8 +12,15 @@ import WebKit
 // MARK: - Naki WebView (使用 WebPage API)
 
 /// 主要的 WebView 元件，使用 macOS 26.0+ 的 WebPage API
+@available(macOS 26.0, iOS 26.0, *)
 struct NakiWebView: View {
-    @Environment(\.webViewModel) private var viewModel
+    /// 透過 Environment 取得通用協議，然後轉型為具體的 WebViewModel
+    @Environment(\.webViewModel) private var viewModelProtocol
+
+    /// 取得具體的 WebViewModel（包含 webPage）
+    private var viewModel: WebViewModel? {
+        viewModelProtocol as? WebViewModel
+    }
 
     var body: some View {
         if let webPage = viewModel?.webPage {
@@ -37,6 +44,7 @@ struct NakiWebView: View {
 // MARK: - Navigation Decider
 
 /// 導覽決策器，處理 WebPage 的導覽事件
+@available(macOS 26.0, iOS 26.0, *)
 @MainActor
 class NakiNavigationDecider: WebPage.NavigationDeciding {
     weak var viewModel: WebViewModel?
@@ -62,6 +70,7 @@ class NakiNavigationDecider: WebPage.NavigationDeciding {
 // MARK: - Dialog Presenter
 
 /// 對話框展示器，處理 JavaScript 對話框
+@available(macOS 26.0, iOS 26.0, *)
 @MainActor
 class NakiDialogPresenter: WebPage.DialogPresenting {
     weak var viewModel: WebViewModel?
@@ -95,6 +104,7 @@ class NakiDialogPresenter: WebPage.DialogPresenting {
 // 注意：MJAIEventStream 已移至 Services/Bridge/MJAIEventStream.swift
 
 /// 協調器，管理 WebSocket 訊息處理和 MJAI 事件流
+@available(macOS 26.0, iOS 26.0, *)
 @MainActor
 class NakiWebCoordinator {
     weak var viewModel: WebViewModel?

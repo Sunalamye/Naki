@@ -22,7 +22,7 @@ import WebKit
 
 @Observable
 @MainActor
-class WebViewModel {
+class WebViewModel: WebViewModelProtocol {
   var statusMessage = ""
 
   // 連線狀態
@@ -1184,6 +1184,30 @@ class WebViewModel {
     }
   }
 
+  /// 重新載入目前頁面
+  func reload() {
+    guard let page = webPage else { return }
+    page.reload()
+    statusMessage = "正在重新載入…"
+  }
+
+  // MARK: - WebViewModelProtocol 補齊
+
+  /// 在遊戲頁面執行 JS。
+  ///
+  /// 注意：`WebPage.callJavaScript` 的腳本是**函式體**，取值必須自己寫 `return`
+  /// （這也是 Debug Server `/js` 端點的同一個規則）。
+  func executeJavaScript(_ script: String) async throws -> Any? {
+    guard let page = webPage else { return nil }
+    return try await page.callJavaScript(script)
+  }
+
+  /// 確認待處理的自動打牌動作。
+  ///
+  /// 目前主路徑沒有「先提示、等確認」的流程——推薦一產生就依模式決定是否直接送出，
+  /// 所以這裡是空實作，只為滿足協定（Legacy 端同樣沒有這個流程）。
+  func confirmAutoPlayAction() {}
+
   // MARK: - Call JavaScript
 
   func callJS(function: String, params: [String: Any]) async {
@@ -1230,16 +1254,8 @@ class WebViewModel {
   }
 }
 
-// MARK: - Environment Key
-
-/// WebViewModel 的 Environment Key
-struct WebViewModelKey: EnvironmentKey {
-  static let defaultValue: WebViewModel? = nil
-}
-
-extension EnvironmentValues {
-  var webViewModel: WebViewModel? {
-    get { self[WebViewModelKey.self] }
-    set { self[WebViewModelKey.self] = newValue }
-  }
-}
+// 註：`WebViewModelKey` / `EnvironmentValues.webViewModel` 統一定義在
+// `WebViewModelProtocol.swift`，型別是 `any WebViewModelProtocol?`，
+// 這樣 View 才能同時吃新版（WebPage）與 Legacy（WKWebView）兩種實作。
+// 這裡不再另外定義具體型別版本，否則兩個同名 extension 會讓 View 端的
+// `@Environment(\.webViewModel)` 產生 ambiguous use 編譯錯誤。

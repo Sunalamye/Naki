@@ -514,11 +514,16 @@
                 }
                 if (!dup) g.xs.push(p.x);
             }
+            // 基準列取「夠寬的那些列裡最低的一排」，不是「相異 x 最多的那排」。
+            //
+            // 立直可用時，雀魂會把所有可宣言的牌抬起來。若被抬起的比留在原位的多，
+            // 「取最多」就會選到被抬起的那排當基準，剩下的牌全部對不上、索引整個錯亂
+            // （實測症狀：只有立直＋過＋打牌同時出現時高亮才會畫錯）。
+            // 抬起只會往上不會往下，所以最低的那排一定是靜止列。
             var best = null;
             for (var m = 0; m < groups.length; m++) {
-                if (groups[m].xs.length >= 5 && (!best || groups[m].xs.length > best.xs.length)) {
-                    best = groups[m];
-                }
+                if (groups[m].xs.length < 3) continue;
+                if (!best || groups[m].y < best.y) best = groups[m];
             }
             if (!best) return;
 

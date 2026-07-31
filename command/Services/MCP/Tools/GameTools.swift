@@ -16,6 +16,8 @@
 //  - 動作（discard / action / action_verify）→ Liqi protobuf（`LiqiActionSender`）
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -391,3 +393,5 @@ struct GameActionVerifyTool: MCPTool {
         return result
     }
 }
+
+#endif  // os(macOS)

@@ -6,6 +6,8 @@
 //  MCP (Model Context Protocol) 處理器 - 使用 Protocol 模式重構
 //
 
+#if os(macOS)
+
 import Foundation
 import Network
 import MCPKit
@@ -320,3 +322,5 @@ extension MCPHandler {
     /// 舊版 ToolResult 類型別名（向後兼容）
     typealias ToolResult = MCPToolResult
 }
+
+#endif  // os(macOS)

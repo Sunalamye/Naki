@@ -26,6 +26,8 @@
 //    手動路徑是 game_emoji_listen + game_emoji。
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -136,3 +138,5 @@ struct EmojiListenTool: MCPTool {
         return result
     }
 }
+
+#endif  // os(macOS)

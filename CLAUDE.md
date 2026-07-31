@@ -110,6 +110,28 @@ Naki 自送的請求用 **msgId 60000+**（遊戲用低位遞增，避免撞號�
 ActionDiscardTile 是 4、ActionNewRound 是 7、ActionChiPengGang 是 6），
 且 `operation_list` 是 repeated——解錯的後果是 oplist 恆空、自動打牌無法判斷輪到誰。
 
+### 字牌編碼格式（Honor Tile Encoding）⚠️
+**MJAI 格式**與 **Majsoul API 格式**不同，這是常見錯誤來源：
+
+| 字牌 | MJAI 格式 | Majsoul API 格式 |
+|------|-----------|------------------|
+| 東 (East) | `E` | `1z` |
+| 南 (South) | `S` | `2z` |
+| 西 (West) | `W` | `3z` |
+| 北 (North) | `N` | `4z` |
+| 白 (Haku) | `P` | `5z` |
+| 發 (Hatsu) | `F` | `6z` |
+| 中 (Chun) | `C` | `7z` |
+
+**使用規則**：
+- **匹配 Bot 推薦**：使用 MJAI 格式（`E`, `S`, `W`, `N`, `P`, `F`, `C`）
+- **調用 Majsoul API**：使用 Majsoul 格式（`1z`-`7z`）
+- **數字牌**：兩種格式相同（`5m`, `3p`, `7s`）
+
+**tile.val 結構**：`{type: number, index: number, dora: boolean}`
+- type: 0=筒(p), 1=萬(m), 2=索(s), 3=字(z)
+- index: 數字牌=牌號(1-9)，字牌=1-7
+
 ### Game Lifecycle
 Each `start_game` triggers fresh Bot creation (delete + recreate) and `end_game` cleans up — already implemented in `NakiWebCoordinator.handleMJAIEvent` (`command/Views/WebViewController.swift:159-199`). See `FLOW_COMPARISON.md`.
 

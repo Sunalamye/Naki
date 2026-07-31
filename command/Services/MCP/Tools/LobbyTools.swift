@@ -21,6 +21,8 @@
 //    回報 Naki 自己送出的心跳狀態。
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -396,3 +398,5 @@ struct AntiIdleToggleTool: MCPTool {
         return status
     }
 }
+
+#endif  // os(macOS)

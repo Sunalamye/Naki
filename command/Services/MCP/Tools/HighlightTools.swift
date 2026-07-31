@@ -23,6 +23,8 @@
 //  現在統一走 `NakiUnsupported.result(...)`：`success` 保證是 Bool，且必有 `error` / `reason`。
 //
 
+#if os(macOS)
+
 import Foundation
 import MCPKit
 
@@ -184,3 +186,5 @@ struct HideHighlightTool: MCPTool {
         HighlightUnsupported.result()
     }
 }
+
+#endif  // os(macOS)
