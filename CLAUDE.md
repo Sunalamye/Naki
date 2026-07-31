@@ -117,13 +117,15 @@ Each `start_game` triggers fresh Bot creation (delete + recreate) and `end_game`
 **每張牌是獨立的 draw call，位置與染色參數都在 shader uniform 裡**（2026-07-31 實測）。
 不需要掃描像素、不需要推算螢幕座標、不需要自己畫覆蓋層。
 
-攔 `drawElements`（牌的特徵：`count === 606`）即可拿到：
+攔 `drawElements` 後用 `gl.getUniform(currentProgram, loc)` 讀，或在 draw 前覆寫：
 
-| uniform | 用途 |
-|---------|------|
-| `hlslcc_mtx4x4unity_ObjectToWorld[0..3]` | 該牌的世界座標矩陣，第 4 列即位置 |
-| `_Tint` | 染色，**遊戲全程保持 `[1,1,1,1]` 不用它** → 可安全覆寫 |
-| `_ColorLight` / `_ColorUnlight` | 亮/暗面顏色 |
+| 對象 | 辨識特徵 | 位置 uniform | 顏色 uniform |
+|------|---------|-------------|-------------|
+| 麻將牌 | `count === 606` | `hlslcc_mtx4x4unity_ObjectToWorld[0..3]`（第 4 列＝位置） | `_Tint`（實測全程 `[1,1,1,1]`，遊戲沒在用 → 可安全覆寫） |
+| UI（吃/碰/立直等按鈕） | `count` 為 6/12/18/24…（quad 倍數） | 同上，另有 `glstate_matrix_projection` | `_Color` |
+
+實測一幀約 533 個 draw call、13 個 shader program、31 個 texture；
+牌那組每幀約 98 次獨立呼叫——**每張牌、每個按鈕都是獨立可定址的**。
 
 取得 Unity instance 的方式（易踩）：`window.unityFramework` 是 **`null`**、
 `window.unityInstance` **不存在**；instance 宣告在 inline script 的 script scope，
