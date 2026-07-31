@@ -76,29 +76,21 @@ WKWebView → WebSocketInterceptor/MajsoulBridge (Liqi→MJAI)     ← ✅ 仍�
          → NativeBotController (pure Swift + Core ML via MortalSwift v0.3.0)
          → GameStateManager (ObservableObject)
          → AutoPlay (WebViewModel.executeAutoPlayActionWithRetry) → SwiftUI Views
-                     ↑ ❌ 已失效：依賴 Laya JS 物件，見下方「雀魂已改用 Unity」
 ```
 
-**Key Files**: `command/ViewModels/WebViewModel.swift` (~1380 lines), `command/Services/Bridge/MajsoulBridge.swift` (~1176 lines), `command/Services/Bot/NativeBotController.swift` (~900 lines)
+**Key Files**: `command/ViewModels/WebViewModel.swift`, `command/Services/Bridge/MajsoulBridge.swift`, `command/Services/Bot/NativeBotController.swift`
 
-### ⚠️ 雀魂已改用 Unity WebGL（2026-07-31 實測）
+### 雀魂是 Unity WebGL（不是 Laya）
 
-雀魂客戶端從 Laya JS 換成 **Unity WebGL**（`chs_t-WebGL-release-4.0.45(45)`）。
-頁面只剩 `createUnityInstance` / `unityFramework` / `getUnityElements` / `onUnityReady`
-與 `<div id="unity-container">` + `<canvas id="unity-canvas">`。
+客戶端為 Unity WebGL（`chs_t-WebGL-release-4.0.45(45)`），頁面只有
+`<canvas id="unity-canvas">`。舊 Laya 全域（`Laya` / `GameMgr` / `uiscript` /
+`view.DesktopMgr` / `cfg` / `app.NetAgent`）**全部不存在**。
 
-**已驗證不存在**：`window.Laya`、`window.GameMgr`、`window.uiscript`、
-`window.view.DesktopMgr`、`window.cfg`、`window.app.NetAgent`。
+**所有動作與狀態一律走 Liqi protobuf**，送出用
+`window.__nakiWebSocket.sendRaw(base64)`。協議格式、msgId 規則 → @docs/majsoul-unity-protocol.md
 
-| 層 | 狀態 |
-|----|------|
-| WebSocket 訊息橋接（`naki-websocket.js`）、Swift `LiqiParser` / `MajsoulBridge` | ✅ 仍正常（Liqi wire protocol 一個位元組都沒變） |
-| Bot 推論（MortalSwift）| ✅ 不受影響 |
-| JS/DOM 讀狀態與點擊打牌（`naki-game-api.js` / `naki-autoplay.js` / coordinator 的 state·action·lobby·visual）| ❌ 全失效 |
-
-**新方針：所有動作與狀態讀取改走 Liqi protobuf**，送出通道為
-`window.__nakiWebSocket.getMajsoulConnections()[i].ws.send(bytes)`（已驗證可行）。
-協議格式、實測 hex、msgId 規則、尚未驗證項 → @docs/majsoul-unity-protocol.md
+⚠️ **送出必須選對連線**：大廳走 `/gateway`、對局走 `/game-gateway`。
+送錯會得到 `error code 6 "method not found"`，而且**沒有任何其他徵兆**。
 
 ## Critical Information
 
@@ -108,24 +100,40 @@ WKWebView → WebSocketInterceptor/MajsoulBridge (Liqi→MJAI)     ← ✅ 仍�
 - **Reconnection**: Base64 → NO XOR → Protobuf (already decoded)
 - No additional `start_game` on syncGame
 
-### Liqi Envelope（Unity 時代唯一有效的互動面）
+### Liqi Envelope
 `[type:1][msgId:2 LE][protobuf{ field1=method 字串, field2=payload }]`；
 type 1=NOTIFY / 2=REQUEST / 3=RESPONSE。method 名**明文**、request **無 XOR**。
-Naki 自送的請求請用 **msgId 60000+**（遊戲用低位遞增，避免撞號）。
-逐位元組解說與驗證紀錄 → @docs/majsoul-unity-protocol.md
+Naki 自送的請求用 **msgId 60000+**（遊戲用低位遞增，避免撞號）。
 
-### Tile Index Mapping（⚠️ 已失效）
-Swift `tehai` array ≠ Majsoul UI order — 這條規則是為了對應 **Laya 的 `mainrole.hand` UI 順序**。
-Unity 客戶端下該陣列不存在，`executeAutoPlayAction` / `showGameHighlightForRecommendations`
-的 tile-index 映射邏輯已無對象（code 尚未更新）。改走 protobuf 後不再需要 UI 順序對齊。
+⚠️ **欄位編號一律查 `docs/protocol/liqi.json`，不要照舊碼或記憶**。
+舊碼的欄位編號是 Laya 時代猜的，實際全錯（`operation` 在 ActionDealTile /
+ActionDiscardTile 是 4、ActionNewRound 是 7、ActionChiPengGang 是 6），
+且 `operation_list` 是 repeated——解錯的後果是 oplist 恆空、自動打牌無法判斷輪到誰。
 
 ### Game Lifecycle
 Each `start_game` triggers fresh Bot creation (delete + recreate) and `end_game` cleans up — already implemented in `NakiWebCoordinator.handleMJAIEvent` (`command/Views/WebViewController.swift:159-199`). See `FLOW_COMPARISON.md`.
 
-### 雀魂配置結構（cfg）— ❌ 已刪除，不要再用
-`cfg` 在 Unity 客戶端下**不存在**（2026-07-31 實測）。舊指引「`cfg.xxx.rows_` 改配置」
-（含雪球小遊戲 `snowball_monster_group.rows_[i].round_time`）已完全失效。
-客戶端配置表隨引擎搬進 wasm，JS 端無法觸及；Unity 下是否有等價做法 **未驗證**。
+### 牌面位置與染色：用遊戲自己的資料，不要自己算
+**每張牌是獨立的 draw call，位置與染色參數都在 shader uniform 裡**（2026-07-31 實測）。
+不需要掃描像素、不需要推算螢幕座標、不需要自己畫覆蓋層。
+
+攔 `drawElements`（牌的特徵：`count === 606`）即可拿到：
+
+| uniform | 用途 |
+|---------|------|
+| `hlslcc_mtx4x4unity_ObjectToWorld[0..3]` | 該牌的世界座標矩陣，第 4 列即位置 |
+| `_Tint` | 染色，**遊戲全程保持 `[1,1,1,1]` 不用它** → 可安全覆寫 |
+| `_ColorLight` / `_ColorUnlight` | 亮/暗面顏色 |
+
+取得 Unity instance 的方式（易踩）：`window.unityFramework` 是 **`null`**、
+`window.unityInstance` **不存在**；instance 宣告在 inline script 的 script scope，
+只能用**裸識別字** `unityInstance` 取（Debug Server `/js` 在 page world 執行，可取得）。
+
+### 客戶端配置表：可下載，不在 wasm 裡
+`window.cfg` 全域物件確實沒了，但配置資料仍以資源檔公開：
+`res/config/lqc.lqbin`（17.5MB）+ `res/proto/config.proto`（自描述 schema），
+41 tables / 263 sheets / 119,289 rows。取法與 liqi.json 相同。
+解析工具 `tools/parse_lqc.py`、`tools/dump_sheet.py`。詳見 @docs/majsoul-config-tables.md
 </IMPORTANT>
 
 ## Code Structure
@@ -152,12 +160,9 @@ Naki-M/Naki_MApp.swift        # @main — iOS target "Naki-M"
 
 ## Documentation
 
-- @docs/majsoul-unity-protocol.md - ⭐ **Unity 時代唯一有效的雀魂互動參考**（Liqi envelope、訊息收送、驗證紀錄、未驗證項）
+- @docs/majsoul-unity-protocol.md - ⭐ 雀魂互動的唯一參考（Liqi envelope、Unity 可控面、驗證紀錄）
+- @docs/majsoul-config-tables.md - 客戶端配置表 `lqc.lqbin` 的取得與解析
+- @docs/protocol/liqi.json - **協定欄位的唯一事實來源**
 - @docs/architecture-deep-dive.md - Protocol, services, debugging
-- @docs/shell-tools-guide.md - Modern shell tools (fd, rg, ast-grep)
 - FLOW_COMPARISON.md - Python vs Swift, reconnection logic
-- AUDIT.md - 稽核紀錄（含 §9 Unity 遷移發現）
-
-**已作廢（Laya 時代，僅存協議線索，勿照抄程式碼）**：
-`docs/majsoul-webui-objects-reference.md`、`docs/majsoul-webui-api-architecture.md`、
-`docs/majsoul-minigame-snowball-reference.md`
+- AUDIT.md - 稽核紀錄（§9–§11 Unity 遷移全紀錄）

@@ -403,10 +403,11 @@ class WebViewModel {
 
     // 推薦一律由原生 SwiftUI 面板呈現：ContentView 直接綁 `recommendations` /
     // `botStatus`（RecommendationView、BotStatusView），@Observable 會自動刷新。
-    // 遊戲內高亮注入已移除：Unity WebGL 客戶端沒有 Laya 物件可掛特效，
-    // 舊路徑只會靜默失敗變成假訊號。
     // 註：`AutoPlayMode.showRecommendation` 目前沒有 View 讀取（原本只用來開關遊戲內高亮）。
     highlightedTile = recommendations.first?.displayTile
+
+    // 遊戲畫面內高亮：Unity 下改為往 framebuffer 疊色塊（見 naki-core.js 的 __nakiHighlight）
+    syncGameHighlight()
 
     // 觸發自動打牌
     triggerAutoPlayIfNeeded()
@@ -462,6 +463,70 @@ class WebViewModel {
     }
   }
 
+  // MARK: - 遊戲畫面內高亮
+
+  /// 依目前推薦，在遊戲畫面的對應手牌上方畫標記條。
+  ///
+  /// Unity WebGL 沒有 per-tile 物件可以改材質，JS 端改成在 Unity 畫完的同一幀
+  /// 往 framebuffer 疊色塊；這裡只負責算出「要標第幾張、什麼顏色」。
+  /// index 是手牌由左至右的**顯示序**（含摸到的牌，摸牌排在最後），
+  /// 與 JS 端從畫面量測到的牌框順序一一對應。
+  private func syncGameHighlight() {
+    guard let page = webPage else { return }
+
+    var marks: [[String: Any]] = []
+
+    // 顯示序 = 已排序的手牌 + 摸到的牌（摸牌在雀魂 UI 上分開放在最右）
+    var displayTiles = tehaiTiles
+    if let tsumo = tsumoTile { displayTiles.append(tsumo) }
+
+    func indices(of tile: String) -> [Int] {
+      displayTiles.enumerated().filter { $0.element == tile }.map(\.offset)
+    }
+
+    if let top = recommendations.first {
+      switch top.actionType {
+      case .discard, .riichi:
+        // 綠：建議打出的牌
+        if let idx = indices(of: top.displayTile).last {
+          marks.append(["index": idx, "color": [0.2, 0.9, 0.3]])
+        }
+      case .chi, .pon, .kan:
+        // 橙：副露會用掉的手牌（組合來自協定層的 oplist，不是猜的）
+        let snapshot = LiqiOperationStore.shared.latest
+        let liqiType: LiqiOperationType? = {
+          switch top.actionType {
+          case .chi: return .chi
+          case .pon: return .pon
+          case .kan: return snapshot?.kanOperation
+          default: return nil
+          }
+        }()
+        let combo = liqiType.flatMap { snapshot?.operation(of: $0) }?.combination.first
+        let mjaiTiles = (combo?.split(separator: "|") ?? []).compactMap {
+          LiqiTileCode.mjai(fromMajsoul: String($0))
+        }
+        var used = Set<Int>()
+        for tile in mjaiTiles {
+          if let idx = indices(of: tile).first(where: { !used.contains($0) }) {
+            used.insert(idx)
+            marks.append(["index": idx, "color": [1.0, 0.6, 0.1]])
+          }
+        }
+      default:
+        break   // 和了 / 過：沒有對應的手牌可標
+      }
+    }
+
+    let payload = (try? JSONSerialization.data(withJSONObject: marks))
+      .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    let script = marks.isEmpty
+      ? "window.__nakiHighlight?.clear();"
+      : "window.__nakiHighlight?.set(\(payload));"
+
+    Task { _ = try? await page.callJavaScript(script) }
+  }
+
   /// 刪除原生 Bot
   func deleteNativeBot() {
     nativeBotController?.deleteBot()
@@ -473,6 +538,7 @@ class WebViewModel {
     // GameStateManager 是 /bot/status 與 SwiftUI 面板的實際資料來源；
     // 不一併重置的話，對局結束後畫面會一直停在上一局的手牌與推薦。
     gameStateManager.reset()
+    syncGameHighlight()   // 推薦已清空 → 會送出 clear()，避免標記留在畫面上
     bridgeLog("[WebViewModel] Bot 已刪除並清除狀態")
   }
 
