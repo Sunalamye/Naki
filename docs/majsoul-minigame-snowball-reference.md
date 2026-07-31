@@ -1,6 +1,26 @@
-# Majsoul 雪球小遊戲框架說明
+# Majsoul 雪球小遊戲框架說明（Laya 時代・已作廢）
 
-**日期**: 2026-01-01
+> # ⚠️ 已作廢：本文依賴的 `window.uiscript` 與 `window.cfg` 都不存在了
+>
+> **雀魂於 `chs_t-WebGL-release-4.0.45(45)` 改用 Unity WebGL 客戶端**（原為 Laya 3D + JS）。
+> 2026-07-31 runtime 實測確認：`window.uiscript`、`window.cfg`、`window.GameMgr`、
+> `window.Laya` **全部不存在**。
+>
+> 因此本文的**每一段程式碼都失效**：
+> `uiscript.UI_Activity_SnowBall_*`、`SnowBallData._inst`、`SnowBallEffectMgr`、
+> `window.cfg.snowball.*`，以及文末的
+> [「客戶端設定表」](#客戶端設定表已失效)（`cfg.snowball.snowball_monster_group.rows_`
+> 改 `round_time` / `attack_delay`）——**照抄必定拋錯。**
+>
+> 保留本文的唯一理由：小遊戲的**規則與數值**（雪球傷害/CD/MP、Buff 等級、章節解鎖條件）
+> 是伺服器端設計，作為遊戲知識仍有參考價值；只有**存取路徑**死了。
+>
+> Unity 時代的正確互動方式（Liqi protobuf）見
+> **[majsoul-unity-protocol.md](majsoul-unity-protocol.md)**。
+> 活動類請求的 payload schema **未驗證**。
+
+**原文日期**: 2026-01-01（Laya 時代）
+**作廢日期**: 2026-07-31
 **來源**: JavaScript 逆向分析 (window.uiscript, window.cfg.snowball)
 **重要**: 這些物件屬於 **Majsoul 遊戲的 WebUI**，不是 Naki 的代碼
 
@@ -510,61 +530,14 @@ mcp__naki__execute_js({ code: "window.cfg.snowball.snowball_activity" })
 
 ---
 
-## 遊戲修改（作弊碼）
+## 客戶端設定表（已失效）
 
-### 無限時間 + 怪物不攻擊
+舊版 Laya 客戶端可從 `window.cfg` 讀寫本地設定表；Unity 客戶端已無此物件，
+該路徑不再存在。本節原有的本地設定修改範例已移除（內容已失效且無遷移價值）。
 
-進入雪球活動後，透過 Naki Debug Server 執行：
 
-```bash
-curl -s -X POST http://localhost:8765/js -d '
-var rows = cfg.snowball.snowball_monster_group.rows_;
-var count = 0;
-for (var i = 0; i < rows.length; i++) {
-  if (rows[i]) {
-    rows[i].round_time = 9999999;
-    rows[i].attack_delay = 9999999;
-    count++;
-  }
-}
-return { success: true, modified: count };
-'
-```
-
-**效果**：
-- 回合時間變成幾乎無限（原本約 54 秒）
-- 怪物不會主動攻擊
-
-**注意**：
-- 需要在**進入雪球活動頁面後**執行
-- 每次重新載入遊戲需要重新執行
-- 只修改客戶端配置，不影響伺服器驗證
-
-### 其他可修改參數
-
-```javascript
-// 查看活動設定
-cfg.snowball.snowball_activity
-
-// 查看攻擊組設定（雪球傷害、CD、MP消耗）
-cfg.snowball.snowball_attack_group.rows_
-
-// 查看升級設定
-cfg.snowball.snowball_attack_level.rows_
-
-// 查看 Buff 設定
-cfg.snowball.player_snowball_buff.rows_
-```
-
-### 配置結構說明
-
-雀魂的配置使用自定義表格結構：
-- `cfg.snowball.xxx` 是表格物件
-- `cfg.snowball.xxx.rows_` 是行陣列（可直接修改）
-- `cfg.snowball.xxx.table_` 是索引表
-
----
-
-**文檔版本**: 1.1
-**更新日期**: 2026-01-01
-**驗證狀態**: ✅ 通過 Naki Debug Server JavaScript 執行驗證
+**文檔版本**: 1.2（作廢標註）
+**更新日期**: 2026-07-31
+**驗證狀態**: ⛔ **已作廢** — 內容於 2026-01-01 在 Laya 客戶端驗證通過；
+2026-07-31 實測雀魂已改用 Unity WebGL，本文所有存取路徑失效。
+規則/數值部分仍有參考價值，程式碼部分請勿使用。

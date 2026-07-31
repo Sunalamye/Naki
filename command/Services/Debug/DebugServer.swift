@@ -44,11 +44,23 @@ class DebugServer {
     private var logBuffer: [String] = []
     private let maxLogCount = 10000
 
+    /// 單一 HTTP request 累積上限（含 header + body），避免超大或惡意 body 造成無限等待 / 記憶體爆掉
+    private let maxRequestSize = 10 * 1024 * 1024  // 10 MB
+
     /// 獲取 Bot 狀態的回調
     var getBotStatus: (() -> [String: Any])?
 
     /// 手動觸發自動打牌的回調
     var triggerAutoPlay: (() -> Void)?
+
+    /// 送出 Liqi 請求的回調（Unity 時代的動作／大廳面；由 WebViewModel 注入）
+    var sendLiqi: ((LiqiRequestSpec, Int) async -> LiqiToolSendOutcome)?
+
+    /// 遊戲狀態快照回調（Swift 協定層供給）
+    var getGameSnapshot: (() -> [String: Any])?
+
+    /// 自動心跳（防閒置）開關回調
+    var setAntiIdle: ((Bool?, TimeInterval?) -> [String: Any])?
 
     /// MCP 協議處理器
     private let mcpHandler = MCPHandler()
@@ -72,6 +84,18 @@ class DebugServer {
         }
         mcpHandler.triggerAutoPlay = { [weak self] in
             self?.triggerAutoPlay?()
+        }
+        mcpHandler.sendLiqi = { [weak self] spec, awaitMs in
+            guard let handler = self?.sendLiqi else {
+                return .unavailable("debug_server_liqi_sender_not_configured")
+            }
+            return await handler(spec, awaitMs)
+        }
+        mcpHandler.getGameSnapshot = { [weak self] in
+            self?.getGameSnapshot?() ?? [:]
+        }
+        mcpHandler.setAntiIdle = { [weak self] enabled, interval in
+            self?.setAntiIdle?(enabled, interval) ?? [:]
         }
         mcpHandler.getLogs = { [weak self] in
             // 合併 DebugServer log 和 LogManager log
@@ -116,6 +140,9 @@ class DebugServer {
         do {
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
+            // #22 帳號安全：只綁 loopback interface（127.0.0.1 / ::1），阻止同網段其他裝置
+            // 存取這個能在遊戲 context 執行 JS 的 debug/MCP server。
+            parameters.requiredInterfaceType = .loopback
 
             guard let nwPort = NWEndpoint.Port(rawValue: port) else {
                 log("Invalid port: \(port)")
@@ -175,15 +202,95 @@ class DebugServer {
 
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: .main)
+        receiveRequest(connection: connection, buffer: Data())
+    }
 
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, error in
-            if let data = data, let request = String(data: data, encoding: .utf8) {
-                self?.handleRequest(request, connection: connection)
-            } else if let error = error {
-                self?.log("Connection error: \(error)")
+    /// 持續 receive 累積資料，直到整條 HTTP request 收滿（header + Content-Length 指定的 body）
+    /// 或連線結束 / 達到大小上限。解決大的 `/js`、`/mcp` body 跨 TCP 段被截斷的問題。
+    private func receiveRequest(connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+            guard let self = self else { return }
+
+            var accumulated = buffer
+            if let data = data, !data.isEmpty {
+                accumulated.append(data)
+            }
+
+            // 上限保護：避免無限等待 / 記憶體爆掉
+            if accumulated.count > self.maxRequestSize {
+                self.log("Request exceeds max size (\(accumulated.count) > \(self.maxRequestSize)), rejecting")
+                self.sendResponse(connection: connection, status: 400, body: "Request Entity Too Large")
+                return
+            }
+
+            // 對端已關閉（half-close）或發生錯誤，視為不會再有更多資料
+            let ended = isComplete || (error != nil)
+
+            // 完全沒收到資料的錯誤 → 直接關閉
+            if let error = error, accumulated.isEmpty {
+                self.log("Connection error: \(error)")
                 connection.cancel()
+                return
+            }
+
+            // 尚未收到任何資料
+            if accumulated.isEmpty {
+                if ended {
+                    connection.cancel()
+                } else {
+                    self.receiveRequest(connection: connection, buffer: accumulated)
+                }
+                return
+            }
+
+            // 檢查 HTTP header 是否收齊（\r\n\r\n）
+            guard let headerEnd = accumulated.range(of: Data([0x0d, 0x0a, 0x0d, 0x0a])) else {
+                if ended {
+                    // 連線結束但 header 仍不完整 → 用現有資料盡力處理
+                    self.processRequestData(accumulated, connection: connection)
+                } else {
+                    self.receiveRequest(connection: connection, buffer: accumulated)
+                }
+                return
+            }
+
+            // 解析 Content-Length，判斷 body 是否收滿
+            let headerData = accumulated.subdata(in: accumulated.startIndex..<headerEnd.lowerBound)
+            let expectedBodyLength = self.parseContentLength(fromHeaderData: headerData) ?? 0
+            let currentBodyLength = accumulated.distance(from: headerEnd.upperBound, to: accumulated.endIndex)
+
+            if currentBodyLength >= expectedBodyLength || ended {
+                // body 已收滿（或連線結束）→ 處理
+                self.processRequestData(accumulated, connection: connection)
+            } else {
+                // body 跨 TCP 段尚未收滿，繼續累積
+                self.receiveRequest(connection: connection, buffer: accumulated)
             }
         }
+    }
+
+    /// 將完整 request 資料轉為字串並交給路由處理
+    private func processRequestData(_ data: Data, connection: NWConnection) {
+        if let request = String(data: data, encoding: .utf8) {
+            handleRequest(request, connection: connection)
+        } else {
+            // 非 UTF-8：用 lossy 解碼避免整條丟棄
+            handleRequest(String(decoding: data, as: UTF8.self), connection: connection)
+        }
+    }
+
+    /// 從 HTTP header 區塊解析 Content-Length（大小寫不敏感）
+    private func parseContentLength(fromHeaderData headerData: Data) -> Int? {
+        guard let headerString = String(data: headerData, encoding: .utf8) else { return nil }
+        for line in headerString.components(separatedBy: "\r\n") {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let name = line[line.startIndex..<colon].trimmingCharacters(in: .whitespaces).lowercased()
+            if name == "content-length" {
+                let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+                return Int(value)
+            }
+        }
+        return nil
     }
 
     private func handleRequest(_ request: String, connection: NWConnection) {
@@ -224,21 +331,6 @@ class DebugServer {
 
         case ("POST", "/js"):
             handleJavaScript(body: body, connection: connection)
-
-        case ("GET", "/detect"):
-            handleDetect(connection: connection)
-
-        case ("GET", "/explore"):
-            handleExplore(connection: connection)
-
-        case ("GET", "/test-indicators"):
-            handleTestIndicators(connection: connection)
-
-        case ("POST", "/click"):
-            handleClick(body: body, connection: connection)
-
-        case ("POST", "/calibrate"):
-            handleCalibrate(body: body, connection: connection)
 
         // 遊戲 API 端點
         case ("GET", "/game/state"):
@@ -284,19 +376,6 @@ class DebugServer {
         // MCP Protocol 端點（委託給 MCPHandler）
         case ("POST", "/mcp"):
             mcpHandler.handleRequest(body: body, headers: lines, connection: connection)
-
-        // UI 控制端點
-        case ("GET", "/ui/names"):
-            handleGetPlayerNamesStatus(connection: connection)
-
-        case ("POST", "/ui/names/hide"):
-            handleHidePlayerNames(connection: connection)
-
-        case ("POST", "/ui/names/show"):
-            handleShowPlayerNames(connection: connection)
-
-        case ("POST", "/ui/names/toggle"):
-            handleTogglePlayerNames(connection: connection)
 
         default:
             sendResponse(connection: connection, status: 404, body: "Not Found: \(path)")
@@ -415,39 +494,6 @@ class DebugServer {
         callToolAndRespond(tool: "execute_js", arguments: ["code": code], connection: connection)
     }
 
-    private func handleDetect(connection: NWConnection) {
-        callToolAndRespond(tool: "detect", connection: connection)
-    }
-
-    private func handleExplore(connection: NWConnection) {
-        callToolAndRespond(tool: "explore", connection: connection)
-    }
-
-    private func handleTestIndicators(connection: NWConnection) {
-        callToolAndRespond(tool: "test_indicators", connection: connection)
-    }
-
-    private func handleClick(body: String, connection: NWConnection) {
-        guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let x = json["x"] as? Double,
-              let y = json["y"] as? Double else {
-            sendJSON(connection: connection, data: ["error": "Invalid JSON. Expected: {\"x\": 100, \"y\": 200}"])
-            return
-        }
-        let label = json["label"] as? String ?? "API Click"
-        callToolAndRespond(tool: "click", arguments: ["x": x, "y": y, "label": label], connection: connection)
-    }
-
-    private func handleCalibrate(body: String, connection: NWConnection) {
-        guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            sendJSON(connection: connection, data: ["error": "Invalid JSON"])
-            return
-        }
-        callToolAndRespond(tool: "calibrate", arguments: json, connection: connection)
-    }
-
     // MARK: - Game API Handlers
 
     private func handleGameState(connection: NWConnection) {
@@ -462,14 +508,18 @@ class DebugServer {
         callToolAndRespond(tool: "game_ops", connection: connection)
     }
 
+    /// 打牌：Unity 下沒有 UI 手牌陣列，改以牌字串指定（MJAI 或雀魂記法皆可）
     private func handleGameDiscard(body: String, connection: NWConnection) {
         guard let data = body.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tileIndex = json["tileIndex"] as? Int else {
-            sendJSON(connection: connection, data: ["error": "Invalid JSON. Expected: {\"tileIndex\": 0}"])
+              let tile = json["tile"] as? String else {
+            sendJSON(connection: connection,
+                     data: ["error": "Invalid JSON. Expected: {\"tile\": \"5m\", \"moqie\": false}"])
             return
         }
-        callToolAndRespond(tool: "game_discard", arguments: ["tileIndex": tileIndex], connection: connection)
+        var arguments: [String: Any] = ["tile": tile]
+        if let moqie = json["moqie"] as? Bool { arguments["moqie"] = moqie }
+        callToolAndRespond(tool: "game_discard", arguments: arguments, connection: connection)
     }
 
     private func handleGameAction(body: String, connection: NWConnection) {
@@ -479,8 +529,15 @@ class DebugServer {
             sendJSON(connection: connection, data: ["error": "Invalid JSON. Expected: {\"action\": \"pass\"}"])
             return
         }
-        let params = json["params"] as? [String: Any] ?? [:]
-        callToolAndRespond(tool: "game_action", arguments: ["action": action, "params": params], connection: connection)
+        // 參數改為平鋪（tile / moqie / index / kanType / timeuse），
+        // 同時相容舊的 {"params": {...}} 包裝
+        var arguments: [String: Any] = json
+        if let params = json["params"] as? [String: Any] {
+            arguments.removeValue(forKey: "params")
+            arguments.merge(params) { _, new in new }
+        }
+        arguments["action"] = action
+        callToolAndRespond(tool: "game_action", arguments: arguments, connection: connection)
     }
 
     // MARK: - Debug Handlers
@@ -517,24 +574,6 @@ class DebugServer {
         callToolAndRespond(tool: "bot_pon", connection: connection)
     }
 
-    // MARK: - UI Control Handlers
-
-    private func handleGetPlayerNamesStatus(connection: NWConnection) {
-        callToolAndRespond(tool: "ui_names_status", connection: connection)
-    }
-
-    private func handleHidePlayerNames(connection: NWConnection) {
-        callToolAndRespond(tool: "ui_names_hide", connection: connection)
-    }
-
-    private func handleShowPlayerNames(connection: NWConnection) {
-        callToolAndRespond(tool: "ui_names_show", connection: connection)
-    }
-
-    private func handleTogglePlayerNames(connection: NWConnection) {
-        callToolAndRespond(tool: "ui_names_toggle", connection: connection)
-    }
-
     // MARK: - Response Helpers
 
     private func sendResponse(connection: NWConnection, status: Int, body: String, contentType: String = "text/plain") {
@@ -551,7 +590,7 @@ class DebugServer {
         HTTP/1.1 \(status) \(statusText)\r
         Content-Type: \(contentType); charset=utf-8\r
         Content-Length: \(body.utf8.count)\r
-        Access-Control-Allow-Origin: *\r
+        Access-Control-Allow-Origin: http://localhost:\(actualPort)\r
         Connection: close\r
         \r
         \(body)

@@ -130,8 +130,15 @@ curl -X POST http://localhost:8765/bot/trigger # 執行推薦動作
 ```bash
 curl http://localhost:8765/detect   # 檢測 API 可用性
 curl http://localhost:8765/explore  # 探索遊戲物件
-curl -X POST http://localhost:8765/js -d 'return JSON.stringify(window.view.DesktopMgr.Inst.mainrole.hand.length)'
+# ❌ 舊範例已失效（雀魂 4.0.45 改 Unity WebGL，DesktopMgr 不存在）：
+#   curl -X POST http://localhost:8765/js -d 'return JSON.stringify(window.view.DesktopMgr.Inst.mainrole.hand.length)'
+# ✅ Unity 時代改查 WebSocket 連線 / 走 Liqi protobuf：
+curl -X POST http://localhost:8765/js -d 'return JSON.stringify(window.__nakiWebSocket.getConnections())'
 ```
+
+> ⚠️ `/js` 端點本身仍可用（能在頁面 context 執行 JS），但 `window.view` / `GameMgr` /
+> `uiscript` / `cfg` 等 Laya 物件已不存在；`/game/*` 類端點與其 MCP 工具因此失效。
+> 正確互動方式見 [majsoul-unity-protocol.md](majsoul-unity-protocol.md)。
 
 ---
 

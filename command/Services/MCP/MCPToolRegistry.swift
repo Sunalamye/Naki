@@ -140,14 +140,30 @@ final class MCPToolRegistry {
 
 extension MCPToolRegistry {
     /// 註冊所有內建工具
+    ///
+    /// 2026-07-31 Unity 遷移後的工具清單（共 **41** 個；`MCPToolsTests` 會檢查這個數字）。
+    ///
+    /// 移除的舊工具（呼叫會得到 `Unknown tool: <name>`）與理由：
+    /// - `detect` / `explore` / `test_indicators` / `click` / `calibrate`：Laya DOM 座標探測，
+    ///   Unity 只有單一 `<canvas>`，沒有替代面（要 ad-hoc 探測請用 `execute_js`）
+    /// - `ui_names_status` / `ui_names_hide` / `ui_names_show` / `ui_names_toggle`：
+    ///   依賴 `uiscript.UI_DesktopInfo`，UI 層已搬進 wasm
+    /// - `lobby_match_status`：協定沒有「查自己排隊狀態」的方法，併入 `lobby_status`
+    /// - `lobby_navigate`：純 UI 換頁，無協定等價物
+    /// - `lobby_idle_status`：讀 `GameMgr._last_heatbeat_time`，改由 `lobby_anti_idle` 回報
+    /// - `game_emoji_list`：表情清單在客戶端配置表（`cfg`）內，已隨引擎進 wasm
+    /// - `game_emoji_auto_reply`：需要 `DesktopMgr.seat` + NetAgent，兩者皆無
+    ///
+    /// 保留但回明確失敗的（有替代面可導向）：`highlight_*` / `show_recommendations` /
+    /// `hide_highlight` / `reset_tile_color` → 改用 Naki 原生推薦面板。
     func registerBuiltInTools() {
-        // 系統類
+        // 系統類（4）— 不碰遊戲物件
         register(GetStatusTool.self)
         register(GetHelpTool.self)
         register(GetLogsTool.self)
         register(ClearLogsTool.self)
 
-        // Bot 控制類
+        // Bot 控制類（7）— 讀 Swift 協定層狀態 / 送 Liqi 動作
         register(BotStatusTool.self)
         register(BotTriggerTool.self)
         register(BotOpsTool.self)
@@ -156,7 +172,7 @@ extension MCPToolRegistry {
         register(BotPonTool.self)
         register(BotSyncTool.self)
 
-        // 遊戲狀態類
+        // 遊戲狀態與動作類（6）— 狀態走協定層、動作走 protobuf
         register(GameStateTool.self)
         register(GameHandTool.self)
         register(GameOpsTool.self)
@@ -164,45 +180,36 @@ extension MCPToolRegistry {
         register(GameActionTool.self)
         register(GameActionVerifyTool.self)
 
-        // JavaScript 執行
+        // JavaScript 執行（1）
         register(ExecuteJSTool.self)
 
-        // 探索類
-        register(DetectTool.self)
-        register(ExploreTool.self)
-
-        // UI 操作類
-        register(TestIndicatorsTool.self)
-        register(ClickTool.self)
-        register(CalibrateTool.self)
-
-        // UI 控制類
-        register(UINameStatusTool.self)
-        register(UINameHideTool.self)
-        register(UINameShowTool.self)
-        register(UINameToggleTool.self)
-
-        // 大廳類
+        // 大廳類（8）— 全部走 .lq.Lobby.* protobuf
         register(LobbyStatusTool.self)
         register(MatchModeListTool.self)
         register(StartMatchTool.self)
         register(CancelMatchTool.self)
-        register(MatchStatusTool.self)
-        register(NavigateLobbyTool.self)
-        register(AccountLevelTool.self)
-
-        // 心跳/閒置管理
+        register(AccountInfoTool.self)
+        register(ServerTimeTool.self)
         register(HeartbeatTool.self)
-        register(IdleStatusTool.self)
+        register(LoginBeatTool.self)
+
+        // 防閒置（1）— Swift 定期送 .lq.Lobby.heatbeat
         register(AntiIdleToggleTool.self)
 
-        // 表情類
-        register(SendEmojiTool.self)
-        register(ListEmojiTool.self)
-        register(EmojiListenTool.self)
-        register(EmojiAutoReplyTool.self)
+        // 友人房類（7）— 新增：建房 → 加人機 → 開局可純由 MCP 完成
+        register(RoomCreateTool.self)
+        register(RoomAddRobotTool.self)
+        register(RoomStartTool.self)
+        register(RoomInfoTool.self)
+        register(RoomJoinTool.self)
+        register(RoomLeaveTool.self)
+        register(RoomQuickTestTool.self)
 
-        // 高亮類
+        // 表情類（2）— 送出走 broadcastInGame、接收走 NotifyGameBroadcast
+        register(SendEmojiTool.self)
+        register(EmojiListenTool.self)
+
+        // 高亮類（6）— Unity 下不可行，一律回明確失敗並導向原生推薦面板
         register(HighlightTileTool.self)
         register(ResetTileColorTool.self)
         register(HighlightStatusTool.self)

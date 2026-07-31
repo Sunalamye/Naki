@@ -24,6 +24,7 @@ struct RecommendationRow: View {
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundColor(.secondary)
                 .frame(width: 18)
+                .accessibilityLabel(rankAccessibilityLabel)
 
             // 動作類型標籤
             Text(recommendation.actionType.displayName)
@@ -37,9 +38,12 @@ struct RecommendationRow: View {
 
             // 牌面（放大顯示）
             if recommendation.actionType == .discard || recommendation.actionType == .riichi {
+                // 固定字級 28/22 保留：此列為固定 40pt 寬版面，改用 Dynamic Type 會與機率條/百分比欄位錯位，風險高故僅補 a11y
                 Text(recommendation.tileUnicode)
                     .font(.system(size: isTop ? 28 : 22))
                     .foregroundColor(recommendation.isRed ? .red : .primary)
+                    // glyph 對 VoiceOver 無意義，改用共用牌名
+                    .accessibilityLabel(tileAccessibleName)
             } else {
                 // ⭐ 使用 displayLabel 來顯示友好的標籤（如 吃①, 吃②, 吃③）
                 Text(recommendation.displayLabel)
@@ -68,6 +72,7 @@ struct RecommendationRow: View {
                         }
                     }
                     .frame(width: 40, height: 4)
+                    .accessibilityHidden(true)  // 純視覺 meter，語意由相鄰百分比欄位承載
                     
                     // 百分比
                     Text(recommendation.percentageString)
@@ -75,6 +80,8 @@ struct RecommendationRow: View {
                         .fontWeight(isTop ? .bold : .regular)
                         .foregroundColor(isTop ? .primary : .secondary)
                         .frame(width: 40, alignment: .trailing)
+                        // 機率顏色分級（綠/橙/紅）本身無文字，合併成「推薦度高/中/低，百分比」給 VoiceOver
+                        .accessibilityLabel(probabilityAccessibilityLabel)
                 }
                 
                 // 百分比
@@ -83,12 +90,17 @@ struct RecommendationRow: View {
                     .fontWeight(isTop ? .bold : .regular)
                     .foregroundColor(isTop ? .primary : .secondary)
                     .frame(width: 40, alignment: .trailing)
+                    // 窄版面（無機率條）同樣補顏色分級文字，讓推薦度讀得出
+                    .accessibilityLabel(probabilityAccessibilityLabel)
             }
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
         .background(isTop ? Color.yellow.opacity(0.15) : Color.clear)
         .cornerRadius(6)
+        // 整列由多個碎片組成，合併成單一可讀元素（理想讀成：第N推薦，打五萬，45%，最佳）
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("recommendation-row-\(rank - 1)")
     }
 
     private var probabilityColor: Color {
@@ -99,6 +111,31 @@ struct RecommendationRow: View {
         } else {
             return .red
         }
+    }
+
+    // MARK: - Accessibility
+
+    /// 牌的可讀名稱（VoiceOver 用），共用 MahjongTile.accessibleName
+    private var tileAccessibleName: String {
+        MahjongTile(mjai: recommendation.displayTile).accessibleName
+    }
+
+    /// 排名可讀標籤，最佳（top）推薦補「最佳」文字線索（原本只靠黃底 + 粗體）
+    private var rankAccessibilityLabel: String {
+        isTop ? "第 \(rank) 推薦，最佳" : "第 \(rank) 推薦"
+    }
+
+    /// 機率顏色分級對應的文字 + 百分比（門檻與 probabilityColor 一致）
+    private var probabilityAccessibilityLabel: String {
+        let grade: String
+        if recommendation.probability > 0.5 {
+            grade = "推薦度高"
+        } else if recommendation.probability > 0.2 {
+            grade = "推薦度中"
+        } else {
+            grade = "推薦度低"
+        }
+        return "\(grade)，\(recommendation.percentageString)"
     }
 }
 
@@ -133,6 +170,8 @@ struct RecommendationView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .help("重新載入 Bot")
+                    .accessibilityLabel("重新載入 Bot")
+                    .accessibilityIdentifier("recommendation-reload-button")
                 }else{
                     Text("\(recommendations.count) 選項")
                         .font(.caption2)

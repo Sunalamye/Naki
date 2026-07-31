@@ -37,6 +37,10 @@ struct BotStatusView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+                // 運行狀態靠顏色（綠/灰）+ 文字，合併為單一無障礙元素並提供狀態值
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Bot 運行狀態")
+                .accessibilityValue(botStatus.isActive ? "運行中" : "待機")
                 Button(action: {
                     Task {
                         await viewModel?.forceReconnect()
@@ -45,6 +49,8 @@ struct BotStatusView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("重新載入")
+                .accessibilityLabel("重新載入")
+                .accessibilityIdentifier("bot-status-reload-button")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -179,6 +185,10 @@ struct ScoreLabel: View {
         .padding(.vertical, 4)
         .background(isPlayer ? Color.blue.opacity(0.1) : Color.clear)
         .cornerRadius(4)
+        // 「我」原本只靠粗體 + 藍底，補文字線索「（我）」讓 VoiceOver 讀得出座位歸屬
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(isPlayer ? "\(windName)（我）" : windName)
+        .accessibilityValue("\(formattedScore) 點")
     }
 
     private var windName: String {
@@ -233,6 +243,9 @@ struct ActionBadge: View {
             .background(isAvailable ? color.opacity(0.2) : Color.gray.opacity(0.1))
             .foregroundColor(isAvailable ? color : .secondary.opacity(0.5))
             .cornerRadius(4)
+            // 可用性原本只靠顏色/透明度，補 VoiceOver 可讀的可用/不可用值
+            .accessibilityLabel(name)
+            .accessibilityValue(isAvailable ? "可用" : "不可用")
     }
 }
 
@@ -253,6 +266,8 @@ struct DoraIndicatorsView: View {
                     Text(mahjongTile.unicode)
                         .font(.title3)
                         .foregroundColor(mahjongTile.isRed ? .red : .primary)
+                        // glyph 對 VoiceOver 無意義，改用共用牌名（紅牌名稱已含「紅」前綴，不僅靠顏色）
+                        .accessibilityLabel(mahjongTile.accessibleName)
                 }
             }
         }

@@ -7,12 +7,59 @@
     'use strict';
 
     // ========================================
+    // ⚠️ Unity WebGL 遷移說明（2026-07 實測）
+    // ========================================
+    /**
+     * 雀魂已從 Laya 3D + JS 改為 Unity WebGL (chs_t-WebGL-release-4.0.45)。
+     * window.Laya / window.view.DesktopMgr / window.uiscript / window.GameMgr / window.cfg
+     * 全部不存在，因此本檔案中所有「直接操作遊戲物件」的功能（玩家名稱隱藏、
+     * 寶牌 hook、推薦高亮初始化）在原理上已不可能運作。
+     *
+     * 本檔案不整檔刪除（naki-coordinator.js 與 MCP 工具仍引用這些 API），
+     * 改為：偵測不到 Laya 物件時回傳明確失敗
+     *   { success: false, reason: 'unity-client-no-laya' }
+     * 而不是靜默回 false 造成假訊號。
+     *
+     * 推薦顯示的唯一管道 = 原生 SwiftUI 面板
+     *   command/Views/RecommendationView.swift、command/Views/BotStatusView.swift
+     */
+
+    /** Laya 客戶端是否可用（Unity WebGL 下永遠為 false） */
+    function nakiLayaAvailable() {
+        return !!(window.Laya
+            && window.view
+            && window.view.DesktopMgr
+            && window.view.DesktopMgr.Inst);
+    }
+
+    /** uiscript（Laya UI 層）是否可用 */
+    function nakiUIScriptAvailable() {
+        return !!(window.uiscript && window.uiscript.UI_DesktopInfo);
+    }
+
+    /** 統一的失效回傳（明確失敗，不拋錯、不靜默） */
+    function nakiLayaUnavailable(api) {
+        console.warn('[Naki GameAPI] ' + api + ' 無法執行：Unity WebGL 客戶端沒有 Laya/DesktopMgr/uiscript');
+        return {
+            success: false,
+            reason: 'unity-client-no-laya',
+            api: api,
+            error: 'Majsoul Unity WebGL client: Laya game objects not present'
+        };
+    }
+
+    // ========================================
     // 遊戲 API 探測 (保留用於調試)
     // ========================================
 
     window.__nakiDetectGameAPI = function() {
+        const layaAvailable = nakiLayaAvailable();
         const results = {
-            engine: 'Laya',
+            // 不再硬寫 'Laya'：實際偵測，避免誤導
+            engine: layaAvailable ? 'Laya' : 'unity-webgl-or-unknown',
+            layaAvailable: layaAvailable,
+            uiscriptAvailable: nakiUIScriptAvailable(),
+            inGameHighlightSupported: layaAvailable,
             coordinator: !!window.NakiCoordinator,
             availableAPIs: [],
             gameObjects: []
@@ -89,13 +136,15 @@
     };
 
     // ========================================
-    // 🎭 玩家名稱隱藏功能
+    // 🎭 玩家名稱隱藏功能 — ⚠️ Unity 客戶端已失效
+    // 依賴 window.uiscript.UI_DesktopInfo（Laya UI 層），Unity WebGL 下不存在。
     // ========================================
 
     window.__nakiPlayerNames = {
         hidden: false,
 
         hide: function() {
+            if (!nakiUIScriptAvailable()) return nakiLayaUnavailable('playerNames.hide');
             try {
                 const playerInfos = window.uiscript?.UI_DesktopInfo?.Inst?._player_infos;
                 if (!playerInfos) return false;
@@ -115,6 +164,7 @@
         },
 
         show: function() {
+            if (!nakiUIScriptAvailable()) return nakiLayaUnavailable('playerNames.show');
             try {
                 const playerInfos = window.uiscript?.UI_DesktopInfo?.Inst?._player_infos;
                 if (!playerInfos) return false;
@@ -134,6 +184,7 @@
         },
 
         toggle: function() {
+            if (!nakiUIScriptAvailable()) return nakiLayaUnavailable('playerNames.toggle');
             return this.hidden ? this.show() : this.hide();
         },
 
@@ -142,13 +193,16 @@
             return {
                 available: !!playerInfos,
                 hidden: this.hidden,
-                count: playerInfos?.length || 0
+                count: playerInfos?.length || 0,
+                // 明確標示不可用的原因，避免「available:false」被誤讀成「還沒進對局」
+                reason: playerInfos ? null : 'unity-client-no-laya'
             };
         }
     };
 
     // ========================================
-    // 🎯 Dora Shimmer Effect Hook (保留調試用)
+    // 🎯 Dora Shimmer Effect Hook (保留調試用) — ⚠️ Unity 客戶端已失效
+    // 依賴 view.DesktopMgr.Inst.effect_dora3D（Laya Sprite3D），Unity WebGL 下不存在。
     // ========================================
 
     window.__nakiDoraHook = {
@@ -156,6 +210,7 @@
         callHistory: [],
 
         hook: function() {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('doraHook.hook');
             try {
                 const effect = window.view?.DesktopMgr?.Inst?.effect_dora3D;
                 if (!effect) return false;
@@ -183,7 +238,11 @@
         },
 
         getHistory: function() {
-            return { hooked: this.hooked, history: this.callHistory };
+            return {
+                hooked: this.hooked,
+                history: this.callHistory,
+                reason: nakiLayaAvailable() ? null : 'unity-client-no-laya'
+            };
         },
 
         clearHistory: function() {
@@ -192,13 +251,15 @@
     };
 
     // ========================================
-    // 高亮效果初始化 (保留)
+    // 高亮效果初始化 (保留) — ⚠️ Unity 客戶端已失效
+    // 依賴 view.DesktopMgr.Inst.effect_recommend，Unity WebGL 下不存在。
     // ========================================
 
     window.__nakiHighlightInit = {
         initialized: false,
 
         init: function() {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('highlightInit.init');
             const effect = window.view?.DesktopMgr?.Inst?.effect_recommend;
             if (effect) {
                 this.initialized = true;
@@ -208,8 +269,13 @@
         }
     };
 
-    // 延遲初始化 hooks
+    // 延遲初始化 hooks（僅 Laya 客戶端；Unity 下直接略過並留下一行明確紀錄）
     setTimeout(() => {
+        if (!nakiLayaAvailable()) {
+            console.log('[Naki] 略過 dora/highlight hook 初始化：'
+                + 'Unity WebGL 客戶端無 Laya 物件，遊戲內高亮已停用（改用原生推薦面板）');
+            return;
+        }
         window.__nakiDoraHook.hook();
         window.__nakiHighlightInit.init();
     }, 500);

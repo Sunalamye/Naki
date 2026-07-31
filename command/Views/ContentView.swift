@@ -70,6 +70,8 @@ struct ContentView: View {
                 Image(systemName: "gearshape")
             }
             .help("進階設定")
+            .accessibilityIdentifier("toolbar-settings")
+            .accessibilityLabel("進階設定")
         }
 
         // 左側：自動打牌模式
@@ -80,11 +82,13 @@ struct ContentView: View {
                 Text("自動").tag(AutoPlayMode.auto)
             }
             .pickerStyle(.segmented)
-            .frame(width: 160)
+            .frame(width: 160) // a11y: fixed width for segmented control; kept to preserve toolbar layout
             .onChange(of: autoPlayMode) { _, newValue in
                 viewModel.setAutoPlayMode(newValue)
             }
             .help("AI 推薦模式")
+            .accessibilityIdentifier("autoplay-mode-picker")
+            .accessibilityLabel("自動打牌模式")
         }
 
         // 延遲調整
@@ -100,6 +104,9 @@ struct ContentView: View {
                         .onChange(of: actionDelay) { _, newValue in
                             viewModel.setAutoPlayDelay(newValue)
                         }
+                        .accessibilityIdentifier("action-delay-stepper")
+                        .accessibilityLabel("動作延遲")
+                        .accessibilityValue(String(format: "%.1f 秒", actionDelay))
                 }
                 .frame(width: 80)
                 .help("動作延遲")
@@ -120,12 +127,15 @@ struct ContentView: View {
 
                     }
                     Text("MCP Server")
-                        .font(.system(size: 8))
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                 }
             }
             .frame(width: 80)
             .help(viewModel.isDebugServerRunning ? "MCP Server 運行中" : "MCP Server 已停止")
+            .accessibilityIdentifier("mcp-server-toggle")
+            .accessibilityLabel("MCP Server")
+            .accessibilityValue(viewModel.isDebugServerRunning ? "運行中，連接埠 \(viewModel.debugServerPort)" : "未運行")
         }
 
         // 連接狀態
@@ -142,6 +152,8 @@ struct ContentView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .help("重新載入")
+            .accessibilityIdentifier("toolbar-reload")
+            .accessibilityLabel("重新載入")
         }
 
         // 右側：日誌切換
@@ -150,6 +162,9 @@ struct ContentView: View {
                 Image(systemName: showLog ? "terminal.fill" : "terminal")
             }
             .help("顯示/隱藏日誌")
+            .accessibilityIdentifier("toolbar-log-toggle")
+            .accessibilityLabel("顯示或隱藏日誌")
+            .accessibilityValue(showLog ? "已顯示" : "已隱藏")
         }
 
         // 遊戲面板切換
@@ -158,6 +173,9 @@ struct ContentView: View {
                 Image(systemName: showGamePanel ? "sidebar.trailing" : "sidebar.right")
             }
             .help("顯示/隱藏遊戲面板")
+            .accessibilityIdentifier("toolbar-game-panel-toggle")
+            .accessibilityLabel("顯示或隱藏遊戲面板")
+            .accessibilityValue(showGamePanel ? "已顯示" : "已隱藏")
         }
     }
 #endif
@@ -211,9 +229,13 @@ struct ContentView: View {
                 }
 
                 Text("WebSocket")
-                    .font(.system(size: 8))
+                    .font(.caption2)
                     .foregroundColor(.secondary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("websocket-connection-indicator")
+            .accessibilityLabel("WebSocket 連線狀態")
+            .accessibilityValue(viewModel.isConnected ? "已連接" : "未連接")
 
             RecommendationView(
                 recommendations: viewModel.recommendations,
@@ -232,6 +254,8 @@ struct ContentView: View {
             }) {
                 Image(systemName: "arrow.clockwise")
             }
+            .accessibilityIdentifier("toolbar-reload")
+            .accessibilityLabel("重新載入")
         }
 
         ToolbarItem(placement: .automatic) {
@@ -245,6 +269,8 @@ struct ContentView: View {
             .onChange(of: autoPlayMode) { _, newValue in
                 viewModel.setAutoPlayMode(newValue)
             }
+            .accessibilityIdentifier("autoplay-mode-picker")
+            .accessibilityLabel("自動打牌模式")
         }
 
         // 右側：遊戲面板
@@ -252,6 +278,8 @@ struct ContentView: View {
             Button(action: { showGamePanel = true }) {
                 Image(systemName: "sidebar.right")
             }
+            .accessibilityIdentifier("toolbar-game-panel-toggle")
+            .accessibilityLabel("顯示遊戲面板")
         }
 
         // 右側：設定
@@ -259,6 +287,8 @@ struct ContentView: View {
             Button(action: { showAdvancedSettings = true }) {
                 Image(systemName: "gearshape")
             }
+            .accessibilityIdentifier("toolbar-settings")
+            .accessibilityLabel("進階設定")
         }
     }
 
@@ -294,6 +324,7 @@ struct ContentView: View {
                     Button("完成") {
                         showGamePanel = false
                     }
+                    .accessibilityIdentifier("game-panel-done-button")
                 }
             }
         }
@@ -350,19 +381,25 @@ struct GamePanel: View {
 struct ConnectionIndicator: View {
     @Environment(\.webViewModel) private var viewModel
 
+    private var isConnected: Bool { viewModel?.isConnected ?? false }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 4) {
                 Circle()
-                    .fill((viewModel?.isConnected ?? false) ? Color.green : Color.red)
+                    .fill(isConnected ? Color.green : Color.red)
                     .frame(width: 6, height: 6)
-                Text((viewModel?.isConnected ?? false) ? "已連接" : "未連接")
+                Text(isConnected ? "已連接" : "未連接")
                     .font(.caption2)
             }
             Text("WebSocket")
-                .font(.system(size: 8))
+                .font(.caption2)
                 .foregroundColor(.secondary)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("websocket-connection-indicator")
+        .accessibilityLabel("WebSocket 連線狀態")
+        .accessibilityValue(isConnected ? "已連接" : "未連接")
     }
 }
 
@@ -404,6 +441,7 @@ struct AdvancedSettingsSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("settings-done-button")
             }
             .padding()
             .background(Color.contentBackground)
@@ -414,6 +452,7 @@ struct AdvancedSettingsSheet: View {
                 settingsForm
             }
         }
+        // a11y: fixed sheet size; large Dynamic Type may clip — kept to preserve layout
         .frame(width: 400, height: 550)
     }
     #endif
@@ -431,6 +470,7 @@ struct AdvancedSettingsSheet: View {
                     Button("完成") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("settings-done-button")
                 }
             }
         }
@@ -450,6 +490,9 @@ struct AdvancedSettingsSheet: View {
                                 .foregroundColor(.secondary)
                         }
                         Slider(value: $temperature, in: 0.1...2.0, step: 0.1)
+                            .accessibilityIdentifier("temperature-slider")
+                            .accessibilityLabel("推薦溫度")
+                            .accessibilityValue(String(format: "%.2f", temperature))
                     }
 
                     Text("較低溫度 = 更確定性的推薦，較高溫度 = 更多樣化的推薦")
@@ -470,6 +513,9 @@ struct AdvancedSettingsSheet: View {
                     .onChange(of: showRotatingEffect) { _, newValue in
                         viewModel?.setHighlightSettings(showRotatingEffect: newValue)
                     }
+                    .accessibilityIdentifier("rotating-effect-toggle")
+                    .accessibilityLabel("顯示旋轉高亮效果")
+                    .accessibilityValue(showRotatingEffect ? "開" : "關")
                 }
             } label: {
                 Label("AI 設定", systemImage: "brain")
@@ -489,6 +535,9 @@ struct AdvancedSettingsSheet: View {
                     .onChange(of: hidePlayerNames) { _, newValue in
                         viewModel?.setHidePlayerNames(newValue)
                     }
+                    .accessibilityIdentifier("hide-player-names-toggle")
+                    .accessibilityLabel("隱藏玩家名稱")
+                    .accessibilityValue(hidePlayerNames ? "開" : "關")
                 }
             } label: {
                 Label("隱私設定", systemImage: "eye.slash")
@@ -510,6 +559,9 @@ struct AdvancedSettingsSheet: View {
                             .onChange(of: tileSpacing) { _, _ in
                                 updateCalibration()
                             }
+                            .accessibilityIdentifier("tile-spacing-slider")
+                            .accessibilityLabel("手牌間距")
+                            .accessibilityValue("\(Int(tileSpacing)) 像素")
                     }
 
                     // 水平偏移
@@ -524,6 +576,9 @@ struct AdvancedSettingsSheet: View {
                             .onChange(of: offsetX) { _, _ in
                                 updateCalibration()
                             }
+                            .accessibilityIdentifier("horizontal-offset-slider")
+                            .accessibilityLabel("水平偏移")
+                            .accessibilityValue("\(Int(offsetX)) 像素")
                     }
 
                     // 垂直偏移
@@ -538,6 +593,9 @@ struct AdvancedSettingsSheet: View {
                             .onChange(of: offsetY) { _, _ in
                                 updateCalibration()
                             }
+                            .accessibilityIdentifier("vertical-offset-slider")
+                            .accessibilityLabel("垂直偏移")
+                            .accessibilityValue("\(Int(offsetY)) 像素")
                     }
 
                     Divider()
@@ -551,6 +609,7 @@ struct AdvancedSettingsSheet: View {
                             updateCalibration()
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityIdentifier("reset-calibration-button")
                     }
                 }
             } label: {
@@ -574,6 +633,7 @@ struct AdvancedSettingsSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .help("強制斷線重連，伺服器會重新發送遊戲狀態重建 Bot")
+                        .accessibilityIdentifier("rebuild-bot-button")
 
                         Button("刪除 Bot") {
                             viewModel?.deleteNativeBot()
@@ -582,6 +642,7 @@ struct AdvancedSettingsSheet: View {
                         #if os(macOS)
                         .tint(.red)
                         #endif
+                        .accessibilityIdentifier("delete-bot-button")
                     }
                 }
             } label: {
@@ -593,10 +654,16 @@ struct AdvancedSettingsSheet: View {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Circle()
-                            .fill((viewModel?.isDebugServerRunning ?? false) ? Color.green : Color.gray)
-                            .frame(width: 8, height: 8)
-                        Text((viewModel?.isDebugServerRunning ?? false) ? "運行中" : "已停止")
+                        HStack {
+                            Circle()
+                                .fill((viewModel?.isDebugServerRunning ?? false) ? Color.green : Color.gray)
+                                .frame(width: 8, height: 8)
+                            Text((viewModel?.isDebugServerRunning ?? false) ? "運行中" : "已停止")
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("mcp-server-status")
+                        .accessibilityLabel("MCP Server 狀態")
+                        .accessibilityValue((viewModel?.isDebugServerRunning ?? false) ? "運行中" : "已停止")
 
                         Spacer()
 
@@ -605,6 +672,7 @@ struct AdvancedSettingsSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .tint((viewModel?.isDebugServerRunning ?? false) ? .red : .green)
+                        .accessibilityIdentifier("mcp-server-toggle-button")
                     }
 
                     if viewModel?.isDebugServerRunning ?? false {
@@ -661,6 +729,8 @@ struct StatusBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(statusColor.opacity(0.1))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("status-bar")
         }
     }
 

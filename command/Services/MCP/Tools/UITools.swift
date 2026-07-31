@@ -3,7 +3,21 @@
 //  Naki
 //
 //  Created by Claude on 2025/12/05.
-//  UI 操作類 MCP 工具
+//  Updated 2026-07-31：雀魂改用 Unity WebGL，DOM/Laya 探測類工具全數移除。
+//
+//  移除的工具與理由（實測 `window.Laya` / `GameMgr` / `uiscript` / `view.DesktopMgr`
+//  在 Unity 客戶端不存在，見 docs/majsoul-unity-protocol.md）：
+//
+//  | 舊工具 | 依賴 | 為何移除而不是回失敗 |
+//  |--------|------|----------------------|
+//  | detect / explore | `__nakiDetectGameAPI` / `__nakiExploreGameObjects`（列舉 Laya 物件）| 沒有替代面可指；要探測就用 `execute_js` |
+//  | test_indicators / click / calibrate | 座標點擊 Laya 牌面 | Unity 只有單一 `<canvas>`，沒有 per-tile 元素；動作改走 protobuf |
+//  | ui_names_status / hide / show / toggle | `uiscript.UI_DesktopInfo._player_infos` | UI 層搬進 wasm，JS 完全碰不到 |
+//
+//  判準：**有替代做法可指的才留失敗樁**（例如高亮 → 原生推薦面板），
+//  純 Laya 除錯輔助沒有替代面，留著只會在每次 tools/list 佔 token 並誘導 agent 白試。
+//  呼叫已移除的工具會得到 `Unknown tool: <name>`（MCPToolRegistry 的既有行為），
+//  那本身就是明確的機械失敗。
 //
 
 import Foundation
@@ -12,9 +26,19 @@ import MCPKit
 // MARK: - Execute JS Tool
 
 /// 執行 JavaScript
+///
+/// Unity 遷移後**唯一保留**的 JS 工具：頁面本身仍是網頁，`window.__nakiWebSocket`
+/// 等 Naki 自己注入的模組仍在，所以 ad-hoc 探測仍有意義。
+/// 但注意：遊戲狀態與動作**不要**再用它（遊戲物件已不存在），請改用
+/// `game_state` / `game_hand` / `game_ops`（Swift 協定層）與 `game_action`（Liqi protobuf）。
 struct ExecuteJSTool: MCPTool {
     static let name = "execute_js"
-    static let description = "在遊戲 WebView 中執行 JavaScript 代碼。⚠️ 重要：必須使用 return 語句才能獲取返回值！例如：'return 1+1' 返回 2，'return document.title' 返回標題。返回 Object 時使用 JSON.stringify()。"
+    static let description = """
+        在遊戲 WebView 中執行 JavaScript 代碼。⚠️ 必須使用 return 語句才能獲取返回值\
+        （例：'return 1+1' → 2）。返回 Object 時使用 JSON.stringify()。\
+        ⚠️ Unity 客戶端下 window.Laya / GameMgr / uiscript / view.DesktopMgr 都不存在，\
+        讀遊戲狀態請改用 game_state / game_hand / game_ops，執行動作請用 game_action。
+        """
     static let inputSchema = MCPInputSchema(
         properties: [
             "code": .string("要執行的 JavaScript 代碼（函數體格式，需要 return 語句才能獲取返回值）")
@@ -35,270 +59,5 @@ struct ExecuteJSTool: MCPTool {
 
         let result = try await context.executeJavaScript(code)
         return ["result": result ?? NSNull()]
-    }
-}
-
-// MARK: - Detect Tool
-
-/// 檢測遊戲 API
-struct DetectTool: MCPTool {
-    static let name = "detect"
-    static let description = "檢測遊戲 API 是否可用"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = "window.__nakiDetectGameAPI ? __nakiDetectGameAPI() : {error: 'Not loaded'}"
-        let result = try await context.executeJavaScript(script)
-        return ["result": result ?? NSNull()]
-    }
-}
-
-// MARK: - Explore Tool
-
-/// 探索遊戲物件
-struct ExploreTool: MCPTool {
-    static let name = "explore"
-    static let description = "探索遊戲物件結構"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = "window.__nakiExploreGameObjects ? __nakiExploreGameObjects() : {error: 'Not loaded'}"
-        let result = try await context.executeJavaScript(script)
-        return ["result": result ?? NSNull()]
-    }
-}
-
-// MARK: - Test Indicators Tool
-
-/// 顯示測試指示器
-struct TestIndicatorsTool: MCPTool {
-    static let name = "test_indicators"
-    static let description = "顯示測試指示器（用於調試點擊位置）"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = "window.__nakiTestIndicators ? (__nakiTestIndicators(), 'OK') : 'Not loaded'"
-        let result = try await context.executeJavaScript(script)
-        return ["result": result ?? NSNull()]
-    }
-}
-
-// MARK: - Click Tool
-
-/// 在指定座標點擊
-struct ClickTool: MCPTool {
-    static let name = "click"
-    static let description = "在指定座標點擊"
-    static let inputSchema = MCPInputSchema(
-        properties: [
-            "x": .number("X 座標"),
-            "y": .number("Y 座標"),
-            "label": .string("點擊標籤（可選）")
-        ],
-        required: ["x", "y"]
-    )
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        guard let x = arguments["x"] as? Double else {
-            throw MCPToolError.missingParameter("x")
-        }
-        guard let y = arguments["y"] as? Double else {
-            throw MCPToolError.missingParameter("y")
-        }
-
-        let label = arguments["label"] as? String ?? "MCP Click"
-        let script = "window.__nakiAutoPlay.click(\(x), \(y), '\(label)')"
-        _ = try await context.executeJavaScript(script)
-
-        return [
-            "result": "clicked",
-            "x": x,
-            "y": y
-        ]
-    }
-}
-
-// MARK: - Calibrate Tool
-
-/// 設定校準參數
-struct CalibrateTool: MCPTool {
-    static let name = "calibrate"
-    static let description = "設定校準參數"
-    static let inputSchema = MCPInputSchema(
-        properties: [
-            "tileSpacing": .number("牌間距（默認 96）"),
-            "offsetX": .number("X 偏移（默認 -200）"),
-            "offsetY": .number("Y 偏移（默認 0）")
-        ],
-        required: []
-    )
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let tileSpacing = arguments["tileSpacing"] as? Double ?? 96
-        let offsetX = arguments["offsetX"] as? Double ?? -200
-        let offsetY = arguments["offsetY"] as? Double ?? 0
-
-        let script = """
-        if (window.__nakiAutoPlay) {
-            window.__nakiAutoPlay.calibration = {
-                tileSpacing: \(tileSpacing),
-                offsetX: \(offsetX),
-                offsetY: \(offsetY)
-            };
-            JSON.stringify(window.__nakiAutoPlay.calibration);
-        } else {
-            'Not loaded';
-        }
-        """
-        _ = try await context.executeJavaScript(script)
-
-        return [
-            "result": "calibrated",
-            "tileSpacing": tileSpacing,
-            "offsetX": offsetX,
-            "offsetY": offsetY
-        ]
-    }
-}
-
-// MARK: - UI Name Status Tool
-
-/// 獲取玩家名稱狀態
-struct UINameStatusTool: MCPTool {
-    static let name = "ui_names_status"
-    static let description = "獲取玩家名稱的顯示狀態"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = "JSON.stringify(window.__nakiPlayerNames?.getStatus() || {available: false})"
-        let result = try await context.executeJavaScript(script)
-
-        // 嘗試解析 JSON
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
-        }
-        return ["result": result ?? NSNull()]
-    }
-}
-
-// MARK: - UI Name Hide Tool
-
-/// 隱藏玩家名稱
-struct UINameHideTool: MCPTool {
-    static let name = "ui_names_hide"
-    static let description = "隱藏所有玩家名稱"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = "window.__nakiPlayerNames?.hide() || false"
-        let result = try await context.executeJavaScript(script)
-        let success = result as? Bool ?? false
-
-        return [
-            "success": success,
-            "hidden": true
-        ]
-    }
-}
-
-// MARK: - UI Name Show Tool
-
-/// 顯示玩家名稱
-struct UINameShowTool: MCPTool {
-    static let name = "ui_names_show"
-    static let description = "顯示所有玩家名稱"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = "window.__nakiPlayerNames?.show() || false"
-        let result = try await context.executeJavaScript(script)
-        let success = result as? Bool ?? false
-
-        return [
-            "success": success,
-            "hidden": false
-        ]
-    }
-}
-
-// MARK: - UI Name Toggle Tool
-
-/// 切換玩家名稱顯示
-struct UINameToggleTool: MCPTool {
-    static let name = "ui_names_toggle"
-    static let description = "切換玩家名稱的顯示狀態"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        // 先 toggle
-        let toggleScript = "window.__nakiPlayerNames?.toggle() || false"
-        let toggleResult = try await context.executeJavaScript(toggleScript)
-        let success = toggleResult as? Bool ?? false
-
-        // 再獲取當前狀態
-        let statusScript = "window.__nakiPlayerNames?.hidden || false"
-        let statusResult = try await context.executeJavaScript(statusScript)
-        let hidden = statusResult as? Bool ?? false
-
-        return [
-            "success": success,
-            "hidden": hidden
-        ]
     }
 }

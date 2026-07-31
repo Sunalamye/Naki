@@ -10,8 +10,8 @@ if e["type"] == "start_game":
     self.model = model.load_model(self.player_id)  # 每次都創建新模型！
 ```
 
-**Swift (目前)**: 只在第一次 `start_game` 創建 Bot，後續不重建
-- 導致第二局開始後，Bot 狀態不正確
+**Swift (已實作)**: 每次 `start_game` 都刪除舊 Bot 並創建新的，`end_game` 時清理
+- 已實作於 `NakiWebCoordinator.handleMJAIEvent`（`command/Views/WebViewController.swift:165-194`）
 
 ### 問題 2：XOR 編碼差異
 - **Notify (ActionPrototype)**: `data` 欄位需要 **XOR 解碼**
@@ -101,54 +101,63 @@ def react(self, events: str) -> str:
 
 ---
 
-## Swift 流程 (需要修復)
+## Swift 流程 (已實作)
 
-### 當前問題：
+Bot 生命週期（每次 `start_game` 重建 Bot / `end_game` 清理）**已實作**於
+`NakiWebCoordinator.handleMJAIEvent`（`command/Views/WebViewController.swift:159-199`）。
+與 Python Akagi 行為一致。
 
-1. **Bot 不重建**
-   - `start_game` 只在首次創建 Bot
-   - 後續 `start_game` 不會重建，導致狀態累積
+### 已實作行為：
 
-2. **事件逐一發送**
-   - 不像 Python 批量發送，可能影響順序
-
-3. **缺少 end_game 處理**
-   - 沒有在遊戲結束時重置 Bot 狀態
+1. **Bot 每局重建** — `start_game` 時 `deleteNativeBot()` 再 `createNativeBot(playerId:)`
+2. **事件透過 `MJAIEventStream` 消費者依序處理**（`startEventConsumer`）
+3. **`end_game` 清理** — 清空 Bot 與推薦/手牌/摸牌狀態
 
 ---
 
-## 修復方案
+## 實作位置
 
-### 1. WebViewController.Coordinator - 重建 Bot
+### 1. `NakiWebCoordinator.handleMJAIEvent` — start_game 重建 Bot
+
+`command/Views/WebViewController.swift:165-184`
 
 ```swift
 case "start_game":
-    if let playerId = event["id"] as? Int {
-        // ⭐ 每次 start_game 都刪除舊 Bot 並創建新的
-        parent.viewModel.deleteNativeBot()
-        try await parent.viewModel.createNativeBot(playerId: playerId)
-        _ = try await parent.viewModel.processNativeEvent(event)
+    guard let playerId = event["id"] as? Int else {
+        bridgeLog("[協調器] 錯誤: start_game 沒有 id 欄位!")
+        return
+    }
+    eventStream.startNewGame()
+    eventStream.emit(event)
+    viewModel?.deleteNativeBot()                       // ⭐ 每次都刪除舊 Bot
+    do {
+        try await viewModel?.createNativeBot(playerId: playerId)  // ⭐ 再創建新的
+        startEventConsumer()
+    } catch {
+        bridgeLog("[協調器] 錯誤: 建立 Bot 失敗: \(error)")
     }
 ```
 
-### 2. NativeBotController - 處理 end_game
+### 2. `NakiWebCoordinator.handleMJAIEvent` — end_game 清理
+
+`command/Views/WebViewController.swift:186-194`
 
 ```swift
-func react(event: [String: Any]) throws -> [String: Any]? {
-    // ... 現有代碼 ...
-
-    // 處理 end_game
-    if eventType == "end_game" {
-        // 重置內部狀態，但保留 Bot 實例
-        resetKyokuState()
-        return nil
-    }
-}
+case "end_game":
+    eventStream.emit(event)
+    eventStream.endGame()
+    viewModel?.deleteNativeBot()
+    viewModel?.recommendations = []
+    viewModel?.tehaiTiles = []
+    viewModel?.tsumoTile = nil
+    viewModel?.statusMessage = "遊戲結束"
 ```
 
-### 3. MortalBot - 確保可重新初始化
+### 3. MortalBot 重新初始化
 
-確保 MortalBot 在收到 `start_game` 事件時正確重置狀態。
+`NativeBotController.createBot(playerId:is3P:)`（`throws`）每次都建立新的
+`MortalBot(playerId:version:4, useBundledModel:true)`（MortalSwift v0.3.0，actor），
+確保收到 `start_game` 時狀態完全重置。
 
 ---
 

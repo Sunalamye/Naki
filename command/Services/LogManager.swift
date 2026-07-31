@@ -61,12 +61,25 @@ class LogManager {
     private let logFile: URL
     private var fileHandle: FileHandle?
 
+    /// 專用序列佇列：序列化所有檔案寫入。
+    /// log() 可能被任意執行緒（off-main 的 botLog / bridgeLog 等）呼叫，
+    /// 單一 FileHandle 併發 seek+write 並不安全，這裡用 serial queue 保證順序與資料完整。
+    private let fileWriteQueue = DispatchQueue(label: "com.naki.LogManager.fileWrite")
+
     private init() {
         logFile = FileManager.default.temporaryDirectory.appendingPathComponent("akagi_websocket.log")
 
         // 嘗試開啟文件
         FileManager.default.createFile(atPath: logFile.path, contents: nil)
         fileHandle = try? FileHandle(forWritingTo: logFile)
+    }
+
+    deinit {
+        // 關閉 FileHandle（先等排入佇列的寫入完成，避免關閉時仍有 in-flight 寫入）
+        let handle = fileHandle
+        fileWriteQueue.sync {
+            try? handle?.close()
+        }
     }
 
     /// 添加日誌
@@ -99,12 +112,14 @@ class LogManager {
         }
     }
 
-    /// 寫入文件
+    /// 寫入文件（透過 serial queue 序列化，避免多執行緒共用單一 FileHandle 造成資料競爭）
     private func writeToFile(_ entry: LogEntry) {
         let line = "[\(ISO8601DateFormatter().string(from: entry.timestamp))] [\(entry.category.rawValue)] \(entry.message)\n"
-        if let data = line.data(using: .utf8) {
-            fileHandle?.seekToEndOfFile()
-            fileHandle?.write(data)
+        guard let data = line.data(using: .utf8) else { return }
+        fileWriteQueue.async { [weak self] in
+            guard let handle = self?.fileHandle else { return }
+            handle.seekToEndOfFile()
+            handle.write(data)
         }
     }
 }

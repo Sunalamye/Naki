@@ -21,6 +21,13 @@ struct NakiWebView: View {
                 .task {
                     await viewModel?.loadMajsoul()
                 }
+                // a11y: 雀魂 Laya/WebGL canvas 對 VoiceOver 與 XCUIElement 是黑盒。
+                // 用 .ignore 折成單一語意葉節點（而非 .accessibilityHidden(true)，
+                // 後者會把元素連同 identifier 一併移出 a11y tree，UI 測試就無法斷言存在），
+                // 讓 VO 讀到「雀魂遊戲畫面」而不卡在無語意的 canvas，同時保留 identifier 供 UI 測試查詢。
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("雀魂遊戲畫面")
+                .accessibilityIdentifier("majsoul-webview")
         } else {
             ProgressView("正在初始化...")
         }
@@ -98,19 +105,45 @@ class NakiWebCoordinator {
     /// MJAI 事件流管理器
     let eventStream = MJAIEventStream()
 
+    /// #6: 事件序列化入口（intake）。過去每則 WS MJAI 事件各包一個獨立 `Task { @MainActor }`，
+    /// 獨立 Task 間無順序保證、各自內部 await 會亂序；且 `start_game` 在 `await createNativeBot`
+    /// 期間，後續事件的 Task 可能先跑 → 事件亂序 / 早於 bot 建立。
+    /// 改為單一 buffered AsyncStream + 單一 consumer task 依序 `await handleMJAIEvent`，保證：
+    ///   (1) FIFO：單一 stream / 單一 consumer，事件依到達順序處理；
+    ///   (2) bot-ready-before-consume：start_game 的 handleMJAIEvent 會 `await createNativeBot`
+    ///       並啟動 eventStream consumer 後才返回，consumer 迴圈才取下一個事件，
+    ///       後續事件不會在 bot 建立完成前被 handle / emit 進 eventStream。
+    private var intakeContinuation: AsyncStream<[String: Any]>.Continuation?
+    private var intakeTask: Task<Void, Never>?
+
     init(viewModel: WebViewModel?) {
         self.viewModel = viewModel
+        setupEventIntake()          // #6: 先建立序列化入口，供 onMJAIEvent 使用
         setupWebSocketCallbacks()
+    }
+
+    /// #6: 建立事件序列化入口 —— 單一 buffered AsyncStream + 單一 consumer task
+    /// consumer 迴圈以 `await` 逐一消費 handleMJAIEvent，故一個事件（含 start_game 的
+    /// createNativeBot）完全處理完，才會取下一個事件 → FIFO 且 bot-ready-before-consume。
+    /// 註：coordinator 為 WebViewModel 持有、與 App 同生命週期，故不另做 teardown（沿用既有設計）。
+    private func setupEventIntake() {
+        let (stream, continuation) = AsyncStream<[String: Any]>.makeStream()
+        self.intakeContinuation = continuation
+        self.intakeTask = Task { @MainActor [weak self] in
+            for await event in stream {
+                await self?.handleMJAIEvent(event)
+            }
+        }
     }
 
     /// 設定 WebSocket 回調
     private func setupWebSocketCallbacks() {
-        websocketHandler.onMJAIEvent = { [weak self] event in
-            guard let self = self else { return }
-
-            Task { @MainActor in
-                await self.handleMJAIEvent(event)
-            }
+        // #6: 不再每則事件各開一個 Task（亂序 + 可能早於 bot 建立）。改為 yield 進序列化入口，
+        //     由單一 consumer 依序 await handleMJAIEvent。Continuation 為 Sendable，可安全從
+        //     WKScriptMessageHandler 回調（主執行緒）呼叫；捕獲值型別副本，不需觸及 self。
+        let intake = self.intakeContinuation
+        websocketHandler.onMJAIEvent = { event in
+            intake?.yield(event)
         }
 
         websocketHandler.onWebSocketStatusChanged = { [weak self] connected in
@@ -168,14 +201,17 @@ class NakiWebCoordinator {
                 return
             }
 
-            bridgeLog("[協調器] start_game: 為玩家 \(playerId) 開始新遊戲")
+            // #3: 由 bridge 帶來的三麻旗標決定建立哪種 bot（預設四麻）
+            let is3P = (event["is3P"] as? Bool) ?? false
+
+            bridgeLog("[協調器] start_game: 為玩家 \(playerId) 開始新遊戲 (is3P=\(is3P))")
 
             eventStream.startNewGame()
             eventStream.emit(event)
             viewModel?.deleteNativeBot()
 
             do {
-                try await viewModel?.createNativeBot(playerId: playerId)
+                try await viewModel?.createNativeBot(playerId: playerId, is3P: is3P)
                 viewModel?.statusMessage = "Bot 已建立 (Player \(playerId))"
                 bridgeLog("[協調器] 已為玩家 \(playerId) 建立 Bot")
                 startEventConsumer()
@@ -226,12 +262,15 @@ class NakiWebCoordinator {
             return
         }
 
-        bridgeLog("[協調器] 為玩家 \(playerId) 重新同步 Bot, 歷史事件數: \(eventStream.eventCount)")
+        // #3: 重連重建時，由歷史中的 start_game 取回三麻旗標，保持與原局一致
+        let is3P = eventStream.getIs3P()
+
+        bridgeLog("[協調器] 為玩家 \(playerId) 重新同步 Bot, 歷史事件數: \(eventStream.eventCount), is3P=\(is3P)")
 
         viewModel?.deleteNativeBot()
 
         do {
-            try await viewModel?.createNativeBot(playerId: playerId)
+            try await viewModel?.createNativeBot(playerId: playerId, is3P: is3P)
             viewModel?.statusMessage = "Bot 已重新同步 (Player \(playerId))"
             startEventConsumer()
             bridgeLog("[協調器] Bot 重新同步成功")

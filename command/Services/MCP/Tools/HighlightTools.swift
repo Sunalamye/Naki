@@ -3,24 +3,60 @@
 //  Naki
 //
 //  Created by Claude on 2025/12/07.
-//  手牌高亮 MCP 工具
+//  Updated 2026-07-31：Unity 遷移，整檔改為明確失敗。
+//
+//  為什麼全部失效：高亮實作是 `window.__nakiRecommendHighlight`，它對 Laya 場景圖動手——
+//  取 `view.DesktopMgr.Inst.mainrole.hand[i]` 的牌 sprite 改 `material.color`，
+//  並 clone `effect_doraPlane` 做光暈。Unity WebGL 客戶端把整個渲染搬進 wasm，
+//  JS 端只看得到一張 `<canvas id="unity-canvas">`，**沒有任何 per-tile 物件可改**。
+//  （實測見 docs/majsoul-unity-protocol.md）
+//
+//  為什麼留下失敗樁而不是移除：高亮有明確的替代面（Naki 原生推薦面板 RecommendationView），
+//  留著才能在 agent 呼叫時把它導過去；反之 UITools 那些純 Laya 探測工具沒有替代面，直接移除。
+//
+//  ⚠️ 修掉的既有 bug：舊實作是
+//      let result = try await context.executeJavaScript(script)   // JS 回 {success:false, error:…}
+//      return result ?? [...]                                      // 直接回 JS 物件
+//  而 `highlight_tile` 那類又在 JS 內層包一次 `{ success: result }`，
+//  於是失敗會變成 `{"success": {"success": false, "error": "高亮模組未載入"}}`。
+//  機械判斷 `result.success` 拿到的是 **truthy 的字典**，失敗被讀成成功。
+//  現在統一走 `NakiUnsupported.result(...)`：`success` 保證是 Bool，且必有 `error` / `reason`。
 //
 
 import Foundation
 import MCPKit
 
+// MARK: - 共用失敗訊息
+
+/// 高亮類工具的共用失敗說明
+private enum HighlightUnsupported {
+    static let reason = """
+        unity-client: 手牌高亮依賴 Laya 場景圖（view.DesktopMgr.Inst.mainrole.hand 的牌 sprite \
+        與 effect_doraPlane 特效），雀魂改用 Unity WebGL 後渲染全在 wasm 內，\
+        JS 端只有單一 <canvas>，無法注入或修改任何牌面物件。
+        """
+    static let alternative = """
+        改用 Naki 原生推薦面板（RecommendationView，App 視窗內顯示 AI 推薦與機率）；\
+        程式化取得同樣資訊請用 bot_status / game_hand。
+        """
+
+    static func result() -> [String: Any] {
+        NakiUnsupported.result(reason: reason, alternative: alternative)
+    }
+}
+
 // MARK: - Highlight Tile Tool
 
-/// 高亮指定手牌（設置顏色）
+/// 高亮指定手牌（Unity 下不可行）
 struct HighlightTileTool: MCPTool {
     static let name = "highlight_tile"
-    static let description = "高亮指定手牌。可設置顏色：green（綠色，推薦度高）、orange（橘色，推薦度中）、red（紅色，推薦度低）、white（白色，重置）。也可使用自定義 RGBA 顏色。"
+    static let description = "⛔ Unity 客戶端不可用：手牌高亮需要修改 Laya 牌面物件，Unity WebGL 下不存在。改用 Naki 原生推薦面板 / bot_status"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "tileIndex": .integer("手牌索引 (0-13)"),
-            "color": .string("顏色名稱: green/orange/red/white，或自定義 RGBA 如 '0.5,0.8,0.3,1'")
+            "tileIndex": .integer("（已無效）手牌索引"),
+            "color": .string("（已無效）顏色名稱")
         ],
-        required: ["tileIndex"]
+        required: []
     )
 
     private let context: MCPContext
@@ -30,61 +66,19 @@ struct HighlightTileTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let tileIndex = arguments["tileIndex"] as? Int else {
-            throw MCPToolError.missingParameter("tileIndex")
-        }
-
-        let colorName = arguments["color"] as? String ?? "green"
-
-        // 解析顏色
-        let colorScript: String
-        if colorName.contains(",") {
-            // 自定義 RGBA
-            let parts = colorName.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-            if parts.count >= 3 {
-                let r = parts[0]
-                let g = parts[1]
-                let b = parts[2]
-                let a = parts.count >= 4 ? parts[3] : 1.0
-                colorScript = "{ r: \(r), g: \(g), b: \(b), a: \(a) }"
-            } else {
-                colorScript = "window.__nakiRecommendHighlight.colors.green"
-            }
-        } else {
-            // 預設顏色名稱
-            colorScript = "window.__nakiRecommendHighlight.colors.\(colorName) || window.__nakiRecommendHighlight.colors.green"
-        }
-
-        let script = """
-        (function() {
-            var highlight = window.__nakiRecommendHighlight;
-            if (!highlight) return { success: false, error: '高亮模組未載入' };
-
-            var color = \(colorScript);
-            var result = highlight.setTileColor(\(tileIndex), color);
-
-            return {
-                success: result,
-                tileIndex: \(tileIndex),
-                color: '\(colorName)'
-            };
-        })()
-        """
-
-        let result = try await context.executeJavaScript(script)
-        return result ?? ["success": false, "error": "執行失敗"]
+        HighlightUnsupported.result()
     }
 }
 
 // MARK: - Reset Tile Color Tool
 
-/// 重置手牌顏色
+/// 重置手牌顏色（Unity 下不可行）
 struct ResetTileColorTool: MCPTool {
     static let name = "reset_tile_color"
-    static let description = "重置指定手牌的顏色為白色（原始顏色）。如果不指定索引，則重置所有手牌。"
+    static let description = "⛔ Unity 客戶端不可用：沒有可修改的牌面物件，也就沒有顏色需要重置"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "tileIndex": .integer("手牌索引 (0-13)，不指定則重置所有")
+            "tileIndex": .integer("（已無效）手牌索引")
         ],
         required: []
     )
@@ -96,42 +90,16 @@ struct ResetTileColorTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let tileIndex = arguments["tileIndex"] as? Int
-
-        let script: String
-        if let index = tileIndex {
-            script = """
-            (function() {
-                var highlight = window.__nakiRecommendHighlight;
-                if (!highlight) return { success: false, error: '高亮模組未載入' };
-
-                var result = highlight.resetTileColor(\(index));
-                return { success: result, tileIndex: \(index) };
-            })()
-            """
-        } else {
-            script = """
-            (function() {
-                var highlight = window.__nakiRecommendHighlight;
-                if (!highlight) return { success: false, error: '高亮模組未載入' };
-
-                highlight.resetAllTileColors();
-                return { success: true, message: '已重置所有手牌顏色' };
-            })()
-            """
-        }
-
-        let result = try await context.executeJavaScript(script)
-        return result ?? ["success": false, "error": "執行失敗"]
+        HighlightUnsupported.result()
     }
 }
 
 // MARK: - Highlight Status Tool
 
-/// 獲取高亮狀態
+/// 高亮狀態（Unity 下永遠不可用）
 struct HighlightStatusTool: MCPTool {
     static let name = "highlight_status"
-    static let description = "獲取當前高亮狀態，包括已高亮的牌、設定等"
+    static let description = "⛔ Unity 客戶端不可用：高亮模組沒有可操作對象，狀態恆為不可用"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
@@ -141,34 +109,24 @@ struct HighlightStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var highlight = window.__nakiRecommendHighlight;
-            if (!highlight) return { available: false, error: '高亮模組未載入' };
-
-            return {
-                available: true,
-                status: highlight.getStatus()
-            };
-        })()
-        """
-
-        let result = try await context.executeJavaScript(script)
-        return result ?? ["available": false, "error": "執行失敗"]
+        var result = HighlightUnsupported.result()
+        // 舊呼叫端會讀 available；明確給 false，不要讓它 fallback 到 nil/未定義
+        result["available"] = false
+        return result
     }
 }
 
 // MARK: - Highlight Settings Tool
 
-/// 設置高亮選項
+/// 高亮設定（Unity 下不可行）
 struct HighlightSettingsTool: MCPTool {
     static let name = "highlight_settings"
-    static let description = "設置高亮選項。showTileColor: 是否使用牌顏色高亮；showNativeEffect: 是否顯示原生光暈效果；showRotatingEffect: 是否顯示旋轉效果"
+    static let description = "⛔ Unity 客戶端不可用：沒有可套用設定的高亮模組"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "showTileColor": .boolean("是否使用牌顏色高亮（預設 true）"),
-            "showNativeEffect": .boolean("是否顯示原生光暈效果（預設 true）"),
-            "showRotatingEffect": .boolean("是否顯示旋轉效果（預設 false）")
+            "showTileColor": .boolean("（已無效）"),
+            "showNativeEffect": .boolean("（已無效）"),
+            "showRotatingEffect": .boolean("（已無效）")
         ],
         required: []
     )
@@ -180,52 +138,21 @@ struct HighlightSettingsTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        var settingsObj: [String: Any] = [:]
-
-        if let showTileColor = arguments["showTileColor"] as? Bool {
-            settingsObj["showTileColor"] = showTileColor
-        }
-        if let showNativeEffect = arguments["showNativeEffect"] as? Bool {
-            settingsObj["showNativeEffect"] = showNativeEffect
-        }
-        if let showRotatingEffect = arguments["showRotatingEffect"] as? Bool {
-            settingsObj["showRotatingEffect"] = showRotatingEffect
-        }
-
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: settingsObj),
-              let jsonString = String(data: jsonData, encoding: .utf8) else {
-            return ["success": false, "error": "無法序列化設定"]
-        }
-
-        let script = """
-        (function() {
-            var highlight = window.__nakiRecommendHighlight;
-            if (!highlight) return { success: false, error: '高亮模組未載入' };
-
-            highlight.setSettings(\(jsonString));
-            return {
-                success: true,
-                settings: highlight.settings
-            };
-        })()
-        """
-
-        let result = try await context.executeJavaScript(script)
-        return result ?? ["success": false, "error": "執行失敗"]
+        HighlightUnsupported.result()
     }
 }
 
 // MARK: - Show Recommendations Tool
 
-/// 顯示推薦高亮
+/// 顯示推薦高亮（Unity 下不可行）
 struct ShowRecommendationsTool: MCPTool {
     static let name = "show_recommendations"
-    static let description = "顯示多個推薦牌的高亮效果。根據機率自動選擇顏色：>50% 綠色、20-50% 橘色、<20% 紅色"
+    static let description = "⛔ Unity 客戶端不可用：無法在遊戲畫面上疊加推薦高亮。推薦內容請用 bot_status / game_hand 取得，畫面顯示改看 Naki 原生推薦面板"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "recommendations": .string("推薦列表 JSON，格式: [{\"tileIndex\": 0, \"probability\": 0.8}, ...]")
+            "recommendations": .string("（已無效）推薦列表 JSON")
         ],
-        required: ["recommendations"]
+        required: []
     )
 
     private let context: MCPContext
@@ -235,36 +162,16 @@ struct ShowRecommendationsTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let recsString = arguments["recommendations"] as? String else {
-            throw MCPToolError.missingParameter("recommendations")
-        }
-
-        let script = """
-        (function() {
-            var highlight = window.__nakiRecommendHighlight;
-            if (!highlight) return { success: false, error: '高亮模組未載入' };
-
-            var recs = \(recsString);
-            var count = highlight.showMultiple(recs);
-            return {
-                success: count > 0,
-                highlightedCount: count,
-                status: highlight.getStatus()
-            };
-        })()
-        """
-
-        let result = try await context.executeJavaScript(script)
-        return result ?? ["success": false, "error": "執行失敗"]
+        HighlightUnsupported.result()
     }
 }
 
 // MARK: - Hide Highlight Tool
 
-/// 隱藏所有高亮
+/// 隱藏高亮（Unity 下不可行）
 struct HideHighlightTool: MCPTool {
     static let name = "hide_highlight"
-    static let description = "隱藏所有高亮效果，重置所有手牌顏色"
+    static let description = "⛔ Unity 客戶端不可用：沒有高亮存在，也就沒有東西可隱藏"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
@@ -274,17 +181,6 @@ struct HideHighlightTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var highlight = window.__nakiRecommendHighlight;
-            if (!highlight) return { success: false, error: '高亮模組未載入' };
-
-            var result = highlight.hide();
-            return { success: result };
-        })()
-        """
-
-        let result = try await context.executeJavaScript(script)
-        return result ?? ["success": false, "error": "執行失敗"]
+        HighlightUnsupported.result()
     }
 }

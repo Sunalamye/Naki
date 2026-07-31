@@ -5,14 +5,14 @@
 //  Created by Suoie on 2025/11/29.
 //
 //  核心視圖模型（協調器），負責：
-//  - 協調各服務 (AutoPlayService, MCPServer, GameStateManager)
+//  - 協調各服務 (MCPServer, GameStateManager, NativeBotController)
 //  - Bot 控制 (NativeBotController + MortalSwift)
 //  - WebPage 整合 (JavaScript Bridge) - 使用 macOS 26.0+ WebPage API
 //
 //  更新日誌:
 //  - 2025/11/30: 移除 Python 依賴，純 Swift 實現
 //  - 2025/12/02: v1.1.2 重構 - 提取重複程式碼，清理未使用變數
-//  - 2025/12/03: v1.2.0 服務化重構 - 提取 AutoPlayService, GameStateManager
+//  - 2025/12/03: v1.2.0 服務化重構 - 提取 GameStateManager（AutoPlayService 已移除，自動打牌邏輯內建於本檔）
 //  - 2025/12/04: v1.3.0 WebPage API - 使用 macOS 26.0+ 新 API
 //
 
@@ -42,14 +42,17 @@ class WebViewModel {
   /// 遊戲狀態管理器（集中管理狀態和推薦）
   private(set) var gameStateManager = GameStateManager()
 
-  /// 自動打牌服務（協調重試機制）
-  private var autoPlayService = AutoPlayService()
-
   // 原生 Bot 控制器 (MortalSwift)
   private var nativeBotController: NativeBotController?
 
   // 自動打牌控制器（UI 自動化）
   private var autoPlayController: AutoPlayController?
+
+  /// Liqi 動作／大廳請求送出器（Unity 時代唯一有效的動作面）
+  ///
+  /// 舊的 `window.naki.action.*` 依賴 Laya 物件，Unity WebGL 客戶端已不存在；
+  /// 所有動作改組成 Liqi REQUEST 經 `window.__nakiWebSocket.sendRaw` 送出。
+  private(set) var liqiSender = LiqiActionSender()
 
   // MCP Server
   private var debugServer: DebugServer?
@@ -142,12 +145,11 @@ class WebViewModel {
     // 初始化自動打牌控制器
     autoPlayController = AutoPlayController()
 
-    // 設定 AutoPlayService 委託
-    autoPlayService.delegate = self
-    autoPlayService.setWebPage(webPage)
-
     // 設定 AutoPlayController 的 WebPage
     autoPlayController?.setWebPage(webPage)
+
+    // 設定 Liqi 送出通道（protobuf → base64 → JS sendRaw）
+    configureLiqiSender()
 
     // 自動啟動 MCP Server
     startDebugServer()
@@ -155,7 +157,7 @@ class WebViewModel {
     // 自動設定全自動打牌模式
     autoPlayController?.setMode(.auto)
 
-    // 啟動定期檢查計時器（每 2 秒檢查一次）
+    // 啟動定期檢查計時器（每 1 秒檢查一次）
     startAutoPlayCheckTimer()
 
     // 監聽導航事件
@@ -186,6 +188,9 @@ class WebViewModel {
 
           case .receivedServerRedirect:
             break
+
+          @unknown default:
+            break
           }
         }
       } catch {
@@ -195,76 +200,92 @@ class WebViewModel {
     }
   }
 
-  /// 啟動定期檢查計時器
+  // MARK: - Liqi 動作送出
+
+  /// 設定 `LiqiActionSender` 的送出通道與日誌
+  ///
+  /// 送出鏈：Swift 組 envelope → base64 → `window.__nakiWebSocket.sendRaw(base64)`
+  /// → JS 端取第一條 OPEN 的雀魂連線 `ws.send(buffer)`。
+  /// JS 回報 `{success, bytes, socketId}` 或 `{success:false, reason}`。
+  private func configureLiqiSender() {
+    liqiSender.logHandler = { [weak self] message in
+      bridgeLog("[WebViewModel] \(message)")
+      self?.debugServer?.addLog(message)
+    }
+
+    liqiSender.sendHandler = { [weak self] base64 in
+      guard let self, let page = self.webPage else {
+        return .failure("no_webpage")
+      }
+
+      // base64 只含 A-Za-z0-9+/=，可安全放進單引號字串
+      let script = "return JSON.stringify(window.__nakiWebSocket.sendRaw('\(base64)'))"
+      do {
+        let result = try await page.callJavaScript(script)
+        guard let json = result as? String,
+          let data = json.data(using: .utf8),
+          let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+          return .failure("unparsable_js_result")
+        }
+
+        if dict["success"] as? Bool == true {
+          let bytes = dict["bytes"] as? Int ?? -1
+          let socketId = dict["socketId"].map { "\($0)" } ?? "?"
+          return LiqiRawSendResult(success: true, detail: "socket=\(socketId) bytes=\(bytes)")
+        }
+        return .failure(dict["reason"] as? String ?? "unknown_reason")
+      } catch {
+        return .failure("js_error: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  /// 啟動定期檢查計時器（每 1 秒檢查一次）
   private func startAutoPlayCheckTimer() {
     autoPlayCheckTimer?.invalidate()
     autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) {
       [weak self] _ in
+      guard let self else { return }
       Task { @MainActor in
-        self?.checkAndRetriggerAutoPlay()
+        self.checkAndRetriggerAutoPlay()
       }
     }
   }
 
   /// 定期檢查：如果有推薦且沒有正在執行的動作，重新觸發
+  /// 走與事件路徑相同的去抖（triggerAutoPlayIfNeeded），共用 lastTriggerKey/lastTriggerTime，
+  /// 避免計時器重複觸發同一推薦；若推薦為 discard，額外確認仍輪到自己打牌後才觸發。
   private func checkAndRetriggerAutoPlay() {
-    guard let page = webPage else { return }
+    guard webPage != nil else { return }
 
-    // 自動套用隱藏名稱設定（僅在遊戲可用時套用一次）
-    applyHideNamesSettingsIfNeeded()
-
-    // 檢查並更新高亮效果（如果有推薦但沒有顯示效果）
-    checkAndUpdateHighlights()
+    // 註：遊戲內高亮 / 隱藏玩家名稱的輪詢已移除。
+    // 雀魂已改用 Unity WebGL 客戶端，window.view.DesktopMgr / Laya / uiscript 均不存在，
+    // 相關注入只會靜默失敗形成假訊號；推薦一律由原生面板
+    // (Views/RecommendationView.swift、Views/BotStatusView.swift) 呈現。
 
     // 自動打牌檢查
     guard autoPlayController?.state.mode == .auto,
-      !recommendations.isEmpty,
+      let firstRec = recommendations.first,
       currentExecutionId == nil
     else { return }
 
-    // 檢查遊戲是否有可用操作
-    let checkScript = """
-      var dm = window.view.DesktopMgr.Inst;
-      if (!dm || !dm.oplist || dm.oplist.length === 0) return false;
-      return true;
-      """
+    // 檢查是否有可用操作。
+    // 舊路徑讀 `DesktopMgr.Inst.oplist`（Laya），Unity 客戶端已不存在；
+    // 改讀協定層快照：MajsoulBridge 解析 notify 時存下的 OptionalOperationList。
+    // discard：必須仍有打牌/立直操作，代表確實輪到自己打牌；
+    // 若已換成別家回合或只剩吃碰機會，則不重新觸發，避免送出遲到／重複的打牌。
+    guard let snapshot = LiqiOperationStore.shared.pending else { return }
 
-    Task {
-      do {
-        let result = try await page.callJavaScript(checkScript)
-        if let hasOp = result as? Bool, hasOp {
-          debugServer?.addLog("⏰ 計時器: 重新觸發自動打牌")
-          triggerAutoPlayNow(delay: 0.1)
-        }
-      } catch {
-        // 忽略錯誤
-      }
+    if firstRec.actionType == .discard,
+      !snapshot.contains(.discard), !snapshot.contains(.riichi)
+    {
+      return
     }
-  }
 
-  /// 檢查並更新推薦顯示
-  private func checkAndUpdateHighlights() {
-    // 只在顯示推薦模式下檢查（推薦/自動模式）
-    guard autoPlayController?.state.mode.showRecommendation == true,
-      !recommendations.isEmpty,
-      let page = webPage,
-      let controller = nativeBotController
-    else { return }
-
-    // 檢查是否有活躍的效果
-    let checkScript = "window.__nakiRecommendHighlight?.activeEffects?.length || 0"
-
-    Task {
-      do {
-        let result = try await page.callJavaScript(checkScript)
-        if let effectCount = result as? Int, effectCount == 0 {
-          debugServer?.addLog("⏰ 計時器: 刷新高亮")
-          await showGameHighlightForRecommendations(recommendations, controller: controller)
-        }
-      } catch {
-        // 忽略錯誤
-      }
-    }
+    debugServer?.addLog("⏰ 計時器: 檢查重新觸發 (ops=\(snapshot.rawTypes))")
+    // 共用事件路徑的去抖邏輯（lastTriggerKey/lastTriggerTime），避免同一推薦被重複觸發
+    triggerAutoPlayIfNeeded()
   }
 
   // MARK: - Native Bot Methods
@@ -360,190 +381,15 @@ class WebViewModel {
     // 同步到 GameStateManager（供 UI 回應式更新）
     gameStateManager.syncFrom(controller: controller)
 
-    // 更新推薦顯示（根據模式決定是否顯示）
-    let shouldShowRecommendation = autoPlayController?.state.mode.showRecommendation ?? false
-
-    if let firstRec = recommendations.first {
-      highlightedTile = firstRec.displayTile
-
-      // 在遊戲 UI 上顯示推薦（只在推薦/自動模式下顯示）
-      if shouldShowRecommendation {
-        Task {
-          await showGameHighlightForRecommendations(recommendations, controller: controller)
-        }
-      } else {
-        // 關閉模式：隱藏推薦
-        Task {
-          await hideGameHighlight()
-        }
-      }
-    } else {
-      // 沒有推薦時隱藏
-      Task {
-        await hideGameHighlight()
-      }
-    }
+    // 推薦一律由原生 SwiftUI 面板呈現：ContentView 直接綁 `recommendations` /
+    // `botStatus`（RecommendationView、BotStatusView），@Observable 會自動刷新。
+    // 遊戲內高亮注入已移除：Unity WebGL 客戶端沒有 Laya 物件可掛特效，
+    // 舊路徑只會靜默失敗變成假訊號。
+    // 註：`AutoPlayMode.showRecommendation` 目前沒有 View 讀取（原本只用來開關遊戲內高亮）。
+    highlightedTile = recommendations.first?.displayTile
 
     // 觸發自動打牌
     triggerAutoPlayIfNeeded()
-  }
-
-  /// 在遊戲 UI 上顯示多個推薦的原生高亮效果
-  /// 顏色和透明度由 JavaScript 的 getColorForProbability 決定
-  /// 按鈕動作（chi/pon/kan/hora）需要機率 > 20% 才顯示
-  private func showGameHighlightForRecommendations(
-    _ recommendations: [Recommendation], controller: NativeBotController
-  ) async {
-    guard let page = webPage else { return }
-
-    // 檢查第一個推薦是否為按鈕動作（非打牌）
-    // 按鈕動作類型：chi/pon/kan/hora/riichi/none(pass)
-    let buttonActionMap: [Recommendation.ActionType: String] = [
-      .chi: "chi",
-      .pon: "pon",
-      .kan: "kan",
-      .hora: "hora",
-      .riichi: "riichi",
-      .none: "pass",
-    ]
-
-    if let firstRec = recommendations.first,
-      buttonActionMap[firstRec.actionType] != nil,
-      firstRec.probability > 0.2
-    {
-      let actionMap = buttonActionMap
-      if let jsAction = actionMap[firstRec.actionType] {
-        let script = "window.__nakiRecommendHighlight?.moveNativeEffectToButton('\(jsAction)')"
-        do {
-          _ = try await page.callJavaScript(script)
-          bridgeLog("[WebViewModel] 高亮按鈕: \(jsAction)")
-        } catch {
-          bridgeLog("[WebViewModel] 高亮按鈕錯誤: \(error.localizedDescription)")
-        }
-        return
-      }
-    }
-
-    // 過濾出有效的打牌推薦（有牌面的推薦）
-    // 所有機率的推薦都傳給 JavaScript，由 getColorForProbability 決定顏色和透明度
-    let validRecs = recommendations.filter { rec in
-      rec.tile != nil && rec.actionType == .discard
-    }
-
-    if validRecs.isEmpty {
-      await hideGameHighlight()
-      return
-    }
-
-    // 建構 JavaScript 來查找所有推薦牌的位置
-    // 加入 rank 資訊，讓 JavaScript 根據排名決定 alpha
-    var tileDataArray: [[String: Any]] = []
-    for (index, rec) in validRecs.enumerated() {
-      guard let tile = rec.tile else { continue }
-      tileDataArray.append([
-        "mjaiString": tile.mjaiString,
-        "probability": rec.probability,
-        "rank": index,  // 0 = 最推薦, 1 = 第二推薦, ...
-      ])
-    }
-
-    // 將資料轉為 JSON
-    guard let jsonData = try? JSONSerialization.data(withJSONObject: tileDataArray),
-      let jsonString = String(data: jsonData, encoding: .utf8)
-    else {
-      bridgeLog("[WebViewModel] 無法序列化推薦")
-      return
-    }
-
-    let script = """
-      // 先清除現有效果，確保不會有殘留
-      window.__nakiRecommendHighlight?.hide();
-
-      var mr = window.view?.DesktopMgr?.Inst?.mainrole;
-      if (!mr || !mr.hand) return [];
-
-      var tiles = \(jsonString);
-      var results = [];
-
-      // 雀魂的 type 映射：0=筒(p), 1=萬(m), 2=索(s), 3=字牌(z)
-      var typeMap = {'m': 1, 'p': 0, 's': 2};
-      var honorMap = {'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4], 'P': [3,5], 'F': [3,6], 'C': [3,7]};
-
-      for (var j = 0; j < tiles.length; j++) {
-      var target = tiles[j].mjaiString;
-      var probability = tiles[j].probability;
-      var rank = tiles[j].rank !== undefined ? tiles[j].rank : j;
-
-      var tileType, tileValue, isRed = false;
-
-      // 處理字牌
-      if (honorMap[target]) {
-      tileType = honorMap[target][0];
-      tileValue = honorMap[target][1];
-      } else {
-      // 處理數牌：1m, 5mr, etc.
-      tileValue = parseInt(target[0]);
-      var suitChar = target[1];
-      tileType = typeMap[suitChar];
-      isRed = target.length > 2 && target[2] === 'r';
-      }
-
-      // 在手牌中查找
-      // rank 0（最推薦）: 從右往左找，優先找到剛摸的牌
-      // 其他 rank: 全部顯示相同的牌
-      var foundFirst = false;
-      for (var i = mr.hand.length - 1; i >= 0; i--) {
-      var t = mr.hand[i];
-      if (t && t.val && t.val.type === tileType && t.val.index === tileValue) {
-      // 如果是紅寶牌，檢查 dora 標記
-      var match = false;
-      if (isRed) {
-          match = t.val.dora === true;
-      } else {
-          match = !t.val.dora;
-      }
-      if (match) {
-          results.push({ tileIndex: i, probability: probability, rank: rank });
-          // rank 0 只取第一個找到的（最右邊），其他 rank 全部顯示
-          if (rank === 0) {
-          break;
-          }
-      }
-      }
-      }
-      }
-
-      // 呼叫高亮模組，延遲 0.1 秒等摸牌動畫結束
-      if (results.length > 0) {
-      setTimeout(function() {
-          window.__nakiRecommendHighlight?.showMultiple(results);
-      }, 100);
-      }
-
-      return results;
-      """
-
-    do {
-      let result = try await page.callJavaScript(script)
-      if let results = result as? [[String: Any]] {
-        bridgeLog("[WebViewModel] 已高亮 \(results.count) 個推薦")
-      }
-    } catch {
-      bridgeLog("[WebViewModel] 顯示高亮錯誤: \(error.localizedDescription)")
-    }
-  }
-
-  /// 隱藏遊戲 UI 上的高亮效果
-  private func hideGameHighlight() async {
-    guard let page = webPage else { return }
-
-    let script = "window.__nakiRecommendHighlight?.hide()"
-    do {
-      _ = try await page.callJavaScript(script)
-      bridgeLog("[WebViewModel] 已隱藏遊戲高亮")
-    } catch {
-      bridgeLog("[WebViewModel] 隱藏高亮錯誤: \(error.localizedDescription)")
-    }
   }
 
   /// 根據當前推薦觸發自動打牌
@@ -603,10 +449,10 @@ class WebViewModel {
     recommendations = []
     tehaiTiles = []
     tsumoTile = nil
-    // 隱藏遊戲 UI 上的高亮
-    Task {
-      await hideGameHighlight()
-    }
+    highlightedTile = nil
+    // GameStateManager 是 /bot/status 與 SwiftUI 面板的實際資料來源；
+    // 不一併重置的話，對局結束後畫面會一直停在上一局的手牌與推薦。
+    gameStateManager.reset()
     bridgeLog("[WebViewModel] Bot 已刪除並清除狀態")
   }
 
@@ -616,7 +462,7 @@ class WebViewModel {
   /// - Parameter handCount: 摸牌後手牌數量
   func onAddHandPai(handCount: Int) async {
     bridgeLog("[WebViewModel] 摸牌事件: handCount=\(handCount)")
-    // 推薦顏色的重新應用由 JavaScript 模組自動處理（使用已記錄的 activeEffects）
+    // 註：不再重新套用遊戲內牌色高亮（Unity 客戶端無 Laya 物件），推薦顯示於原生面板
   }
 
   // MARK: - Auto Play Methods
@@ -627,20 +473,7 @@ class WebViewModel {
     bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
     debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
 
-    // 根據模式處理推薦顯示
-    if mode.showRecommendation {
-      // 推薦/自動模式：顯示推薦（如果有）
-      if !recommendations.isEmpty, let controller = nativeBotController {
-        Task {
-          await showGameHighlightForRecommendations(recommendations, controller: controller)
-        }
-      }
-    } else {
-      // 關閉模式：隱藏推薦
-      Task {
-        await hideGameHighlight()
-      }
-    }
+    // 推薦顯示由原生面板依模式自行決定，不再注入遊戲內高亮（Unity 客戶端已不支援）
 
     // 只有全自動模式才觸發自動打牌
     if mode.isFullAuto, !recommendations.isEmpty {
@@ -667,7 +500,10 @@ class WebViewModel {
     autoPlayController?.setActionDelay(delay)
   }
 
-  /// 設定高亮效果選項
+  /// 設定遊戲內高亮效果選項
+  /// ⚠️ Unity WebGL 客戶端已無 Laya 特效物件，此設定不會產生任何遊戲內視覺變化；
+  /// JS 端只會更新 flag 並在實際套用時回報 `unity-client-no-laya`。
+  /// 保留是為了不破壞既有設定 UI 與 MCP `highlight_settings` 工具的介面。
   func setHighlightSettings(showRotatingEffect: Bool) {
     guard let page = webPage else { return }
 
@@ -724,46 +560,12 @@ class WebViewModel {
     return nil
   }
 
-  /// 自動套用隱藏名稱設定（在遊戲可用時套用）
-  private func applyHideNamesSettingsIfNeeded() {
-    guard !hasAppliedHideNamesSettings else { return }
-    guard let page = webPage else { return }
-
-    // 檢查用戶設定
-    let shouldHide = UserDefaults.standard.bool(forKey: "hidePlayerNames")
-    guard shouldHide else {
-      // 如果用戶不想隱藏，標記為已處理，不需要再檢查
-      hasAppliedHideNamesSettings = true
-      return
-    }
-
-    // 檢查遊戲 API 是否可用
-    let checkScript =
-      "window.__nakiPlayerNames && window.uiscript?.UI_DesktopInfo?.Inst ? true : false"
-
-    Task {
-      do {
-        let result = try await page.callJavaScript(checkScript)
-        if let isAvailable = result as? Bool, isAvailable {
-          // API 可用，套用設定
-          setHidePlayerNames(true)
-          hasAppliedHideNamesSettings = true
-          bridgeLog("[WebViewModel] 已自動套用隱藏玩家名稱設定")
-        }
-      } catch {
-        // 忽略錯誤，下次定期檢查時會再嘗試
-      }
-    }
-  }
-
   /// 重置隱藏名稱設定狀態（頁面重新載入時調用）
+  /// 註：自動套用（applyHideNamesSettingsIfNeeded）已移除——它依賴
+  /// `window.uiscript.UI_DesktopInfo`，Unity WebGL 客戶端不存在此物件，
+  /// 每秒輪詢只會永遠檢查失敗。手動 API（setHidePlayerNames / MCP ui_names_*）保留。
   func resetHideNamesSettings() {
     hasAppliedHideNamesSettings = false
-  }
-
-  /// 確認待處理的自動打牌動作
-  func confirmAutoPlayAction() {
-    autoPlayController?.confirmPendingAction()
   }
 
   /// 取消待處理的自動打牌動作
@@ -773,7 +575,7 @@ class WebViewModel {
 
   /// 手動觸發自動打牌（使用當前推薦）
   func triggerAutoPlayNow(delay: TimeInterval = 1.2) {
-    guard let page = webPage,
+    guard webPage != nil,
       let firstRec = recommendations.first
     else {
       bridgeLog("[WebViewModel] 無法觸發: 無 WebPage 或推薦")
@@ -803,7 +605,7 @@ class WebViewModel {
       // 所有動作都使用重試機制
       Task {
         await self.executeAutoPlayActionWithRetry(
-          page: page, actionType: actionType, tileName: tileName, attempt: 1,
+          actionType: actionType, tileName: tileName, attempt: 1,
           executionId: executionId)
       }
     }
@@ -812,9 +614,24 @@ class WebViewModel {
   /// 最大重試次數
   private let maxRetryAttempts = 50
 
+  /// 僅在 executionId 仍為當前執行時清除 currentExecutionId。
+  /// 避免遞迴／延遲後外層路徑清掉「已被新觸發取代」的執行 ID；
+  /// 所有終止路徑（成功／放棄／逾時／錯誤／catch）都必須經此歸零，
+  /// 否則 currentExecutionId 殘留會讓 1 秒輪詢（checkAndRetriggerAutoPlay 以
+  /// currentExecutionId == nil 為前提）被永久停用，自動打牌黏著卡死。
+  private func clearExecutionIfCurrent(_ executionId: UUID) {
+    if currentExecutionId == executionId {
+      currentExecutionId = nil
+    }
+  }
+
   /// 帶重試的自動打牌執行
+  ///
+  /// 保留原本的 executionId 守衛 / 去抖 / 重試框架，只把「怎麼把動作送出去」換成
+  /// Liqi protobuf；可用操作（oplist）改讀協定層快照 `LiqiOperationStore`
+  /// （Unity 客戶端沒有 `DesktopMgr.Inst.oplist`）。
   private func executeAutoPlayActionWithRetry(
-    page: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int,
+    actionType: Recommendation.ActionType, tileName: String, attempt: Int,
     executionId: UUID
   ) async {
 
@@ -824,104 +641,69 @@ class WebViewModel {
       return
     }
 
-    // 先檢查是否還有操作可執行
-    let checkScript = """
-      var dm = window.view.DesktopMgr.Inst;
-      if (!dm) return JSON.stringify({hasOp: false, reason: 'no dm'});
-      if (!dm.oplist || dm.oplist.length === 0) return JSON.stringify({hasOp: false, reason: 'no oplist'});
-
-      var opTypes = dm.oplist.map(function(o) { return o.type; });
-      return JSON.stringify({hasOp: true, opTypes: opTypes, count: dm.oplist.length});
-      """
-
-    do {
-      let result = try await page.callJavaScript(checkScript)
-
-      // 再次檢查是否被取代
-      if currentExecutionId != executionId {
-        debugServer?.addLog("⏭️ JS 執行後重試已取消: 被取代")
+    // 先檢查是否還有操作可執行（協定層 oplist）
+    guard let snapshot = LiqiOperationStore.shared.pending else {
+      // 打牌 (discard) 不需要等待 oplist，直接執行（維持舊語意）
+      // ⚠️ 未驗證：notify 未帶 OptionalOperationList 時，伺服器是否仍接受這筆 inputOperation
+      if actionType == .discard {
+        debugServer?.addLog("打牌: 無 oplist, 直接送出")
+        await executeAutoPlayAction(actionType: actionType, tileName: tileName)
+        try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3s
+        debugServer?.addLog("✅ 打牌已發送")
+        clearExecutionIfCurrent(executionId)
         return
       }
 
-      // 解析 JSON 字符串
-      if let jsonString = result as? String,
-        let jsonData = jsonString.data(using: .utf8),
-        let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-        let hasOp = dict["hasOp"] as? Bool
-      {
-
-        if !hasOp {
-          let reason = dict["reason"] as? String ?? "unknown"
-
-          // 打牌 (discard) 不需要等待 oplist，直接執行
-          if actionType == .discard {
-            debugServer?.addLog("打牌: 無 oplist, 直接執行")
-            await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
-            try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3s
-            debugServer?.addLog("✅ 打牌已發送")
-            currentExecutionId = nil
-            return
-          }
-
-          // 其他動作需要等待 oplist
-          if attempt < maxRetryAttempts {
-            if attempt == 1 || attempt % 10 == 0 {
-              debugServer?.addLog("等待 oplist \(attempt)/\(maxRetryAttempts) (\(reason))")
-            }
-            try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
-            await executeAutoPlayActionWithRetry(
-              page: page, actionType: actionType, tileName: tileName, attempt: attempt + 1,
-              executionId: executionId)
-          } else {
-            if actionType == .none {
-              debugServer?.addLog("✅ Pass: \(attempt) 次嘗試後無 oplist, 無機會")
-            } else {
-              debugServer?.addLog("❌ \(attempt) 次嘗試後無 oplist, 放棄")
-            }
-            currentExecutionId = nil
-          }
-          return
+      // 其他動作需要等待 oplist
+      if attempt < maxRetryAttempts {
+        if attempt == 1 || attempt % 10 == 0 {
+          debugServer?.addLog("等待 oplist \(attempt)/\(maxRetryAttempts)")
         }
-
-        // 有操作，執行動作
-        let opInfo = dict["opTypes"] as? [Int] ?? []
-        debugServer?.addLog("第 \(attempt) 次嘗試: ops=\(opInfo)")
-
-        await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
-
-        // pass 操作：較長間隔 (0.5s)，最多重試 5 次
-        if actionType == .none {
-          let maxPassRetries = 5
-          if attempt >= maxPassRetries {
-            debugServer?.addLog("✅ Pass 已發送 (第 \(attempt) 次)")
-            return
-          }
-          try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
-          await checkAndRetryIfNeeded(
-            page: page, actionType: actionType, tileName: tileName, attempt: attempt,
-            executionId: executionId)
-          return
-        }
-
-        // 其他操作：0.1 秒後檢查是否成功
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        await checkAndRetryIfNeeded(
-          page: page, actionType: actionType, tileName: tileName, attempt: attempt,
+        try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
+        await executeAutoPlayActionWithRetry(
+          actionType: actionType, tileName: tileName, attempt: attempt + 1,
           executionId: executionId)
       } else {
-        // 無法解析，直接執行一次
-        debugServer?.addLog("第 \(attempt) 次嘗試: 檢查失敗, 仍執行")
-        await executeAutoPlayAction(page: page, actionType: actionType, tileName: tileName)
+        if actionType == .none {
+          debugServer?.addLog("✅ Pass: \(attempt) 次嘗試後無 oplist, 無機會")
+        } else {
+          debugServer?.addLog("❌ \(attempt) 次嘗試後無 oplist, 放棄")
+        }
+        clearExecutionIfCurrent(executionId)
       }
-    } catch {
-      debugServer?.addLog("JS 錯誤: \(error.localizedDescription)")
+      return
     }
+
+    // 有操作，執行動作
+    debugServer?.addLog("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes)")
+    await executeAutoPlayAction(actionType: actionType, tileName: tileName)
+
+    // pass 操作：較長間隔 (0.5s)，最多重試 5 次
+    if actionType == .none {
+      let maxPassRetries = 5
+      if attempt >= maxPassRetries {
+        debugServer?.addLog("✅ Pass 已發送 (第 \(attempt) 次)")
+        clearExecutionIfCurrent(executionId)
+        return
+      }
+      try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
+      await checkAndRetryIfNeeded(
+        actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
+      return
+    }
+
+    // 其他操作：0.1 秒後檢查是否成功
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    await checkAndRetryIfNeeded(
+      actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
   }
 
   /// 檢查動作是否成功，失敗則重試
+  ///
+  /// 判準改為協定層：動作送出成功時會把當批 oplist 標記為已處理，
+  /// 因此「仍有未處理的 oplist」＝動作沒送出去（或被 JS 端拒絕），需要重試。
   private func checkAndRetryIfNeeded(
-    page: WebPage, actionType: Recommendation.ActionType, tileName: String, attempt: Int,
-    executionId: UUID
+    actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID
   ) async {
 
     // 檢查是否被新的觸發取代
@@ -930,210 +712,195 @@ class WebViewModel {
       return
     }
 
-    let checkScript = """
-      var dm = window.view.DesktopMgr.Inst;
-      if (!dm) return JSON.stringify({success: true, reason: 'no dm'});
-
-      var actionType = '\(actionType.rawValue)';
-      var tileName = '\(tileName)';
-
-      if (dm.oplist && dm.oplist.length > 0) {
-      var opTypes = dm.oplist.map(function(o) { return o.type; });
-
-      if (actionType === 'discard') {
-      if (opTypes.indexOf(1) >= 0) {
-      return JSON.stringify({success: false, reason: 'discard op still present', opTypes: opTypes});
-      }
-      } else if (actionType === 'chi') {
-      if (opTypes.indexOf(2) >= 0) {
-      return JSON.stringify({success: false, reason: 'chi op still present', opTypes: opTypes});
-      }
-      } else if (actionType === 'pon') {
-      if (opTypes.indexOf(3) >= 0) {
-      return JSON.stringify({success: false, reason: 'pon op still present', opTypes: opTypes});
-      }
-      } else if (actionType === 'kan') {
-      if (opTypes.indexOf(4) >= 0 || opTypes.indexOf(5) >= 0 || opTypes.indexOf(6) >= 0) {
-      return JSON.stringify({success: false, reason: 'kan op still present', opTypes: opTypes});
-      }
-      } else if (actionType === 'hora') {
-      if (opTypes.indexOf(8) >= 0 || opTypes.indexOf(9) >= 0) {
-      return JSON.stringify({success: false, reason: 'hora op still present', opTypes: opTypes});
-      }
-      } else if (actionType === 'none') {
-      var hasCallOp = false;
-      for (var i = 0; i < opTypes.length; i++) {
-      if (opTypes[i] >= 2 && opTypes[i] <= 9) { hasCallOp = true; break; }
-      }
-      if (hasCallOp) {
-      return JSON.stringify({success: false, reason: 'call ops still present', opTypes: opTypes});
-      }
-      }
-      }
-
-      return JSON.stringify({success: true, reason: 'oplist cleared or action done'});
-      """
-
-    do {
-      let result = try await page.callJavaScript(checkScript)
-
-      // 解析 JSON 字符串
-      if let jsonString = result as? String,
-        let jsonData = jsonString.data(using: .utf8),
-        let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-        let success = dict["success"] as? Bool
-      {
-
-        if success {
-          let reason = dict["reason"] as? String ?? "ok"
-          debugServer?.addLog("✅ 動作成功, 第 \(attempt) 次 (\(reason))")
-          currentExecutionId = nil
-          return
-        }
-
-        // 失敗，需要重試
-        let opInfo = dict["opTypes"] as? [Int] ?? []
-
-        if attempt >= maxRetryAttempts {
-          debugServer?.addLog("❌ 已達最大重試次數 (\(attempt)), ops=\(opInfo)")
-          currentExecutionId = nil
-          return
-        }
-
-        // 重試
-        debugServer?.addLog("重試 \(attempt + 1): ops 仍存在 \(opInfo)")
-        await executeAutoPlayActionWithRetry(
-          page: page, actionType: actionType, tileName: tileName, attempt: attempt + 1,
-          executionId: executionId)
-      }
-    } catch {
-      debugServer?.addLog("檢查錯誤: \(error.localizedDescription)")
+    guard let snapshot = LiqiOperationStore.shared.pending else {
+      debugServer?.addLog("✅ 動作成功, 第 \(attempt) 次 (oplist 已消化)")
+      clearExecutionIfCurrent(executionId)
+      return
     }
+
+    if attempt >= maxRetryAttempts {
+      debugServer?.addLog("❌ 已達最大重試次數 (\(attempt)), ops=\(snapshot.rawTypes)")
+      clearExecutionIfCurrent(executionId)
+      return
+    }
+
+    debugServer?.addLog("重試 \(attempt + 1): ops 仍存在 \(snapshot.rawTypes)")
+    await executeAutoPlayActionWithRetry(
+      actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
   }
 
-  /// 實際執行自動打牌動作
-  /// 使用 NakiCoordinator 統一 API
+  /// 實際送出自動打牌動作（Liqi protobuf）
+  ///
+  /// 舊實作呼叫 `window.naki.action.*`（Laya 物件），Unity WebGL 客戶端已不存在，
+  /// 那條路徑永遠靜默失敗。現在一律由 `LiqiActionSender` 組 Liqi REQUEST，
+  /// 經 `window.__nakiWebSocket.sendRaw` 送出；需要 index／槓型／和牌型的動作
+  /// 由協定層 oplist 快照推導。
   private func executeAutoPlayAction(
-    page: WebPage, actionType: Recommendation.ActionType, tileName: String
+    actionType: Recommendation.ActionType, tileName: String
   ) async {
+    let snapshot = LiqiOperationStore.shared.pending
+    var result: LiqiSendResult?
 
     switch actionType {
-    case .riichi:
-      debugServer?.addLog("執行: 立直...")
-      let script = "return JSON.stringify(window.naki.action.riichi())"
-      do {
-        let result = try await page.callJavaScript(script)
-        debugServer?.addLog("立直結果: \(String(describing: result))")
-      } catch {
-        debugServer?.addLog("立直錯誤: \(error.localizedDescription)")
-      }
-
     case .discard:
-      // 使用 NakiCoordinator.utils.findTileInHand 查找牌
-      let findScript = "return window.naki.utils.findTileInHand('\(tileName)')"
-      do {
-        let result = try await page.callJavaScript(findScript)
-        if let tileIndex = result as? Int, tileIndex >= 0 {
-          debugServer?.addLog("查找: \(tileName) → idx=\(tileIndex)")
-          let discardScript = "return JSON.stringify(window.naki.action.discard(\(tileIndex)))"
-          do {
-            let discardResult = try await page.callJavaScript(discardScript)
-            debugServer?.addLog("打牌結果: \(String(describing: discardResult))")
-          } catch {
-            debugServer?.addLog("打牌錯誤: \(error.localizedDescription)")
-          }
-        } else {
-          debugServer?.addLog("找不到牌: \(tileName)")
-        }
-      } catch {
-        debugServer?.addLog("查找錯誤: \(error.localizedDescription)")
+      guard let majsoulTile = LiqiTileCode.majsoul(fromMJAI: tileName) else {
+        debugServer?.addLog("打牌: 無法轉換牌字串 \(tileName)")
+        markSnapshotHandled(snapshot)
+        return
       }
+      let moqie = (tsumoTile == tileName)
+      debugServer?.addLog("執行: 打牌 \(tileName) → \(majsoulTile) (moqie=\(moqie))")
+      result = await liqiSender.discard(tile: majsoulTile, moqie: moqie)
+
+    case .riichi:
+      // Mortal 把「立直宣言」與「捨牌」拆成兩個動作，但 ReqSelfOperation(type=7)
+      // 必須同時帶上捨牌，因此取同一批推薦中機率最高的打牌當宣言牌。
+      // ⚠️ 未驗證：此選法是否與 Mortal 立直後的第二次推論結果一致。
+      guard let discardRec = recommendations.first(where: { $0.actionType == .discard }),
+        let majsoulTile = LiqiTileCode.majsoul(fromMJAI: discardRec.displayTile)
+      else {
+        debugServer?.addLog("立直: 找不到可宣言的捨牌, 跳過")
+        markSnapshotHandled(snapshot)
+        return
+      }
+      let moqie = (tsumoTile == discardRec.displayTile)
+      debugServer?.addLog("執行: 立直 + 捨 \(discardRec.displayTile) → \(majsoulTile)")
+      result = await liqiSender.riichi(tile: majsoulTile, moqie: moqie)
 
     case .chi:
-      // 從 tileName 解析 chi 類型 (chi_0, chi_1, chi_2)
-      var chiType = 0
+      // 從 tileName 解析 chi 變體 (chi_0 / chi_1 / chi_2)
+      var variant = 0
       if tileName.hasPrefix("chi_"), let idx = Int(String(tileName.dropFirst(4))) {
-        chiType = idx
+        variant = idx
       }
-
-      // 查詢可用組合數
-      let queryScript = """
-        var ops = window.naki.state.getAvailableOps();
-        var chiOp = ops.find(function(o) { return o.type === 2; });
-        if (!chiOp) return JSON.stringify({available: false});
-        return JSON.stringify({available: true, count: chiOp.combination.length, combinations: chiOp.combination});
-        """
-      do {
-        let result = try await page.callJavaScript(queryScript)
-        guard let jsonString = result as? String,
-          let jsonData = jsonString.data(using: .utf8),
-          let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-          let available = dict["available"] as? Bool, available,
-          let count = dict["count"] as? Int
-        else {
-          debugServer?.addLog("吃: 無可用組合")
-          return
-        }
-
-        // 計算組合索引
-        let combIndex = count == 1 ? 0 : max(0, count - 1 - chiType)
-        let combInfo = (dict["combinations"] as? [String])?.joined(separator: ", ") ?? ""
-        debugServer?.addLog("吃: mortal=chi_\(chiType) → gameIdx=\(combIndex) [\(combInfo)]")
-
-        let chiScript = "return JSON.stringify(window.naki.action.chi(\(combIndex)))"
-        do {
-          let chiResult = try await page.callJavaScript(chiScript)
-          debugServer?.addLog("吃結果: \(String(describing: chiResult))")
-        } catch {
-          debugServer?.addLog("吃錯誤: \(error.localizedDescription)")
-        }
-      } catch {
-        debugServer?.addLog("吃查詢錯誤: \(error.localizedDescription)")
-      }
+      // 舊實作靠 Laya UI 的組合順序反推索引；改用 oplist 的 combination
+      // 與被吃的牌直接對照，得到雀魂端的 combination 索引。
+      let resolved = snapshot?.chiCombinationIndex(variant: variant)
+      let index = UInt32(resolved ?? 0)
+      let combos = snapshot?.operation(of: .chi)?.combination.joined(separator: ", ") ?? "-"
+      debugServer?.addLog(
+        "執行: 吃 mortal=chi_\(variant) → index=\(index) [\(combos)]"
+          + (resolved == nil ? " ⚠️ 無法對照組合, 退回 0" : ""))
+      result = await liqiSender.chi(index: index)
 
     case .pon:
+      // combination 通常只有一組；含紅五時可能有兩組（取捨規則未驗證，先取第 0 組）
       debugServer?.addLog("執行: 碰...")
-      let script = "return JSON.stringify(window.naki.action.pon())"
-      do {
-        let result = try await page.callJavaScript(script)
-        debugServer?.addLog("碰結果: \(String(describing: result))")
-      } catch {
-        debugServer?.addLog("碰錯誤: \(error.localizedDescription)")
-      }
+      result = await liqiSender.pon()
 
     case .kan:
-      debugServer?.addLog("執行: 槓...")
-      let script = "return JSON.stringify(window.naki.action.kan())"
-      do {
-        let result = try await page.callJavaScript(script)
-        debugServer?.addLog("槓結果: \(String(describing: result))")
-      } catch {
-        debugServer?.addLog("槓錯誤: \(error.localizedDescription)")
-      }
+      let kanType = snapshot?.kanOperation ?? .ankan
+      debugServer?.addLog("執行: 槓 (type=\(kanType.rawValue))")
+      result = await liqiSender.kan(type: kanType)
 
     case .hora:
-      debugServer?.addLog("執行: 和牌...")
-      let script = "return JSON.stringify(window.naki.action.hora())"
-      do {
-        let result = try await page.callJavaScript(script)
-        debugServer?.addLog("和牌結果: \(String(describing: result))")
-      } catch {
-        debugServer?.addLog("和牌錯誤: \(error.localizedDescription)")
+      let horaType = snapshot?.horaOperation ?? .tsumo
+      debugServer?.addLog("執行: 和牌 (type=\(horaType.rawValue))")
+      if horaType == .ron {
+        result = await liqiSender.ron()
+      } else {
+        result = await liqiSender.tsumo()
       }
 
     case .none:
-      debugServer?.addLog("執行: 過...")
-      let script = "return JSON.stringify(window.naki.action.pass())"
-      do {
-        let result = try await page.callJavaScript(script)
-        debugServer?.addLog("過結果: \(String(describing: result))")
-      } catch {
-        debugServer?.addLog("過錯誤: \(error.localizedDescription)")
-      }
+      // 跳過：回應他家打牌走 inputChiPengGang，自家回合的選項走 inputOperation
+      let channel: LiqiActionChannel =
+        (snapshot?.isCallOpportunity ?? true) ? .chiPengGang : .selfOperation
+      debugServer?.addLog("執行: 過 (\(channel.method))")
+      result = await liqiSender.pass(channel: channel)
 
     case .unknown:
       bridgeLog("[WebViewModel] 未知動作類型, 跳過")
+      return
     }
+
+    // 送出成功才把這批 oplist 標記為已處理；失敗留給重試框架再送一次
+    if result?.success == true {
+      markSnapshotHandled(snapshot)
+    }
+  }
+
+  // MARK: - 協定層狀態快照（MCP 狀態類工具的資料來源）
+
+  /// 組出「Swift 協定層的遊戲快照」。
+  ///
+  /// Unity 客戶端下 `window.view.DesktopMgr.Inst` 不存在，舊的 `/game/state`、`/game/hand`、
+  /// `/game/ops` 全部讀不到東西。這些資訊本來就從 Liqi notify 流進 Swift，
+  /// 由 `MajsoulBridge` → `NativeBotController` → `GameStateManager` 維護，
+  /// 以及 `LiqiOperationStore`（可用操作）持有，這裡只是把它們攤成 JSON。
+  ///
+  /// ⚠️ 這是 **Naki 自己看到的狀態**，不是向伺服器查詢的結果；
+  /// 若 Naki 錯過封包（例如中途啟動），這裡會不完整——用 `bot_sync` 觸發重連重建。
+  func protocolGameSnapshot() -> [String: Any] {
+    let state = gameStateManager.gameState
+    let bot = gameStateManager.botStatus
+
+    var snapshot: [String: Any] = [
+      "source": "swift-protocol-layer",
+      "note": "Unity 客戶端沒有 JS 遊戲物件；本資料由 Liqi 封包在 Swift 端重建",
+      "accountId": webCoordinator?.websocketHandler.majsoulAccountId ?? 0,
+      "gameState": [
+        "bakaze": state.bakazeString,
+        "bakazeDisplay": state.bakazeDisplay,
+        "kyoku": state.kyoku,
+        "kyokuDisplay": state.kyokuDisplayName,
+        "honba": state.honba,
+        "kyotaku": state.kyotaku,
+        "jikaze": state.jikazeString,
+        "scores": state.scores,
+        "doraIndicators": state.doraIndicators,
+        "seat": state.playerId,
+        "is3P": state.is3P,
+        "inGame": gameStateManager.isInGame,
+      ],
+      "bot": [
+        "isActive": bot.isActive,
+        "model": bot.modelName,
+        "seat": bot.playerId,
+        "is3P": bot.is3P,
+        "canDiscard": bot.canDiscard,
+        "canRiichi": bot.canRiichi,
+        "canChi": bot.canChi,
+        "canPon": bot.canPon,
+        "canKan": bot.canKan,
+        "canAgari": bot.canAgari,
+      ],
+      "hand": [
+        "tehai": tehaiTiles,
+        "tehaiCount": tehaiTiles.count,
+        "tsumo": tsumoTile as Any? ?? NSNull(),
+        "notation": "MJAI（5mr = 紅五萬；E/S/W/N/P/F/C = 字牌）",
+      ] as [String: Any],
+      "recommendations": gameStateManager.recommendations.map { rec in
+        [
+          "tile": rec.displayTile,
+          "action": rec.actionType.rawValue,
+          "label": rec.displayLabel,
+          "prob": rec.probability,
+          "percentage": rec.percentageString,
+        ] as [String: Any]
+      },
+      "autoPlay": [
+        "mode": autoPlayController?.state.mode.rawValue ?? "unknown",
+        "isMyTurn": autoPlayController?.state.isMyTurn ?? false,
+        "hasPendingAction": autoPlayController?.state.pendingAction != nil,
+      ],
+    ]
+
+    // 可用操作（協定層 oplist；pending = 尚未被動作層消化）
+    let store = LiqiOperationStore.shared
+    var operations: [String: Any] = [:]
+    operations["pending"] = store.pending?.dictionary ?? NSNull()
+    operations["latest"] = store.latest?.dictionary ?? NSNull()
+    snapshot["operations"] = operations
+
+    return snapshot
+  }
+
+  /// 標記某批 oplist 已處理（沒有快照時不做事，避免誤標剛到的新機會）
+  private func markSnapshotHandled(_ snapshot: LiqiOperationSnapshot?) {
+    guard let snapshot else { return }
+    LiqiOperationStore.shared.markHandled(snapshot.sequence)
   }
 
   // MARK: - MCP Server
@@ -1224,21 +991,36 @@ class WebViewModel {
     }
 
     // 設定手動觸發自動打牌回調
+    // 統一走 WebViewModel 主自動打牌路徑（以牌名經 findTileInHand 轉 UI index），
+    // 不再使用 AutoPlayController 的排序索引 discard 路徑
     debugServer?.triggerAutoPlay = { [weak self] in
       guard let self = self else { return }
+      self.triggerAutoPlayNow()
+    }
 
-      if let controller = self.nativeBotController,
-        let lastAction = controller.lastAction
-      {
-        self.debugServer?.addLog("使用 lastAction 觸發")
-        self.autoPlayController?.handleRecommendedAction(
-          lastAction,
-          tehai: controller.tehai,
-          tsumo: controller.tsumo
-        )
-      } else {
-        self.triggerAutoPlayNow()
+    // 設定 Liqi 請求送出回調（MCP 工具的動作／大廳面）
+    // 舊的 JS 路徑（GameMgr.uimgr / NetAgent / DesktopMgr）在 Unity 客戶端全部不存在，
+    // 所有 MCP 動作類工具改由這裡送 protobuf。
+    debugServer?.sendLiqi = { [weak self] spec, awaitMs in
+      guard let self = self else { return .unavailable("webviewmodel_deallocated") }
+      return await self.liqiSender.sendAwaitingResponse(spec, awaitResponseMs: awaitMs)
+    }
+
+    // 設定遊戲狀態快照回調（MCP 狀態類工具的資料來源）
+    debugServer?.getGameSnapshot = { [weak self] in
+      guard let self = self else { return [:] }
+      return self.protocolGameSnapshot()
+    }
+
+    // 設定自動心跳（防閒置）開關：Unity 下 GameMgr.clientHeatBeat 已不存在，
+    // 改由 Swift 定期送 .lq.Lobby.heatbeat
+    debugServer?.setAntiIdle = { [weak self] enabled, interval in
+      guard let self = self else { return [:] }
+      if enabled != nil || interval != nil {
+        self.liqiSender.setAntiIdle(
+          enabled: enabled ?? self.liqiSender.antiIdleEnabled, intervalSeconds: interval)
       }
+      return self.liqiSender.antiIdleStatus
     }
 
     // 端口變更回調
@@ -1335,34 +1117,6 @@ class WebViewModel {
   func deleteBot(playerId: Int) async -> Result<Void, Error> {
     deleteNativeBot()
     return .success(())
-  }
-}
-
-// MARK: - AutoPlayServiceDelegate
-
-extension WebViewModel: AutoPlayServiceDelegate {
-  func autoPlayService(_ service: AutoPlayService, didLog message: String) {
-    debugServer?.addLog(message)
-  }
-
-  func autoPlayService(
-    _ service: AutoPlayService, didComplete actionType: Recommendation.ActionType
-  ) {
-    bridgeLog("[WebViewModel] AutoPlayService 完成: \(actionType.rawValue)")
-    statusMessage = "動作完成: \(actionType.displayName)"
-    Task {
-      await hideGameHighlight()
-    }
-  }
-
-  func autoPlayService(
-    _ service: AutoPlayService, didFail actionType: Recommendation.ActionType, error: String
-  ) {
-    bridgeLog("[WebViewModel] AutoPlayService 失敗: \(actionType.rawValue) - \(error)")
-    statusMessage = "動作失敗: \(error)"
-    Task {
-      await hideGameHighlight()
-    }
   }
 }
 

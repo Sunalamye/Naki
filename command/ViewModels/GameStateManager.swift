@@ -15,30 +15,31 @@ import MortalSwift
 
 /// 遊戲狀態管理器
 /// 集中管理遊戲狀態、AI 推薦和 Bot 狀態，提供 UI 響應式更新
-final class GameStateManager: ObservableObject {
+@Observable
+final class GameStateManager {
 
-    // MARK: - Published Properties
+    // MARK: - Observable Properties
 
     /// 遊戲狀態
-    @Published private(set) var gameState = GameState()
+    private(set) var gameState = GameState()
 
     /// Bot 狀態
-    @Published private(set) var botStatus = BotStatus()
+    private(set) var botStatus = BotStatus()
 
     /// AI 推薦動作列表
-    @Published private(set) var recommendations: [Recommendation] = []
+    private(set) var recommendations: [Recommendation] = []
 
     /// 推薦數量（用於 badge 顯示）
-    @Published private(set) var recommendationCount: Int = 0
+    private(set) var recommendationCount: Int = 0
 
     /// 是否正在計算推薦
-    @Published private(set) var isCalculating = false
+    private(set) var isCalculating = false
 
     /// 最後更新時間
-    @Published private(set) var lastUpdateTime: Date?
+    private(set) var lastUpdateTime: Date?
 
     /// 錯誤訊息
-    @Published var errorMessage: String?
+    var errorMessage: String?
 
     // MARK: - Computed Properties
 
@@ -160,8 +161,11 @@ final class GameStateManager: ObservableObject {
 
     /// 從 NativeBotController 同步狀態
     /// - Parameter controller: Bot 控制器
+    /// #15: controller 已 @MainActor 隔離，故本方法標為 @MainActor，於一致的 isolation 下
+    ///      同步讀取 controller 屬性（呼叫端 WebViewModel 亦為 @MainActor，安全）。
+    @MainActor
     func syncFrom(controller: NativeBotController) {
-        // 在主線程外先獲取所有需要的值
+        // controller 為 @MainActor，這裡在 MainActor 上同步取得所有需要的值（值型別快照）
         let state = controller.gameState
         let recs = controller.lastRecommendations
         let is3P = controller.is3P

@@ -90,12 +90,6 @@ class AutoPlayController: ObservableObject {
     /// 日誌標籤
     private let logTag = "[AutoPlay]"
 
-    /// 當前手牌 (用於計算打牌的索引)
-    private var currentTehai: [Tile] = []
-
-    /// 當前摸牌
-    private var currentTsumo: Tile? = nil
-
     // MARK: - Initialization
 
     init() {
@@ -125,12 +119,6 @@ class AutoPlayController: ObservableObject {
         state.actionDelay = max(0.5, min(5.0, delay))
     }
 
-    /// 更新手牌狀態
-    func updateHandState(tehai: [Tile], tsumo: Tile?) {
-        currentTehai = tehai
-        currentTsumo = tsumo
-    }
-
     // MARK: - Game State Updates
 
     /// 通知輪到自己的回合
@@ -147,199 +135,11 @@ class AutoPlayController: ObservableObject {
 
     // MARK: - Action Execution
 
-    /// 處理 AI 推薦動作
-    /// - Parameters:
-    ///   - action: MJAIAction 推薦動作
-    ///   - tehai: 當前手牌
-    ///   - tsumo: 當前摸牌
-    ///   - immediately: 是否立即執行（跳過延遲）
-    func handleRecommendedAction(_ action: MJAIAction, tehai: [Tile], tsumo: Tile?, immediately: Bool = false) {
-        // off 模式下不處理自動打牌（但 AI 推薦仍在背景運行）
-        guard state.mode != .off else { return }
-
-        // 更新手牌狀態
-        updateHandState(tehai: tehai, tsumo: tsumo)
-
-        // 轉換為自動打牌動作
-        guard let autoPlayAction = createUIAction(from: action) else {
-            bridgeLog("\(logTag) 無法轉換動作: \(action)")
-            return
-        }
-
-        state.pendingAction = autoPlayAction
-
-        if state.mode.isFullAuto {
-            // 全自動模式：延遲後執行
-            if immediately {
-                executeAction(autoPlayAction)
-            } else {
-                scheduleAction(autoPlayAction)
-            }
-        } else {
-            // 推薦確認模式：等待用戶確認
-            bridgeLog("\(logTag) 動作等待確認: \(autoPlayAction)")
-        }
-    }
-
-    /// 從 MJAIAction 創建 UI 動作
-    private func createUIAction(from mjaiAction: MJAIAction) -> AutoPlayAction? {
-        switch mjaiAction {
-        case .dahai(let action):
-            // 找到要打的牌在手牌中的索引
-            let tile = action.pai
-            let isRiichi = false  // riichi 會作為獨立動作處理
-
-            // 檢查是否是摸切
-            if action.tsumogiri, currentTsumo == tile {
-                return .discard(tileIndex: 13, isRiichi: isRiichi)
-            }
-
-            // 在手牌中查找
-            if let index = currentTehai.firstIndex(of: tile) {
-                return .discard(tileIndex: index, isRiichi: isRiichi)
-            }
-
-            // 如果手牌中找不到，可能是摸牌
-            if currentTsumo == tile {
-                return .discard(tileIndex: 13, isRiichi: isRiichi)
-            }
-
-            bridgeLog("\(logTag) 手牌中找不到 \(tile.mjaiString)")
-            return nil
-
-        case .reach:
-            // 立直通常伴隨 dahai，這裡只處理立直按鈕點擊
-            // 實際打牌會在下一個 dahai 動作中處理
-            return nil
-
-        case .chi:
-            return .chi
-
-        case .pon:
-            return .pon
-
-        case .daiminkan, .ankan, .kakan:
-            return .kan
-
-        case .hora:
-            return .hora
-
-        case .ryukyoku:
-            return .ryukyoku
-
-        case .pass:
-            return .pass
-
-        case .nukidora:
-            // 北抜き - 三麻專用，暫不支援
-            return nil
-        }
-    }
-
-    /// 確認並執行待處理動作
-    func confirmPendingAction() {
-        guard let action = state.pendingAction else {
-            bridgeLog("\(logTag) 沒有待確認的動作")
-            return
-        }
-
-        executeAction(action)
-    }
-
     /// 取消待處理動作
     func cancelPendingAction() {
         actionTimer?.invalidate()
         actionTimer = nil
         state.pendingAction = nil
-    }
-
-    /// 調度動作執行（帶延遲）
-    private func scheduleAction(_ action: AutoPlayAction) {
-        actionTimer?.invalidate()
-
-        let delay = state.actionDelay
-        bridgeLog("\(logTag) 排程動作, 延遲 \(delay) 秒")
-
-        actionTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            self?.executeAction(action)
-        }
-    }
-
-    /// 執行動作 (透過 UI 自動化)
-    private func executeAction(_ action: AutoPlayAction) {
-        guard let webPage = webPage else {
-            bridgeLog("\(logTag) 錯誤: WebPage 不可用")
-            lastError = "WebPage 不可用"
-            return
-        }
-
-        let script = generateJavaScript(for: action)
-        bridgeLog("\(logTag) 執行: \(script)")
-
-        Task { @MainActor [weak self] in
-            do {
-                _ = try await webPage.callJavaScript(script)
-                bridgeLog("\(self?.logTag ?? "") 動作執行成功")
-                self?.handleActionSuccess()
-            } catch {
-                bridgeLog("\(self?.logTag ?? "") JS 錯誤: \(error.localizedDescription)")
-                self?.handleActionError(error.localizedDescription)
-            }
-        }
-    }
-
-    /// 生成執行動作的 JavaScript 代碼
-    /// 使用 NakiCoordinator 統一 API
-    private func generateJavaScript(for action: AutoPlayAction) -> String {
-        switch action {
-        case .discard(let tileIndex, let isRiichi):
-            if isRiichi {
-                return "window.naki.action.riichi(\(tileIndex))"
-            } else {
-                return "window.naki.action.discard(\(tileIndex))"
-            }
-
-        case .pass:
-            return "window.naki.action.pass()"
-
-        case .chi:
-            return "window.naki.action.chi()"
-
-        case .pon:
-            return "window.naki.action.pon()"
-
-        case .kan:
-            return "window.naki.action.kan()"
-
-        case .hora:
-            return "window.naki.action.hora()"
-
-        case .ryukyoku:
-            return "window.naki.action.execute('ryukyoku', {})"
-
-        case .kyushukyuhai:
-            return "window.naki.action.execute('kyushu', {})"
-        }
-    }
-
-    /// 處理動作成功
-    private func handleActionSuccess() {
-        state.pendingAction = nil
-        state.lastActionTime = Date()
-        state.errorCount = 0
-        lastError = nil
-    }
-
-    /// 處理動作失敗
-    private func handleActionError(_ error: String) {
-        state.errorCount += 1
-        lastError = error
-
-        if state.errorCount >= state.maxErrors {
-            bridgeLog("\(logTag) 錯誤過多, 停用自動打牌")
-            setMode(.off)
-            lastError = "錯誤過多，已停止自動打牌"
-        }
     }
 
     // MARK: - Status

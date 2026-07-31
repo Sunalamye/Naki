@@ -457,16 +457,46 @@
     };
 
     // ========================================
-    // 🌟 推薦高亮管理模組 (手牌顏色版)
+    // 🌟 推薦高亮管理模組 (手牌顏色版) — ⚠️ Unity WebGL 客戶端已停用
     // ========================================
     /**
-     * 管理推薦牌的視覺高亮效果
-     * 使用 tile._SetColor() 直接改變手牌顏色
-     * 支援多個推薦同時顯示，根據機率顯示不同顏色：
-     * - 綠色：probability > 0.5
-     * - 橘色：0.3 < probability <= 0.5
-     * - 紅色：0.2 < probability <= 0.3
+     * ⚠️ 已停用（2026-07 雀魂改用 Unity WebGL 4.0.45）
+     *
+     * 本模組所有視覺效果都建立在 Laya 物件上：
+     *   window.Laya.Vector3/Vector4、window.view.DesktopMgr.Inst.mainrole.hand、
+     *   effect_doraPlane.clone()、effect_recommend、window.uiscript.UI_ChiPengHu
+     * 這些在 Unity 客戶端 **全部不存在**（runtime 實測），因此「牌上高亮」在原理上
+     * 已不可能運作，只會靜默失敗變成假訊號。
+     *
+     * → 推薦改由原生 SwiftUI 面板呈現：
+     *   command/Views/RecommendationView.swift、command/Views/BotStatusView.swift
+     *
+     * 保留本物件的原因：naki-coordinator.js 的 visual.* 與 MCP HighlightTools
+     * 仍會引用它。偵測不到 Laya 時一律回傳明確失敗
+     * { success: false, reason: 'unity-client-no-laya' }，不再靜默回 false / 0。
+     * 純計算函數（getColorForRank / setSettings / setColor）不依賴 Laya，維持可用。
      */
+
+    /** Laya 客戶端是否可用（Unity WebGL 下永遠為 false） */
+    function nakiLayaAvailable() {
+        return !!(window.Laya
+            && window.view
+            && window.view.DesktopMgr
+            && window.view.DesktopMgr.Inst);
+    }
+
+    /** 統一的失效回傳（明確失敗，不拋錯、不靜默） */
+    function nakiLayaUnavailable(api) {
+        console.warn('[Naki 高亮] ' + api + ' 無法執行：Unity WebGL 客戶端沒有 Laya/DesktopMgr，'
+            + '遊戲內高亮已停用，請看原生推薦面板');
+        return {
+            success: false,
+            reason: 'unity-client-no-laya',
+            api: api,
+            error: 'Majsoul Unity WebGL client: window.Laya / view.DesktopMgr not present'
+        };
+    }
+
     window.__nakiRecommendHighlight = {
         activeEffects: [],  // 存儲所有已著色的牌 { tileIndex, originalColor }
         nativeEffectActive: false,  // 追蹤原生 effect_recommend 狀態
@@ -498,6 +528,7 @@
          * @returns {boolean} 成功或失敗
          */
         moveNativeEffect: function(tileIndex) {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('moveNativeEffect');
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 if (!mgr?.effect_recommend?._childs?.[0]) {
@@ -535,6 +566,7 @@
          * 隱藏原生 effect_recommend
          */
         hideNativeEffect: function() {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('hideNativeEffect');
             try {
                 const effect = window.view?.DesktopMgr?.Inst?.effect_recommend;
                 if (effect) {
@@ -553,6 +585,7 @@
          * @returns {boolean} 成功或失敗
          */
         moveNativeEffectToButton: function(actionType) {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('moveNativeEffectToButton');
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 if (!mgr?.effect_recommend?._childs?.[0]) {
@@ -702,6 +735,7 @@
          * @returns {boolean} 成功或失敗
          */
         setTileColor: function(tileIndex, color) {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('setTileColor');
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 const hand = mgr?.mainrole?.hand;
@@ -753,6 +787,7 @@
          * 重置所有手牌的顏色
          */
         resetAllTileColors: function() {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('resetAllTileColors');
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 const hand = mgr?.mainrole?.hand;
@@ -782,6 +817,8 @@
          * @returns {object|null} { effects: [effect1, effect2], blings: [bling1, bling2] } 或 null
          */
         createEffect: function(tile, color, reverse) {
+            // 內部用：呼叫端（showMultiple）以 null 判斷失敗，維持原介面
+            if (!nakiLayaAvailable()) return null;
             try {
                 const mgr = window.view?.DesktopMgr?.Inst;
                 if (!mgr || !tile || !tile.mySelf) return null;
@@ -860,6 +897,9 @@
          * @returns {number} 成功創建的效果數量
          */
         showMultiple: function(recommendations) {
+            // ⚠️ Unity 客戶端沒有 Laya/DesktopMgr，牌上高亮無法運作 → 明確回傳失敗
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('showMultiple');
+
             // 先清除現有效果
             this.hide();
 
@@ -985,6 +1025,7 @@
          * @returns {boolean} 成功或失敗
          */
         show: function(tileIndex, probability) {
+            if (!nakiLayaAvailable()) return nakiLayaUnavailable('show');
             const prob = typeof probability === 'number' ? probability : 1.0;
             return this.showMultiple([{ tileIndex, probability: prob }]) > 0;
         },
@@ -994,6 +1035,13 @@
          * @returns {boolean} 成功或失敗
          */
         hide: function() {
+            // 沒有 Laya 就沒有任何遊戲內效果可清；仍先停掉可能殘留的計時器再回報失效
+            if (!nakiLayaAvailable()) {
+                this.stopRotation();
+                this.activeEffects = [];
+                this.nativeEffectActive = false;
+                return nakiLayaUnavailable('hide');
+            }
             try {
                 // 停止旋轉動畫
                 this.stopRotation();
@@ -1029,7 +1077,15 @@
          * 獲取當前狀態
          */
         getStatus: function() {
+            const layaAvailable = nakiLayaAvailable();
             return {
+                // 明確標示遊戲內高亮是否還可能運作（Unity 客戶端固定 false）
+                layaAvailable: layaAvailable,
+                supported: layaAvailable,
+                reason: layaAvailable ? null : 'unity-client-no-laya',
+                note: layaAvailable
+                    ? undefined
+                    : '遊戲內高亮已停用，推薦顯示於原生面板 (RecommendationView / BotStatusView)',
                 isActive: this.activeEffects.length > 0 || this.nativeEffectActive,
                 effectCount: this.activeEffects.length,
                 nativeEffectActive: this.nativeEffectActive,
@@ -1081,8 +1137,14 @@
      * 當玩家摸牌時觸發，用於：
      * 1. 通知 Swift 可以重新計算推薦
      * 2. 重新應用推薦顏色（因為遊戲動畫會重置顏色）
+     *
+     * ⚠️ Unity WebGL 客戶端沒有 view.DesktopMgr.mainrole，此 hook 永遠裝不上：
+     * 下面的輪詢會在 60 秒後自行停止，不會留下背景計時器。
+     * 摸牌事件請改由 WebSocket/Liqi 事件流取得（MajsoulBridge → MJAI tsumo）。
      */
     function hookAddHandPai() {
+        // 註：這裡不提前 return——腳本在 document-start 注入，此刻 window.view 尚未建立，
+        // 提前判斷會誤殺。輪詢本身有 60 秒上限，Unity 客戶端下會自然逾時結束。
         const checkInterval = setInterval(function() {
             const mgr = window.view?.DesktopMgr?.Inst;
             const mr = mgr?.mainrole;
@@ -1110,7 +1172,7 @@
                         console.error('[Naki Hook] 通知 Swift 失敗:', e);
                     }
 
-                    // 2. 重新應用已記錄的推薦顏色
+                    // 2. 重新應用已記錄的推薦顏色（僅 Laya 客戶端可能走到這裡）
                     var highlight = window.__nakiRecommendHighlight;
                     if (highlight && highlight.activeEffects && highlight.activeEffects.length > 0) {
                         var effects = highlight.activeEffects;

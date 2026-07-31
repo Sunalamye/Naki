@@ -321,6 +321,11 @@ struct MahjongTile: Identifiable, Equatable, Hashable {
         return isRed ? "紅\(name)" : name
     }
 
+    /// 無障礙可讀名稱（VoiceOver 用）
+    /// 數牌「一萬…九萬 / 一筒…九筒 / 一索…九索」、字牌「東南西北白發中」、紅寶牌加「紅」前綴（如「紅五萬」）。
+    /// 供 BotStatusView 與 RecommendationView 共用，避免各寫一份牌名轉換。
+    var accessibleName: String { displayName }
+
     /// MJAI 到 Unicode 的映射表
     static let mjaiToUnicode: [String: String] = [
         "1m": "🀇", "2m": "🀈", "3m": "🀉", "4m": "🀊", "5m": "🀋",

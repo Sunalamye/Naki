@@ -3,7 +3,27 @@
 //  Naki
 //
 //  Created by Claude on 2025/12/06.
-//  表情相關 MCP 工具
+//  Updated 2026-07-31：Unity 遷移，改走 Liqi protobuf。
+//
+//  舊實作：
+//  - `game_emoji` 用 `app.NetAgent.sendReq2MJ('FastTest','broadcastInGame', …)` → NetAgent 已不存在
+//  - `game_emoji_list` 讀 `uiscript.UI_MJ_Emoji.Inst.emos` → uiscript 已不存在
+//  - `game_emoji_listen` 掛 `netRouteGroup_mj.notifyHander.handlers['.lq.NotifyGameBroadcast']`
+//    → 同上
+//
+//  新實作：
+//  - 送出：直接組 `.lq.FastTest.broadcastInGame`（ReqBroadcastInGame：content=1, except_self=2），
+//    content 沿用雀魂格式 `{"emo":N}`。
+//  - 接收：`.lq.NotifyGameBroadcast` 本來就會經過 Naki 的 WebSocket 攔截，
+//    由 `LiqiResponseStore` 在 `MajsoulBridge.parse` 接住（見該檔說明）。
+//
+//  移除的工具：
+//  - `game_emoji_list`：角色表情清單存在客戶端配置表（`cfg`），Unity 下隨引擎進 wasm，
+//    JS/協定層都拿不到，也沒有替代面。emo_id 0-8 可直接盲送。
+//  - `game_emoji_auto_reply`：舊模組 `window.__nakiEmojiAutoReply` 要靠
+//    `view.DesktopMgr.Inst.seat` 判斷「不是自己發的」再用 NetAgent 回送，兩個依賴都沒了。
+//    在 Swift 重寫一份自動回應等於新功能，且無法在沒有真實對局的情況下驗證，故移除；
+//    手動路徑是 game_emoji_listen + game_emoji。
 //
 
 import Foundation
@@ -11,14 +31,20 @@ import MCPKit
 
 // MARK: - Send Emoji Tool
 
-/// 發送遊戲內表情
+/// 發送遊戲內表情（Liqi protobuf）
 struct SendEmojiTool: MCPTool {
     static let name = "game_emoji"
-    static let description = "在遊戲中發送表情。emo_id: 表情索引 (0-8)，可選 count 參數設定連續發送次數 (1-5)"
+    static let description = """
+        在對局中發送表情。送出 .lq.FastTest.broadcastInGame，content = {"emo":N}。\
+        emo_id 0-8 對應當前角色的 9 個表情（清單無法取得，見 game_emoji_list 已移除的說明）。\
+        count 可設定連續發送次數（1-5）。
+        """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "emo_id": .integer("表情索引 (0-8)，對應當前角色的 9 個表情"),
-            "count": .integer("連續發送次數 (1-5)，預設為 1")
+            "emo_id": .integer("表情索引 (0-8)"),
+            "count": .integer("連續發送次數 (1-5)，預設 1"),
+            "except_self": .boolean("是否不廣播給自己（預設 false）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
         ],
         required: ["emo_id"]
     )
@@ -33,190 +59,54 @@ struct SendEmojiTool: MCPTool {
         guard let emoId = arguments["emo_id"] as? Int else {
             throw MCPToolError.missingParameter("emo_id")
         }
-
-        // 驗證 emo_id 範圍
         guard emoId >= 0 && emoId <= 8 else {
             throw MCPToolError.invalidParameter("emo_id", expected: "0-8")
         }
-
-        // 獲取發送次數，預設為 1
-        var count = (arguments["count"] as? Int) ?? 1
-        count = max(1, min(5, count))  // 限制在 1-5 之間
-
-        let script = """
-        (function() {
-            if (!window.app || !window.app.NetAgent) {
-                return JSON.stringify({ success: false, error: 'NetAgent not available' });
-            }
-
-            var emoId = \(emoId);
-            var count = \(count);
-            var sent = 0;
-
-            for (var i = 0; i < count; i++) {
-                window.app.NetAgent.sendReq2MJ('FastTest', 'broadcastInGame', {
-                    content: JSON.stringify({ emo: emoId }),
-                    except_self: false
-                }, function(err, res) {
-                    sent++;
-                });
-            }
-
-            return JSON.stringify({
-                success: true,
-                emo_id: emoId,
-                count: count,
-                message: '已發送 ' + count + ' 次表情 #' + emoId
-            });
-        })();
-        """
-
-        let result = try await context.executeJavaScript(script)
-
-        // 解析 JSON 結果
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
-        }
-        return ["result": result ?? NSNull()]
-    }
-}
-
-// MARK: - List Emoji Tool
-
-/// 獲取當前角色的表情列表
-struct ListEmojiTool: MCPTool {
-    static let name = "game_emoji_list"
-    static let description = "獲取當前角色可用的表情列表"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var emojiUI = window.uiscript?.UI_MJ_Emoji?.Inst;
-
-            if (!emojiUI || !emojiUI.emos) {
-                return JSON.stringify({
-                    success: false,
-                    error: 'Emoji UI not available (may not be in game)'
-                });
-            }
-
-            var emos = emojiUI.emos.map(function(e, i) {
-                return {
-                    index: i,
-                    sub_id: e.sub_id,
-                    path: e.path
-                };
-            });
-
-            var charId = null;
-            if (emojiUI.emo_infos && emojiUI.emo_infos.char_id) {
-                charId = emojiUI.emo_infos.char_id;
-            } else if (emos.length > 0) {
-                // 從 path 提取 char_id: "extendRes/emo/e200002/0.png"
-                var match = emos[0].path.match(/e(\\d+)/);
-                if (match) charId = parseInt(match[1]);
-            }
-
-            return JSON.stringify({
-                success: true,
-                char_id: charId,
-                emoji_count: emos.length,
-                emojis: emos
-            });
-        })();
-        """
-
-        let result = try await context.executeJavaScript(script)
-
-        // 解析 JSON 結果
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
-        }
-        return ["result": result ?? NSNull()]
-    }
-}
-
-// MARK: - Emoji Auto Reply Tool
-
-/// 自動回應表情功能
-struct EmojiAutoReplyTool: MCPTool {
-    static let name = "game_emoji_auto_reply"
-    static let description = "切換自動回應表情功能（預設開啟）。啟用後，當其他玩家發送表情時，會在 5 秒後以 50% 機率回應相同表情，並有 60 秒冷卻時間。5 秒內多人發表情只會回應一次"
-    static let inputSchema = MCPInputSchema(
-        properties: [
-            "enabled": .boolean("是否啟用自動回應（不提供則返回當前狀態）")
-        ],
-        required: []
-    )
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let enabled = arguments["enabled"] as? Bool
-
-        let script: String
-        if let enabled = enabled {
-            script = """
-            (function() {
-                if (!window.__nakiEmojiAutoReply) {
-                    return JSON.stringify({ success: false, error: 'Emoji auto-reply module not loaded' });
-                }
-
-                if (\(enabled)) {
-                    window.__nakiEmojiAutoReply.enable();
-                } else {
-                    window.__nakiEmojiAutoReply.disable();
-                }
-
-                return JSON.stringify(window.__nakiEmojiAutoReply.status());
-            })();
-            """
-        } else {
-            script = """
-            (function() {
-                if (!window.__nakiEmojiAutoReply) {
-                    return JSON.stringify({ success: false, error: 'Emoji auto-reply module not loaded' });
-                }
-                return JSON.stringify(window.__nakiEmojiAutoReply.status());
-            })();
-            """
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
         }
 
-        let result = try await context.executeJavaScript(script)
+        let count = max(1, min(5, arguments["count"] as? Int ?? 1))
+        let exceptSelf = arguments["except_self"] as? Bool ?? false
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
 
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
+        let spec = LiqiRequestBuilder.emoji(emoId: emoId, exceptSelf: exceptSelf)
+        var sends: [[String: Any]] = []
+        var successCount = 0
+
+        for _ in 0..<count {
+            let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
+            if outcome.sent?.success == true { successCount += 1 }
+            sends.append(LiqiToolResult.dictionary(outcome, spec: spec))
         }
-        return ["result": result ?? NSNull()]
+
+        return [
+            // 全部送成功才算成功；部分成功要看 sends 逐筆判斷
+            "success": successCount == count,
+            "emo_id": emoId,
+            "requested": count,
+            "sentCount": successCount,
+            "content": "{\"emo\":\(emoId)}",
+            "method": spec.method,
+            "sends": sends
+        ]
     }
 }
 
 // MARK: - Emoji Listen Tool
 
-/// 獲取收到的表情廣播記錄
+/// 讀取收到的表情廣播（協定層）
 struct EmojiListenTool: MCPTool {
     static let name = "game_emoji_listen"
-    static let description = "獲取收到的表情廣播記錄（包含其他玩家發送的表情）。首次調用會自動啟用監聽，可透過 clear 參數清空記錄"
+    static let description = """
+        獲取收到的表情廣播紀錄（其他玩家發送的表情）。\
+        資料來自 Liqi 協定層：`.lq.NotifyGameBroadcast` 由 Naki 的 WebSocket 攔截接住，\
+        不需要也不再有「安裝監聽器」的步驟（舊版要 hook NetAgent handler）。\
+        最多保留最近 50 筆；用 clear=true 清空。
+        """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "clear": .boolean("是否清空記錄後返回 (預設 false)")
+            "clear": .boolean("是否在回傳後清空記錄（預設 false）")
         ],
         required: []
     )
@@ -228,90 +118,21 @@ struct EmojiListenTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let clear = (arguments["clear"] as? Bool) ?? false
+        let clear = arguments["clear"] as? Bool ?? false
+        let store = LiqiResponseStore.shared
+        let records = store.broadcasts
 
-        let script = """
-        (function() {
-            // 確保監聽器已設置
-            if (!window.__nakiEmojiListenerInstalled) {
-                var netAgent = window.app?.NetAgent;
-                var routeGroup = netAgent?.netRouteGroup_mj;
-                var handlers = routeGroup?.notifyHander?.handlers;
-                var originalHandler = handlers?.['.lq.NotifyGameBroadcast'];
+        var result: [String: Any] = [
+            "success": true,
+            "source": "LiqiResponseStore (.lq.NotifyGameBroadcast)",
+            "count": records.count,
+            "broadcasts": records.map { $0.dictionary }
+        ]
 
-                if (originalHandler && originalHandler[0] && !originalHandler[0].__nakiHooked) {
-                    window.__nakiEmojiBroadcasts = [];
-                    var origMethod = originalHandler[0].method;
-
-                    originalHandler[0].method = function(data) {
-                        // 記錄廣播
-                        window.__nakiEmojiBroadcasts.push({
-                            timestamp: Date.now(),
-                            data: data
-                        });
-
-                        // 只保留最近 50 條
-                        if (window.__nakiEmojiBroadcasts.length > 50) {
-                            window.__nakiEmojiBroadcasts.shift();
-                        }
-
-                        // 調用原始方法
-                        if (origMethod) {
-                            origMethod.call(this, data);
-                        }
-                    };
-
-                    originalHandler[0].__nakiHooked = true;
-                    window.__nakiEmojiListenerInstalled = true;
-                }
-            }
-
-            // 初始化記錄陣列
-            if (!window.__nakiEmojiBroadcasts) {
-                window.__nakiEmojiBroadcasts = [];
-            }
-
-            var broadcasts = window.__nakiEmojiBroadcasts;
-
-            // 解析記錄
-            var parsed = broadcasts.map(function(b) {
-                var content = null;
-                try {
-                    content = JSON.parse(b.data.content);
-                } catch(e) {}
-
-                return {
-                    timestamp: b.timestamp,
-                    seat: b.data.seat,
-                    emo_id: content ? content.emo : null
-                };
-            });
-
-            var result = {
-                success: true,
-                listener_installed: !!window.__nakiEmojiListenerInstalled,
-                count: parsed.length,
-                broadcasts: parsed
-            };
-
-            // 清空記錄
-            if (\(clear ? "true" : "false")) {
-                window.__nakiEmojiBroadcasts = [];
-                result.cleared = true;
-            }
-
-            return JSON.stringify(result);
-        })();
-        """
-
-        let result = try await context.executeJavaScript(script)
-
-        // 解析 JSON 結果
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
+        if clear {
+            store.clearBroadcasts()
+            result["cleared"] = true
         }
-        return ["result": result ?? NSNull()]
+        return result
     }
 }

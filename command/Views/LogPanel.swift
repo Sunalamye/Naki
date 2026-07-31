@@ -49,12 +49,17 @@ struct LogPanel: View {
                 }
                 .pickerStyle(.menu)
                 .frame(width: 80)
+                .accessibilityIdentifier("log-category-picker")
+                .accessibilityLabel("日誌分類")
 
                 // 自動滾動
                 Toggle(isOn: $autoScroll) {
                     Image(systemName: autoScroll ? "arrow.down.circle.fill" : "arrow.down.circle")
                 }
                 .toggleStyle(.button)
+                .accessibilityIdentifier("log-autoscroll-toggle")
+                .accessibilityLabel("自動捲動")
+                .accessibilityValue(autoScroll ? "開" : "關")
                 #if os(macOS)
                 .help("自動滾動到最新")
                 #endif
@@ -63,6 +68,8 @@ struct LogPanel: View {
                 Button(action: { logManager.clear() }) {
                     Image(systemName: "trash")
                 }
+                .accessibilityIdentifier("log-clear-button")
+                .accessibilityLabel("清除日誌")
                 #if os(macOS)
                 .help("清除日誌")
                 #endif
@@ -79,12 +86,15 @@ struct LogPanel: View {
                     .foregroundColor(.secondary)
                 TextField("搜索...", text: $searchText)
                     .textFieldStyle(.plain)
+                    .accessibilityIdentifier("log-search-field")
                 if !searchText.isEmpty {
                     Button(action: { searchText = "" }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("log-clear-search-button")
+                    .accessibilityLabel("清除搜尋")
                 }
             }
             .padding(6)
@@ -148,6 +158,7 @@ struct LogEntryRow: View {
             Spacer()
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 
     private var categoryColor: Color {

@@ -3,7 +3,22 @@
 //  Naki
 //
 //  Created by Claude on 2025/12/06.
-//  大廳相關 MCP 工具 - 自動開始遊戲功能
+//  Updated 2026-07-31：Unity 遷移，整檔改走 Liqi protobuf。
+//
+//  舊實作全部操作 `window.GameMgr.Inst.uimgr`（`_ui_lobby.setPage()`、
+//  `_uis[105].addMatch()`、`account_data`、`clientHeatBeat()`）。
+//  Unity WebGL 客戶端下 `GameMgr` **實測不存在**，這些工具是靜默失敗。
+//
+//  新做法：直接送 `.lq.Lobby.*` REQUEST。所有欄位編號都查過
+//  docs/protocol/liqi.json（見各工具註解），但**伺服器是否接受、match_mode 的
+//  數值語意**仍需真實登入驗證。
+//
+//  移除的工具：
+//  - `lobby_match_status`：協定沒有「查詢自己排隊狀態」的方法（客戶端自己記），
+//    功能併入 `lobby_status`（fetchGamingInfo）。
+//  - `lobby_navigate`：純 UI 換頁，Unity 下沒有可操作的 UI 層，也沒有協定等價物。
+//  - `lobby_idle_status`：讀 `GameMgr.Inst._last_heatbeat_time`；改由 `lobby_anti_idle`
+//    回報 Naki 自己送出的心跳狀態。
 //
 
 import Foundation
@@ -11,11 +26,20 @@ import MCPKit
 
 // MARK: - Lobby Status Tool
 
-/// 獲取大廳狀態
+/// 查詢目前對局／房間狀態
 struct LobbyStatusTool: MCPTool {
     static let name = "lobby_status"
-    static let description = "獲取大廳狀態，包含當前頁面、匹配狀態、帳號等級等信息"
-    static let inputSchema = MCPInputSchema.empty
+    static let description = """
+        查詢大廳狀態：送出 .lq.Lobby.fetchGamingInfo（ReqCommon，空 payload），\
+        伺服器回覆目前是否在對局／房間中。\
+        ⚠️ 回應以 protobuf 欄位編號（fieldN）呈現，語意請對照 liqi.json 的 ResFetchGamingInfo。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500，0 = 不等）")
+        ],
+        required: []
+    )
 
     private let context: MCPContext
 
@@ -24,74 +48,22 @@ struct LobbyStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({error: "GameMgr not available"});
-
-            var uimgr = gm.Inst.uimgr;
-            var lobby = uimgr ? uimgr._ui_lobby : null;
-            var matchUI = uimgr ? uimgr._uis[105] : null;
-            var account = gm.Inst.account_data;
-
-            var result = {
-                inLobby: !!lobby,
-                nowpage: lobby ? lobby.nowpage : -1,
-                locking: lobby ? lobby.locking : false,
-                matching: {
-                    available: !!matchUI,
-                    inopen: matchUI ? matchUI.inopen : false,
-                    current_count: matchUI ? matchUI.current_count : 0,
-                    cells: []
-                },
-                account: null
-            };
-
-            // 匹配隊列信息
-            if (matchUI && matchUI.cells) {
-                for (var i = 0; i < matchUI.cells.length; i++) {
-                    var cell = matchUI.cells[i];
-                    if (cell && cell.match_id) {
-                        result.matching.cells.push({
-                            index: i,
-                            match_id: cell.match_id,
-                            match_mode: cell.match_mode || 0
-                        });
-                    }
-                }
-            }
-
-            // 帳號信息
-            if (account) {
-                var level = account.level || {};
-                result.account = {
-                    nickname: account.nickname || "",
-                    level_id: level.id || 0,
-                    level_score: level.score || 0
-                };
-            }
-
-            return JSON.stringify(result);
-        })()
-        """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
         }
-        return ["result": result ?? NSNull()]
+        let spec = LiqiRequestBuilder.fetchGamingInfo()
+        let outcome = await nakiContext.sendLiqi(spec,
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        return LiqiToolResult.dictionary(outcome, spec: spec)
     }
 }
 
 // MARK: - Match Mode List Tool
 
-/// 獲取可用的匹配模式列表
+/// 匹配模式對照表（靜態，不碰遊戲物件）
 struct MatchModeListTool: MCPTool {
     static let name = "lobby_match_modes"
-    static let description = "獲取所有可用的匹配模式列表，包含段位場信息和級別限制"
+    static let description = "獲取段位場 match_mode 對照表（給 lobby_start_match / lobby_cancel_match 用）"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
@@ -101,7 +73,6 @@ struct MatchModeListTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        // 返回靜態的匹配模式對照表
         let modes: [[String: Any]] = [
             ["id": 1, "room": "銅之間", "type": "東風", "minLevel": 0, "description": "銅之間 - 東風戰"],
             ["id": 2, "room": "銅之間", "type": "半莊", "minLevel": 0, "description": "銅之間 - 半莊戰"],
@@ -126,20 +97,27 @@ struct MatchModeListTool: MCPTool {
                 "x04xx": "雀豪",
                 "x05xx": "雀聖",
                 "x06xx": "魂天"
-            ]
+            ],
+            "warning": "match_mode 數值來自 Laya 時代的觀察，liqi.json 沒有對應 enum，尚未以真實封包驗證"
         ]
     }
 }
 
 // MARK: - Start Match Tool
 
-/// 開始匹配
+/// 開始段位場匹配
 struct StartMatchTool: MCPTool {
     static let name = "lobby_start_match"
-    static let description = "開始段位場匹配。match_mode: 1=銅東, 2=銅半, 4=銀東, 5=銀半, 7=金東, 8=金半, 10=玉東, 11=玉半, 13=王座東, 14=王座半"
+    static let description = """
+        開始段位場匹配。送出 .lq.Lobby.matchGame（ReqJoinMatchQueue：match_mode=1, \
+        client_version_string=2）。match_mode 對照表見 lobby_match_modes。\
+        ⚠️ 真的會排進伺服器隊列，請只在測試帳號使用。
+        """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "match_mode": .integer("匹配模式 ID (1=銅東, 2=銅半, 4=銀東, 5=銀半, 7=金東, 8=金半, 10=玉東, 11=玉半, 13=王座東, 14=王座半)")
+            "match_mode": .integer("匹配模式 ID（1=銅東, 2=銅半, 4=銀東, 5=銀半, 7=金東, 8=金半, 10=玉東, 11=玉半, 13=王座東, 14=王座半）"),
+            "client_version_string": .string("客戶端版本字串（可選，空字串則不送此欄位）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
         ],
         required: ["match_mode"]
     )
@@ -154,59 +132,21 @@ struct StartMatchTool: MCPTool {
         guard let matchMode = arguments["match_mode"] as? Int else {
             throw MCPToolError.missingParameter("match_mode")
         }
-
-        // 驗證 match_mode 是否有效
         let validModes = [1, 2, 4, 5, 7, 8, 10, 11, 13, 14]
         guard validModes.contains(matchMode) else {
             throw MCPToolError.invalidParameter("match_mode", expected: "1, 2, 4, 5, 7, 8, 10, 11, 13, 14")
         }
-
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({success: false, error: "GameMgr not available"});
-
-            var matchUI = gm.Inst.uimgr._uis[105];
-            if (!matchUI) return JSON.stringify({success: false, error: "Match UI not available"});
-
-            // 檢查是否已在匹配中
-            if (matchUI.inopen) {
-                return JSON.stringify({success: false, error: "Already matching", current_count: matchUI.current_count});
-            }
-
-            // 開始匹配
-            matchUI.addMatch(\(matchMode));
-
-            // 驗證結果
-            var result = {
-                success: matchUI.current_count >= 1,
-                inopen: matchUI.inopen,
-                current_count: matchUI.current_count,
-                match_mode: \(matchMode)
-            };
-
-            return JSON.stringify(result);
-        })()
-        """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-
-            // 記錄日誌
-            let success = json["success"] as? Bool ?? false
-            if success {
-                context.log("🎮 Started matching with mode \(matchMode)")
-            } else {
-                let error = json["error"] as? String ?? "Unknown error"
-                context.log("❌ Failed to start match: \(error)")
-            }
-
-            return json
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
         }
-        return ["success": false, "error": "Failed to parse result"]
+
+        let spec = LiqiRequestBuilder.matchGame(
+            matchMode: UInt32(matchMode),
+            clientVersionString: arguments["client_version_string"] as? String ?? "")
+        let outcome = await nakiContext.sendLiqi(spec,
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        context.log("🎮 lobby_start_match match_mode=\(matchMode)")
+        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["match_mode": matchMode])
     }
 }
 
@@ -215,130 +155,16 @@ struct StartMatchTool: MCPTool {
 /// 取消匹配
 struct CancelMatchTool: MCPTool {
     static let name = "lobby_cancel_match"
-    static let description = "取消當前的段位場匹配"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({success: false, error: "GameMgr not available"});
-
-            var matchUI = gm.Inst.uimgr._uis[105];
-            if (!matchUI) return JSON.stringify({success: false, error: "Match UI not available"});
-
-            // 檢查是否在匹配中
-            if (!matchUI.inopen && matchUI.current_count === 0) {
-                return JSON.stringify({success: false, error: "Not currently matching"});
-            }
-
-            // 取消匹配
-            matchUI.cancelPiPei();
-
-            // 驗證結果
-            var result = {
-                success: true,
-                inopen: matchUI.inopen,
-                current_count: matchUI.current_count
-            };
-
-            return JSON.stringify(result);
-        })()
+    static let description = """
+        取消段位場匹配。送出 .lq.Lobby.cancelMatch（ReqCancelMatchQueue：match_mode=1）。\
+        ⚠️ match_mode 為必填：伺服器要知道取消哪一條隊列（與舊版無參數的行為不同）。
         """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-
-            let success = json["success"] as? Bool ?? false
-            if success {
-                context.log("⏹️ Cancelled matching")
-            }
-
-            return json
-        }
-        return ["success": false, "error": "Failed to parse result"]
-    }
-}
-
-// MARK: - Match Status Tool
-
-/// 獲取當前匹配狀態
-struct MatchStatusTool: MCPTool {
-    static let name = "lobby_match_status"
-    static let description = "獲取當前匹配狀態，包含是否在匹配中、隊列數量等信息"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({available: false, error: "GameMgr not available"});
-
-            var matchUI = gm.Inst.uimgr._uis[105];
-            if (!matchUI) return JSON.stringify({available: false, error: "Match UI not available"});
-
-            var result = {
-                available: true,
-                inopen: matchUI.inopen,
-                current_count: matchUI.current_count,
-                queues: []
-            };
-
-            // 獲取隊列詳情
-            if (matchUI.cells) {
-                for (var i = 0; i < matchUI.cells.length; i++) {
-                    var cell = matchUI.cells[i];
-                    if (cell && cell.match_id) {
-                        result.queues.push({
-                            index: i,
-                            match_id: cell.match_id,
-                            match_mode: cell.match_mode || 0
-                        });
-                    }
-                }
-            }
-
-            return JSON.stringify(result);
-        })()
-        """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
-        }
-        return ["available": false, "error": "Failed to parse result"]
-    }
-}
-
-// MARK: - Navigate Lobby Tool
-
-/// 導航到大廳頁面
-struct NavigateLobbyTool: MCPTool {
-    static let name = "lobby_navigate"
-    static let description = "導航到大廳的指定頁面。page: 0=主頁, 1=段位場, 2=友人場, 3=比賽場"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "page": .integer("頁面索引 (0=主頁, 1=段位場, 2=友人場, 3=比賽場)")
+            "match_mode": .integer("要取消的匹配模式 ID（與 lobby_start_match 相同）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
         ],
-        required: ["page"]
+        required: ["match_mode"]
     )
 
     private let context: MCPContext
@@ -348,126 +174,36 @@ struct NavigateLobbyTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let page = arguments["page"] as? Int else {
-            throw MCPToolError.missingParameter("page")
+        guard let matchMode = arguments["match_mode"] as? Int else {
+            throw MCPToolError.missingParameter("match_mode")
+        }
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
         }
 
-        // 驗證頁面索引
-        guard page >= 0 && page <= 3 else {
-            throw MCPToolError.invalidParameter("page", expected: "0-3")
-        }
-
-        let pageNames = ["主頁", "段位場", "友人場", "比賽場"]
-
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({success: false, error: "GameMgr not available"});
-
-            var lobby = gm.Inst.uimgr._ui_lobby;
-            if (!lobby) return JSON.stringify({success: false, error: "Lobby UI not available"});
-
-            var prevPage = lobby.nowpage;
-            lobby.setPage(\(page));
-
-            return JSON.stringify({
-                success: true,
-                previousPage: prevPage,
-                currentPage: lobby.nowpage
-            });
-        })()
-        """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-
-            let success = json["success"] as? Bool ?? false
-            if success {
-                context.log("📍 Navigated to \(pageNames[page])")
-            }
-
-            return json
-        }
-        return ["success": false, "error": "Failed to parse result"]
+        let spec = LiqiRequestBuilder.cancelMatch(matchMode: UInt32(max(0, matchMode)))
+        let outcome = await nakiContext.sendLiqi(spec,
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        context.log("⏹️ lobby_cancel_match match_mode=\(matchMode)")
+        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["match_mode": matchMode])
     }
 }
 
-// MARK: - Heartbeat Tool
+// MARK: - Account Info Tool
 
-/// 發送心跳防止閒置登出
-struct HeartbeatTool: MCPTool {
-    static let name = "lobby_heartbeat"
-    static let description = "發送心跳信號防止閒置自動登出。遊戲會在閒置 50 分鐘後彈出警告，可定期調用此工具保持活躍"
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({success: false, error: "GameMgr not available"});
-
-            var inst = gm.Inst;
-
-            // 記錄心跳前的時間
-            var beforeTime = inst._last_heatbeat_time;
-
-            // 調用心跳函數
-            if (typeof inst.clientHeatBeat === 'function') {
-                inst.clientHeatBeat();
-            } else {
-                return JSON.stringify({success: false, error: "clientHeatBeat function not found"});
-            }
-
-            // 記錄心跳後的時間
-            var afterTime = inst._last_heatbeat_time;
-            var now = Date.now();
-
-            return JSON.stringify({
-                success: true,
-                previousHeartbeat: beforeTime,
-                currentHeartbeat: afterTime,
-                updated: beforeTime !== afterTime,
-                serverTime: now,
-                message: "Heartbeat sent successfully"
-            });
-        })()
+/// 查詢帳號資訊（段位等）
+struct AccountInfoTool: MCPTool {
+    static let name = "lobby_account_info"
+    static let description = """
+        查詢帳號資訊（含段位）。送出 .lq.Lobby.fetchAccountInfo（ReqAccountInfo：account_id=1）。\
+        ⚠️ account_id 必填；未提供時使用 Naki 從登入封包解析到的 account_id，\
+        若尚未登入（=0）會直接回失敗，因為送空 payload 伺服器不會回應。\
+        （舊名 lobby_account_level，改名以反映它是協定查詢而非本地讀值）
         """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-
-            let success = json["success"] as? Bool ?? false
-            if success {
-                context.log("💓 Heartbeat sent")
-            }
-
-            return json
-        }
-        return ["success": false, "error": "Failed to parse result"]
-    }
-}
-
-// MARK: - Anti-Idle Toggle Tool
-
-/// 切換自動防閒置開關
-struct AntiIdleToggleTool: MCPTool {
-    static let name = "lobby_anti_idle"
-    static let description = "切換自動防閒置功能。啟用時會在收到伺服器訊息時自動刷新心跳，防止被登出"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "enabled": .boolean("是否啟用自動防閒置（不提供則返回當前狀態）")
+            "account_id": .integer("要查詢的 account_id；不填則用 Naki 已知的登入帳號"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
         ],
         required: []
     )
@@ -479,44 +215,48 @@ struct AntiIdleToggleTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        // 如果有提供 enabled 參數，則設定開關
-        if let enabled = arguments["enabled"] as? Bool {
-            let script = enabled
-                ? "window.__nakiAntiIdle && window.__nakiAntiIdle.enable(); return JSON.stringify(window.__nakiAntiIdle ? window.__nakiAntiIdle.status() : {error: 'not loaded'});"
-                : "window.__nakiAntiIdle && window.__nakiAntiIdle.disable(); return JSON.stringify(window.__nakiAntiIdle ? window.__nakiAntiIdle.status() : {error: 'not loaded'});"
-
-            let result = try await context.executeJavaScript(script)
-
-            if let jsonString = result as? String,
-               let data = jsonString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                context.log(enabled ? "🛡️ Anti-idle enabled" : "⏹️ Anti-idle disabled")
-                return json
-            }
-            return ["success": enabled, "error": "Failed to parse result"]
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
         }
 
-        // 沒有參數，返回當前狀態
-        let script = "return JSON.stringify(window.__nakiAntiIdle ? window.__nakiAntiIdle.status() : {error: 'Anti-idle module not loaded'});"
+        let known = (nakiContext.getGameSnapshot()?["accountId"] as? Int) ?? 0
+        let accountId = arguments["account_id"] as? Int ?? known
 
-        let result = try await context.executeJavaScript(script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
+        guard accountId > 0 else {
+            return [
+                "success": false,
+                "error": "missing_account_id",
+                "reason": "ReqAccountInfo.account_id 必填，且 Naki 尚未從登入封包解析到 account_id"
+                    + "（尚未登入，或 Naki 是在登入之後才啟動而錯過了登入回應）。",
+                "hint": "先登入雀魂；或直接帶入 account_id 參數。"
+            ]
         }
-        return ["error": "Failed to get status"]
+
+        let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: UInt32(accountId))
+        let outcome = await nakiContext.sendLiqi(spec,
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        return LiqiToolResult.dictionary(outcome, spec: spec,
+                                         extra: ["account_id": accountId,
+                                                 "accountIdSource": arguments["account_id"] == nil ? "naki-login-capture" : "argument"])
     }
 }
 
-// MARK: - Idle Status Tool
+// MARK: - Server Time Tool
 
-/// 獲取閒置狀態
-struct IdleStatusTool: MCPTool {
-    static let name = "lobby_idle_status"
-    static let description = "獲取當前的閒置狀態，包含距離上次心跳的時間、閒置警告閾值等信息"
-    static let inputSchema = MCPInputSchema.empty
+/// 查詢伺服器時間（最無害的連線探針）
+struct ServerTimeTool: MCPTool {
+    static let name = "lobby_server_time"
+    static let description = """
+        查詢伺服器時間。送出 .lq.Lobby.fetchServerTime（ReqCommon，空 payload）。\
+        這是最無害的查詢類請求，適合用來確認「注入通道是否真的通到伺服器」\
+        （有 RESPONSE 回來就代表整條鏈路 OK）。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+        ],
+        required: []
+    )
 
     private let context: MCPContext
 
@@ -525,71 +265,33 @@ struct IdleStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({available: false, error: "GameMgr not available"});
-
-            var inst = gm.Inst;
-            var now = Date.now();
-
-            // 計算閒置時間
-            var lastHeartbeat = inst._last_heatbeat_time || 0;
-            var idleSeconds = Math.floor((now - lastHeartbeat) / 1000);
-
-            // 閒置檢測配置（從 360 秒定時器代碼分析得出）
-            var warnThreshold = 3000;  // 50 分鐘後顯示警告
-            var checkInterval = 360;    // 每 6 分鐘檢查一次
-
-            // 檢查警告 UI 是否顯示
-            var hangupWarnVisible = false;
-            var hangupLogoutVisible = false;
-
-            try {
-                if (window.uiscript && window.uiscript.UI_Hangup_Warn && window.uiscript.UI_Hangup_Warn.Inst) {
-                    hangupWarnVisible = window.uiscript.UI_Hangup_Warn.Inst.me && window.uiscript.UI_Hangup_Warn.Inst.me.visible;
-                }
-                if (window.uiscript && window.uiscript.UI_Hanguplogout && window.uiscript.UI_Hanguplogout.Inst) {
-                    hangupLogoutVisible = window.uiscript.UI_Hanguplogout.Inst.me && window.uiscript.UI_Hanguplogout.Inst.me.visible;
-                }
-            } catch(e) {}
-
-            return JSON.stringify({
-                available: true,
-                lastHeartbeat: lastHeartbeat,
-                lastHeartbeatISO: new Date(lastHeartbeat).toISOString(),
-                idleSeconds: idleSeconds,
-                idleMinutes: Math.floor(idleSeconds / 60),
-                warnThreshold: warnThreshold,
-                warnThresholdMinutes: Math.floor(warnThreshold / 60),
-                checkInterval: checkInterval,
-                timeUntilWarn: Math.max(0, warnThreshold - idleSeconds),
-                timeUntilWarnMinutes: Math.max(0, Math.floor((warnThreshold - idleSeconds) / 60)),
-                hangupWarnVisible: hangupWarnVisible,
-                hangupLogoutVisible: hangupLogoutVisible,
-                recommendation: idleSeconds > 2400 ? "建議立即發送心跳" : (idleSeconds > 1800 ? "建議在 10 分鐘內發送心跳" : "狀態正常")
-            });
-        })()
-        """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
         }
-        return ["available": false, "error": "Failed to parse result"]
+        let spec = LiqiRequestBuilder.fetchServerTime()
+        let outcome = await nakiContext.sendLiqi(spec,
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        return LiqiToolResult.dictionary(outcome, spec: spec)
     }
 }
 
-// MARK: - Account Level Tool
+// MARK: - Heartbeat Tool
 
-/// 獲取帳號等級信息
-struct AccountLevelTool: MCPTool {
-    static let name = "lobby_account_level"
-    static let description = "獲取當前帳號的段位等級信息"
-    static let inputSchema = MCPInputSchema.empty
+/// 手動送出大廳心跳
+struct HeartbeatTool: MCPTool {
+    static let name = "lobby_heartbeat"
+    static let description = """
+        送出大廳心跳防止閒置登出。送出 .lq.Lobby.heatbeat（ReqHeatBeat：no_operation_counter=1）。\
+        取代 Unity 下已失效的 GameMgr.Inst.clientHeatBeat()。\
+        要自動定期送請用 lobby_anti_idle。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "no_operation_counter": .integer("無操作計數（預設 0；為 0 時依 proto3 省略，payload 為空）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+        ],
+        required: []
+    )
 
     private let context: MCPContext
 
@@ -598,53 +300,99 @@ struct AccountLevelTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let script = """
-        (function() {
-            var gm = window.GameMgr;
-            if (!gm || !gm.Inst) return JSON.stringify({available: false, error: "GameMgr not available"});
-
-            var account = gm.Inst.account_data;
-            if (!account) return JSON.stringify({available: false, error: "Account data not available"});
-
-            var level = account.level || {};
-            var level3 = account.level3 || {};
-
-            // 解析段位
-            function parseLevel(id) {
-                if (!id) return null;
-                var mode = Math.floor(id / 10000);  // 1=四麻, 2=三麻
-                var rank = Math.floor((id % 10000) / 100);  // 1=初心, 2=雀士, ...
-                var tier = id % 100;  // 段位內等級
-
-                var rankNames = {1: "初心", 2: "雀士", 3: "雀傑", 4: "雀豪", 5: "雀聖", 6: "魂天"};
-
-                return {
-                    id: id,
-                    mode: mode === 1 ? "四麻" : "三麻",
-                    rank: rankNames[rank] || "unknown",
-                    tier: tier,
-                    displayName: rankNames[rank] + " " + tier + " 段"
-                };
-            }
-
-            return JSON.stringify({
-                available: true,
-                nickname: account.nickname || "",
-                level4p: parseLevel(level.id),
-                level3p: parseLevel(level3.id),
-                score4p: level.score || 0,
-                score3p: level3.score || 0
-            });
-        })()
-        """
-
-        let result = try await context.executeJavaScript("return " + script)
-
-        if let jsonString = result as? String,
-           let data = jsonString.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) {
-            return json
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
         }
-        return ["available": false, "error": "Failed to parse result"]
+        let counter = UInt32(max(0, arguments["no_operation_counter"] as? Int ?? 0))
+        let spec = LiqiRequestBuilder.heatbeat(noOperationCounter: counter)
+        let outcome = await nakiContext.sendLiqi(spec,
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        context.log("💓 lobby_heartbeat sent")
+        return LiqiToolResult.dictionary(outcome, spec: spec,
+                                         extra: ["no_operation_counter": Int(counter)])
+    }
+}
+
+// MARK: - Login Beat Tool
+
+/// 登入保活
+struct LoginBeatTool: MCPTool {
+    static let name = "lobby_login_beat"
+    static let description = """
+        送出登入保活。送出 .lq.Lobby.loginBeat（ReqLoginBeat：contract=1）。\
+        ⚠️ contract 的來源與內容未驗證（一般由登入流程取得），空字串會送出空 payload。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "contract": .string("contract 字串（由登入流程取得）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+        let contract = arguments["contract"] as? String ?? ""
+        let spec = LiqiRequestBuilder.loginBeat(contract: contract)
+        let outcome = await nakiContext.sendLiqi(spec,
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        return LiqiToolResult.dictionary(outcome, spec: spec,
+                                         extra: ["contractProvided": !contract.isEmpty])
+    }
+}
+
+// MARK: - Anti-Idle Toggle Tool
+
+/// 自動心跳（防閒置）開關
+struct AntiIdleToggleTool: MCPTool {
+    static let name = "lobby_anti_idle"
+    static let description = """
+        切換自動防閒置：啟用後由 Swift 定期送 .lq.Lobby.heatbeat（取代已失效的 \
+        window.__nakiAntiIdle，它呼叫 GameMgr.Inst.clientHeatBeat()）。\
+        不帶參數則只回報目前狀態。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "enabled": .boolean("是否啟用自動心跳（不提供則只回報狀態）"),
+            "intervalSeconds": .integer("送出間隔秒數（預設 300，下限 30）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+
+        let enabled = arguments["enabled"] as? Bool
+        let interval = (arguments["intervalSeconds"] as? Int).map { TimeInterval($0) }
+
+        guard var status = nakiContext.setAntiIdle(enabled: enabled, intervalSeconds: interval) else {
+            return [
+                "success": false,
+                "error": "anti_idle_not_configured",
+                "reason": "尚未注入自動心跳控制回調（WebViewModel 未啟動 Debug Server 時會如此）"
+            ]
+        }
+
+        status["success"] = true
+        if let enabled {
+            context.log(enabled ? "🛡️ Anti-idle enabled (Liqi heatbeat)" : "⏹️ Anti-idle disabled")
+        }
+        return status
     }
 }

@@ -15,12 +15,21 @@ import MortalSwift
 /// 原生 Bot 控制器，使用 MortalSwift 進行 Core ML 推理
 /// ⭐ 現在 MortalBot 是 actor，所有方法都需要 async
 /// ⭐ 支援強類型 MJAIEvent/MJAIAction API
+/// ⭐ #2: 標為 @MainActor —— 可變狀態（tehai/tsumo/lastRecommendations…）在 MainActor 隔離，
+///        消除呼叫端（WebViewModel/NakiWebCoordinator 皆 @MainActor）的資料競態。
+///        heavy 的 Core ML 推理仍在 MortalBot actor 內 off-main，不受此隔離影響。
+@MainActor
 class NativeBotController {
 
     // MARK: - Properties
 
     /// Bot 實例 (actor)
     private var bot: MortalBot?
+
+    /// #2: 世代序號（generation token）。每次 createBot/deleteBot 遞增，用於使 inflight 的
+    /// react 結果失效：react 在 `await bot.react` 暫停期間若換了 bot（start_game / 重連），
+    /// 恢復後檢查世代不符即丟棄本次結果，避免舊局的推論污染新局。
+    private var generation = 0
 
     /// 玩家 ID (0-3)
     private(set) var playerId: UInt8 = 0
@@ -50,15 +59,14 @@ class NativeBotController {
     /// 最後一次的推薦列表
     private(set) var lastRecommendations: [Recommendation] = []
 
-    /// 最後一次 AI 回傳的動作 (用於自動打牌)
-    private(set) var lastAction: MJAIAction?
-
     /// 最後一次的可用動作
     private(set) var lastCandidates: String?
 
     // 遊戲狀態追蹤
     private(set) var kyoku: Int = 0
     private(set) var honba: Int = 0
+    /// 供託（立直棒數），來自 start_kyoku 事件的 kyotaku 欄位
+    private(set) var kyotaku: Int = 0
     private(set) var bakazeWind: Wind = .east
     private(set) var jikazeWind: Wind = .east
     private(set) var scores: [Int] = [25000, 25000, 25000, 25000]
@@ -88,115 +96,29 @@ class NativeBotController {
     ///   - playerId: 玩家座位 (0-3)
     ///   - is3P: 是否為三麻模式
     func createBot(playerId: UInt8, is3P: Bool = false) throws {
+        // #2: 遞增世代，使任何 inflight 的舊 react 結果失效
+        generation += 1
         self.playerId = playerId
         self.is3P = is3P
 
         // 使用內建的 Core ML 模型
         // MortalSwift v0.3.0 使用 Int 作為 playerId
+        // ⚠️ #3 已知風險：MortalBot 建構子不吃 sanma/is3P，且僅內建單一四麻模型
+        //    (bundledModelURL = "mortal", version 4, obs 1012ch)。is3P 只用於本控制器狀態
+        //    （GameState.is3P / 模型名稱標籤 / 自風 playerCount），實際推論仍為四麻。
+        //    真三麻需 MortalSwift 提供三麻模型與 sanma 建構參數。
         bot = try MortalBot(playerId: Int(playerId), version: 4, useBundledModel: true)
 
-        botLog("[NativeBotController] Bot 創建成功: playerId=\(playerId), is3P=\(is3P)")
+        botLog("[NativeBotController] Bot 創建成功: playerId=\(playerId), is3P=\(is3P), gen=\(generation)")
     }
 
     /// 刪除 Bot 實例
     func deleteBot() {
+        // #2: 遞增世代，使任何 inflight 的舊 react 結果失效
+        generation += 1
         bot = nil
         resetState()
-        botLog("[NativeBotController] Bot 已刪除")
-    }
-
-    // MARK: - Event Processing (Typed API)
-
-    /// 處理 MJAI 事件並獲取回應 (強類型異步版本)
-    /// ⭐ 使用 MortalSwift 的強類型 API
-    /// - Parameter event: MJAI 事件
-    /// - Returns: Bot 回應動作，無動作時返回 nil
-    func react(event: MJAIEvent) async throws -> MJAIAction? {
-        guard let bot = bot else {
-            botLog("[NativeBotController] ERROR: Bot not initialized!")
-            throw NativeBotError.botNotInitialized
-        }
-
-        // 記錄事件類型
-        let eventType = event.typeName
-        let eventActor = getEventActor(event)
-        let isMyMeld = (eventType == "chi" || eventType == "pon" || eventType == "daiminkan") && eventActor == Int(playerId)
-        let isMyDahai = eventType == "dahai" && eventActor == Int(playerId)
-        let isEndEvent = eventType == "hora" || eventType == "ryukyoku" || eventType == "end_kyoku" || eventType == "end_game"
-
-        botLog("[NativeBotController] Processing typed event: \(eventType), actor: \(eventActor), playerId: \(playerId)")
-
-        // 更新內部狀態
-        updateInternalState(from: event)
-
-        // 當自己打牌後，清空推薦
-        if isMyDahai {
-            lastRecommendations = []
-        }
-
-        // 局/遊戲結束時清空推薦
-        if isEndEvent {
-            lastRecommendations = []
-        }
-
-        botLog("[NativeBotController] Calling bot.react with typed event: \(eventType)")
-
-        // ⭐ 呼叫 Bot 處理事件 (強類型 async 版本)
-        let action: MJAIAction?
-        do {
-            action = try await bot.react(event: event)
-        } catch {
-            botLog("[NativeBotController] ERROR: bot.react threw error: \(error)")
-            throw error
-        }
-
-        guard let resultAction = action else {
-            botLog("[NativeBotController] bot.react returned nil (no action needed)")
-            if isMyMeld {
-                botLog("[NativeBotController] 自己碰/吃後，需要選擇打牌")
-                await updateRecommendationsFromCurrentMask()
-            }
-            return nil
-        }
-
-        botLog("[NativeBotController] bot.react returned action: \(resultAction.typeName)")
-
-        // 更新推薦列表
-        await updateRecommendations()
-
-        // ⭐ 儲存最後動作供自動打牌使用
-        self.lastAction = resultAction
-
-        return resultAction
-    }
-
-    /// 批量處理多個 MJAI 事件 (強類型異步版本)
-    func react(events: [MJAIEvent]) async throws -> MJAIAction? {
-        var lastAction: MJAIAction?
-        for event in events {
-            if let action = try await react(event: event) {
-                lastAction = action
-            }
-        }
-        return lastAction
-    }
-
-    /// 獲取事件的 actor
-    private func getEventActor(_ event: MJAIEvent) -> Int {
-        switch event {
-        case .tsumo(let e): return e.actor
-        case .dahai(let e): return e.actor
-        case .reach(let e): return e.actor
-        case .reachAccepted(let e): return e.actor
-        case .chi(let e): return e.actor
-        case .pon(let e): return e.actor
-        case .daiminkan(let e): return e.actor
-        case .ankan(let e): return e.actor
-        case .kakan(let e): return e.actor
-        case .nukidora(let e): return e.actor
-        case .hora(let e): return e.actor
-        default: return -1
-        }
+        botLog("[NativeBotController] Bot 已刪除, gen=\(generation)")
     }
 
     // MARK: - Event Processing (Dictionary API - Legacy)
@@ -210,6 +132,10 @@ class NativeBotController {
             botLog("[NativeBotController] ERROR: Bot not initialized!")
             throw NativeBotError.botNotInitialized
         }
+
+        // #2: 進入時捕獲當前世代。`await bot.react` 是唯一暫停點，暫停期間若換了 bot
+        //     （deleteBot/createBot 皆遞增 generation），恢復後世代不符 → 丟棄本次結果。
+        let gen = generation
 
         // 記錄事件類型，用於判斷是否需要更新推薦
         let eventType = event["type"] as? String ?? ""
@@ -251,6 +177,14 @@ class NativeBotController {
         } catch {
             botLog("[NativeBotController] ERROR: bot.react threw error: \(error)")
             throw error
+        }
+
+        // #2: `await bot.react` 已返回。若期間換了 bot（start_game / 重連 deleteBot+createBot），
+        //     世代不符 → 直接丟棄本次結果，不寫回任何共享狀態、也不讀「新」bot 的 mask/推薦，
+        //     避免舊局 inflight 推論污染新局。
+        guard gen == generation else {
+            botLog("[NativeBotController] 丟棄過期 react 結果 (gen=\(gen) != 現世代=\(generation))，不污染新局")
+            return nil
         }
 
         guard let responseStr = responseString else {
@@ -298,125 +232,6 @@ class NativeBotController {
         }
 
         return lastResponse
-    }
-
-    // MARK: - State Management (Typed API)
-
-    /// 更新內部狀態 (強類型版本)
-    private func updateInternalState(from event: MJAIEvent) {
-        switch event {
-        case .startGame(let e):
-            handleStartGame(e)
-
-        case .startKyoku(let e):
-            handleStartKyoku(e)
-
-        case .tsumo(let e):
-            handleTsumo(e)
-
-        case .dahai(let e):
-            handleDahai(e)
-
-        case .reach, .reachAccepted:
-            botLog("[NativeBotController] reach/reach_accepted event")
-            break
-
-        case .chi(let e):
-            handleMeld(consumed: e.consumed)
-
-        case .pon(let e):
-            handleMeld(consumed: e.consumed)
-
-        case .daiminkan(let e):
-            handleMeld(consumed: e.consumed)
-
-        case .ankan(let e):
-            handleMeld(consumed: e.consumed)
-
-        case .kakan(let e):
-            handleMeld(consumed: e.consumed)
-
-        case .dora(let e):
-            doraMarkers.append(e.doraMarker)
-
-        case .hora, .ryukyoku, .endKyoku:
-            handleEndKyoku()
-
-        case .endGame:
-            handleEndGame()
-
-        case .nukidora:
-            break
-        }
-    }
-
-    private func handleStartGame(_ event: StartGameEvent) {
-        kyoku = 0
-        honba = 0
-        scores = [25000, 25000, 25000, 25000]
-        is3P = event.names.count == 3
-    }
-
-    private func handleStartKyoku(_ event: StartKyokuEvent) {
-        botLog("[NativeBotController] handleStartKyoku (typed)")
-
-        kyoku = event.kyoku
-        honba = event.honba
-        bakazeWind = event.bakaze
-        scores = event.scores
-
-        // 計算自風
-        let playerCount = is3P ? 3 : 4
-        let jikazeIndex = (Int(playerId) - ((kyoku - 1) % playerCount) + playerCount) % playerCount
-        jikazeWind = Wind.fromIndex(jikazeIndex) ?? .east
-
-        // 更新寶牌
-        doraMarkers = [event.doraMarker]
-
-        // 更新手牌
-        if Int(playerId) < event.tehais.count {
-            tehai = event.tehais[Int(playerId)].filter { $0 != .unknown }
-            botLog("[NativeBotController] Set tehai to: \(tehai.map { $0.mjaiString })")
-        }
-
-        tsumo = nil
-    }
-
-    private func handleTsumo(_ event: TsumoEvent) {
-        guard event.actor == Int(playerId) else { return }
-
-        tsumo = event.pai
-        canDiscard = true
-        botLog("[NativeBotController] handleTsumo: my tsumo pai=\(event.pai.mjaiString)")
-    }
-
-    private func handleDahai(_ event: DahaiEvent) {
-        guard event.actor == Int(playerId) else { return }
-
-        let pai = event.pai
-
-        // 從手牌中移除打出的牌
-        if let t = tsumo, t == pai {
-            tsumo = nil
-        } else if let index = tehai.firstIndex(of: pai) {
-            tehai.remove(at: index)
-            if let t = tsumo {
-                tehai.append(t)
-                tehai.sort { $0.index < $1.index }
-                tsumo = nil
-            }
-        }
-
-        canDiscard = false
-    }
-
-    private func handleMeld(consumed: [Tile]) {
-        // 從手牌中移除 consumed 的牌
-        for tile in consumed {
-            if let index = tehai.firstIndex(of: tile) {
-                tehai.remove(at: index)
-            }
-        }
     }
 
     private func handleEndKyoku() {
@@ -479,9 +294,14 @@ class NativeBotController {
         // 重置遊戲狀態
         kyoku = 0
         honba = 0
+        kyotaku = 0
         scores = [25000, 25000, 25000, 25000]
 
-        if let names = event["names"] as? [String] {
+        // #3: 優先用 bridge 帶來的 is3P 旗標；否則退回 names 陣列長度判斷。
+        //     （createBot 已用 is3P 參數設過，此處只在 react 重放 start_game 時保持一致，不覆蓋為錯值。）
+        if let flag = event["is3P"] as? Bool {
+            is3P = flag
+        } else if let names = event["names"] as? [String] {
             is3P = names.count == 3
         }
     }
@@ -495,15 +315,20 @@ class NativeBotController {
         if let h = event["honba"] as? Int {
             honba = h
         }
+        // #21: 從 start_kyoku 事件持久化供託（bridge parseNewRound/parseGameState 皆帶 kyotaku 欄位）
+        if let ky = event["kyotaku"] as? Int {
+            kyotaku = ky
+        }
         if let b = event["bakaze"] as? String {
             bakazeWind = Wind(rawValue: b) ?? .east
         }
 
-        botLog("[NativeBotController] start_kyoku: bakaze=\(bakaze), kyoku=\(kyoku), honba=\(honba)")
+        botLog("[NativeBotController] start_kyoku: bakaze=\(bakaze), kyoku=\(kyoku), honba=\(honba), kyotaku=\(kyotaku)")
 
         // 計算自風
+        // #8: kyoku 為 1-based（oya = kyoku-1），故以 (kyoku - 1) 取模；原式用 kyoku 取模差一。
         let playerCount = is3P ? 3 : 4
-        let jikazeIndex = (Int(playerId) - (kyoku % playerCount) + playerCount) % playerCount
+        let jikazeIndex = (Int(playerId) - ((kyoku - 1) % playerCount) + playerCount) % playerCount
         jikazeWind = Wind.fromIndex(jikazeIndex) ?? .east
 
         if let s = event["scores"] as? [Int] {
@@ -837,6 +662,7 @@ class NativeBotController {
         lastCandidates = nil
         kyoku = 0
         honba = 0
+        kyotaku = 0
         bakazeWind = .east
         jikazeWind = .east
         scores = [25000, 25000, 25000, 25000]
@@ -856,7 +682,7 @@ class NativeBotController {
         GameState(
             kyoku: kyoku,
             honba: honba,
-            kyotaku: 0,  // TODO: 追蹤供託
+            kyotaku: kyotaku,
             bakaze: bakazeWind,
             jikaze: jikazeWind,
             scores: scores,

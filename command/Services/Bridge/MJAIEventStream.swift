@@ -91,16 +91,19 @@ class MJAIEventStream {
         print("[MJAIEventStream] 啟動消費者, 有 \(historySnapshot.count) 個歷史事件")
 
         // 3. 創建新的 AsyncStream
-        let stream = AsyncStream<[String: Any]> { [weak self] continuation in
-            // 先 yield 所有歷史事件
-            for event in historySnapshot {
-                continuation.yield(event)
-            }
-            // 保存 continuation 用於接收新事件
-            Task { @MainActor in
-                self?.continuation = continuation
-            }
+        // #5: 用 makeStream 同步取得 continuation，避免以往在 build 閉包內把 continuation
+        //     指派丟進延遲的 Task { @MainActor }。那個跨 Task hop 會讓 startConsumer 返回到
+        //     該 Task 執行之間的 emit() yield 到舊/nil continuation → 消費者啟動後最初幾個 live
+        //     事件遺失。這裡在 @MainActor 上同步保存 continuation，emit() 立即可用、不漏事件。
+        let (stream, continuation) = AsyncStream<[String: Any]>.makeStream()
+
+        // 先 yield 所有歷史事件（消費者啟動後會依序重放）
+        for event in historySnapshot {
+            continuation.yield(event)
         }
+
+        // 同步保存 continuation 用於接收新事件（startConsumer 為 @MainActor，此指派在返回前完成）
+        self.continuation = continuation
 
         // 4. 啟動新的消費者 Task
         consumerTask = Task { [weak self] in
@@ -144,5 +147,15 @@ class MJAIEventStream {
             }
         }
         return nil
+    }
+
+    /// #3: 獲取 start_game 事件中的三麻旗標（用於重連重建時保持一致；預設四麻）
+    func getIs3P() -> Bool {
+        for event in eventHistory {
+            if (event["type"] as? String) == "start_game" {
+                return (event["is3P"] as? Bool) ?? false
+            }
+        }
+        return false
     }
 }

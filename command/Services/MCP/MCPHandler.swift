@@ -60,6 +60,24 @@ final class MCPHandler {
         set { context.triggerAutoPlayCallback = newValue }
     }
 
+    /// 設置 Liqi 請求送出回調（Unity 時代唯一有效的動作／大廳面）
+    var sendLiqi: ((LiqiRequestSpec, Int) async -> LiqiToolSendOutcome)? {
+        get { context.sendLiqiCallback }
+        set { context.sendLiqiCallback = newValue }
+    }
+
+    /// 設置遊戲狀態快照回調（Swift 協定層供給，取代已死的 DesktopMgr 讀取）
+    var getGameSnapshot: (() -> [String: Any])? {
+        get { context.getGameSnapshotCallback }
+        set { context.getGameSnapshotCallback = newValue }
+    }
+
+    /// 設置自動心跳（防閒置）開關回調
+    var setAntiIdle: ((Bool?, TimeInterval?) -> [String: Any])? {
+        get { context.antiIdleCallback }
+        set { context.antiIdleCallback = newValue }
+    }
+
     /// 設置獲取日誌回調
     var getLogs: (() -> [String])? {
         get { context.getLogsCallback }
@@ -194,21 +212,9 @@ final class MCPHandler {
         }
     }
 
-    /// 構建 Help 內容（向後兼容）
+    /// 構建 Help 內容（向後兼容 HTTP `/help`；與 `get_help` 共用同一份內容）
     func buildHelpContent() -> [String: Any] {
-        return [
-            "name": "Naki Debug API",
-            "version": "2.0",
-            "description": "Naki 麻將 AI 助手的 Debug API，用於監控遊戲狀態、控制 Bot、執行遊戲操作",
-            "base_url": "http://localhost:\(serverPort)",
-            "mcp_endpoint": "http://localhost:\(serverPort)/mcp",
-            "tools_count": MCPToolRegistry.shared.registeredToolNames.count,
-            "tile_notation": [
-                "數牌（Suited）": "1-9 + m(萬)/p(筒)/s(索)，如 1m, 5p, 9s",
-                "紅寶牌（Red 5s）": "5mr, 5pr, 5sr",
-                "字牌（Honor）": "E(東), S(南), W(西), N(北), P(白), F(發), C(中)"
-            ]
-        ]
+        NakiHelpContent.build(serverPort: serverPort)
     }
 
     // MARK: - Response Methods

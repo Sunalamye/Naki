@@ -17,6 +17,19 @@
     const arrayBufferToBase64 = window.__nakiCore?.arrayBufferToBase64 || window.__nakiArrayBufferToBase64 || function(b) { return ''; };
     const blobToBase64 = window.__nakiCore?.blobToBase64 || window.__nakiBlobToBase64 || function(b, cb) { cb(''); };
 
+    /**
+     * Base64 → Uint8Array（不依賴 naki-core，避免載入順序造成的空實作 fallback）
+     */
+    function base64ToUint8Array(base64) {
+        const binary = atob(base64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    }
+
     // ========================================
     // WebSocket 攔截
     // ========================================
@@ -149,6 +162,18 @@
                     type: 'binary',
                     size: data.byteLength
                 });
+            } else if (ArrayBuffer.isView(data)) {
+                // TypedArray / DataView：Unity WebGL 送出的封包走這條
+                // （Laya 時代送 ArrayBuffer，只判 instanceof ArrayBuffer 會整批漏掉送出面，
+                //  連帶讓 LiqiParser 收不到 REQUEST、無法配對 RESPONSE）
+                const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+                sendToSwift('websocket_message', {
+                    socketId: wsId,
+                    direction: direction,
+                    data: arrayBufferToBase64(view),
+                    type: 'binary',
+                    size: view.byteLength
+                });
             } else if (data instanceof Blob) {
                 // Blob：異步轉成 Base64
                 blobToBase64(data, function(base64) {
@@ -280,6 +305,78 @@
                 }
             });
             return result;
+        },
+
+        /**
+         * 送出原始二進位封包到適當的雀魂連線
+         *
+         * 由 Swift 端 LiqiEncoder 產生 Liqi envelope（[type][msgId LE][protobuf]），
+         * 以 base64 傳進來後解碼送出。本函式只負責挑連線與送出，不做任何協定加工。
+         *
+         * ⚠️ 雀魂同時開著大廳 `/gateway` 與對局 `/game-gateway` 兩種連線。
+         * 對局方法（`.lq.FastTest.*`）只有 game-gateway 認得，送到大廳會被回
+         * `method not found`（error code 6）。舊版寫死取 conns[0]，一旦大廳連線
+         * 排在前面，所有打牌都會靜默失敗。
+         *
+         * @param {string} base64 - 完整 envelope 的 base64
+         * @returns {{success: boolean, bytes?: number, socketId?: number, reason?: string}}
+         */
+        sendRaw: function(base64) {
+            if (typeof base64 !== 'string' || base64.length === 0) {
+                return { success: false, reason: 'invalid_base64' };
+            }
+            // 明確驗格式：不同引擎的 atob 寬鬆度不一，先擋掉才不會送出半解碼的垃圾
+            if (base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+                return { success: false, reason: 'invalid_base64' };
+            }
+
+            let bytes;
+            try {
+                bytes = base64ToUint8Array(base64);
+            } catch (e) {
+                return { success: false, reason: 'decode_failed: ' + e.message };
+            }
+
+            if (bytes.length === 0) {
+                return { success: false, reason: 'empty_payload' };
+            }
+
+            const conns = window.__nakiWebSocket.getMajsoulConnections();
+            if (conns.length === 0) {
+                return { success: false, reason: 'no_open_majsoul_connection' };
+            }
+
+            // 從 envelope 取出明文方法名（REQUEST 無 XOR：[type][msgId:2][0a][len][method]）
+            let method = '';
+            try {
+                if (bytes[3] === 0x0a) {
+                    const nameLen = bytes[4];
+                    let s = '';
+                    for (let i = 0; i < nameLen; i++) s += String.fromCharCode(bytes[5 + i]);
+                    method = s;
+                }
+            } catch (e) { /* 取不到方法名就退回預設選線 */ }
+
+            const isGameMethod = method.indexOf('.lq.FastTest.') === 0;
+            const pick = conns.filter(function (c) {
+                const isGameGateway = c.url.indexOf('game-gateway') !== -1;
+                return isGameMethod ? isGameGateway : !isGameGateway;
+            });
+
+            if (isGameMethod && pick.length === 0) {
+                return { success: false, reason: 'no_game_gateway_connection' };
+            }
+
+            const conn = pick.length > 0 ? pick[pick.length - 1] : conns[0];
+            try {
+                conn.ws.send(bytes.buffer);
+            } catch (e) {
+                console.error('[Naki WS] sendRaw 失敗:', conn.id, e);
+                return { success: false, reason: 'send_failed: ' + e.message };
+            }
+
+            console.log('[Naki WS] sendRaw:', conn.id, bytes.length, 'bytes');
+            return { success: true, bytes: bytes.length, socketId: conn.id };
         },
 
         /**

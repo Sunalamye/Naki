@@ -113,13 +113,24 @@ func parseProtobufBlocks(_ data: Data) -> [ProtobufBlock] {
             blocks.append(ProtobufBlock(fieldId: fieldId, wireType: wireType, data: varintData))
             offset = newOffset
 
+        case 1: // 64-bit (fixed64 / sfixed64 / double) — 正確跳過 8 bytes
+            guard offset + 8 <= data.count else {
+                liqiLog("[LiqiParser] parseProtobufBlocks: fixed64 field \(fieldId) truncated at offset \(offset), stopping (kept \(blocks.count) blocks)")
+                return blocks
+            }
+            offset += 8
+
         case 2: // Length-delimited (string, bytes, embedded message)
             guard let (length, newOffset) = parseVarint(data, offset: offset) else {
                 return blocks
             }
             offset = newOffset
 
-            guard offset + length <= data.count else {
+            // 防護：length 必須非負，且不超過剩餘資料長度。
+            // 先比較 length 與 (data.count - offset)（此時 offset <= data.count），
+            // 避免直接算 offset + length 時被超大 varint 造成整數溢位/越界。
+            guard length >= 0, length <= data.count - offset else {
+                liqiLog("[LiqiParser] parseProtobufBlocks: length-delimited field \(fieldId) invalid length \(length) (remaining \(data.count - offset)), stopping (kept \(blocks.count) blocks)")
                 return blocks
             }
 
@@ -127,8 +138,17 @@ func parseProtobufBlocks(_ data: Data) -> [ProtobufBlock] {
             blocks.append(ProtobufBlock(fieldId: fieldId, wireType: wireType, data: blockData))
             offset += length
 
+        case 5: // 32-bit (fixed32 / sfixed32 / float) — 正確跳過 4 bytes
+            guard offset + 4 <= data.count else {
+                liqiLog("[LiqiParser] parseProtobufBlocks: fixed32 field \(fieldId) truncated at offset \(offset), stopping (kept \(blocks.count) blocks)")
+                return blocks
+            }
+            offset += 4
+
         default:
-            // 跳過未知類型
+            // wireType 3/4 為已棄用的 group start/end；長度未知無法安全跳過，
+            // 安全中止並記錄，但保留已解析出的 blocks（不因單一未知欄位丟掉整條訊息）。
+            liqiLog("[LiqiParser] parseProtobufBlocks: unsupported wireType \(wireType) at field \(fieldId), stopping (kept \(blocks.count) blocks)")
             return blocks
         }
     }
@@ -326,7 +346,8 @@ class LiqiParser {
 
         // 根據消息類型進行特定解析
         if methodName == ".lq.ActionPrototype" {
-            return parseActionPrototype(innerBlocks)
+            // Notify/request/response 路徑的 ActionPrototype 來自 WebSocket，需要 XOR 解碼
+            return parseActionPrototype(innerBlocks, xorDecode: true)
         }
 
         if methodName == ".lq.FastTest.authGame" {
@@ -353,10 +374,11 @@ class LiqiParser {
     }
 
     /// 解析 ActionPrototype 消息
-    /// - Parameter xorDecode: 是否需要 XOR 解碼。
-    ///   - Notify 訊息的 ActionPrototype 需要 XOR 解碼 (true)
-    ///   - SyncGame/GameRestore 的 actions 不需要 XOR 解碼 (false)
-    private func parseActionPrototype(_ blocks: [ProtobufBlock], xorDecode: Bool = true) -> [String: Any]? {
+    /// - Parameter xorDecode: 是否需要 XOR 解碼。**契約：所有 caller 必須顯式傳入，不提供 default 值**，
+    ///   以防未來新增 caller 忘記指定 flag 而導致靜默的雙重解碼 / 未解碼。
+    ///   - Notify/request/response 訊息的 ActionPrototype 需要 XOR 解碼 (true)
+    ///   - SyncGame/GameRestore 的 actions 已解碼，不可再次 XOR (false)
+    private func parseActionPrototype(_ blocks: [ProtobufBlock], xorDecode: Bool) -> [String: Any]? {
         var result: [String: Any] = [:]
         var actionName: String = ""
         var actionData: Data? = nil
@@ -520,7 +542,12 @@ class LiqiParser {
                 let scores = parsePackedInt32(block.data)
                 liqiLog("[LiqiParser] NewRound scores parsed: \(scores)")
                 result["scores"] = scores
-            case 7: // liqibang (立直棒)
+            // 依 liqi.json 的 ActionNewRound：7=operation、8=liqibang。
+            // 舊版把 7 當 liqibang 用 varint 硬解 operation 的訊息位元組 → kyotaku 是垃圾值，
+            // 且開局第一巡的可用操作（親家打牌／天和）永遠拿不到。
+            case 7: // operation (OptionalOperationList)
+                result["operation"] = parseOperation(block.data)
+            case 8: // liqibang (立直棒)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["liqibang"] = v }
             case 11: // al (是否有操作)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["al"] = v != 0 }
@@ -574,31 +601,24 @@ class LiqiParser {
                     result["leftTileCount"] = v
                     liqiLog("[LiqiParser] DealTile leftTileCount: \(v)")
                 }
-            case 4: // revealed tiles (明牌)
-                if let tile = block.stringValue {
-                    result["tile"] = tile
-                    liqiLog("[LiqiParser] DealTile tile from field 4: \(tile)")
-                }
-            case 5: // liqi (立直後的自摸)
-                result["liqi"] = parseProtobufBlocks(block.data).count > 0
-            case 6: // 可能是另一種格式的 tile
-                if let tile = block.stringValue {
-                    if result["tile"] == nil {
-                        result["tile"] = tile
-                        liqiLog("[LiqiParser] DealTile tile from field 6: \(tile)")
-                    }
-                }
-            case 7: // 未知字段，可能包含 tile 信息
-                let rawPreview = block.data.prefix(min(20, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                liqiLog("[LiqiParser] DealTile field 7 raw: \(rawPreview)")
-                if block.wireType == 2, let tile = block.stringValue {
-                    liqiLog("[LiqiParser] DealTile field 7 as string: \(tile)")
-                }
-            case 8: // doras
-                result["doras"] = parseTileList(block.data)
-            case 11: // operation (可選操作)
+            // 欄位編號依 docs/protocol/liqi.json 的 ActionDealTile（唯一事實來源）。
+            // 舊版把 operation 當 field 11、doras 當 field 8，是 Laya 時代的猜測，
+            // 結果 oplist 永遠是空的 → 自動打牌無從判斷是否輪到自己。
+            case 4: // operation (OptionalOperationList)
                 result["operation"] = parseOperation(block.data)
                 liqiLog("[LiqiParser] DealTile has operation data")
+            case 5: // liqi (LiQiSuccess)
+                result["liqi"] = parseProtobufBlocks(block.data).count > 0
+            case 6: // doras (repeated string)
+                if let tile = block.stringValue {
+                    if result["doras"] == nil { result["doras"] = [] }
+                    if var doras = result["doras"] as? [String] {
+                        doras.append(tile)
+                        result["doras"] = doras
+                    }
+                }
+            case 7: // zhenting (bool)
+                if let (v, _) = parseVarint(block.data, offset: 0) { result["zhenting"] = v != 0 }
             default:
                 // 記錄未知字段
                 let rawPreview = block.data.prefix(min(20, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
@@ -632,16 +652,26 @@ class LiqiParser {
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
             case 2: // tile
                 if let tile = block.stringValue { result["tile"] = tile }
+            // 欄位編號依 docs/protocol/liqi.json 的 ActionDiscardTile。
+            // 舊版 operation 誤標 field 11（實為 muyu），doras 誤標 field 8 之外還漏了 is_wliqi 位置。
             case 3: // is_liqi (是否立直)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["isLiqi"] = v != 0 }
+            case 4: // operation (OptionalOperationList)
+                result["operation"] = parseOperation(block.data)
             case 5: // moqie (是否摸切)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["moqie"] = v != 0 }
-            case 7: // is_wliqi (是否 W 立直)
+            case 6: // zhenting
+                if let (v, _) = parseVarint(block.data, offset: 0) { result["zhenting"] = v != 0 }
+            case 8: // doras (repeated string)
+                if let tile = block.stringValue {
+                    if result["doras"] == nil { result["doras"] = [] }
+                    if var doras = result["doras"] as? [String] {
+                        doras.append(tile)
+                        result["doras"] = doras
+                    }
+                }
+            case 9: // is_wliqi (是否 W 立直)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["isWliqi"] = v != 0 }
-            case 8: // doras
-                result["doras"] = parseTileList(block.data)
-            case 11: // operation
-                result["operation"] = parseOperation(block.data)
             default:
                 break
             }
@@ -672,7 +702,8 @@ class LiqiParser {
                 }
             case 4: // froms (從哪個玩家拿的牌)
                 result["froms"] = parseIntList(block.data)
-            case 5: // operation
+            // liqi.json ActionChiPengGang：5=liqi(LiQiSuccess)、6=operation
+            case 6: // operation (OptionalOperationList)
                 result["operation"] = parseOperation(block.data)
             default:
                 break
@@ -697,7 +728,7 @@ class LiqiParser {
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["type"] = v }
             case 3: // tiles
                 if let tile = block.stringValue { result["tiles"] = tile }
-            case 5: // operation
+            case 4: // operation（liqi.json ActionAnGangAddGang：operation 是 field 4）
                 result["operation"] = parseOperation(block.data)
             default:
                 break
@@ -732,6 +763,10 @@ class LiqiParser {
             switch block.fieldId {
             case 1: // seat
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
+            case 4: // operation（liqi.json ActionBaBei：operation 是 field 4）
+                result["operation"] = parseOperation(block.data)
+            case 9: // moqie
+                if let (v, _) = parseVarint(block.data, offset: 0) { result["moqie"] = v != 0 }
             default:
                 break
             }
@@ -1061,12 +1096,17 @@ class LiqiParser {
         let blocks = parseProtobufBlocks(data)
         var result: [String: Any] = [:]
 
+        // operation_list 是 repeated OptionalOperation：wire 上會出現多個 field 2 block，
+        // 每個 block 本身就是一筆 OptionalOperation。舊版每遇到一個就覆寫 result，
+        // 且把單筆訊息再拆一層當成清單，導致可用操作永遠解不出來。
+        var operations: [[String: Any]] = []
+
         for block in blocks {
             switch block.fieldId {
             case 1: // seat
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
-            case 2: // operationList
-                result["operationList"] = parseOperationList(block.data)
+            case 2: // operation_list（repeated，逐筆累積）
+                operations.append(parseOptionalOperation(block.data))
             case 4: // timeAdd
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["timeAdd"] = v }
             case 5: // timeFixed
@@ -1076,32 +1116,34 @@ class LiqiParser {
             }
         }
 
+        result["operationList"] = operations
         return result
     }
 
-    private func parseOperationList(_ data: Data) -> [[String: Any]] {
-        var results: [[String: Any]] = []
-        let blocks = parseProtobufBlocks(data)
+    /// 解析單筆 `OptionalOperation`（1=type, 2=combination, 3=change_tiles）
+    private func parseOptionalOperation(_ data: Data) -> [String: Any] {
+        var op: [String: Any] = [:]
+        var combination: [String] = []
 
-        for block in blocks {
-            if block.wireType == 2 {
-                let opBlocks = parseProtobufBlocks(block.data)
-                var op: [String: Any] = [:]
-                for opBlock in opBlocks {
-                    switch opBlock.fieldId {
-                    case 1: // type
-                        if let (v, _) = parseVarint(opBlock.data, offset: 0) { op["type"] = v }
-                    case 2: // combination
-                        op["combination"] = parseTileList(opBlock.data)
-                    default:
-                        break
-                    }
+        for block in parseProtobufBlocks(data) {
+            switch block.fieldId {
+            case 1: // type
+                if let (v, _) = parseVarint(block.data, offset: 0) { op["type"] = v }
+            case 2: // combination（repeated string，如 "1m|2m"）
+                if let str = block.stringValue { combination.append(str) }
+            case 3: // change_tiles（repeated string）
+                if let str = block.stringValue {
+                    var changes = op["changeTiles"] as? [String] ?? []
+                    changes.append(str)
+                    op["changeTiles"] = changes
                 }
-                results.append(op)
+            default:
+                break
             }
         }
 
-        return results
+        op["combination"] = combination
+        return op
     }
 
     private func parseTileList(_ data: Data) -> [String] {

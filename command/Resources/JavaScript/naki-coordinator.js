@@ -463,7 +463,13 @@
                     return { success: false, error: 'cannot execute action' };
                 }
 
-                const actualIndex = Math.min(tileIndex, mr.hand.length - 1);
+                // 索引越界時不夾取（避免靜默打出「最後一張」而掩蓋上游 bug）
+                if (tileIndex < 0 || tileIndex >= mr.hand.length) {
+                    console.error('[Naki 動作] 牌索引越界:', tileIndex, '手牌數:', mr.hand.length);
+                    return { success: false, reason: 'tile index out of range', requested: tileIndex, handLength: mr.hand.length };
+                }
+
+                const actualIndex = tileIndex;
                 const tile = mr.hand[actualIndex];
 
                 if (!tile) {
@@ -963,76 +969,95 @@
         },
 
         // ========================================
-        // 視覺效果控制
+        // 視覺效果控制 — ⚠️ Unity WebGL 客戶端已停用
         // ========================================
+        /**
+         * 下列全部依賴 Laya 物件（view.DesktopMgr 的 effect_* / mainrole.hand、
+         * uiscript.UI_ChiPengHu、uiscript.UI_DesktopInfo），Unity WebGL 客戶端
+         * 一律不存在，遊戲內高亮在原理上已不可能運作。
+         *
+         * 這裡只做轉發：底層模組（naki-autoplay.js / naki-game-api.js）會回傳
+         * { success:false, reason:'unity-client-no-laya' }，本層原樣傳出，
+         * 不再吞掉理由。推薦顯示的唯一管道是原生面板
+         * (command/Views/RecommendationView.swift / BotStatusView.swift)。
+         */
         visual: {
+            _unavailable: function(api) {
+                return {
+                    success: false,
+                    reason: 'unity-client-no-laya',
+                    api: api,
+                    error: '高亮模組未載入（且 Unity 客戶端本來就不支援遊戲內高亮）'
+                };
+            },
+
             /**
-             * 顯示推薦高亮
+             * 顯示推薦高亮（Unity 下回傳明確失敗）
              */
             showRecommendation: function(tileIndex, probability) {
                 if (window.__nakiRecommendHighlight) {
                     return window.__nakiRecommendHighlight.show(tileIndex, probability);
                 }
-                return false;
+                return this._unavailable('visual.showRecommendation');
             },
 
             /**
-             * 顯示多個推薦高亮
+             * 顯示多個推薦高亮（Unity 下回傳明確失敗）
              */
             showMultipleRecommendations: function(recommendations) {
                 if (window.__nakiRecommendHighlight) {
                     return window.__nakiRecommendHighlight.showMultiple(recommendations);
                 }
-                return 0;
+                return this._unavailable('visual.showMultipleRecommendations');
             },
 
             /**
-             * 隱藏所有推薦高亮
+             * 隱藏所有推薦高亮（Unity 下回傳明確失敗）
              */
             hideRecommendations: function() {
                 if (window.__nakiRecommendHighlight) {
                     return window.__nakiRecommendHighlight.hide();
                 }
-                return false;
+                return this._unavailable('visual.hideRecommendations');
             },
 
             /**
-             * 移動高亮到按鈕
+             * 移動高亮到按鈕（Unity 下回傳明確失敗）
              */
             highlightButton: function(actionType) {
                 if (window.__nakiRecommendHighlight) {
                     return window.__nakiRecommendHighlight.moveNativeEffectToButton(actionType);
                 }
-                return false;
+                return this._unavailable('visual.highlightButton');
             },
 
             /**
-             * 玩家名稱控制
+             * 玩家名稱控制（依賴 uiscript.UI_DesktopInfo，Unity 下失效）
              */
             playerNames: {
                 hide: function() {
                     if (window.__nakiPlayerNames) {
                         return window.__nakiPlayerNames.hide();
                     }
-                    return false;
+                    return NakiCoordinator.visual._unavailable('visual.playerNames.hide');
                 },
                 show: function() {
                     if (window.__nakiPlayerNames) {
                         return window.__nakiPlayerNames.show();
                     }
-                    return false;
+                    return NakiCoordinator.visual._unavailable('visual.playerNames.show');
                 },
                 toggle: function() {
                     if (window.__nakiPlayerNames) {
                         return window.__nakiPlayerNames.toggle();
                     }
-                    return false;
+                    return NakiCoordinator.visual._unavailable('visual.playerNames.toggle');
                 },
                 getStatus: function() {
                     if (window.__nakiPlayerNames) {
                         return window.__nakiPlayerNames.getStatus();
                     }
-                    return { available: false };
+                    return { available: false, reason: 'unity-client-no-laya' };
                 }
             }
         },
@@ -1294,6 +1319,16 @@
                         antiIdle: !!window.__nakiAntiIdle,
                         highlight: !!window.__nakiRecommendHighlight,
                         playerNames: !!window.__nakiPlayerNames
+                    },
+                    // 引擎現況：模組「載入」不等於「可運作」。Unity WebGL 下
+                    // 沒有 Laya 物件，遊戲內高亮/名稱隱藏一律失效（改用原生面板）。
+                    engine: {
+                        laya: !!window.Laya,
+                        desktopMgr: !!(window.view && window.view.DesktopMgr),
+                        uiscript: !!window.uiscript,
+                        unityWebGL: !!(window.unityFramework || window.createUnityInstance),
+                        inGameHighlightSupported: !!(window.Laya && window.view
+                            && window.view.DesktopMgr && window.view.DesktopMgr.Inst)
                     },
                     state: NakiCoordinator.state.getFullState(),
                     auto: NakiCoordinator.auto.getSettings(),
