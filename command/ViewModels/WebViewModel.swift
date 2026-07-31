@@ -264,19 +264,39 @@ class WebViewModel {
     // 相關注入只會靜默失敗形成假訊號；推薦一律由原生面板
     // (Views/RecommendationView.swift、Views/BotStatusView.swift) 呈現。
 
-    // 自動打牌檢查
-    guard autoPlayController?.state.mode == .auto,
-      let firstRec = recommendations.first,
-      currentExecutionId == nil
-    else { return }
+    guard autoPlayController?.state.mode == .auto, currentExecutionId == nil else { return }
 
     // 檢查是否有可用操作。
     // 舊路徑讀 `DesktopMgr.Inst.oplist`（Laya），Unity 客戶端已不存在；
     // 改讀協定層快照：MajsoulBridge 解析 notify 時存下的 OptionalOperationList。
-    // discard：必須仍有打牌/立直操作，代表確實輪到自己打牌；
-    // 若已換成別家回合或只剩吃碰機會，則不重新觸發，避免送出遲到／重複的打牌。
     guard let snapshot = LiqiOperationStore.shared.pending else { return }
 
+    // 副露機會但 Mortal 沒給推薦 → 主動送「過」。
+    //
+    // Mortal 判斷不值得吃碰時 `bot.react` 直接回 nil，推薦清單是空的。
+    // 但伺服器仍在等我方回應（實測 time_fixed 300 秒），沒人送 cancel 的話
+    // 整局就停在那裡，直到逾時才由伺服器代打——這是「輪到我卻沒推薦、對局卡住」的成因。
+    // 只在「確實是我方的副露機會」時補送，且以 sequence 標記已處理避免重複送。
+    if recommendations.isEmpty {
+      // pass 要送 inputChiPengGang 還是 inputOperation，取決於這批機會的類型
+      // （吃/碰/大明槓走前者，榮和等走後者），故從快照裡實際的機會操作取通道。
+      if let callOp = snapshot.operations.compactMap({ $0.type }).first(where: { $0.isCallOpportunity }) {
+        debugServer?.addLog("⏰ 副露機會無推薦(Mortal 判斷不做) → 自動送出過 (ops=\(snapshot.rawTypes))")
+        LiqiOperationStore.shared.markHandled(snapshot.sequence)
+        let channel = callOp.channel
+        Task { [weak self] in
+          guard let self else { return }
+          let result = await self.liqiSender.pass(channel: channel)
+          self.debugServer?.addLog(result.logLine)
+        }
+      }
+      return
+    }
+
+    guard let firstRec = recommendations.first else { return }
+
+    // discard：必須仍有打牌/立直操作，代表確實輪到自己打牌；
+    // 若已換成別家回合或只剩吃碰機會，則不重新觸發，避免送出遲到／重複的打牌。
     if firstRec.actionType == .discard,
       !snapshot.contains(.discard), !snapshot.contains(.riichi)
     {

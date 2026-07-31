@@ -52,7 +52,11 @@ class LogManager {
     var entries: [LogEntry] = []
 
     /// 最大日誌條目數
-    var maxEntries = 500
+    ///
+    /// 500 條在真實對局下只夠涵蓋十幾秒（單一摸打就會產生數十行 parser 記錄），
+    /// 事後回查「上一局為什麼這樣打」時早就被輪掉了。檔案日誌才是完整紀錄，
+    /// 記憶體這份僅供 UI 即時顯示與 `/logs` 快取。
+    var maxEntries = 5000
 
     /// 是否啟用文件日誌
     var fileLoggingEnabled = true
@@ -66,11 +70,39 @@ class LogManager {
     /// 單一 FileHandle 併發 seek+write 並不安全，這裡用 serial queue 保證順序與資料完整。
     private let fileWriteQueue = DispatchQueue(label: "com.naki.LogManager.fileWrite")
 
-    private init() {
-        logFile = FileManager.default.temporaryDirectory.appendingPathComponent("akagi_websocket.log")
+    /// 檔案日誌路徑（對外公開，方便從 `/status` 或除錯時直接開檔查）
+    var logFilePath: String { logFile.path }
 
-        // 嘗試開啟文件
-        FileManager.default.createFile(atPath: logFile.path, contents: nil)
+    /// 保留幾份歷史日誌（不含當前這份）
+    private let rotationKeepCount = 5
+
+    private init() {
+        let dir = FileManager.default.temporaryDirectory
+        logFile = dir.appendingPathComponent("akagi_websocket.log")
+
+        // 啟動時輪替而非覆寫。
+        //
+        // 舊行為是每次啟動就 createFile 把檔案清空，於是「重啟前發生了什麼」永遠查不到——
+        // 偏偏跨重啟的問題（重連後 Bot 狀態是否正確）正是最需要回溯的。
+        // 改為把上一份改名保留，最多留 rotationKeepCount 份。
+        let fm = FileManager.default
+        if fm.fileExists(atPath: logFile.path) {
+            let oldest = dir.appendingPathComponent("akagi_websocket.log.\(rotationKeepCount)")
+            try? fm.removeItem(at: oldest)
+            for i in stride(from: rotationKeepCount - 1, through: 1, by: -1) {
+                let from = dir.appendingPathComponent("akagi_websocket.log.\(i)")
+                let to = dir.appendingPathComponent("akagi_websocket.log.\(i + 1)")
+                if fm.fileExists(atPath: from.path) {
+                    try? fm.removeItem(at: to)
+                    try? fm.moveItem(at: from, to: to)
+                }
+            }
+            let first = dir.appendingPathComponent("akagi_websocket.log.1")
+            try? fm.removeItem(at: first)
+            try? fm.moveItem(at: logFile, to: first)
+        }
+
+        fm.createFile(atPath: logFile.path, contents: nil)
         fileHandle = try? FileHandle(forWritingTo: logFile)
     }
 

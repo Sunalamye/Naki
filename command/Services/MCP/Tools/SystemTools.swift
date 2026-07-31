@@ -24,10 +24,13 @@ struct GetStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
+        // 帶上檔案日誌路徑：`/logs` 只回記憶體裡的近期條目，跨重啟或回查上一局要直接讀檔。
         return [
             "status": "running",
             "port": context.serverPort,
-            "timestamp": ISO8601DateFormatter().string(from: Date())
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "logFile": await LogManager.shared.logFilePath,
+            "logFileNote": "同目錄下 .1 ~ .5 為前幾次啟動的歷史日誌"
         ]
     }
 }

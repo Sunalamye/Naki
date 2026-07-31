@@ -214,7 +214,14 @@ class NativeBotController {
 
         // 更新推薦列表（Bot 已選擇動作，顯示所有可用選項及其機率）
         await updateRecommendations()
-        botLog("[NativeBotController] Bot returned action, updated recommendations: \(lastRecommendations.count) items")
+        // 只記筆數不足以事後判斷「Mortal 為什麼沒選和牌」——必須看得到它到底有哪些選項，
+        // 以及協定層同時給了哪些可用操作。兩者不一致就是 Mortal 的狀態與實際牌局脫節。
+        let recSummary = lastRecommendations.prefix(6)
+            .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
+            .joined(separator: " ")
+        let opsSummary = LiqiOperationStore.shared.latest.map { "\($0.rawTypes)" } ?? "-"
+        botLog("[NativeBotController] Bot returned action, updated recommendations: "
+               + "\(lastRecommendations.count) items [\(recSummary)] oplist=\(opsSummary)")
 
         return response
     }

@@ -21,9 +21,12 @@
 //      ReqAddRoomRobot{ position=1 }   ReqRoomStart{}   ReqJoinRoom{ room_id=1, cvs=2 }
 //      leaveRoom / fetchRoom = ReqCommon（空 payload）
 //
-//  ⚠️ **未驗證**：`GameMode.mode` 的數值語意（常見說法 1=東風戰、2=半莊戰）、
-//  `ai_level` 的有效範圍、以及伺服器是否會因缺 `client_version_string` 而拒絕。
-//  這些都要真實登入後看 RESPONSE 才能確認。
+//  **已驗證**（2026-07-31）：createRoom / addRoomRobot / startRoom 全部 serverAccepted，
+//  以 mode=2 開的房實際打完整個半莊（東1→南1）→ **mode 1=東風戰、2=半莊戰**，
+//  與 desktop.matchmode 配置表一致（見 docs/majsoul-config-tables.md）。
+//  `pre_rule` 的合法值列在 desktop.friend_room（"" / xuezhandaodi / dora3 / …）。
+//
+//  ⚠️ **仍未驗證**：`ai_level` 的有效範圍、伺服器是否會因缺 `client_version_string` 而拒絕。
 //
 
 import Foundation
@@ -38,7 +41,7 @@ struct RoomCreateTool: MCPTool {
         建立友人房。送出 .lq.Lobby.createRoom。\
         預設 4 人、半莊(mode=2)、思考時間 300+0 秒。\
         建房成功後用 room_add_robot 加人機、room_start 開局。\
-        ⚠️ mode 數值語意（1=東風 / 2=半莊）未經真實封包驗證。
+        mode：1=東風戰、2=半莊戰（依 desktop.matchmode 配置表 + 真實對局驗證）。
         """
     static let inputSchema = MCPInputSchema(
         properties: [
