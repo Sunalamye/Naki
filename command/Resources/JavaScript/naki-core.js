@@ -424,6 +424,7 @@
         var LIFT_TOLERANCE = 0.16;
 
         var marks = {};            // index -> [r,g,b]
+        var expectedCount = 0;     // 這批 marks 是依幾張手牌算出來的
         var handXs = [];           // 上一幀量到的手牌 x（已排序），供本幀查索引
         var handY = null;
         var scan = [];             // 本幀候選點 [{x,y}]
@@ -538,6 +539,13 @@
         }
 
         function indexOfTile(p) {
+            // 張數對不上就不要染。
+            //
+            // 索引是 Swift 依「當下的手牌張數」算的，但手牌張數會變（摸牌 13→14、
+            // 打牌 14→13）。畫面已經變了、標記還是舊的那一瞬間，同一個索引會指到
+            // 隔壁那張——實際症狀是打牌送出的瞬間高亮先跳到下一張才消失、
+            // 剛摸到的牌標不到。要求張數一致就能把這段錯位完全消掉。
+            if (expectedCount > 0 && handXs.length !== expectedCount) return -1;
             // y 只用來界定「還在手牌區」（含被抬起的牌），實際認人一律看 x
             if (handY === null) return -1;
             if (p.y < handY - Y_TOLERANCE || p.y > handY + LIFT_TOLERANCE) return -1;
@@ -636,15 +644,17 @@
         window.__nakiHighlight = {
             /// marks: [{index, color:[r,g,b]}]，index = 手牌由左至右的顯示序（含摸到的牌）
             /// popup: [r,g,b] 或 null——有值時把副露彈出面板（吃／碰／跳過）一併染色
-            set: function (list, popup) {
+            /// tileCount: 這批 index 是依幾張手牌算的；畫面張數不符時就不染，避免錯位
+            set: function (list, popup, tileCount) {
                 marks = {};
                 (list || []).forEach(function (m) { marks[m.index] = m.color; });
                 popupColor = (popup && popup.length === 3) ? popup : null;
+                expectedCount = tileCount || 0;
                 var gl = context();
                 if (gl) install(gl);
                 return Object.keys(marks).length;
             },
-            clear: function () { marks = {}; popupColor = null; return true; },
+            clear: function () { marks = {}; popupColor = null; expectedCount = 0; return true; },
             state: function () {
                 return {
                     marks: marks, handTileCount: handXs.length, handY: handY, handXs: handXs,

@@ -93,10 +93,9 @@ macOS 和 iOS 都能用！
 
 ### 🎮 更多功能
 
-- **手牌顏色高亮** — AI 推薦的牌直接在遊戲畫面中標色
-- **動作按鈕高亮** — 吃/碰/槓/立直按鈕也會高亮提示
+- **手牌顏色高亮** — AI 推薦的牌直接在遊戲畫面中變色（改遊戲自己的繪製顏色，不是疊圖層）
+- **動作按鈕高亮** — Mortal 建議吃/碰/槓時，遊戲的動作按鈕會一起標色
 - **自動回應表情** — 被立直、被和牌時自動發表情
-- **隱藏玩家名稱** — 保護隱私，錄影時更安心
 - **MCP Server** — 讓 Claude Code 等 AI 助手直接操作遊戲
 
 ## 🚀 快速開始
@@ -173,27 +172,40 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                  WebPage (雀魂遊戲)                      │
+│              WebPage (雀魂 · Unity WebGL)                │
 │                         │                               │
-│              JavaScript 攔截模組                         │
-│     naki-core / naki-websocket / naki-autoplay         │
+│         JavaScript：只做 WebSocket 收送與畫面標色         │
+│              naki-core / naki-websocket                 │
 └─────────────────────────┼───────────────────────────────┘
                           ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   Swift 服務層                           │
 │                                                         │
-│   MajsoulBridge → NativeBotController → AutoPlayService│
-│   (Liqi→MJAI)    (Rust FFI + Core ML)   (自動打牌)      │
+│   MajsoulBridge → NativeBotController → LiqiActionSender│
+│   (Liqi→MJAI)    (純 Swift + Core ML)   (組包送出動作)   │
 │                         │                               │
-│         GameStateManager ← → SwiftUI Views             │
-│          (@Observable)       (響應式 UI)                │
+│         GameStateManager ← → SwiftUI Views              │
+│          (@Observable)       (響應式 UI)                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
 **核心技術：**
 - **協議轉換**：Liqi Protobuf → MJAI JSON
-- **AI 推論**：Core ML + Mortal 神經網絡
+- **AI 推論**：Core ML + Mortal 神經網絡（純 Swift，無 FFI）
 - **狀態管理**：Swift @Observable 響應式架構
+
+### 為什麼是協定層而不是操作 UI
+
+雀魂客戶端已改用 **Unity WebGL**，遊戲邏輯與畫面都在 wasm 裡，
+JavaScript 端拿不到手牌、按鈕等物件——早期靠讀寫 Laya JS 物件、
+模擬點擊打牌的做法已全面失效。
+
+Naki 因此改為**所有讀取與動作都走 Liqi protobuf**：
+狀態從 WebSocket 封包解析，動作自行組包後送出。
+協定欄位定義取自遊戲自身公開的資源檔 `res/proto/liqi.json`，不是反組譯客戶端得來的。
+
+畫面標色則是攔截 WebGL 繪製呼叫、改遊戲畫該張牌時用的顏色參數，
+位置由遊戲自己的變換矩陣決定，不需要推算螢幕座標。
 
 </details>
 

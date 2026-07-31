@@ -154,8 +154,12 @@ class WebViewModel {
     // 自動啟動 MCP Server
     startDebugServer()
 
-    // 自動設定全自動打牌模式
-    autoPlayController?.setMode(.auto)
+    // 沿用上次選的模式。
+    // 舊行為是每次啟動都硬設 .auto，於是使用者選的「關閉」一重啟就被沖掉，
+    // 看起來像「選了關閉還是會自動打牌」。
+    let savedMode = UserDefaults.standard.string(forKey: Self.autoPlayModeKey)
+      .flatMap(AutoPlayMode.init(rawValue:)) ?? .auto
+    autoPlayController?.setMode(savedMode)
 
     // 啟動定期檢查計時器（每 1 秒檢查一次）
     startAutoPlayCheckTimer()
@@ -538,7 +542,7 @@ class WebViewModel {
       .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
     let script = (marks.isEmpty && popup == "null")
       ? "window.__nakiHighlight?.clear();"
-      : "window.__nakiHighlight?.set(\(payload), \(popup));"
+      : "window.__nakiHighlight?.set(\(payload), \(popup), \(displayTiles.count));"
 
     Task { _ = try? await page.callJavaScript(script) }
   }
@@ -569,9 +573,13 @@ class WebViewModel {
 
   // MARK: - Auto Play Methods
 
+  /// 自動打牌模式的持久化 key
+  static let autoPlayModeKey = "naki.autoPlayMode"
+
   /// 設定自動打牌模式
   func setAutoPlayMode(_ mode: AutoPlayMode) {
     autoPlayController?.setMode(mode)
+    UserDefaults.standard.set(mode.rawValue, forKey: Self.autoPlayModeKey)
     bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
     debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
 
