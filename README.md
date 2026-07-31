@@ -8,8 +8,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Version-2.3.0-green" alt="Version">
-  <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
-  <img src="https://img.shields.io/badge/iOS-26.0+-blue" alt="iOS">
+  <img src="https://img.shields.io/badge/macOS-14.0+-blue" alt="macOS">
+  <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-Required-red" alt="Architecture">
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue" alt="License">
 </p>
@@ -118,11 +118,15 @@ Naki 把雀魂和麻將 AI 包進同一個 App。不需要 Python、不需要 Do
 
 | 平台 | 版本 | 架構 |
 |-----|------|-----|
-| **macOS** | 26.0+（Tahoe） | Apple Silicon |
-| **iOS** | 26.0+ | A12 以上 |
+| **macOS** | 14.0+（Sonoma） | Apple Silicon |
+| **iOS** | 17.0+ | A12 以上 |
 
 > **為什麼不支援 Intel Mac？**
 > AI 模型跑在 Apple Neural Engine 上，那是 Apple Silicon 獨有的硬體。
+
+> **macOS 26 / iOS 26 以上**用新的 `WebPage` API；**14–25** 走相容路徑（`WKWebView`）。
+> 兩條路的 AI 推薦與自動打牌都走同一套遊戲協定層，功能一致。
+> 相容路徑目前只驗證過編譯與單元測試，尚未在 macOS 14/15 實機跑過對局。
 
 ### 安裝
 
