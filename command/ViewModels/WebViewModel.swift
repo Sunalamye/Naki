@@ -519,11 +519,24 @@ class WebViewModel {
       }
     }
 
+    // 副露彈出面板（吃／碰／跳過按鈕）：位置不在 uniform 裡，JS 端靠「只在有機會時
+    // 才出現」自行辨識，這裡只負責告訴它「現在有機會、用什麼顏色」。
+    // 顏色跟著建議走：Mortal 建議副露就綠、建議跳過就灰，讓面板本身即是提示。
+    var popup = "null"
+    if let top = recommendations.first,
+       LiqiOperationStore.shared.latest?.isCallOpportunity == true {
+      switch top.actionType {
+      case .chi, .pon, .kan, .hora: popup = "[0.45,1.0,0.5]"
+      case .none: popup = "[0.55,0.55,0.6]"
+      default: break
+      }
+    }
+
     let payload = (try? JSONSerialization.data(withJSONObject: marks))
       .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-    let script = marks.isEmpty
+    let script = (marks.isEmpty && popup == "null")
       ? "window.__nakiHighlight?.clear();"
-      : "window.__nakiHighlight?.set(\(payload));"
+      : "window.__nakiHighlight?.set(\(payload), \(popup));"
 
     Task { _ = try? await page.callJavaScript(script) }
   }

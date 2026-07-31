@@ -419,6 +419,9 @@
         var HAND_Y_MAX = -0.55;    // NDC y 低於此值才可能是自家手牌那一排
         var Y_TOLERANCE = 0.02;    // 同一排的 y 容差
         var X_TOLERANCE = 0.03;    // 對應到同一張牌的 x 容差
+        // 滑鼠指到／選取時雀魂會把那張牌抬起來，y 會離開靜止那一排。
+        // 抬起只改 y、不改 x，所以索引一律以 x 認人，y 只用來界定「屬於手牌區」。
+        var LIFT_TOLERANCE = 0.16;
 
         var marks = {};            // index -> [r,g,b]
         var handXs = [];           // 上一幀量到的手牌 x（已排序），供本幀查索引
@@ -426,6 +429,39 @@
         var scan = [];             // 本幀候選點 [{x,y}]
         var installed = false;
         var progCache = new Map();
+
+        // 副露按鈕（吃／碰／跳過）的辨識：它們的位置不在 uniform 裡
+        // （Unity UI 把座標烘進 vertex buffer），所以改用「只在有副露機會時才出現」
+        // 這個事實——維護一份平時的 draw call 基線，機會出現時不在基線裡的就是彈出面板。
+        // 實測差異只有 4 筆（兩個按鈕 quad + 文字/光效），且會隨版本自動跟上，
+        // 不需要寫死貼圖 ID 或螢幕座標。
+        var popupColor = null;     // 有值時代表「現在有副露機會」，要染彈出面板
+        var sigFrames = new Map(); // draw call 特徵 -> 出現過的幀數
+        var totalFrames = 0;
+        var frameSigs = new Set();
+        var POPUP_RATIO = 0.25;    // 出現率低於此值才算「彈出元件」
+        var POPUP_MIN_FRAMES = 300;
+        var objIds = new WeakMap();
+        var nextObjId = 1;
+
+        var popupTinted = 0;
+        var colorCache = new Map();
+
+        function objId(o) {
+            if (!o) return 0;
+            var id = objIds.get(o);
+            if (!id) { id = nextObjId++; objIds.set(o, id); }
+            return id;
+        }
+
+        /// 只找顏色 uniform（不要求位置），給彈出面板用
+        function colorLocFor(gl, prog) {
+            if (colorCache.has(prog)) return colorCache.get(prog);
+            var c = gl.getUniformLocation(prog, '_Tint')
+                 || gl.getUniformLocation(prog, '_Color');
+            colorCache.set(prog, c);
+            return c;
+        }
 
         function locsFor(gl, prog) {
             if (progCache.has(prog)) return progCache.get(prog);
@@ -483,14 +519,28 @@
                     best = groups[m];
                 }
             }
-            if (best) {
-                handXs = best.xs.slice().sort(function (a, b) { return a - b; });
-                handY = best.y;
+            if (!best) return;
+
+            handY = best.y;
+            var xs = best.xs.slice();
+            // 被抬起的那張牌不在靜止列上，但它仍是手牌的一員——
+            // 不補回來的話 x 清單會少一格，後面所有索引就整個位移（選牌時高亮跑掉）。
+            for (var q = 0; q < scan.length; q++) {
+                var s = scan[q];
+                if (s.y <= handY + Y_TOLERANCE || s.y > handY + LIFT_TOLERANCE) continue;
+                var known = false;
+                for (var r = 0; r < xs.length; r++) {
+                    if (Math.abs(xs[r] - s.x) < X_TOLERANCE) { known = true; break; }
+                }
+                if (!known) xs.push(s.x);
             }
+            handXs = xs.sort(function (a, b) { return a - b; });
         }
 
         function indexOfTile(p) {
-            if (handY === null || Math.abs(p.y - handY) > Y_TOLERANCE) return -1;
+            // y 只用來界定「還在手牌區」（含被抬起的牌），實際認人一律看 x
+            if (handY === null) return -1;
+            if (p.y < handY - Y_TOLERANCE || p.y > handY + LIFT_TOLERANCE) return -1;
             for (var i = 0; i < handXs.length; i++) {
                 if (Math.abs(handXs[i] - p.x) < X_TOLERANCE) return i;
             }
@@ -503,9 +553,37 @@
 
             var origDraw = gl.drawElements.bind(gl);
             gl.drawElements = function (mode, count, type, offset) {
-                if (count !== 6) return origDraw(mode, count, type, offset);
-
                 var prog = gl.getParameter(gl.CURRENT_PROGRAM);
+
+                // 副露彈出面板：不在基線裡的 draw call 就染色
+                if (prog) {
+                    var sig = count + '/' + objId(prog) + '/' +
+                              objId(gl.getParameter(gl.TEXTURE_BINDING_2D));
+                    frameSigs.add(sig);
+                    // 常駐 UI 幾乎每幀都畫，副露按鈕只在少數幀出現——用出現率區分。
+                    // 不能用「累積基線」：按鈕在更早的機會裡就會被吸收進去，之後永不判為彈出。
+                    var seenFrames = sigFrames.get(sig) || 0;
+                    if (popupColor && totalFrames > POPUP_MIN_FRAMES
+                        && seenFrames < totalFrames * POPUP_RATIO) {
+                        // 彈出面板只需要顏色 uniform——按鈕的 shader 沒有 ObjectToWorld /
+                        // MatrixVP（Unity UI 把座標烘進 vertex buffer），所以不能沿用
+                        // 手牌那條需要位置的查詢，否則整批會被判定「缺 uniform」而跳過。
+                        var pc = colorLocFor(gl, prog);
+                        if (pc) {
+                            var pPrev = gl.getUniform(prog, pc);
+                            gl.uniform4f(pc, popupColor[0], popupColor[1], popupColor[2],
+                                         pPrev && pPrev.length > 3 ? pPrev[3] : 1);
+                            var pr = origDraw(mode, count, type, offset);
+                            if (pPrev && pPrev.length > 3) {
+                                gl.uniform4f(pc, pPrev[0], pPrev[1], pPrev[2], pPrev[3]);
+                            }
+                            popupTinted++;
+                            return pr;
+                        }
+                    }
+                }
+
+                if (count !== 6) return origDraw(mode, count, type, offset);
                 if (!prog) return origDraw(mode, count, type, offset);
 
                 var L;
@@ -540,6 +618,11 @@
                     var r = cb(t);
                     resolveHandRow();
                     scan = [];
+                    totalFrames++;
+                    frameSigs.forEach(function (s) {
+                        sigFrames.set(s, (sigFrames.get(s) || 0) + 1);
+                    });
+                    frameSigs = new Set();
                     return r;
                 });
             };
@@ -552,16 +635,22 @@
 
         window.__nakiHighlight = {
             /// marks: [{index, color:[r,g,b]}]，index = 手牌由左至右的顯示序（含摸到的牌）
-            set: function (list) {
+            /// popup: [r,g,b] 或 null——有值時把副露彈出面板（吃／碰／跳過）一併染色
+            set: function (list, popup) {
                 marks = {};
                 (list || []).forEach(function (m) { marks[m.index] = m.color; });
+                popupColor = (popup && popup.length === 3) ? popup : null;
                 var gl = context();
                 if (gl) install(gl);
                 return Object.keys(marks).length;
             },
-            clear: function () { marks = {}; return true; },
+            clear: function () { marks = {}; popupColor = null; return true; },
             state: function () {
-                return { marks: marks, handTileCount: handXs.length, handY: handY, handXs: handXs };
+                return {
+                    marks: marks, handTileCount: handXs.length, handY: handY, handXs: handXs,
+                    popup: popupColor, totalFrames: totalFrames,
+                    sigCount: sigFrames.size, popupTinted: popupTinted
+                };
             }
         };
     })();
