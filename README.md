@@ -1,7 +1,9 @@
-# Naki (鳴き) - 你的雀魂 AI 雀友
+# Naki（鳴き）
+
+**雀魂的 AI 雀友 — 原生 macOS / iOS 應用，開箱即用。**
 
 <p align="center">
-  <img src="image.png" width="600" alt="Naki macOS 介面">
+  <img src="image.png" width="640" alt="Naki macOS 介面">
 </p>
 
 <p align="center">
@@ -13,48 +15,58 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sunalamye/Naki/releases/latest"><strong>📥 立即下載</strong></a> ·
-  <a href="#-快速開始"><strong>🚀 快速開始</strong></a> ·
-  <a href="#-功能展示"><strong>✨ 功能展示</strong></a>
+  <a href="https://github.com/Sunalamye/Naki/releases/latest"><strong>下載</strong></a> ·
+  <a href="#快速開始"><strong>快速開始</strong></a> ·
+  <a href="#功能"><strong>功能</strong></a> ·
+  <a href="#給開發者"><strong>給開發者</strong></a>
 </p>
 
 ---
 
-## ⚠️ 使用前必讀
-
-> **本專案僅供學習與研究用途！**
+> ### ⚠️ 使用前必讀
 >
-> - 🚫 **請勿使用主帳號** — 強烈建議使用小號或測試帳號
-> - ⚖️ 使用本工具可能違反雀魂服務條款，可能導致帳號被封禁
-> - 🙅 作者不對任何因使用本工具造成的損失負責
+> 本專案**僅供學習與研究**。使用本工具可能違反雀魂服務條款，導致帳號被封禁。
 >
-> **繼續使用即表示您已理解並接受以上風險。**
+> **請勿使用主帳號。** 作者不對任何損失負責。繼續使用即表示您接受以上風險。
 
 ---
 
-> **鳴き (Naki)** — 日麻術語，指「吃」「碰」「槓」等副露動作。
->
-> 這款 AI 會在關鍵時刻告訴你：**該鳴！**
+## 這是什麼
 
-## 這是什麼？
+「鳴き」是日麻術語，指吃、碰、槓這類副露動作。這款 AI 會在關鍵時刻告訴你：該鳴。
 
-Naki 是一款**原生 Apple 應用**，內建雀魂遊戲和 AI 助手。
+Naki 把雀魂和麻將 AI 包進同一個 App。不需要 Python、不需要 Docker、不需要瀏覽器外掛——
+打開就能用，AI 推薦直接顯示在遊戲畫面上。
 
-**不需要** Python、Docker、瀏覽器外掛，開箱即用。
+推論引擎是 [Mortal](https://github.com/Equim-chan/Mortal)，透過 Core ML 跑在 Apple Neural Engine 上。
 
-## ✨ 功能展示
+---
+
+## ⚠️ 舊版突然沒反應？請更新
+
+雀魂在 **2026 年 7 月把客戶端換成了 Unity 引擎**。
+
+這次改版讓舊版 Naki 的**自動打牌與畫面高亮完全失效**——
+過去的做法是操作網頁上的遊戲物件，而那些物件在新引擎裡已經不存在了。
+
+最新版已全面改走遊戲的通訊協定，兩項功能都已恢復，並在真實對局中驗證過。
+**如果你的 Naki 只剩側邊欄有推薦、遊戲畫面卻沒反應，更新就會好。**
+
+---
+
+## 功能
 
 <table>
 <tr>
 <td width="50%">
 
-### 🎯 即時 AI 推薦
+### 即時 AI 推薦
 
-每張牌都有 AI 評分，最佳選擇會直接在遊戲中高亮顯示。
+每張牌都有 AI 評分，最佳選擇直接在遊戲畫面中變色。
 
 - 顏色越亮 = 越推薦
-- 側邊欄顯示完整分析
-- 支援吃/碰/槓/立直/和牌推薦
+- 側邊欄顯示完整分析與 Q 值
+- 涵蓋打牌 / 吃 / 碰 / 槓 / 立直 / 和牌
 
 </td>
 <td width="50%">
@@ -71,164 +83,167 @@ Naki 是一款**原生 Apple 應用**，內建雀魂遊戲和 AI 助手。
 </td>
 <td width="50%">
 
-### 📱 跨平台支援
+### macOS 與 iOS 都能用
 
-macOS 和 iOS 都能用！
-
-- macOS：完整功能，含自動打牌
-- iOS/iPhone：查看 AI 推薦
-- 響應式 UI，深色模式支援
+- **macOS** — 完整功能，含自動打牌
+- **iPhone / iPad** — 查看 AI 推薦
+- 響應式 UI、支援深色模式
 
 </td>
 </tr>
 </table>
 
-### 🤖 三種模式任你選
+### 三種模式
 
 | 模式 | 說明 |
 |:---:|-----|
-| **關閉** | AI 背景運算但不顯示，完全手動 |
+| **關閉** | AI 在背景運算但不顯示，完全手動 |
 | **推薦** | 顯示 AI 推薦，你來決定怎麼打 |
 | **自動** | AI 全權代理，躺平看戲 |
 
-### 🎮 更多功能
+> 模式選擇會記住，重開 App 不會被重設。
 
-- **手牌顏色高亮** — AI 推薦的牌直接在遊戲畫面中變色（改遊戲自己的繪製顏色，不是疊圖層）
-- **動作按鈕高亮** — Mortal 建議吃/碰/槓時，遊戲的動作按鈕會一起標色
+### 還有這些
+
+- **手牌顏色高亮** — 建議打的牌直接在遊戲畫面中變色
+- **動作按鈕高亮** — 該吃該碰的時候，遊戲的動作按鈕會一起亮起來
 - **自動回應表情** — 被立直、被和牌時自動發表情
 - **MCP Server** — 讓 Claude Code 等 AI 助手直接操作遊戲
 
-## 🚀 快速開始
+---
+
+## 快速開始
 
 ### 系統需求
 
-| 平台 | 最低版本 | 架構 |
-|-----|---------|-----|
-| **macOS** | 26.0+ (Tahoe) | Apple Silicon (M1/M2/M3/M4) |
-| **iOS** | 26.0+ | A12+ / Apple Silicon |
+| 平台 | 版本 | 架構 |
+|-----|------|-----|
+| **macOS** | 26.0+（Tahoe） | Apple Silicon |
+| **iOS** | 26.0+ | A12 以上 |
 
 > **為什麼不支援 Intel Mac？**
-> AI 模型使用 Apple Neural Engine 加速運算，這是 Apple Silicon 獨有的硬體。
+> AI 模型跑在 Apple Neural Engine 上，那是 Apple Silicon 獨有的硬體。
 
-### 下載安裝
+### 安裝
 
-1. 前往 [Releases](https://github.com/Sunalamye/Naki/releases/latest) 下載 `Naki.dmg`
-2. 拖入 Applications 資料夾
-3. 首次開啟：右鍵 → 打開（繞過 Gatekeeper）
+1. 到 [Releases](https://github.com/Sunalamye/Naki/releases/latest) 下載 `Naki.dmg`
+2. 拖進「應用程式」
+3. 首次開啟：右鍵 →「打開」（繞過 Gatekeeper）
 
-### 開始使用
+### 使用
 
 1. 打開 Naki，雀魂會自動載入
-2. 登入你的帳號（**建議使用小號**）
-3. 開始對局，AI 推薦會即時顯示
-4. 在側邊欄選擇你想要的模式
+2. 登入帳號（**請用小號**）
+3. 開始對局，AI 推薦即時顯示
+4. 在側邊欄選擇你要的模式
 
-## 🔧 進階功能
+---
+
+## 給開發者
 
 <details>
-<summary><b>🛠 Debug API (HTTP Server)</b></summary>
+<summary><b>Debug API（HTTP，port 8765）</b></summary>
 
-應用啟動後會開啟 HTTP Server (port 8765)：
+App 啟動後會在本機開一個 HTTP server，只綁 loopback，同網段其他裝置連不到。
 
 ```bash
-# 查看 Bot 狀態
+# Bot 狀態、手牌、推薦
 curl http://localhost:8765/bot/status
 
-# 手動觸發打牌
+# 協定層目前的可用操作（吃/碰/槓/立直…）
+curl http://localhost:8765/bot/ops
+
+# 手動觸發一次自動打牌
 curl -X POST http://localhost:8765/bot/trigger
 
-# 執行 JavaScript
+# 在遊戲頁面執行 JS（注意：必須用 return 才有回傳值）
 curl -X POST http://localhost:8765/js -d 'return window.location.href'
 ```
+
+`/status` 會回傳檔案日誌的路徑；歷史日誌保留最近 5 次啟動。
 
 </details>
 
 <details>
-<summary><b>🤖 MCP Server (Claude Code 整合)</b></summary>
+<summary><b>MCP Server（Claude Code 整合）</b></summary>
 
-Naki 支援 [Model Context Protocol](https://modelcontextprotocol.io/)，提供 47 個工具讓 AI 助手直接操作遊戲。
+Naki 內建 [Model Context Protocol](https://modelcontextprotocol.io/) server，
+提供 42 個工具讓 AI 助手直接操作遊戲。與 Debug API 共用同一個 port。
 
-**配置 Claude Code：**
 ```bash
 claude mcp add --transport http naki http://localhost:8765/mcp
 ```
 
-**主要工具分類：**
-
 | 類別 | 工具範例 |
 |-----|---------|
-| Bot 控制 | `bot_status`, `bot_trigger`, `bot_sync` |
-| 遊戲操作 | `game_state`, `game_discard`, `game_action` |
-| 大廳控制 | `lobby_start_match`, `lobby_cancel_match` |
-| UI 控制 | `ui_names_hide`, `execute_js` |
-| 表情系統 | `game_emoji`, `game_emoji_list` |
+| Bot 控制 | `bot_status` · `bot_ops` · `bot_trigger` |
+| 遊戲動作 | `game_state` · `game_discard` · `game_action` |
+| 友人房 | `room_create` · `room_add_robot` · `room_start` · `room_quick_test` |
+| 大廳 | `lobby_start_match` · `lobby_account_info` |
+| 表情 | `game_emoji` · `game_emoji_listen` |
 
-詳見 [MCP Server 指南](docs/mcp-server-guide.md)
+`room_quick_test` 會一次跑完「建房 → 補人機 → 開局」，用來快速驗證自動打牌。
 
 </details>
 
 <details>
-<summary><b>🏗 架構設計</b></summary>
+<summary><b>架構</b></summary>
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              WebPage (雀魂 · Unity WebGL)                │
-│                         │                               │
-│         JavaScript：只做 WebSocket 收送與畫面標色         │
-│              naki-core / naki-websocket                 │
-└─────────────────────────┼───────────────────────────────┘
-                          ▼
+│              WebPage（雀魂 · Unity WebGL）               │
+│                          │                              │
+│      JavaScript：只做 WebSocket 收送與畫面標色           │
+│               naki-core / naki-websocket                │
+└──────────────────────────┼──────────────────────────────┘
+                           ▼
 ┌─────────────────────────────────────────────────────────┐
-│                   Swift 服務層                           │
+│                     Swift 服務層                         │
 │                                                         │
-│   MajsoulBridge → NativeBotController → LiqiActionSender│
-│   (Liqi→MJAI)    (純 Swift + Core ML)   (組包送出動作)   │
-│                         │                               │
-│         GameStateManager ← → SwiftUI Views              │
-│          (@Observable)       (響應式 UI)                 │
+│  MajsoulBridge  →  NativeBotController  →  LiqiActionSender
+│   (Liqi→MJAI)      (純 Swift + Core ML)     (組包送出動作)
+│                           │                             │
+│          GameStateManager  ←→  SwiftUI Views            │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**核心技術：**
-- **協議轉換**：Liqi Protobuf → MJAI JSON
-- **AI 推論**：Core ML + Mortal 神經網絡（純 Swift，無 FFI）
-- **狀態管理**：Swift @Observable 響應式架構
+**為什麼不去操作遊戲畫面？**
 
-### 為什麼是協定層而不是操作 UI
-
-雀魂客戶端已改用 **Unity WebGL**，遊戲邏輯與畫面都在 wasm 裡，
-JavaScript 端拿不到手牌、按鈕等物件——早期靠讀寫 Laya JS 物件、
-模擬點擊打牌的做法已全面失效。
-
-Naki 因此改為**所有讀取與動作都走 Liqi protobuf**：
-狀態從 WebSocket 封包解析，動作自行組包後送出。
+雀魂改用 Unity 後，遊戲邏輯與畫面都在 wasm 裡，JavaScript 拿不到任何遊戲物件。
+所以 Naki 一律走**協定層**：狀態從 WebSocket 封包解析，動作自行組包送出。
 協定欄位定義取自遊戲自身公開的資源檔 `res/proto/liqi.json`，不是反組譯客戶端得來的。
 
-畫面標色則是攔截 WebGL 繪製呼叫、改遊戲畫該張牌時用的顏色參數，
-位置由遊戲自己的變換矩陣決定，不需要推算螢幕座標。
+畫面高亮則是攔截繪圖呼叫、改遊戲畫那張牌時用的顏色參數——
+位置由遊戲自己給，不需要猜螢幕座標。
+
+技術細節見 [`docs/majsoul-unity-protocol.md`](docs/majsoul-unity-protocol.md)。
 
 </details>
 
-## 📋 開發計畫
+---
+
+## 開發計畫
 
 - [x] AI 推薦高亮
 - [x] 全自動打牌
-- [x] 動作按鈕推薦
-- [x] MCP Server 支援
-- [x] 手牌顏色高亮
+- [x] 動作按鈕高亮
+- [x] MCP Server
 - [x] 自動回應表情
+- [x] Unity 客戶端遷移
 - [ ] 三麻模式
 - [ ] 牌譜回放分析
 
-## 🙏 致謝
+---
 
-- [Mortal](https://github.com/Equim-chan/Mortal) — 強大的麻將 AI 引擎
+## 致謝
+
+- [Mortal](https://github.com/Equim-chan/Mortal) — 麻將 AI 引擎
 - [Akagi](https://github.com/shinkuan/Akagi) — Python 版參考實現
-- 雀魂 (Majsoul) — 優秀的麻將遊戲平台
+- 雀魂（Majsoul） — 很好的麻將遊戲
 
-## 📄 許可證
+## 許可證
 
-[AGPL-3.0 with Commons Clause](LICENSE) — 開源但禁止商業銷售
+[AGPL-3.0 with Commons Clause](LICENSE) — 開源，但禁止商業銷售。
 
 ---
 
@@ -237,14 +252,15 @@ Naki 因此改為**所有讀取與動作都走 Liqi protobuf**：
 ### 教育與學習目的
 
 本專案的開發目的是為了：
-- 學習 Swift/SwiftUI 原生 macOS/iOS 應用開發
+
+- 學習 Swift / SwiftUI 原生 macOS / iOS 應用開發
 - 研究 Core ML 機器學習模型整合
 - 理解 WebSocket 通訊協議與攔截技術
 - 探索 Protobuf 協議解析
 
 ### 使用風險
 
-1. **帳號風險**：使用本工具可能違反雀魂 (Majsoul) 的服務條款，可能導致您的遊戲帳號被暫停或永久封禁。**強烈建議使用小號或測試帳號**。
+1. **帳號風險**：使用本工具可能違反雀魂（Majsoul）的服務條款，可能導致您的遊戲帳號被暫停或永久封禁。**強烈建議使用小號或測試帳號**。
 
 2. **法律風險**：在某些地區，使用此類工具可能涉及法律問題。請確保您了解並遵守當地法律法規。
 
@@ -257,17 +273,17 @@ Naki 因此改為**所有讀取與動作都走 Liqi protobuf**：
 ### 第三方內容
 
 - 本專案使用 [Mortal](https://github.com/Equim-chan/Mortal) AI 模型
-- 雀魂 (Majsoul) 是貓糧工作室的註冊商標
+- 雀魂（Majsoul）是貓糧工作室的註冊商標
 - 本專案與貓糧工作室或悠星網絡無任何關聯
 
 **使用本軟體即表示您已閱讀、理解並同意以上所有條款。**
 
 ---
 
-<p align="center">
-  <sub>Made with ❤️ by a Mahjong lover who got tired of losing</sub>
-</p>
-
 ## ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Sunalamye/Naki&type=Date)](https://star-history.com/#Sunalamye/Naki&Date)
+
+<p align="center">
+  <sub>Made with ❤️ by a Mahjong lover who got tired of losing</sub>
+</p>
