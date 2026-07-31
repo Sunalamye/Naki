@@ -487,9 +487,10 @@ class WebViewModel {
     if let top = recommendations.first {
       switch top.actionType {
       case .discard, .riichi:
-        // 綠：建議打出的牌
+        // 綠：建議打出的牌。顏色是乘在牌面貼圖上的，太深會看不見牌，
+        // 所以只壓非主色通道，維持牌面可讀。
         if let idx = indices(of: top.displayTile).last {
-          marks.append(["index": idx, "color": [0.2, 0.9, 0.3]])
+          marks.append(["index": idx, "color": [0.45, 1.0, 0.5]])
         }
       case .chi, .pon, .kan:
         // 橙：副露會用掉的手牌（組合來自協定層的 oplist，不是猜的）
@@ -510,7 +511,7 @@ class WebViewModel {
         for tile in mjaiTiles {
           if let idx = indices(of: tile).first(where: { !used.contains($0) }) {
             used.insert(idx)
-            marks.append(["index": idx, "color": [1.0, 0.6, 0.1]])
+            marks.append(["index": idx, "color": [1.0, 0.75, 0.4]])
           }
         }
       default:

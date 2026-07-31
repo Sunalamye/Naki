@@ -395,146 +395,173 @@
     window.__nakiSendToSwift = sendToSwift;
 
     // ========================================
-    // 手牌高亮（Unity WebGL）
+    // 手牌高亮（Unity WebGL）— 改遊戲自己畫牌時用的顏色
     // ========================================
     //
-    // Unity 下沒有任何 per-tile DOM 或 Laya 物件可以改材質色（實測：頁面只暴露
-    // GameLoader.OnLuaGC 一個橋接方法、Emscripten 匯出裡沒有 Il2Cpp 符號），
-    // 所以改成「在 Unity 畫完的同一幀，直接往它的 framebuffer 疊色塊」：
-    //   requestAnimationFrame 包裝 → Unity 的 callback 跑完 → scissor + clear 畫矩形。
-    // 用 scissor+clear 而不是自繪 quad，是為了完全不碰 Unity 的 shader program /
-    // buffer 綁定狀態，只動 scissor box 與 clear color 並在畫完還原。
+    // 不自繪、不疊圖層、不推算座標：牌的位置與顏色本來就在 shader uniform 裡，
+    // 攔 `drawElements` 直接改就好（實測 2026-07-31）：
     //
-    // 牌的螢幕座標沒有任何官方資料可查（協定層只給牌的內容，不給版面），
-    // 因此改為**每次需要時從畫面自動量測**：readPixels 掃描底部橫列，
-    // 牌面是亮色、桌面是深色，連續亮區段即為一張牌。這樣換解析度／有副露
-    // 導致手牌變短時都會自動跟上，不需要維護寫死的常數。
+    //   自家手牌 = UI quad（`count === 6`），uniform 有
+    //     hlslcc_mtx4x4unity_ObjectToWorld[3]  → 世界座標（第 4 列即位置）
+    //     hlslcc_mtx4x4unity_MatrixVP[0..3]    → 遊戲自己的 view-projection
+    //     _Color                                → 顏色，改它就等於把牌染色
+    //   （桌上的 3D 牌是另一組 `count === 606`，uniform 用 `_Tint`；
+    //     自家手牌雀魂是當 sprite 畫的，所以走 UI 這條。）
+    //
+    // 投影約定（踩過）：clip[j] = dot(worldPos, VP 第 j 個分量組成的向量)，
+    // 也就是 `clip[j] = w0*VP[0][j] + w1*VP[1][j] + w2*VP[2][j] + w3*VP[3][j]`。
+    // 反過來寫（dot(VP[j], worldPos)）會得到數量級完全錯誤的結果。
+    //
+    // 手牌辨識：投影後 y 落在同一條線上、x 等距的那一排就是自家手牌，
+    // 依 x 排序即為畫面上由左至右的顯示序。整排位置由遊戲決定，
+    // 換解析度／有副露導致手牌變短都會自動跟上。
     (function () {
-        var TILE_MIN_WIDTH = 40;      // 小於此寬度的亮區段視為雜訊（花紋、UI 邊框）
-        var BRIGHT_THRESHOLD = 150;   // 牌面 vs 桌面的亮度分界
-        var BAR_HEIGHT = 22;          // 標記條高度
-        var BAR_GAP = 8;              // 標記條與牌頂的間距
+        var HAND_Y_MAX = -0.55;    // NDC y 低於此值才可能是自家手牌那一排
+        var Y_TOLERANCE = 0.02;    // 同一排的 y 容差
+        var X_TOLERANCE = 0.03;    // 對應到同一張牌的 x 容差
 
-        var marks = [];               // [{index, color:[r,g,b]}]
-        var boxes = null;             // [{x, w}]，含 top（牌頂 y，畫布座標）
-        var needCalib = false;
+        var marks = {};            // index -> [r,g,b]
+        var handXs = [];           // 上一幀量到的手牌 x（已排序），供本幀查索引
+        var handY = null;
+        var scan = [];             // 本幀候選點 [{x,y}]
         var installed = false;
+        var progCache = new Map();
 
-        function canvas() { return document.getElementById('unity-canvas'); }
-
-        function gl2() {
-            var c = canvas();
-            return c ? c.getContext('webgl2') : null;
+        function locsFor(gl, prog) {
+            if (progCache.has(prog)) return progCache.get(prog);
+            var o3 = gl.getUniformLocation(prog, 'hlslcc_mtx4x4unity_ObjectToWorld[3]');
+            var vp = [0, 1, 2, 3].map(function (i) {
+                return gl.getUniformLocation(prog, 'hlslcc_mtx4x4unity_MatrixVP[' + i + ']');
+            });
+            // 顏色 uniform 名稱依 shader 而異：自家手牌那組是 `_Tint`，
+            // 其他 UI 是 `_Color`。兩者語意相同（乘在貼圖上），取到哪個就用哪個。
+            var color = gl.getUniformLocation(prog, '_Tint')
+                     || gl.getUniformLocation(prog, '_Color');
+            var L = (o3 && vp[0] && color) ? { o3: o3, vp: vp, color: color } : null;
+            progCache.set(prog, L);
+            return L;
         }
 
-        // 讀一整列像素（WebGL 原點在左下，這裡的 y 是畫布座標（左上原點））
-        function readRow(gl, width, height, y) {
-            var buf = new Uint8Array(width * 4);
-            gl.readPixels(0, height - 1 - y, width, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-            return buf;
+        function project(gl, prog, L) {
+            var w = gl.getUniform(prog, L.o3);
+            if (!w) return null;
+            var vp = [
+                gl.getUniform(prog, L.vp[0]), gl.getUniform(prog, L.vp[1]),
+                gl.getUniform(prog, L.vp[2]), gl.getUniform(prog, L.vp[3])
+            ];
+            if (!vp[0]) return null;
+            var cw = w[0] * vp[0][3] + w[1] * vp[1][3] + w[2] * vp[2][3] + w[3] * vp[3][3];
+            if (!cw) return null;
+            var cx = w[0] * vp[0][0] + w[1] * vp[1][0] + w[2] * vp[2][0] + w[3] * vp[3][0];
+            var cy = w[0] * vp[0][1] + w[1] * vp[1][1] + w[2] * vp[2][1] + w[3] * vp[3][1];
+            return { x: cx / cw, y: cy / cw };
         }
 
-        function segmentsOf(buf, width) {
-            var out = [], start = -1;
-            for (var x = 0; x < width; x++) {
-                var v = (buf[x * 4] + buf[x * 4 + 1] + buf[x * 4 + 2]) / 3;
-                if (v > BRIGHT_THRESHOLD) { if (start < 0) start = x; }
-                else if (start >= 0) {
-                    if (x - start >= TILE_MIN_WIDTH) out.push({ x: start, w: x - start });
-                    start = -1;
+        /// 從本幀候選點裡挑出手牌那一排。
+        ///
+        /// 不能用「最低的一排」——畫面底部還有其他 UI（實測 y = -1 的角落元件會搶走），
+        /// 手牌的特徵是**同一條 y 上有最多相異 x**（一整排等距的牌），用這個判定才穩。
+        /// 同一張牌會被畫好幾個 quad（底、面、框），所以 x 要去重。
+        function resolveHandRow() {
+            var groups = [];   // [{y, xs:[]}]
+            for (var i = 0; i < scan.length; i++) {
+                var p = scan[i];
+                var g = null;
+                for (var j = 0; j < groups.length; j++) {
+                    if (Math.abs(groups[j].y - p.y) < Y_TOLERANCE) { g = groups[j]; break; }
                 }
+                if (!g) { g = { y: p.y, xs: [] }; groups.push(g); }
+                var dup = false;
+                for (var k = 0; k < g.xs.length; k++) {
+                    if (Math.abs(g.xs[k] - p.x) < X_TOLERANCE) { dup = true; break; }
+                }
+                if (!dup) g.xs.push(p.x);
             }
-            if (start >= 0 && width - start >= TILE_MIN_WIDTH) out.push({ x: start, w: width - start });
-            return out;
-        }
-
-        // 從當前 framebuffer 量測手牌位置。必須在 Unity 畫完的同一幀內呼叫。
-        function calibrate() {
-            var c = canvas(), gl = gl2();
-            if (!c || !gl) return null;
-            var W = c.width, H = c.height;
-
-            // 由下往上掃，取亮區段最多的那一列（= 落在手牌帶上）
             var best = null;
-            for (var y = H - 25; y > H - 300; y -= 6) {
-                var segs = segmentsOf(readRow(gl, W, H, y), W);
-                if (segs.length >= 3 && (!best || segs.length > best.segs.length)) {
-                    best = { y: y, segs: segs };
+            for (var m = 0; m < groups.length; m++) {
+                if (groups[m].xs.length >= 5 && (!best || groups[m].xs.length > best.xs.length)) {
+                    best = groups[m];
                 }
             }
-            if (!best) return null;
-
-            // 再往上找牌頂：以第一張牌的中心 x 逐列往上掃到不再是亮色為止
-            var cx = best.segs[0].x + Math.floor(best.segs[0].w / 2);
-            var top = best.y;
-            for (var yy = best.y; yy > H - 320; yy--) {
-                var px = new Uint8Array(4);
-                gl.readPixels(cx, H - 1 - yy, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-                if ((px[0] + px[1] + px[2]) / 3 > BRIGHT_THRESHOLD) top = yy;
-                else break;
+            if (best) {
+                handXs = best.xs.slice().sort(function (a, b) { return a - b; });
+                handY = best.y;
             }
-
-            best.segs.top = top;
-            return best.segs;
         }
 
-        function draw() {
-            if (!marks.length) return;
-            var c = canvas(), gl = gl2();
-            if (!c || !gl) return;
-
-            if (needCalib || !boxes) {
-                boxes = calibrate();
-                needCalib = false;
-                if (!boxes) return;
+        function indexOfTile(p) {
+            if (handY === null || Math.abs(p.y - handY) > Y_TOLERANCE) return -1;
+            for (var i = 0; i < handXs.length; i++) {
+                if (Math.abs(handXs[i] - p.x) < X_TOLERANCE) return i;
             }
-
-            var prevScissorOn = gl.getParameter(gl.SCISSOR_TEST);
-            var prevBox = gl.getParameter(gl.SCISSOR_BOX);
-            var prevClear = gl.getParameter(gl.COLOR_CLEAR_VALUE);
-
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-            gl.enable(gl.SCISSOR_TEST);
-
-            var barY = Math.max(0, boxes.top - BAR_GAP - BAR_HEIGHT);
-            for (var i = 0; i < marks.length; i++) {
-                var m = marks[i];
-                var b = boxes[m.index];
-                if (!b) continue;
-                gl.scissor(b.x, c.height - barY - BAR_HEIGHT, b.w, BAR_HEIGHT);
-                gl.clearColor(m.color[0], m.color[1], m.color[2], 1);
-                gl.clear(gl.COLOR_BUFFER_BIT);
-            }
-
-            if (!prevScissorOn) gl.disable(gl.SCISSOR_TEST);
-            gl.scissor(prevBox[0], prevBox[1], prevBox[2], prevBox[3]);
-            gl.clearColor(prevClear[0], prevClear[1], prevClear[2], prevClear[3]);
+            return -1;
         }
 
-        function install() {
+        function install(gl) {
             if (installed) return;
             installed = true;
+
+            var origDraw = gl.drawElements.bind(gl);
+            gl.drawElements = function (mode, count, type, offset) {
+                if (count !== 6) return origDraw(mode, count, type, offset);
+
+                var prog = gl.getParameter(gl.CURRENT_PROGRAM);
+                if (!prog) return origDraw(mode, count, type, offset);
+
+                var L;
+                try { L = locsFor(gl, prog); } catch (e) { L = null; }
+                if (!L) return origDraw(mode, count, type, offset);
+
+                var p;
+                try { p = project(gl, prog, L); } catch (e) { p = null; }
+                if (!p || p.y > HAND_Y_MAX) return origDraw(mode, count, type, offset);
+
+                if (scan.length < 2000) scan.push(p);
+
+                var idx = indexOfTile(p);
+                var color = (idx >= 0) ? marks[idx] : null;
+                if (!color) return origDraw(mode, count, type, offset);
+
+                // 只在這一次 draw 期間覆寫顏色，畫完立刻還原，不留任何狀態給遊戲
+                var prev = gl.getUniform(prog, L.color);
+                gl.uniform4f(L.color, color[0], color[1], color[2],
+                             prev && prev.length > 3 ? prev[3] : 1);
+                var r = origDraw(mode, count, type, offset);
+                if (prev && prev.length > 3) {
+                    gl.uniform4f(L.color, prev[0], prev[1], prev[2], prev[3]);
+                }
+                return r;
+            };
+
+            // 一幀結束才把量到的 x 定案，供下一幀查索引（畫的當下還不知道總共幾張）
             var origRAF = window.requestAnimationFrame.bind(window);
             window.requestAnimationFrame = function (cb) {
                 return origRAF(function (t) {
-                    var r = cb(t);          // Unity 在這裡畫完整幀
-                    try { draw(); } catch (e) { /* 疊畫失敗不能影響遊戲本身 */ }
+                    var r = cb(t);
+                    resolveHandRow();
+                    scan = [];
                     return r;
                 });
             };
         }
 
+        function context() {
+            var c = document.getElementById('unity-canvas');
+            return c ? c.getContext('webgl2') : null;
+        }
+
         window.__nakiHighlight = {
-            /// marks: [{index, color:[r,g,b]}]，index 為手牌由左至右的顯示序（含摸到的牌）
-            set: function (newMarks) {
-                marks = Array.isArray(newMarks) ? newMarks : [];
-                needCalib = true;       // 手牌可能已變動，重新量測
-                install();
-                return marks.length;
+            /// marks: [{index, color:[r,g,b]}]，index = 手牌由左至右的顯示序（含摸到的牌）
+            set: function (list) {
+                marks = {};
+                (list || []).forEach(function (m) { marks[m.index] = m.color; });
+                var gl = context();
+                if (gl) install(gl);
+                return Object.keys(marks).length;
             },
-            clear: function () { marks = []; boxes = null; return true; },
+            clear: function () { marks = {}; return true; },
             state: function () {
-                return { marks: marks, boxes: boxes, tileCount: boxes ? boxes.length : 0 };
+                return { marks: marks, handTileCount: handXs.length, handY: handY, handXs: handXs };
             }
         };
     })();
