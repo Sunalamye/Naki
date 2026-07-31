@@ -298,9 +298,69 @@ window.__nakiWebSocket.sendRaw(base64)
 
 ### 其他未探測項
 
-- Unity 側是否有可從 JS 呼叫的匯出函式（`unityFramework` / `SendMessage` 類介面）
-- 牌面高亮、UI 覆蓋等視覺輔助在 Unity 下的可行做法
 - 防閒置：Unity 下如何觸發／是否需要 Naki 自己補送 `.lq.Route.heartbeat`
+
+---
+
+## Unity 執行期可控面（2026-07-31 實測補充）
+
+**已驗證**：Unity instance **拿得到**，先前「完全未探測」的判定作廢。
+
+### 怎麼取到 instance（關鍵）
+
+`window.unityFramework` 是 **`null`**（`typeof` 回 `"object"` 會誤導），
+`window.unityInstance` 也**不存在**。真正的 instance 存在頁面 inline script 的
+**script scope**（`let`/`const` 宣告不掛上 `window`），所以只能用**裸識別字**取：
+
+```js
+// ❌ 取不到
+window.unityInstance            // undefined
+window.unityFramework           // null
+
+// ✅ 取得到（Debug Server /js 在 page world 執行）
+return typeof unityInstance === 'undefined' ? null : Object.keys(unityInstance);
+// → ["Module", "SetFullscreen", "SendMessage", "Quit", "GetMemoryInfo"]
+```
+
+線索來自 `String(window.onUnityReady)`——它的函式本體是
+`function onUnityReady(instance) { unityInstance = instance; … }`。
+
+### 實測可觸及的面
+
+| 面 | 狀態 | 備註 |
+|----|------|------|
+| `unityInstance.SendMessage(obj, method, value)` | ✅ 存在（`function`） | Unity 標準 JS→C# 橋；**需要知道 GameObject 名稱與 public 方法名**，雀魂並未公開，未驗證有無可用目標 |
+| `unityInstance.Module`（Emscripten） | ✅ 565 個 key | |
+| `Module.HEAP8/16/32/U8/U16/U32/F32/F64` | ✅ 全部在 | 可讀寫整塊線性記憶體 |
+| `Module.ccall` / `cwrap` | ✅ `function` | 但可呼叫的匯出只有下面 17 個 |
+| `Module._malloc` / `_free` | ✅ | |
+| `Module.addFunction` / `getValue` / `setValue` | ❌ `undefined` | 未編入 |
+| Il2Cpp / Mono 符號 | ❌ **零個** | `Object.keys(Module)` 過濾 `il2cpp|mono` = 空 |
+
+**全部匯出函式（`_` 開頭，共 17 個）**——沒有任何遊戲邏輯函式：
+
+```
+_GetFakemodTimeInSeconds  _ReleaseKeys  _getMemInfo
+_SendMessageFloat  _SendMessageString  _SendMessage  _SetFullscreen
+_main  _htonl  _htons  _ntohs  _strlen
+_malloc  _free  _emscripten_builtin_memalign  _setThrew  _saveSetjmp
+```
+
+WebGL 相關只有 `webglContextAttributes`、`matchWebGLToCanvasSize`（設定值，非繪圖介面）。
+
+### 對「控制牌的顏色 / 高亮」的結論
+
+| 做法 | 可行性 |
+|------|--------|
+| Unity 內直接改牌面材質色 | ❌ **做不到**。無 Il2Cpp 符號、無遊戲邏輯匯出，只有 `SendMessage` 一條窄門且目標名未知 |
+| 掃 / 改 `HEAPU8` 找牌色狀態 | ⚠️ 理論可行但需逆向 wasm 佈局，且每次改版失效；**不建議** |
+| Hook WebGL context 攔繪圖呼叫染色 | ⚠️ 需辨識哪個 draw call 是哪張牌，極脆弱 |
+| **DOM 疊層**（在 canvas 上蓋半透明標記） | ✅ 最務實。`<canvas id="unity-canvas">` 是 `#unity-container` 的**唯一子元素**，`position: static`、無 z-index，疊一層絕對定位元素不會被覆蓋。**注意**：attribute 尺寸 2560×1440 但 CSS 實際 1007×566，座標需自行換算；牌的螢幕位置仍要靠校準，會隨版面漂移 |
+| 協定層裝扮（`.lq.Lobby.useCommonView` / `saveCommonViews`） | ✅ 真實存在，但只能換**整套**牌背／牌桌皮膚（`ViewSlot{slot, item_id, type}`，需帳號已擁有該 item），**不能單張高亮** |
+
+> 現況：`HighlightTools.swift` 的 6 個高亮工具在 Unity 下全數回報 unavailable，
+> 推薦改由 Naki 原生 SwiftUI 面板呈現。上表的 DOM 疊層是**唯一**能回到遊戲畫面內的路徑，
+> 但**尚未實作、尚未驗證**。
 
 ### 建議的驗證順序
 
