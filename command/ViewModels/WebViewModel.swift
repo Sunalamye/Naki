@@ -478,26 +478,20 @@ class WebViewModel: WebViewModelProtocol {
   private func syncGameHighlight() {
     guard let page = webPage else { return }
 
+    // 標記的是「哪一張牌」而不是「第幾張」。
+    // JS 端從遊戲畫牌時的圖集 UV 認出牌面，所以這裡只要給牌名，
+    // 不必知道它排在第幾個——手牌張數變動、立直抬牌、畫面邊緣混入別的牌
+    // 都不再影響。
     var marks: [[String: Any]] = []
-
-    // 顯示序 = 已排序的手牌 + 摸到的牌（摸牌在雀魂 UI 上分開放在最右）
-    var displayTiles = tehaiTiles
-    if let tsumo = tsumoTile { displayTiles.append(tsumo) }
-
-    func indices(of tile: String) -> [Int] {
-      displayTiles.enumerated().filter { $0.element == tile }.map(\.offset)
-    }
 
     if let top = recommendations.first {
       switch top.actionType {
       case .discard, .riichi:
-        // 綠：建議打出的牌。顏色是乘在牌面貼圖上的，太深會看不見牌，
-        // 所以只壓非主色通道，維持牌面可讀。
-        if let idx = indices(of: top.displayTile).last {
-          marks.append(["index": idx, "color": [0.45, 1.0, 0.5]])
-        }
+        // 綠：建議打出的牌。顏色是乘在牌面貼圖上的，太深會看不見牌面，
+        // 所以只壓非主色通道。
+        marks.append(["tile": top.displayTile, "color": [0.45, 1.0, 0.5]])
       case .chi, .pon, .kan:
-        // 橙：副露會用掉的手牌（組合來自協定層的 oplist，不是猜的）
+        // 橙：副露會用掉的手牌（組合取自協定層的 oplist，不是推測）
         let snapshot = LiqiOperationStore.shared.latest
         let liqiType: LiqiOperationType? = {
           switch top.actionType {
@@ -508,15 +502,10 @@ class WebViewModel: WebViewModelProtocol {
           }
         }()
         let combo = liqiType.flatMap { snapshot?.operation(of: $0) }?.combination.first
-        let mjaiTiles = (combo?.split(separator: "|") ?? []).compactMap {
+        for tile in (combo?.split(separator: "|") ?? []).compactMap({
           LiqiTileCode.mjai(fromMajsoul: String($0))
-        }
-        var used = Set<Int>()
-        for tile in mjaiTiles {
-          if let idx = indices(of: tile).first(where: { !used.contains($0) }) {
-            used.insert(idx)
-            marks.append(["index": idx, "color": [1.0, 0.75, 0.4]])
-          }
+        }) {
+          marks.append(["tile": tile, "color": [1.0, 0.75, 0.4]])
         }
       default:
         break   // 和了 / 過：沒有對應的手牌可標
@@ -542,7 +531,7 @@ class WebViewModel: WebViewModelProtocol {
       .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
     let script = (marks.isEmpty && popup == "null")
       ? "window.__nakiHighlight?.clear();"
-      : "window.__nakiHighlight?.set(\(payload), \(popup), \(displayTiles.count));"
+      : "window.__nakiHighlight?.set(\(payload), \(popup));"
 
     Task { _ = try? await page.callJavaScript(script) }
   }
