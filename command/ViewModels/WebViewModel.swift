@@ -742,18 +742,12 @@ class WebViewModel: WebViewModelProtocol {
 
     // 先檢查是否還有操作可執行（協定層 oplist）
     guard let snapshot = LiqiOperationStore.shared.pending else {
-      // 打牌 (discard) 不需要等待 oplist，直接執行（維持舊語意）
-      // ⚠️ 未驗證：notify 未帶 OptionalOperationList 時，伺服器是否仍接受這筆 inputOperation
-      if actionType == .discard {
-        debugServer?.addLog("打牌: 無 oplist, 直接送出")
-        await executeAutoPlayAction(actionType: actionType, tileName: tileName)
-        try? await Task.sleep(nanoseconds: 300_000_000)  // 0.3s
-        debugServer?.addLog("✅ 打牌已發送")
-        clearExecutionIfCurrent(executionId)
-        return
-      }
-
-      // 其他動作需要等待 oplist
+      // 沒有 oplist 就不送。
+      //
+      // 舊行為是「打牌不等 oplist，直接送出」——那等於在沒有伺服器授權的情況下
+      // 硬送，實測有一半以上根本不是我們的回合而被丟棄，而且會繞過終局保護
+      // （伺服器可能正提供自摸，我們卻盲送打牌）。合法性的權威在 oplist，
+      // 缺資料一律 fail closed，等下一批 oplist 到齊再說。
       if attempt < maxRetryAttempts {
         if attempt == 1 || attempt % 10 == 0 {
           debugServer?.addLog("等待 oplist \(attempt)/\(maxRetryAttempts)")
@@ -773,12 +767,60 @@ class WebViewModel: WebViewModelProtocol {
       return
     }
 
-    // 有操作，執行動作
-    debugServer?.addLog("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes)")
-    await executeAutoPlayAction(actionType: actionType, tileName: tileName)
+    // 送出前的唯一決策點。
+    //
+    // 不直接照 `actionType` 送——那是「觸發當下」的 AI 推薦，
+    // 中間隔了 1.0–1.8 秒的延遲，這段期間 oplist 可能已經換了一批。
+    // Resolver 會做三件事：終局保護（伺服器提供自摸就一定自摸，凌駕 AI）、
+    // 模式閘門、以及確認該動作真的在這批 oplist 裡。
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot,
+      recommendations: recommendations,
+      mode: autoPlayController?.state.mode ?? .off,
+      seat: gameState.playerId)
+
+    let resolvedAction: Recommendation.ActionType
+    let resolvedTile: String
+    switch decision {
+    case .send(let action, let tile):
+      resolvedAction = action
+      resolvedTile = tile.isEmpty ? tileName : tile
+    case .surfaceOnly(let action, _):
+      debugServer?.addLog("模式非自動，僅顯示不送出: \(action.rawValue)")
+      clearExecutionIfCurrent(executionId)
+      return
+    case .none(let reason):
+      debugServer?.addLog("⏭️ 不送出: \(reason)")
+      clearExecutionIfCurrent(executionId)
+      return
+    }
+
+    if resolvedAction != actionType {
+      debugServer?.addLog("⚠️ 決策覆蓋: AI 建議 \(actionType.rawValue) → 實際送出 \(resolvedAction.rawValue)")
+    }
+
+    // 送出前最後確認這批 oplist 沒被換掉（決策到送出之間對局可能已往前走）
+    guard AutoPlayDecisionResolver.isStillValid(
+      decidedOn: snapshot, current: LiqiOperationStore.shared.pending)
+    else {
+      debugServer?.addLog("⏭️ oplist 已更新，捨棄過期決策 (seq=\(snapshot.sequence))")
+      clearExecutionIfCurrent(executionId)
+      return
+    }
+
+    debugServer?.addLog("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes) → \(resolvedAction.rawValue)")
+    await executeAutoPlayAction(actionType: resolvedAction, tileName: resolvedTile)
+
+    // 和牌是終局動作，送出即結束這一手，不需要任何重試
+    if resolvedAction == .hora {
+      debugServer?.addLog("✅ 已宣告和牌")
+      LiqiOperationStore.shared.markHandled(snapshot.sequence)
+      clearExecutionIfCurrent(executionId)
+      return
+    }
 
     // pass 操作：較長間隔 (0.5s)，最多重試 5 次
-    if actionType == .none {
+    if resolvedAction == .none {
       let maxPassRetries = 5
       if attempt >= maxPassRetries {
         debugServer?.addLog("✅ Pass 已發送 (第 \(attempt) 次)")
@@ -787,14 +829,14 @@ class WebViewModel: WebViewModelProtocol {
       }
       try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
       await checkAndRetryIfNeeded(
-        actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
+        actionType: resolvedAction, tileName: resolvedTile, attempt: attempt, executionId: executionId)
       return
     }
 
     // 其他操作：0.1 秒後檢查是否成功
     try? await Task.sleep(nanoseconds: 100_000_000)
     await checkAndRetryIfNeeded(
-      actionType: actionType, tileName: tileName, attempt: attempt, executionId: executionId)
+      actionType: resolvedAction, tileName: resolvedTile, attempt: attempt, executionId: executionId)
   }
 
   /// 檢查動作是否成功，失敗則重試
