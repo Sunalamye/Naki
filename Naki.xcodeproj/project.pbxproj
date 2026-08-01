@@ -1168,7 +1168,7 @@
 			repositoryURL = "https://github.com/Sunalamye/MortalSwift";
 			requirement = {
 				kind = upToNextMinorVersion;
-				minimumVersion = 0.4.0;
+				minimumVersion = 0.5.0;
 			};
 		};
 		ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */ = {
