@@ -41,7 +41,7 @@ curl -X POST http://127.0.0.1:8765/js \
 
 | Property | Current value |
 |----------|---------------|
-| App version | 2.5.0 |
+| App version | 2.6.0 |
 | macOS target | 26.0 |
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |

@@ -273,84 +273,47 @@ class WebViewModel: WebViewModelProtocol {
     // 相關注入只會靜默失敗形成假訊號；推薦一律由原生面板
     // (Views/RecommendationView.swift、Views/BotStatusView.swift) 呈現。
 
-    guard autoPlayController?.state.mode == .auto, currentExecutionId == nil else { return }
+    let snapshot = LiqiOperationStore.shared.pending
+    let decision = AutoPlayGate.evaluate(.init(
+      isAutoMode: autoPlayController?.state.mode == .auto,
+      hasActionInFlight: currentExecutionId != nil,
+      snapshot: snapshot,
+      recommendations: recommendations,
+      now: Date(),
+      callPassGrace: Self.callPassGrace))
 
-    // 檢查是否有可用操作。
-    // 舊路徑讀 `DesktopMgr.Inst.oplist`（Laya），Unity 客戶端已不存在；
-    // 改讀協定層快照：MajsoulBridge 解析 notify 時存下的 OptionalOperationList。
-    guard let snapshot = LiqiOperationStore.shared.pending else { return }
+    switch decision {
+    case .skip:
+      // 刻意不記 log：這條路一秒跑一次，記下來會把 log 淹掉。
+      // 要看被哪一關擋住時，改用 /bot/deep（回傳同一組輸入）重新判一次。
+      return
 
-    // 副露機會但 Mortal 沒給推薦 → 主動送「過」。
-    //
-    // Mortal 判斷不值得吃碰時 `bot.react` 直接回 nil，推薦清單是空的。
-    // 但伺服器仍在等我方回應（實測 time_fixed 300 秒），沒人送 cancel 的話
-    // 整局就停在那裡，直到逾時才由伺服器代打——這是「輪到我卻沒推薦、對局卡住」的成因。
-    // 只在「確實是我方的副露機會」時補送，且以 sequence 標記已處理避免重複送。
-    if recommendations.isEmpty {
-      // ⚠️ 伺服器提供和牌時，絕不因為「模型沒意見」而放過。
-      //
-      // 這裡曾經是漏和的成因：Mortal 判斷不出和牌時 `react` 回 nil，
-      // 推薦清單是空的，於是整段直接 return，resolver 根本沒被呼叫——
-      // 而 resolver 裡明明寫著「伺服器說可以和就一定和」。
-      //
-      // 更糟的是榮和被歸類為 isCallOpportunity，所以下面那段會**主動送出「過」**，
-      // 等於自己棄和，而且送完就 markHandled 不再有第二次機會。
-      //
-      // 「能不能和」的權威在伺服器，不在模型。這裡直接把決策交還給 resolver。
-      if snapshot.horaOperation != nil {
-        logAutoPlayEvent("🎯 oplist 有和牌但模型無推薦 → 交給 resolver (ops=\(snapshot.rawTypes))")
-        triggerAutoPlayNow(delay: 0, forcedAction: .hora)
-        return
-      }
+    case .forceHora:
+      guard let snapshot else { return }
+      logAutoPlayEvent("🎯 oplist 有和牌但模型無推薦 → 交給 resolver (ops=\(snapshot.rawTypes))")
+      triggerAutoPlayNow(delay: 0, forcedAction: .hora)
 
-      // ⚠️ 「此刻推薦是空的」≠「模型決定不做」。
-      //
-      // 這條路徑是 1 秒輪詢，而推論是非同步的：oplist 到達後 ~50–100ms 才有結果，
-      // 而 `recommendations` 還要再經過 updateUIAfterBotResponse 才同步過來。
-      // 輪詢若在這中間跑到，看到的是**上一巡清空後的空清單**，卻把它當成
-      // 「Mortal 判斷不做」而主動送出「過」。
-      //
-      // 2026-08-01 live 實測兩次：
-      //   20:57:10.704 oplist types=[3] → .707 送出過 → .791 推薦才算完
-      //   20:57:47.183 oplist types=[3] → .238 推薦 pon@85.9% → .638 仍送出過
-      // 第二次直接把模型 85.9% 的碰蓋成過。
-      //
-      // 伺服器給的思考時間是 300 秒（實測），等幾秒完全安全；
-      // 搶在推論完成前送出則不可逆。所以加一段寬限期：快照到達後
-      // 未滿 `callPassGrace` 就先不送，讓推論有機會完成。
-      let sinceCapture = Date().timeIntervalSince(snapshot.capturedAt)
-      if sinceCapture < Self.callPassGrace {
-        return
-      }
-
+    case .sendPass:
+      guard let snapshot,
+            let callOp = snapshot.operations.compactMap({ $0.type })
+              .first(where: { $0.isCallOpportunity })
+      else { return }
       // pass 要送 inputChiPengGang 還是 inputOperation，取決於這批機會的類型
       // （吃/碰/大明槓走前者，榮和等走後者），故從快照裡實際的機會操作取通道。
-      if let callOp = snapshot.operations.compactMap({ $0.type }).first(where: { $0.isCallOpportunity }) {
-        logAutoPlayEvent("⏰ 副露機會無推薦(Mortal 判斷不做) → 自動送出過 (ops=\(snapshot.rawTypes))")
-        LiqiOperationStore.shared.markHandled(snapshot.sequence)
-        let channel = callOp.channel
-        Task { [weak self] in
-          guard let self else { return }
-          let result = await self.liqiSender.pass(channel: channel)
-          self.debugServer?.addLog(result.logLine)
-        }
+      logAutoPlayEvent("⏰ 副露機會無推薦(Mortal 判斷不做) → 自動送出過 (ops=\(snapshot.rawTypes))")
+      LiqiOperationStore.shared.markHandled(snapshot.sequence)
+      let channel = callOp.channel
+      Task { [weak self] in
+        guard let self else { return }
+        let result = await self.liqiSender.pass(channel: channel)
+        self.debugServer?.addLog(result.logLine)
       }
-      return
+
+    case .proceed:
+      debugServer?.addLog("⏰ 計時器: 檢查重新觸發 (ops=\(snapshot?.rawTypes ?? []))")
+      // 共用事件路徑的去抖邏輯（lastTriggerKey/lastTriggerTime），避免同一推薦被重複觸發
+      triggerAutoPlayIfNeeded()
     }
-
-    guard let firstRec = recommendations.first else { return }
-
-    // discard：必須仍有打牌/立直操作，代表確實輪到自己打牌；
-    // 若已換成別家回合或只剩吃碰機會，則不重新觸發，避免送出遲到／重複的打牌。
-    if firstRec.actionType == .discard,
-      !snapshot.contains(.discard), !snapshot.contains(.riichi)
-    {
-      return
-    }
-
-    debugServer?.addLog("⏰ 計時器: 檢查重新觸發 (ops=\(snapshot.rawTypes))")
-    // 共用事件路徑的去抖邏輯（lastTriggerKey/lastTriggerTime），避免同一推薦被重複觸發
-    triggerAutoPlayIfNeeded()
   }
 
   // MARK: - Native Bot Methods
