@@ -411,17 +411,8 @@ struct AdvancedSettingsSheet: View {
     @Environment(\.webViewModel) private var viewModel
     @Environment(\.dismiss) private var dismiss
 
-    // AI 設定
-    @State private var temperature: Double = 0.3
-    @State private var showRotatingEffect: Bool = false  // 預設關閉旋轉效果
-
     // 隱私設定
     @AppStorage("hidePlayerNames") private var hidePlayerNames: Bool = false
-
-    // 位置校準
-    @State private var tileSpacing: Double = 96.0
-    @State private var offsetX: Double = -200.0
-    @State private var offsetY: Double = 0.0
 
     var body: some View {
         #if os(macOS)
@@ -481,48 +472,6 @@ struct AdvancedSettingsSheet: View {
 
     private var settingsForm: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // AI 設定
-            GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("推薦溫度")
-                            Spacer()
-                            Text("\(temperature, specifier: "%.2f")")
-                                .foregroundColor(.secondary)
-                        }
-                        Slider(value: $temperature, in: 0.1...2.0, step: 0.1)
-                            .accessibilityIdentifier("temperature-slider")
-                            .accessibilityLabel("推薦溫度")
-                            .accessibilityValue(String(format: "%.2f", temperature))
-                    }
-
-                    Text("較低溫度 = 更確定性的推薦，較高溫度 = 更多樣化的推薦")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Divider()
-
-                    // 旋轉高亮效果開關
-                    Toggle(isOn: $showRotatingEffect) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("顯示旋轉高亮效果")
-                            Text("啟用後會在推薦牌上顯示額外的旋轉光環效果")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .onChange(of: showRotatingEffect) { _, newValue in
-                        viewModel?.setHighlightSettings(showRotatingEffect: newValue)
-                    }
-                    .accessibilityIdentifier("rotating-effect-toggle")
-                    .accessibilityLabel("顯示旋轉高亮效果")
-                    .accessibilityValue(showRotatingEffect ? "開" : "關")
-                }
-            } label: {
-                Label("AI 設定", systemImage: "brain")
-            }
-
             // 隱私設定
             GroupBox {
                 VStack(alignment: .leading, spacing: 12) {
@@ -545,79 +494,6 @@ struct AdvancedSettingsSheet: View {
                 Label("隱私設定", systemImage: "eye.slash")
             }
 
-            #if os(macOS)
-            // 位置校準 (僅 macOS)
-            GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    // 手牌間距
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("手牌間距")
-                            Spacer()
-                            Text("\(Int(tileSpacing)) px")
-                                .foregroundColor(.secondary)
-                        }
-                        Slider(value: $tileSpacing, in: 50...100, step: 1)
-                            .onChange(of: tileSpacing) { _, _ in
-                                updateCalibration()
-                            }
-                            .accessibilityIdentifier("tile-spacing-slider")
-                            .accessibilityLabel("手牌間距")
-                            .accessibilityValue("\(Int(tileSpacing)) 像素")
-                    }
-
-                    // 水平偏移
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("水平偏移")
-                            Spacer()
-                            Text("\(Int(offsetX)) px")
-                                .foregroundColor(.secondary)
-                        }
-                        Slider(value: $offsetX, in: -200...200, step: 5)
-                            .onChange(of: offsetX) { _, _ in
-                                updateCalibration()
-                            }
-                            .accessibilityIdentifier("horizontal-offset-slider")
-                            .accessibilityLabel("水平偏移")
-                            .accessibilityValue("\(Int(offsetX)) 像素")
-                    }
-
-                    // 垂直偏移
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("垂直偏移")
-                            Spacer()
-                            Text("\(Int(offsetY)) px")
-                                .foregroundColor(.secondary)
-                        }
-                        Slider(value: $offsetY, in: -200...200, step: 5)
-                            .onChange(of: offsetY) { _, _ in
-                                updateCalibration()
-                            }
-                            .accessibilityIdentifier("vertical-offset-slider")
-                            .accessibilityLabel("垂直偏移")
-                            .accessibilityValue("\(Int(offsetY)) 像素")
-                    }
-
-                    Divider()
-
-                    // 按鈕
-                    HStack {
-                        Button("重置預設") {
-                            tileSpacing = 96.0
-                            offsetX = -200.0
-                            offsetY = 0.0
-                            updateCalibration()
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("reset-calibration-button")
-                    }
-                }
-            } label: {
-                Label("位置校準", systemImage: "arrow.up.left.and.arrow.down.right")
-            }
-            #endif
 
             // Bot 管理
             GroupBox {
@@ -696,10 +572,6 @@ struct AdvancedSettingsSheet: View {
             #endif
         }
         .padding()
-    }
-
-    private func updateCalibration() {
-        // TODO: 實作校準更新功能
     }
 }
 
