@@ -1,257 +1,210 @@
-# MCP Server 指南
+# Naki MCP Server
 
-**版本**: 2.0.0
-**工具數量**: 47 個
-**協議版本**: MCP 2025-03-26
+**最後核對**：2026-08-01，live `tools/list`  
+**Endpoint**：`http://127.0.0.1:8765/mcp`  
+**工具數**：42
 
----
+MCP 與 Debug HTTP API 由同一個 Naki process／loopback port 提供。所有工具名稱與 schema 以 live `tools/list` 為準；本文件不保存已移除的 Laya 工具。
 
-## 概述
-
-Naki 支援 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)，讓 AI 助手（如 Claude Code）可以直接調用 Naki 的功能，實現遊戲狀態監控、Bot 控制、自動打牌等操作。
-
-### 特點
-
-- **純 Swift 實現** - 無需 Node.js，HTTP transport
-- **47 個工具** - 完整的遊戲控制能力
-- **向後相容** - 現有 HTTP 端點繼續可用
-- **JSON-RPC 2.0** - 標準 MCP 協議
-
----
-
-## 快速開始
-
-### 1. 啟動 Naki
-
-確保 Naki app 已啟動，MCP Server 會自動在 port 8765 運行。
-
-### 2. 配置 Claude Code
+## 設定
 
 ```bash
-claude mcp add --transport http naki http://localhost:8765/mcp
+claude mcp add --transport http naki http://127.0.0.1:8765/mcp
 ```
 
-### 3. 驗證連接
+Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做 `tools/list` 再選工具，不可依舊 catalog 猜名稱。
 
-```bash
-curl -X POST http://localhost:8765/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}'
-```
+## 42 個現行工具
 
----
+### 系統（4）
 
-## 工具列表 (47 個)
+| Tool | 作用 |
+|------|------|
+| `get_status` | server／port／時間／log path |
+| `get_help` | current JSON help |
+| `get_logs` | 近期記憶體 log |
+| `clear_logs` | 清除記憶體 log |
 
-### 系統類 (4 個)
+### Bot（7）
 
-| 工具名稱 | 說明 |
-|---------|------|
-| `get_status` | 獲取 Server 狀態和埠號 |
-| `get_help` | 獲取完整 API 文檔 (JSON) |
-| `get_logs` | 獲取 Debug 日誌（最多 10,000 條） |
-| `clear_logs` | 清空所有日誌 |
-
-### Bot 控制類 (7 個)
-
-| 工具名稱 | 說明 |
-|---------|------|
-| `bot_status` | 獲取 Bot 狀態、手牌、AI 推薦 |
+| Tool | 作用 |
+|------|------|
+| `bot_status` | Bot、手牌、mode、推薦 |
 | `bot_trigger` | 手動觸發自動打牌 |
-| `bot_ops` | 探索可用的副露操作（吃/碰/槓） |
-| `bot_deep` | 深度探索 naki API |
-| `bot_chi` | 測試吃操作 |
-| `bot_pon` | 測試碰操作 |
-| `bot_sync` | 強制斷線重連以重建 Bot 狀態 |
+| `bot_ops` | pending／latest oplist |
+| `bot_deep` | game snapshot、response、diagnostics |
+| `bot_chi` | 送出 chi |
+| `bot_pon` | 送出 pon |
+| `bot_sync` | 強制 WebSocket reconnect／重建 Bot |
 
-### 遊戲狀態類 (6 個)
+### 遊戲狀態／動作（6）
 
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `game_state` | 獲取當前遊戲狀態 | - |
-| `game_hand` | 獲取手牌資訊 | - |
-| `game_ops` | 獲取當前可用操作 | - |
-| `game_discard` | 打出指定索引的牌 | `tileIndex`: 0-13 |
-| `game_action` | 執行遊戲動作 | `action`: string |
-| `game_action_verify` | 執行動作並驗證結果 | `action`: string |
+| Tool | 作用 |
+|------|------|
+| `game_state` | Swift protocol-layer game snapshot |
+| `game_hand` | 手牌與推薦 |
+| `game_ops` | 可用操作 |
+| `game_discard` | 以牌字串 discard |
+| `game_action` | 送一般 action |
+| `game_action_verify` | 送 action 並等 RESPONSE／snapshot 前進 |
 
-### 高亮控制類 (6 個)
+### JavaScript（1）
 
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `highlight_tile` | 高亮指定手牌 | `tileIndex`, `color` |
-| `reset_tile_color` | 重置手牌顏色 | `tileIndex` (可選) |
-| `highlight_status` | 獲取高亮狀態 | - |
-| `highlight_settings` | 設置高亮選項 | `showTileColor`, `showNativeEffect` |
-| `show_recommendations` | 顯示多個推薦高亮 | `recommendations`: JSON |
-| `hide_highlight` | 隱藏所有高亮 | - |
+| Tool | 作用 |
+|------|------|
+| `execute_js` | 在 WebView 執行 function body；取值必須 `return` |
 
-**顏色選項**: `green` (推薦度高), `orange` (中), `red` (低), `white` (重置), 或自訂 RGBA
+### 大廳（8）
 
-### 表情類 (4 個)
+| Tool | 作用 |
+|------|------|
+| `lobby_status` | Naki lobby／connection 狀態 |
+| `lobby_match_modes` | 從 current config 提供可用 match modes |
+| `lobby_start_match` | 開始匹配 |
+| `lobby_cancel_match` | 取消匹配 |
+| `lobby_account_info` | 查帳號資訊 |
+| `lobby_server_time` | 唯讀 server-time request／連線自檢 |
+| `lobby_heartbeat` | 送 lobby heartbeat |
+| `lobby_login_beat` | 送 login beat |
 
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `game_emoji` | 發送表情 | `emo_id`: 0-8, `count`: 1-5 |
-| `game_emoji_list` | 獲取可用表情列表 | - |
-| `game_emoji_auto_reply` | 切換自動回應表情 | `enabled` (可選) |
-| `game_emoji_listen` | 獲取表情廣播記錄 | `clear` (可選) |
+### 防閒置（1）
 
-### 大廳類 (9 個)
+| Tool | 作用 |
+|------|------|
+| `lobby_anti_idle` | 查詢或切換 Naki 自動 heartbeat |
 
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `lobby_status` | 獲取大廳狀態 | - |
-| `lobby_match_modes` | 獲取匹配模式列表 | - |
-| `lobby_start_match` | 開始段位場匹配 | `match_mode` |
-| `lobby_cancel_match` | 取消匹配 | - |
-| `lobby_match_status` | 獲取匹配狀態 | - |
-| `lobby_navigate` | 導航到指定頁面 | `page`: 0-3 |
-| `lobby_heartbeat` | 發送心跳防閒置 | - |
-| `lobby_anti_idle` | 切換自動防閒置 | `enabled` (可選) |
-| `lobby_idle_status` | 獲取閒置狀態 | - |
-| `lobby_account_level` | 獲取帳號段位 | - |
+### 友人房（7）
 
-**匹配模式 ID**:
-| ID | 段位場 |
-|----|-------|
-| 1, 2 | 銅東, 銅半 |
-| 4, 5 | 銀東, 銀半 |
-| 7, 8 | 金東, 金半 |
-| 10, 11 | 玉東, 玉半 |
-| 13, 14 | 王座東, 王座半 |
+| Tool | 作用 |
+|------|------|
+| `room_create` | 建立友人房 |
+| `room_add_robot` | 加入機器人 |
+| `room_start` | 開局 |
+| `room_info` | 查房間資訊 |
+| `room_join` | 加入房間 |
+| `room_leave` | 離開房間 |
+| `room_quick_test` | 建房 → 補機器人 → 開局 |
 
-### UI 控制類 (11 個)
+### 表情（2）
 
-| 工具名稱 | 說明 | 參數 |
-|---------|------|------|
-| `execute_js` | 執行 JavaScript | `code`: string |
-| `detect` | 檢測遊戲 API 可用性 | - |
-| `explore` | 探索遊戲物件結構 | - |
-| `test_indicators` | 顯示測試指示器 | - |
-| `click` | 在指定座標點擊 | `x`, `y`, `label` |
-| `calibrate` | 設定校準參數 | `tileSpacing`, `offsetX`, `offsetY` |
-| `ui_names_status` | 獲取玩家名稱顯示狀態 | - |
-| `ui_names_hide` | 隱藏所有玩家名稱 | - |
-| `ui_names_show` | 顯示所有玩家名稱 | - |
-| `ui_names_toggle` | 切換玩家名稱顯示 | - |
+| Tool | 作用 |
+|------|------|
+| `game_emoji` | 送表情 |
+| `game_emoji_listen` | 讀取／清除已捕獲的表情廣播 |
 
----
+### 高亮相容失敗樁（6）
 
-## Claude Code 使用範例
+| Tool | 現況 |
+|------|------|
+| `highlight_tile` | 固定回 unavailable |
+| `reset_tile_color` | 固定回 unavailable |
+| `highlight_status` | `available=false` |
+| `highlight_settings` | 固定回 unavailable |
+| `show_recommendations` | 固定回 unavailable |
+| `hide_highlight` | 固定回 unavailable |
 
-配置完成後，直接使用 MCP 工具：
+這 6 個工具尚未接到新的 `window.__nakiHighlight`。App 內建自動 WebGL 高亮是另一條活路徑；MCP stub 失敗不代表內建 hook 不存在。
 
-```
-# 獲取 Bot 狀態和 AI 推薦
-mcp__naki__bot_status
+## 已移除，不可再呼叫
 
-# 手動觸發自動打牌
-mcp__naki__bot_trigger
-
-# 開始銀之間半莊匹配
-mcp__naki__lobby_start_match --match_mode 5
-
-# 發送表情
-mcp__naki__game_emoji --emo_id 3 --count 2
-
-# 高亮第 5 張牌為綠色
-mcp__naki__highlight_tile --tileIndex 5 --color green
-
-# 執行 JavaScript
-mcp__naki__execute_js --code "return window.location.href"
+```text
+detect
+explore
+test_indicators
+click
+calibrate
+ui_names_status / ui_names_hide / ui_names_show / ui_names_toggle
+lobby_match_status
+lobby_navigate
+lobby_idle_status
+lobby_account_level
+game_emoji_list
+game_emoji_auto_reply
 ```
 
-### 常見工作流程
+它們依賴 Laya／DesktopMgr／UI 座標或不存在的 server semantics。不要用 `execute_js` 重造同一條舊路徑。
 
-#### 1. 自動段位場
+## 安全分級
 
-```
-1. mcp__naki__lobby_status           # 確認在大廳
-2. mcp__naki__lobby_navigate --page 1  # 前往段位場
-3. mcp__naki__lobby_start_match --match_mode 5  # 開始銀半
-4. mcp__naki__bot_status             # 等待遊戲開始，查看推薦
-```
+### 唯讀優先
 
-#### 2. 調試遊戲狀態
-
-```
-1. mcp__naki__detect                 # 檢測 API 可用性
-2. mcp__naki__game_state             # 獲取遊戲狀態
-3. mcp__naki__game_hand              # 查看手牌
-4. mcp__naki__get_logs               # 查看操作日誌
+```text
+get_status, get_help, get_logs
+bot_status, bot_ops, bot_deep
+game_state, game_hand, game_ops
+lobby_status, lobby_match_modes, lobby_account_info, lobby_server_time
+room_info, game_emoji_listen(clear=false)
 ```
 
-#### 3. 手牌高亮測試
+`execute_js` 只有在 code 本身唯讀時才算唯讀。
 
-```
-1. mcp__naki__highlight_status       # 查看當前高亮狀態
-2. mcp__naki__highlight_tile --tileIndex 0 --color green  # 高亮第一張
-3. mcp__naki__hide_highlight         # 清除所有高亮
-```
+### 會改 local runtime
 
----
-
-## 牌記號說明
-
-MCP 工具中使用的牌記號遵循 MJAI 格式：
-
-| 類型 | 格式 | 範例 |
-|-----|------|------|
-| 萬子 | 1-9m | 1m, 5m, 9m |
-| 筒子 | 1-9p | 1p, 5p, 9p |
-| 索子 | 1-9s | 1s, 5s, 9s |
-| 紅寶牌 | 5Xr | 5mr, 5pr, 5sr |
-| 字牌 | E/S/W/N/P/F/C | E(東), S(南), W(西), N(北), P(白), F(發), C(中) |
-
----
-
-## HTTP API 對照表
-
-MCP 工具與 HTTP 端點對應：
-
-| MCP 工具 | HTTP 端點 |
-|---------|----------|
-| `get_status` | GET /status |
-| `get_logs` | GET /logs |
-| `bot_status` | GET /bot/status |
-| `bot_trigger` | POST /bot/trigger |
-| `game_state` | GET /game/state |
-| `game_discard` | POST /game/discard |
-| `execute_js` | POST /js |
-
----
-
-## 故障排除
-
-### MCP 連接失敗
-
-1. 確認 Naki app 已啟動
-2. 確認 port 8765 未被佔用：`lsof -i :8765`
-3. 測試 HTTP：`curl http://localhost:8765/status`
-
-### 工具找不到
-
-```bash
-# 重新添加 MCP server
-claude mcp remove naki
-claude mcp add --transport http naki http://localhost:8765/mcp
+```text
+clear_logs
+bot_sync
+lobby_anti_idle(enabled=...)
+game_emoji_listen(clear=true)
 ```
 
-### 遊戲 API 不可用
+### 會影響帳號／對局
 
+```text
+bot_trigger
+bot_chi, bot_pon
+game_discard, game_action, game_action_verify
+lobby_start_match, lobby_cancel_match, lobby_heartbeat, lobby_login_beat
+room_create, room_add_robot, room_start, room_join, room_leave, room_quick_test
+game_emoji
 ```
-mcp__naki__detect  # 檢查遊戲是否已載入
+
+這些只在測試帳號、明確授權與正確 oplist／gateway 下使用。
+
+## 建議流程
+
+### 唯讀診斷
+
+```text
+get_status
+  → bot_status
+  → game_state
+  → game_ops
+  → bot_deep（需要 request／response 細節時）
+  → get_logs
 ```
 
----
+### 對局動作
 
-## 相關文檔
+```text
+game_ops
+  → 確認 seat、sequence、type、combination
+  → game_action_verify
+  → 檢查 sent、response、verified／新 snapshot
+```
 
-- [Debug API 完整列表](debug-api-help-endpoint.md)
-- [架構深度詳解](architecture-deep-dive.md)
-- [Majsoul WebUI 物件參考](majsoul-webui-objects-reference.md)
+不要只因 `sent.success=true` 就宣稱 server 已接受。
 
----
+### 連線自檢
 
-**更新日期**: 2025-12-07
+`lobby_server_time` 是較低風險的 request。需要確認對局 sender 時，必須在測試帳號與實際 game-gateway 下用合法動作驗證，不能把 lobby 成功外推成 game action 成功。
+
+### Unity 唯讀 probe
+
+```javascript
+return JSON.stringify({
+  canvas: !!document.getElementById('unity-canvas'),
+  laya: typeof window.Laya,
+  sockets: window.__nakiWebSocket?.getConnections?.(),
+  highlight: window.__nakiHighlight?.state?.()
+})
+```
+
+`execute_js` 是 function body，沒有 `return` 只會得到 null／undefined。
+
+## 資料語意與限制
+
+- `game_state`／`game_hand`／`game_ops` 讀 Naki 的 Swift protocol state，不是 server 完整查詢。
+- `game_action_verify` 比單純 send 更好，但仍應針對終局動作確認 `ActionHule`。
+- Legacy iOS 17–25 的自動路徑沒有主路徑 resolver；MCP sender 與自動模式不可混為一談。
+- 三麻沒有專用 AI model。
+- 完整 current facts 見 [majsoul-unity-protocol.md](majsoul-unity-protocol.md)。

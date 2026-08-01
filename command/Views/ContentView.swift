@@ -411,9 +411,6 @@ struct AdvancedSettingsSheet: View {
     @Environment(\.webViewModel) private var viewModel
     @Environment(\.dismiss) private var dismiss
 
-    // 隱私設定
-    @AppStorage("hidePlayerNames") private var hidePlayerNames: Bool = false
-
     var body: some View {
         #if os(macOS)
         macOSSettingsContent
@@ -472,27 +469,6 @@ struct AdvancedSettingsSheet: View {
 
     private var settingsForm: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // 隱私設定
-            GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle(isOn: $hidePlayerNames) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("隱藏玩家名稱")
-                            Text("隱藏遊戲中所有玩家的暱稱顯示")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .onChange(of: hidePlayerNames) { _, newValue in
-                        viewModel?.setHidePlayerNames(newValue)
-                    }
-                    .accessibilityIdentifier("hide-player-names-toggle")
-                    .accessibilityLabel("隱藏玩家名稱")
-                    .accessibilityValue(hidePlayerNames ? "開" : "關")
-                }
-            } label: {
-                Label("隱私設定", systemImage: "eye.slash")
-            }
 
 
             // Bot 管理

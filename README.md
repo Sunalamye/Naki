@@ -51,9 +51,10 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 ### 推薦直接標在牌上
 
-不用低頭看側邊欄再回頭找牌。AI 建議打哪張，**那張牌就在遊戲畫面裡變色**。
+不用低頭看側邊欄再回頭找牌。AI 建議會透過 Unity WebGL hook 標在遊戲畫面；
+目前已確認 hook 會執行，但「每次都命中正確牌／按鈕」仍缺視覺回歸測試。
 
-- 該吃該碰時，遊戲的動作按鈕會一起亮起來
+- 動作機會可顯示在原生側欄；遊戲內按鈕染色仍屬 heuristic
 - 側邊欄有完整分析與 Q 值
 - 涵蓋打牌 / 吃 / 碰 / 槓 / 立直 / 和牌
 
@@ -108,9 +109,9 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 > **為什麼要 Apple Silicon？**
 > AI 模型跑在 Apple Neural Engine 上，那是 Apple Silicon 獨有的硬體，Intel Mac 沒有。
 
-> **iOS 17–25** 走 `WKWebView` 相容路徑，**iOS 26+** 用新的 `WebPage` API。
-> 兩條路的推薦與動作都走同一套遊戲協定層，功能一致。
-> 相容路徑目前只驗證過編譯與單元測試，**尚未在實機跑過完整對局**。
+> **iOS 17–25** 走 `WKWebView` Legacy 路徑，**iOS 26+** 用新的 `WebPage` API。
+> 兩條路目前**不完全等價**：Legacy 自動打牌尚未接上 server-authoritative resolver，
+> 也尚未在實機跑過完整對局。需要自動模式的安全保護時，以 macOS／iOS 26+ 為準。
 
 ### 安裝
 
@@ -136,15 +137,14 @@ Mortal 的模型是**固定成品**——它訓練時看到的輸入是一個 `1
 Naki 這邊如果某一格填錯東西，模型不會報錯，它會**照樣算出一個看起來很正常的推薦**，
 只是那個推薦建立在完全錯誤的理解上。
 
-所以 Naki 用 [MortalSwift](https://github.com/Sunalamye/MortalSwift) 把 Mortal 的
-Rust 核心（libriichi）逐格對拍：同一串對局事件同時餵給兩邊，比對輸出的每一格。
+所以 MortalSwift 的 test target 用 libriichi v4 當 oracle：同一串固定對局事件同時餵給
+純 Swift encoder 與 Rust oracle，比對 observation 與 action mask。
 
-**目前 1012 格全部一致，動作遮罩也一致。** 這代表模型收到的每一格語意，
-都與它訓練時看到的相同——包含「每張打牌在往後每一巡的聽牌率、和牌率、期望點數」
-這組最直接關於「打哪張比較好」的資訊。
+**目前內建兩套 fixtures 的所有 action-required snapshots 都是 1012 格零落差，
+動作遮罩也一致。** 這是有力的回歸證據，但不是所有可能牌局狀態的形式證明。
 
-> 誠實補充：對拍證明的是**輸入正確**，不是**打得比較好**。
-> 後者需要跑幾千局的評測環境才說得準，那個還沒做。
+> 誠實補充：MortalSwift 0.5.0 更新的是 encoder／計算與 parity，bundled 模型權重沒有換。
+> Naki 也還沒有千局級評測，所以不能把它稱為「最新最強模型」。
 
 ---
 
@@ -182,9 +182,10 @@ JavaScript 再也拿不到任何遊戲物件。所以 Naki 一律走**協定層*
 畫面高亮則是攔截 WebGL 繪圖呼叫、改遊戲畫那張牌時用的顏色參數——
 **位置由遊戲自己給**，不需要猜螢幕座標，也不會因為版面調整就失效。
 
-**合法性由伺服器決定，不由模型決定。** 每個動作送出前都會比對雀魂給的
-可用操作清單；清單裡沒有的動作一律不送，缺清單時直接放棄。
-模型只負責「這幾個合法動作裡哪個好」。
+**合法性應由伺服器決定，不由模型決定。** macOS／iOS 26+ 主路徑已有 resolver：
+缺 oplist 時 fail closed、和牌凌駕 AI、其餘動作必須存在於同一份 oplist。
+但目前仍有兩個整合缺口：空推薦可能讓自摸完全不進 resolver；hora send 失敗仍可能被
+標成 handled。Legacy iOS 17–25 也尚未接上這層，因此「漏自摸已完全消除」仍未驗證。
 
 技術細節：[`docs/majsoul-unity-protocol.md`](docs/majsoul-unity-protocol.md) ·
 [`AUDIT.md`](AUDIT.md)
@@ -237,8 +238,8 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 
 `room_quick_test` 一次跑完「建房 → 補人機 → 開局」，用來快速驗證自動打牌。
 
-> 高亮那 6 個工具在 Unity 客戶端下**一律回明確失敗**並導向原生推薦面板——
-> 它們是 Laya 時代的遺留，留著是為了讓呼叫端拿到清楚的錯誤而不是靜默失效。
+> MCP 的 6 個手動高亮工具目前是一律回明確失敗的相容樁；它們沒有接到新的
+> `__nakiHighlight`。這與 App 內建的自動 WebGL 高亮是兩條不同路徑。
 
 </details>
 

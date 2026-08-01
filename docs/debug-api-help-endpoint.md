@@ -1,185 +1,111 @@
-# Debug API 完整指南
+# Naki Debug HTTP API
 
-**版本**: 2.0
-**更新日期**: 2025-12-07
-**HTTP Port**: 8765
+**最後核對**：2026-08-01（source route switch + live request）  
+**Base URL**：`http://127.0.0.1:8765`  
+**綁定**：loopback only
 
----
+HTTP Debug API 與 MCP 共用同一個 Naki process／port。Unity、Liqi 與資料語意見 [majsoul-unity-protocol.md](majsoul-unity-protocol.md)。
 
-## 概述
-
-Naki 提供 HTTP Debug Server，用於監控遊戲狀態、控制 Bot、執行遊戲操作。
-
-### 兩種使用方式
-
-| 方式 | 說明 | 推薦 |
-|------|------|------|
-| **MCP 工具** | Claude Code 直接調用 | ⭐ 推薦 |
-| **HTTP 端點** | curl 或瀏覽器訪問 | 傳統方式 |
-
-> **提示**: MCP 工具功能更完整（47 個工具），詳見 [mcp-server-guide.md](mcp-server-guide.md)
-
----
-
-## HTTP 端點列表
-
-### 系統類
-
-| 端點 | 方法 | 說明 |
-|------|------|------|
-| `/` | GET | HTML 首頁 |
-| `/help` | GET | JSON API 文檔 |
-| `/status` | GET | 伺服器狀態 |
-| `/logs` | GET | 獲取 Debug 日誌 |
-| `/logs` | DELETE | 清空日誌 |
-
-### Bot 控制類
-
-| 端點 | 方法 | 說明 |
-|------|------|------|
-| `/bot/status` | GET | Bot 狀態、手牌、AI 推薦 |
-| `/bot/trigger` | POST | 手動觸發自動打牌 |
-| `/bot/ops` | GET | 探索可用的副露操作 |
-| `/bot/deep` | GET | 深度探索 naki API |
-| `/bot/chi` | POST | 測試吃操作 |
-| `/bot/pon` | POST | 測試碰操作 |
-| `/bot/sync` | POST | 強制斷線重連重建狀態 |
-
-### 遊戲狀態類
-
-| 端點 | 方法 | 說明 | Body |
-|------|------|------|------|
-| `/game/state` | GET | 當前遊戲狀態 | - |
-| `/game/hand` | GET | 手牌資訊 | - |
-| `/game/ops` | GET | 當前可用操作 | - |
-| `/game/discard` | POST | 打出指定牌 | `{"tileIndex": 0-13}` |
-| `/game/action` | POST | 執行遊戲動作 | `{"action": "pass"}` |
-
-### JavaScript 執行
-
-| 端點 | 方法 | 說明 | Body |
-|------|------|------|------|
-| `/js` | POST | 執行 JavaScript | JS 代碼（需 return） |
-
-### 探索類
-
-| 端點 | 方法 | 說明 |
-|------|------|------|
-| `/detect` | GET | 檢測遊戲 API 可用性 |
-| `/explore` | GET | 探索遊戲物件結構 |
-
-### UI 操作類
-
-| 端點 | 方法 | 說明 | Body |
-|------|------|------|------|
-| `/test-indicators` | GET | 顯示測試指示器 | - |
-| `/click` | POST | 在指定座標點擊 | `{"x": 100, "y": 200}` |
-| `/calibrate` | POST | 設定校準參數 | `{"offsetX": -200}` |
-
----
-
-## 使用範例
-
-### 查看 Bot 狀態
+## 先做唯讀檢查
 
 ```bash
-curl http://localhost:8765/bot/status | jq .
+curl http://127.0.0.1:8765/status
+curl http://127.0.0.1:8765/bot/status
+curl http://127.0.0.1:8765/game/state
+curl http://127.0.0.1:8765/game/hand
+curl http://127.0.0.1:8765/game/ops
 ```
 
-### 手動觸發打牌
+`game_*`／`bot_*` 的資料來自 Naki 已解析的 Swift 協定層，不是每次向雀魂 server 重抓完整狀態。
+
+## 現行 routes
+
+| Method | Path | 作用 | 是否可能改變狀態 |
+|--------|------|------|------------------|
+| GET | `/` | 簡要 HTML 入口 | 否 |
+| GET | `/help` | JSON help | 否 |
+| GET | `/status` | server、port、時間與 log path | 否 |
+| POST | `/js` | 在 game page 執行 JavaScript | **依 code 而定** |
+| GET | `/game/state` | Swift game snapshot | 否 |
+| GET | `/game/hand` | 手牌與推薦 | 否 |
+| GET | `/game/ops` | pending／latest oplist | 否 |
+| POST | `/game/discard` | 送出 discard request | 是 |
+| POST | `/game/action` | 送出一般遊戲動作 | 是 |
+| GET | `/logs` | 記憶體內近期 log | 否 |
+| DELETE | `/logs` | 清除記憶體 log | 是 |
+| GET | `/bot/status` | Bot／mode／推薦 | 否 |
+| POST | `/bot/trigger` | 手動觸發自動打牌 | 是 |
+| GET | `/bot/ops` | oplist snapshot | 否 |
+| GET | `/bot/deep` | snapshot、response 與診斷 | 否 |
+| POST | `/bot/chi` | 送 chi，預設 combination index 0 | 是 |
+| POST | `/bot/pon` | 送 pon，預設 combination index 0 | 是 |
+| POST | `/mcp` | MCP JSON-RPC | 依 tool 而定 |
+
+`/detect`、`/explore`、`/click`、`/calibrate`、`/ui/names*` 都不是現行 routes；呼叫會 404。
+
+## `/js`
+
+body 可直接是 JavaScript function body，或 JSON `{"code":"..."}`。要取得值必須顯式 `return`：
 
 ```bash
-curl -X POST http://localhost:8765/bot/trigger
+curl -X POST http://127.0.0.1:8765/js \
+  -d 'return window.location.href'
+
+curl -X POST http://127.0.0.1:8765/js \
+  -d 'return JSON.stringify({
+    canvas: !!document.getElementById("unity-canvas"),
+    laya: typeof window.Laya,
+    connections: window.__nakiWebSocket?.getConnections?.(),
+    highlight: window.__nakiHighlight?.state?.()
+  })'
 ```
 
-### 執行 JavaScript
+推薦的 `/js` 用途是 read-only page／Unity／WebSocket／WebGL probe。不要嘗試 `DesktopMgr`、`GameMgr`、`uiscript` 或座標點擊；這些 Laya 物件不存在。
+
+## 送出動作
+
+下列 request 會真的影響帳號，只能用測試帳號，且先讀 `/game/ops`。
+
+### Discard
+
+以牌字串指定，不使用 UI index：
 
 ```bash
-curl -X POST http://localhost:8765/js -d 'return window.location.href'
+curl -X POST http://127.0.0.1:8765/game/discard \
+  -H 'Content-Type: application/json' \
+  -d '{"tile":"5m","moqie":false}'
 ```
 
-### 打出第 3 張牌
+`tile` 接受 MJAI（`5mr`、`E`）或雀魂（`0m`、`1z`）記法。
+
+### 一般 action
 
 ```bash
-curl -X POST http://localhost:8765/game/discard \
-  -H "Content-Type: application/json" \
-  -d '{"tileIndex": 2}'
+curl -X POST http://127.0.0.1:8765/game/action \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"pass"}'
+
+curl -X POST http://127.0.0.1:8765/game/action \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"riichi","tile":"5m","moqie":false}'
 ```
 
----
+支援名稱：`discard`、`riichi`、`chi`、`pon`、`kan`、`tsumo`、`ron`、`hora`、`kyushu`、`babei`、`pass`。可用參數包括 `tile`、`moqie`、`index`、`kanType`、`timeuse`。
 
-## 常見工作流程
+HTTP route 會送出 request，但「寫進 WebSocket」不等於 server 接受。需要 RESPONSE／state verification 時優先使用 MCP `game_action_verify`。
 
-### 1. 監控遊戲狀態
+## Log
 
-```bash
-curl http://localhost:8765/bot/status   # Bot 狀態和推薦
-curl http://localhost:8765/game/hand    # 手牌詳情
-curl http://localhost:8765/logs         # 操作日誌
-```
+`GET /logs` 只回 Naki process 內存中的近期條目。`GET /status` 另回檔案 log path；同目錄 `.1`–`.5` 是 rotation。
 
-### 2. 手動控制打牌
+App-hosted tests 也會初始化 LogManager。正式 Naki 正在跑時執行 tests 可能輪替同一暫存 log 名稱，所以 live 對局期間不要把 test host 與正式 App 的 log 混在一起。
 
-```bash
-curl http://localhost:8765/bot/status          # 查看 AI 推薦
-curl -X POST http://localhost:8765/bot/trigger # 執行推薦動作
-```
+## 回傳判讀
 
-### 3. JavaScript 調試
+| 訊號 | 能證明什麼 |
+|------|------------|
+| `sent.success == true` | bytes 已交給 OPEN WebSocket |
+| 同 msgId RESPONSE 無 error | server 已回應該 request |
+| `ActionHule`／新 action／oplist sequence 前進 | 權威遊戲狀態已改變 |
 
-```bash
-curl http://localhost:8765/detect   # 檢測 API 可用性
-curl http://localhost:8765/explore  # 探索遊戲物件
-# ❌ 舊範例已失效（雀魂 4.0.45 改 Unity WebGL，DesktopMgr 不存在）：
-#   curl -X POST http://localhost:8765/js -d 'return JSON.stringify(window.view.DesktopMgr.Inst.mainrole.hand.length)'
-# ✅ Unity 時代改查 WebSocket 連線 / 走 Liqi protobuf：
-curl -X POST http://localhost:8765/js -d 'return JSON.stringify(window.__nakiWebSocket.getConnections())'
-```
-
-> ⚠️ `/js` 端點本身仍可用（能在頁面 context 執行 JS），但 `window.view` / `GameMgr` /
-> `uiscript` / `cfg` 等 Laya 物件已不存在；`/game/*` 類端點與其 MCP 工具因此失效。
-> 正確互動方式見 [majsoul-unity-protocol.md](majsoul-unity-protocol.md)。
-
----
-
-## 牌記號說明 (MJAI 格式)
-
-| 類型 | 格式 | 範例 |
-|-----|------|------|
-| 萬子 | 1-9m | 1m, 5m, 9m |
-| 筒子 | 1-9p | 1p, 5p, 9p |
-| 索子 | 1-9s | 1s, 5s, 9s |
-| 紅寶牌 | 5Xr | 5mr, 5pr, 5sr |
-| 字牌 | E/S/W/N/P/F/C | E(東), S(南), W(西), N(北), P(白), F(發), C(中) |
-
----
-
-## 故障排除
-
-### 連接失敗
-
-```bash
-# 確認 Naki 已啟動
-curl http://localhost:8765/status
-
-# 檢查端口是否被佔用
-lsof -i :8765
-```
-
-### 遊戲 API 不可用
-
-```bash
-# 檢測遊戲是否已載入
-curl http://localhost:8765/detect
-```
-
----
-
-## 相關文檔
-
-- [mcp-server-guide.md](mcp-server-guide.md) - MCP 工具完整指南（47 個工具）
-- [architecture-deep-dive.md](architecture-deep-dive.md) - 架構深度詳解
-
----
-
-**文件位置**: `Naki/Services/Debug/DebugServer.swift`
+驗收動作時至少記錄後兩層；只看到 HTTP 200 或 `sent.success` 不足以宣稱成功。

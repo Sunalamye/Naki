@@ -1,376 +1,328 @@
-# Majsoul Unity 客戶端 × Liqi 協議參考
+# Naki 現行 Unity／AI 技術基準
 
-**日期**: 2026-07-31
-**來源**: runtime 實測（WebSocket 封包擷取 + 全域物件列舉 + 自組請求送出）
-**狀態**: 這是 Unity 時代**唯一有效**的雀魂互動參考。舊的 Laya JS 物件文件已作廢，見
-[majsoul-webui-objects-reference.md](majsoul-webui-objects-reference.md) /
-[majsoul-webui-api-architecture.md](majsoul-webui-api-architecture.md)。
+**資料日期**：2026-08-01（Asia/Taipei）  
+**程式基準**：Naki `main`，盤點起點 `5eb1aef`  
+**用途**：這是目前唯一的 Unity、Liqi、Mortal、自動打牌與遊戲內高亮技術基準。
 
-> **驗收語彙**
-> **已驗證** = 本輪 runtime 實測有事實佐證（封包 hex / 全域物件列舉 / 伺服器回應）
-> **由 source 推導** = 讀 Naki 自己的 code 得到，未跑 runtime 確認
-> **未驗證** = 尚無實測，不可當事實引用
+本文只保留能由下列來源支持的現況，不保存 Laya 時代做法或已被推翻的中間結論：
 
----
+1. Naki 當前程式碼、測試與 Xcode package 設定。
+2. 正在執行的 Naki loopback API（`127.0.0.1:8765`）唯讀查詢。
+3. 由 Naki 頁面取得的雀魂當前資源索引，再下載並機械解析的資源。
+4. 可重查的 runtime log。沒有這四類證據的項目一律標成「未驗證」。
 
-## 目錄
+## 目前結論
 
-1. [一句話結論](#一句話結論)
-2. [Unity 客戶端事實](#unity-客戶端事實)
-3. [Liqi Envelope 格式](#liqi-envelope-格式)
-4. [實測封包逐位元組解說](#實測封包逐位元組解說)
-5. [接收訊息](#接收訊息)
-6. [送出請求](#送出請求)
-7. [msgId 管理](#msgid-管理)
-8. [已驗證的 PoC](#已驗證的-poc)
-9. [尚未驗證的部分](#尚未驗證的部分)
+| 問題 | 現況 |
+|------|------|
+| 雀魂客戶端 | Unity WebGL `chs_t-WebGL-release-4.0.45(45)`，不是 Laya |
+| Naki 狀態來源 | WebSocket → Liqi protobuf → Swift 狀態；不是 JS 遊戲物件 |
+| Naki 動作來源 | Swift 組 Liqi request，再由 `window.__nakiWebSocket.sendRaw` 送出 |
+| AI package | 本機目前 resolve 到 MortalSwift `0.5.0`，revision `802dc3d…` |
+| AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.0 並不是新訓練模型 |
+| 「最新最強」 | **不能這樣宣稱**。package／encoder 是目前最新版，但權重未更新，也沒有牌力 benchmark |
+| 四麻 | 唯一有正確模型形狀與 parity 證據的模式 |
+| 三麻 | 沒有三麻模型；目前仍把三麻狀態送進四麻模型，不應宣稱支援 |
+| 自摸保護 | resolver 純邏輯已存在且單測通過，但整合仍有漏觸發與錯誤完成兩個漏洞 |
+| 遊戲內高亮 | 現行 WebGL hook 會執行；尚未證明每次都染到正確牌／按鈕 |
+| MCP | live `tools/list` 為 42 個；6 個 MCP 高亮工具仍只是明確失敗的相容樁 |
 
----
+## 現場唯讀查詢
 
-## 一句話結論
+2026-08-01 以正在執行的 Naki 查到：
 
-**JS/DOM 層已死，protobuf 層完好。**
+- `GET /status`：Debug／MCP server 正在 `127.0.0.1:8765` 運行。
+- `GET /bot/status`、`GET /bot/ops`、`GET /game/state`、`GET /game/hand`、`GET /game/ops`：都可從 Naki 的 Swift 協定層取得資料。
+- `POST /js` 唯讀 probe：頁面為 `https://game.maj-soul.com/1/`，`unity-canvas` 存在；`Laya`、`view.DesktopMgr`、`uiscript` 不存在。
+- loader、framework、wasm、data 都來自 `chs_t-WebGL-release-4.0.45(45)`。
+- `unityInstance` 是 script-scope 的裸識別字；`window.unityInstance` 不存在。
+- `window.__nakiWebSocket` 與 `window.__nakiHighlight` 存在；highlighter 的 `tinted` counter 持續增加。
+- live `POST /mcp` 的 `tools/list` 回傳 42 個工具。
 
-雀魂客戶端從 Laya JS 換成 Unity WebGL 後，遊戲邏輯與 UI 全部搬進 wasm，
-JavaScript 端再也拿不到手牌、操作按鈕、配置表等物件。
-但 **Liqi wire protocol 一個位元組都沒變**，WebSocket 仍是 JS 可攔可送的通道，
-所以 Naki 的正確路線是：**所有讀取與動作都改走 Liqi protobuf**。
+這些 probe 是讀取狀態，不會送遊戲動作。當時執行中的 Naki binary 早於盤點後的最新文件 commit，因此 live 證據只用來確認客戶端、連線、API 與 WebGL hook，不用來替最新 source code 的每條控制流程背書。
 
----
+### 查詢的資料語意
 
-## Unity 客戶端事實
+`/game/*` 與 `/bot/*` 不是每次向雀魂伺服器重新抓完整狀態。它們攤開的是 Naki 自 WebSocket 事件累積的 Swift 狀態：
 
-**已驗證**（2026-07-31 runtime 列舉）：
-
-| 項目 | 值 |
-|------|-----|
-| 引擎 | Unity WebGL（原為 Laya 3D） |
-| 版本字串 | `chs_t-WebGL-release-4.0.45(45)` |
-| 載入器 | `loader.js`、`framework.js.gz` |
-| 全域物件 | `createUnityInstance`、`unityFramework`、`getUnityElements`、`onUnityReady` |
-| 容器 | `<div id="unity-container">` |
-| 畫布 | `<canvas id="unity-canvas" width="2560" height="1440">` |
-
-### 已確認**不存在**的全域（舊 Laya 時代物件）
-
-```
-window.Laya            window.GameMgr         window.uiscript
-window.view.DesktopMgr window.cfg             window.app.NetAgent
+```text
+WebSocket frame
+  → LiqiParser
+  → MajsoulBridge
+  → NativeBotController / LiqiOperationStore
+  → Debug API / MCP / SwiftUI
 ```
 
-因此下列舊做法**全數失效**（不是「可能失效」，是實測不存在）：
+若 Naki 中途加入、漏掉事件或尚未完成 sync，回傳可能不完整。這時應先診斷 `bot_status`、`game_ops` 與 log；`bot_sync` 會強制重連，屬會改變 runtime 的操作，不是唯讀查詢。
 
-- `mainrole.hand` 讀手牌、`setChoosePai()` / `DoDiscardTile()` 打牌
-- `effect_doraPlane.clone()` 做寶牌／推薦高亮
-- `uimgr._ui_lobby` 切頁、`_uis[105].addMatch()` 匹配
-- `cfg.xxx.rows_` 讀寫客戶端本地設定表
-- `GameMgr.Inst.clientHeatBeat()` 防閒置
-- `app.NetAgent.sendReq2Lobby(...)` 發請求
+## 兩條平台路徑並不等價
 
-> Unity 內部（wasm 記憶體佈局、Il2Cpp 符號、`unityFramework` 可呼叫面）**本輪未探測**。
-> 不要在文件或 code 中對 Unity 內部做任何推測性宣稱。
+`WebViewModelFactory` 目前按 OS 版本分流：
 
----
+| 平台路徑 | View model | 自動打牌現況 |
+|----------|------------|--------------|
+| macOS 26+／iOS 26+ | `WebViewModel`（WebPage） | 有 `AutoPlayDecisionResolver`、oplist 合法性與 stale snapshot 檢查 |
+| iOS 17–25 | `LegacyWebViewModel`（WKWebView） | 直接使用 AI 第一推薦，沒有 resolver、seat/action/stale 檢查，也沒有 fail-closed |
 
-## Liqi Envelope 格式
+macOS deployment target 是 26.0，所以 macOS 實際只走新路徑；iOS deployment target 是 17.0，仍會走 Legacy 路徑。README 不可再宣稱兩條路徑功能一致。
 
-**已驗證**：外層封包結構與 Laya 時代完全相同。
+## Unity WebGL 可控面
 
-```
-┌────────┬──────────────┬──────────────────────────────────────┐
-│ type   │ msgId        │ protobuf body                        │
-│ 1 byte │ 2 bytes LE   │ { field1: method(string),            │
-│        │              │   field2: payload(bytes) }           │
-└────────┴──────────────┴──────────────────────────────────────┘
-```
+### 存在
 
-| type | 含義 | msgId | body |
-|------|------|-------|------|
-| `1` | NOTIFY（伺服器主動推播） | — | field1 = 方法名，field2 = payload |
-| `2` | REQUEST（客戶端請求） | 客戶端配發 | field1 = 方法名，field2 = payload |
-| `3` | RESPONSE（伺服器回應） | 對應 REQUEST 的 msgId | field1 空、field2 = payload |
+- DOM 與單一 `<canvas id="unity-canvas">`
+- WebSocket constructor／`send`
+- WebGL2 context 與 draw calls
+- 頁面載入的 Unity resource URLs
+- script-scope `unityInstance`
+- Naki 注入的 `__nakiWebSocket`、`__nakiHighlight` 等物件
 
-### 加密
+### 不存在
 
-- **REQUEST / RESPONSE：無 XOR**，方法名是**明文 ASCII**（`.lq.Route.heartbeat` 直接可見）。
-- **XOR 只用於 NOTIFY 的 `.lq.ActionPrototype.data`**（對局動作內容）。
-  演算法與金鑰見 `FLOW_COMPARISON.md` 與 `command/Services/Bridge/MajsoulBridge.swift`。
-- `syncGame` / `enterGame` 回應內的 `gameRestore.actions[]` **不需要 XOR**（既有結論，未因 Unity 遷移改變）。
+- `window.Laya`
+- `window.GameMgr`
+- `window.uiscript`
+- `window.view.DesktopMgr`
+- `window.cfg`
+- `window.app.NetAgent`
 
----
+因此不可再用 DOM tile、Laya sprite、`DesktopMgr.Inst.oplist`、座標點擊或 `uiscript` 控制遊戲。JS 仍可做 WebSocket、WebGL、resource 與頁面層 probe；「JS 全部失效」同樣是不正確的說法。
 
-## 實測封包逐位元組解說
+## WebSocket 與 Liqi
 
-### REQUEST（34 bytes，遊戲自己送出的真實心跳）
+### 注入順序
 
-```
-028d000a132e6c712e526f7574652e686561727462656174120808001000180b200f
-```
+`WebSocketInterceptor.jsModules` 目前依序注入：
 
-| offset | bytes | 解讀 |
-|--------|-------|------|
-| 0 | `02` | type = 2 → **REQUEST** |
-| 1–2 | `8d 00` | msgId = 0x008d = **141**（little-endian） |
-| 3 | `0a` | protobuf tag：field **1**, wire type 2 (length-delimited) |
-| 4 | `13` | 長度 = 19 |
-| 5–23 | `2e 6c 71 2e 52 6f 75 74 65 2e 68 65 61 72 74 62 65 61 74` | ASCII `.lq.Route.heartbeat` |
-| 24 | `12` | protobuf tag：field **2**, wire type 2 |
-| 25 | `08` | 長度 = 8 |
-| 26–33 | `08 00 10 00 18 0b 20 0f` | payload（見下） |
+1. `naki-core.js`
+2. `naki-autoplay.js`
+3. `naki-game-api.js`
+4. `naki-websocket.js`
+5. `naki-coordinator.js`
 
-payload 的 protobuf 拆解（**機械拆解已驗證，欄位語意未驗證**）：
+其中舊 Laya API 仍可能載入，但不可作為現行遊戲狀態或動作來源。活路徑是 `naki-websocket.js` 與 `naki-core.js` 的 Unity/WebGL hook。
 
-| bytes | tag | 值 |
-|-------|-----|-----|
-| `08 00` | field 1, varint | 0 |
-| `10 00` | field 2, varint | 0 |
-| `18 0b` | field 3, varint | 11 |
-| `20 0f` | field 4, varint | 15 |
+### Envelope
 
-### RESPONSE（7 bytes，伺服器對上面那筆的回應）
-
-```
-038d000a001200
+```text
+[type: 1 byte][msgId: 2 bytes little-endian][protobuf envelope]
 ```
 
-| offset | bytes | 解讀 |
-|--------|-------|------|
-| 0 | `03` | type = 3 → **RESPONSE** |
-| 1–2 | `8d 00` | msgId = **141**，與 REQUEST 配對 |
-| 3–4 | `0a 00` | field 1, length 0 → 方法名空字串 |
-| 5–6 | `12 00` | field 2, length 0 → payload 空 |
+- type `1`：NOTIFY
+- type `2`：REQUEST
+- type `3`：RESPONSE
+- envelope field 1：method name
+- envelope field 2：payload
+- Naki 自送 request 使用 `60000+` msgId，避免與遊戲低位遞增 id 衝突
 
-> RESPONSE 不重覆方法名，**只能靠 msgId 配對**。這是 msgId 管理必須小心的原因。
+一般 `.lq.ActionPrototype` 收包會做 Liqi XOR decode；`syncGame`／`enterGame` response 內的 restore actions 已是 payload，不應再 XOR。
 
----
+協定欄位的唯一 schema 來源是 [`docs/protocol/liqi.json`](protocol/liqi.json)。2026-08-01 由 Naki live resource manifest 取得的 CDN 檔與 repo 版本 byte-for-byte 相同，SHA-256 都是：
 
-## 接收訊息
-
-**已驗證**：既有 `naki-websocket.js` hook 在 Unity 客戶端下仍正常運作。
-
-- 實測有 2 條 live 連線：`wss://route-N.maj-soul.com/gateway`
-- Swift 端 `LiqiParser` 解碼仍正常（協議沒變，parser 不需改）
-
-機制（`command/Resources/JavaScript/naki-websocket.js`）：
-
-```
-包裝 window.WebSocket 建構子
-  ├─ addEventListener('message')  → handleMessage(..., 'receive')
-  ├─ 覆寫 ws.send                 → handleMessage(..., 'send') 後呼叫原生 send
-  └─ 以 URL 關鍵字判定是否為雀魂連線（majsoul / mj- / game. / gateway / match）
-        └─ 非雀魂連線直接略過，不轉發
+```text
+f2955c3d10cf2d42bee9309f672c062540941ea0cffe1bd62e3f436c7afc404c
 ```
 
-frame 以 base64 經 `websocketBridge` message handler 送到 Swift。
+### 連線選擇
 
-查詢連線：
+- `.lq.FastTest.*` 對局 request 必須走 OPEN 的 `/game-gateway`。
+- 大廳 request 走 OPEN 的 `/gateway`。
+- 不能假設第一條 connection 就是正確連線，也不能寫死連線數。
+- 選錯線常見結果是 code 6／method not found。
 
-```js
-return JSON.stringify(window.__nakiWebSocket.getConnections());
-// [{ id, url, isMajsoul, readyState, age }, ...]
+`sendRaw` 成功只表示資料交給瀏覽器 WebSocket；不等於雀魂接受。嚴格成功條件應包含同 msgId RESPONSE，對終局動作最好再看到 `ActionHule` 或後續權威狀態。
+
+## Oplist 與動作
+
+`OptionalOperationList` 是 server 提供的可用操作權威。Naki 將它存成帶 sequence、seat、source、context tile 的 snapshot。
+
+目前 enum：
+
+| type | 程式語意 | runtime 狀態 |
+|------|----------|--------------|
+| 1 | discard | 已有大量成功紀錄 |
+| 2 | chi | 尚缺實際組合選擇驗收 |
+| 3 | pon | 已見 `inputChiPengGang` → `ActionChiPengGang` |
+| 4 | ankan | 未驗證 |
+| 5 | minkan | 未驗證 |
+| 6 | kakan | 未驗證 |
+| 7 | riichi | 已有送出紀錄；完整 failure-path 仍未覆蓋 |
+| 8 | tsumo | protocol 送出曾成功；「AI 想打牌時由 resolver 強制自摸」尚未端到端驗證 |
+| 9 | ron | 已見 `inputOperation` payload `0809` → RESPONSE → `ActionHule` |
+| 10 | kyushu | 未驗證 |
+| 11 | babei | 三麻模型本身不支援，未驗證 |
+
+赤五 chi／pon、多個 chi variant 的 combination index，以及三種槓都不可寫成已驗證。
+
+## 自動打牌決策
+
+### Resolver 已做的事
+
+OS 26+ 主路徑的 `AutoPlayDecisionResolver`：
+
+- 沒有 snapshot 時 fail closed。
+- snapshot seat 不符時不動作。
+- snapshot 有自摸或榮和時，和牌凌駕 AI 推薦。
+- 其他 AI 推薦必須存在於同一份 oplist。
+- 送出前再比 sequence、seat、source、context tile，拒絕 stale decision。
+- recommend mode 只呈現，off mode 不送。
+
+純 resolver 13 個專項測試與 NakiTests 75 個測試已通過。這證明純函式、encoding 與 builder，不等於 WebViewModel 整合或 live server 已驗證。
+
+### 為什麼現在仍可能「能自摸卻不自摸」
+
+現行整合還有兩個 P0 漏洞：
+
+1. **resolver 的入口仍被 recommendations gate 擋住。** `WebViewModel` 只有在 Mortal 產生非空推薦時才進自動動作；timer 在推薦空時只處理副露 pass。若 server oplist 有 type 8，但 Mortal 回空，resolver 根本不會被呼叫。
+2. **hora 送出失敗仍會被當成已完成。** 外層呼叫送出後，只看 resolved action 是 `.hora` 就 log 成功並 `markHandled`；它沒有取得 `LiqiSendResult`。沒有 game-gateway、JS send 失敗或 server 拒絕時，機會仍可能被吃掉而不重試。
+
+Legacy iOS 17–25 還有第三個漏洞：完全沒走 resolver。
+
+### 正確調整方向
+
+優先順序應是：
+
+1. **由新 oplist 驅動決策。** snapshot 一到就先檢查 `horaOperation`；不應等待 AI recommendation。
+2. **讓送出回傳結果。** `executeAutoPlayAction` 回傳 `LiqiSendResult`；只有確認 WebSocket send 成功，最好再確認同 msgId RESPONSE／權威 action 後，才 `markHandled`。
+3. **失敗保留 pending 並重試。** 加上 bounded retry、sequence guard 與清楚 log；不能把「函式被呼叫」當成功。
+4. **把 Legacy 收斂到同一個 resolver／sender。** 在此以前，iOS 17–25 必須標為無 server-authoritative 保護。
+5. **加整合與 live 驗收。** 至少覆蓋：`[discard,riichi,tsumo] + AI discard`、空推薦 + tsumo、send failure、server reject、stale snapshot、recommend/off 絕不送。
+
+## MortalSwift 與模型
+
+### 真正的版本狀態
+
+Xcode package requirement 是 `upToNextMinorVersion`、minimum `0.5.0`，即允許 `[0.5.0, 0.6.0)`，不是 exact pin。本機 `Package.resolved` 目前是：
+
+```text
+MortalSwift 0.5.0
+revision 802dc3d030da6573094d413e18af34e776eb091d
 ```
 
----
+但 `Package.resolved` 被 `.gitignore` 排除，新 clone 不保證固定在同一 revision。若要求可重現，應把 resolved lockfile 納入版本控制或改成 exact dependency。
 
-## 送出請求
+### 0.5.0 驗證了什麼
 
-**已驗證**：`getMajsoulConnections()` 回傳物件含**原始 `ws` 參考**，可直接 `.send()`。
+MortalSwift test target 用 libriichi v4 當 oracle。兩套固定 MJAI 劇本會把每個需要決策的 snapshot 同時餵給兩邊，逐格比對：
 
-```js
-// naki-websocket.js → window.__nakiWebSocket.getMajsoulConnections()
-const conns = window.__nakiWebSocket.getMajsoulConnections();
-// [{ id, url, ws }, ...]  ← 只回傳 isMajsoul && readyState === OPEN 的連線
-conns[0].ws.send(bytes);   // bytes: Uint8Array / ArrayBuffer
+- observation：固定 `1012 × 34`
+- action mask：46 actions
+- `knownUnportedChannels`：目前為空
+- Debug 與 Release 各 47 tests：通過，測試輸出為 observation mismatch 0、mask parity pass
+
+這只證明內建劇本所覆蓋的 snapshots 一致，不是所有牌局狀態的形式證明。
+
+### 為什麼不能叫「最新最強模型」
+
+- MortalSwift 0.5.0 更新的是 encoder、和牌／期望值相關邏輯與 parity，不是重新訓練權重。
+- bundled `mortal.mlmodelc` 在 0.3.0、0.4.0、0.5.0 的 blobs 相同。
+- Naki 沒有千局級牌力、順位、和率、放銃率或相對基準 benchmark。
+- 現有 obvious-discard sanity test 不能代表實戰強度。
+
+所以能說的是：「Naki 目前使用已完成這批 encoder parity 修正的 MortalSwift 0.5.0」；不能說「模型已升成最新最強」。
+
+### 三麻
+
+Naki 雖有 `is3P` 狀態與 UI 警示，`NativeBotController` 最後仍建立同一個 `MortalBot(version: 4, useBundledModel: true)`。目前沒有 sanma constructor、775×34 encoder 或專用權重。三麻推薦在結構上未驗證，不應用於品質判斷。
+
+## Unity 遊戲內高亮
+
+現行高亮不是 Laya material，也不是螢幕座標推算。`naki-core.js` 攔截 WebGL2 `drawElements`：
+
+1. 只看 `count === 6` 的 quad draw。
+2. 從 `_MainTex_ST` UV 解出牌種與牌號。
+3. 若牌名在 Swift 傳入的 target set，暫時覆寫 `_Tint` 或 `_Color`。
+4. draw 完立即還原 uniform。
+
+Swift 由 `WebViewModel.syncGameHighlight()` 呼叫 `window.__nakiHighlight.set(...)`／`clear()`。
+
+live `state()` 的 tinted counter 持續增加，能證明 hook 與染色分支有執行；不能證明視覺命中正確。現有限制：
+
+- target 以牌名為 key，同名牌會一起染。
+- 只攔 WebGL2 `drawElements` 與特定 quad signature。
+- 同 UV 的非手牌 draw 可能誤染。
+- popup／動作按鈕用頻率 heuristic，不是穩定 identity。
+- 沒有 JS 自動測試或 screenshot-based 驗收。
+
+MCP 的 6 個 `highlight_*` 工具是另一條舊 API，目前仍固定回 unavailable；這不代表 Naki 內建自動 WebGL 高亮不存在。
+
+## 客戶端資源與配置表
+
+live Naki 取得：
+
+```text
+version.json                    0.11.252.w
+res/proto/liqi.json prefix      v0.11.243.w
+res/proto/config.proto prefix   v0.10.1.w
+res/config/lqc.lqbin prefix     v0.11.252.w
 ```
 
-### 並行開發中的封裝：`sendRaw(base64)`
+正確 URL 公式是：
 
-**由 source 推導，未 runtime 驗證**（2026-07-31 讀 code 時工作區已存在，非本輪文件作業產物）：
-`naki-websocket.js` 已新增 `window.__nakiWebSocket.sendRaw(base64)`，
-搭配新檔 `command/Services/Bridge/LiqiEncoder.swift`（Swift 端組 envelope → base64 → JS 送出）。
-
-```js
-window.__nakiWebSocket.sendRaw(base64)
-// → { success: true, bytes, socketId }
-// → { success: false, reason: 'invalid_base64' | 'decode_failed: …' | 'empty_payload'
-//                            | 'no_open_majsoul_connection' | 'send_failed: …' }
+```text
+/1/<prefix>/<path>
 ```
 
-行為（讀 code 得知）：驗 base64 格式 → 解碼 → 取 `getMajsoulConnections()[0]` → `ws.send(buffer)`。
-只送第一條連線、不做任何協定加工。**這條路徑的 runtime 行為未在本文驗證。**
+`prefix` 已含前導 `v`，不可再補一個 `v`。
 
-### 注意：送出會被自己的 hook 攔到
+2026-08-01 依這份 live manifest fresh download 並用 repo 工具解析：
 
-**由 source 推導**（`naki-websocket.js` 中 `ws.send` 的包裝）：`ws.send` 已被 Naki 包裝，
-所以 Naki 自己送出的請求也會走一次 `handleMessage(..., 'send')` 並轉發給 Swift。
-若 Swift 端要區分「遊戲送的」與「Naki 送的」，需要靠 msgId 區間判斷。
-**此行為對 Swift 端解析的實際影響未實測。**
+| 資源 | bytes | SHA-256 |
+|------|------:|---------|
+| `config.proto` | 855 | `7291c02850e0eebd913a585e123355fad04f06d44c2c5388a923328ba4d07873` |
+| `lqc.lqbin` | 17,483,020 | `a5959513fa31d3b5297d2dda400c86c0eacbdb4adad461b583439d7f673c9086` |
 
-繞過方式（若確定不想讓自己的封包進 bridge）：使用 `window.__nakiWebSocket.OriginalWebSocket`
-之外的路徑目前**沒有**現成 API——原始 `ws` 實例的 `send` 已在建構時被覆寫。**未驗證是否有其他繞法。**
+解析結果仍是 41 tables、263 sheets、119,289 rows。詳細 current-only 表格見 [majsoul-config-tables.md](majsoul-config-tables.md)。
 
----
+## Debug／MCP 現況
 
-## msgId 管理
+Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。live registry 為 42 個工具：
 
-**已驗證的事實**：遊戲自己用**低位遞增**的 msgId（實測心跳為 141）。
+| 類別 | 數量 |
+|------|-----:|
+| 系統 | 4 |
+| Bot | 7 |
+| 遊戲狀態／動作 | 6 |
+| JavaScript | 1 |
+| 大廳 | 8 |
+| 防閒置 | 1 |
+| 友人房 | 7 |
+| 表情 | 2 |
+| 高亮相容失敗樁 | 6 |
 
-**規則（Naki 自送時必守）**：
+`detect`、`explore`、座標 click／calibrate、`ui_names_*`、`lobby_navigate` 等舊工具不存在。完整列表見 [mcp-server-guide.md](mcp-server-guide.md)。
 
-- Naki 自組的 REQUEST 一律用**高位號段，建議 60000+**，避免與遊戲的低位序列撞號。
-- 撞號的後果：RESPONSE 只帶 msgId 不帶方法名，撞號會讓遊戲客戶端把「我們的回應」
-  當成「它自己那筆請求的回應」餵給 Unity，或反之——**未驗證實際崩潰行為，但避免即可。**
-- 每筆自送請求自己記錄 `msgId → method` 的對照表，收到同 msgId 的 type=3 才知道那是什麼。
+## 目前已知風險
 
----
+| 優先級 | 風險 | 驗證狀態 |
+|--------|------|----------|
+| P0 | tsumo snapshot 可能因推薦空而沒進 resolver | source code 已確認；尚缺 live failure fixture |
+| P0 | hora send 失敗仍被 mark handled | source code 已確認；尚缺 live failure fixture |
+| P0 | Legacy iOS 沒有 server-authoritative resolver | source code 已確認 |
+| P1 | 三麻使用四麻模型 | source code 已確認 |
+| P1 | Package.resolved 未納入版本控制 | git ignore 與 project 設定已確認 |
+| P1 | 隱藏玩家名稱 toggle 必定無效 | source + live `uiscript` 缺席已確認 |
+| P1 | WebGL highlighter 可能誤染／重複染 | hook 執行已確認；視覺正確性未驗證 |
+| P2 | Liqi generic protobuf tag 只讀一 byte，field > 31 會錯 | source code 已確認 |
+| P2 | AI 實戰強度未知 | 沒有 benchmark，未驗證 |
 
-## 已驗證的 PoC
+## 驗收邊界
 
-**結論：自組 Liqi 請求送出可行，已驗證。**
+已驗證：
 
-實測步驟：
+- Unity 客戶端、canvas、Laya 缺席、WebSocket 與 WebGL hook 的 live 存在性。
+- live Debug API 與 42-tool MCP registry。
+- 當前 `liqi.json` 與 live CDN 相同。
+- 當前 config 資源 fresh download／hash／解析統計。
+- MortalSwift parity fixtures 與 Naki resolver／builder 單元測試。
+- runtime 榮和、碰與一般 discard／pass 的協定鏈。
 
-1. 從 live 連線擷取遊戲真實送出的 heartbeat REQUEST（上面那 34 bytes）。
-2. 機械改寫其 msgId 為 `60000`（0xEA60 → little-endian `60 EA`），其餘位元組不動。
-3. 透過 `getMajsoulConnections()[0].ws.send(...)` 送出。
-4. **伺服器正確回應 msgId=60000 的 RESPONSE** → 封包被接受、msgId 配對正確。
+未驗證：
 
-對應的封包（依實測封包機械改寫 msgId 而得）：
-
-```
-0260ea0a132e6c712e526f7574652e686561727462656174120808001000180b200f
-  ^^^^^ msgId = 60000
-```
-
-參考重建程式碼（供除錯用；**此片段本身未逐行 runtime 驗證**，
-已驗證的是「同構封包 + msgId=60000 會得到對應 RESPONSE」這件事）：
-
-```js
-// 在遊戲頁面 context 執行（Debug Server /js 需要 return）
-(function () {
-  const method = '.lq.Route.heartbeat';
-  const payload = [0x08, 0x00, 0x10, 0x00, 0x18, 0x0b, 0x20, 0x0f];
-  const msgId = 60000;
-
-  const nameBytes = Array.from(method, c => c.charCodeAt(0));
-  const bytes = [
-    0x02,                                   // type = REQUEST
-    msgId & 0xff, (msgId >> 8) & 0xff,      // msgId, little-endian
-    0x0a, nameBytes.length, ...nameBytes,   // field1 = method
-    0x12, payload.length, ...payload        // field2 = payload
-  ];
-
-  const conns = window.__nakiWebSocket.getMajsoulConnections();
-  if (!conns.length) return { ok: false, error: 'no live majsoul ws' };
-  conns[0].ws.send(new Uint8Array(bytes));
-  return { ok: true, msgId: msgId, len: bytes.length };
-})()
-```
-
-驗證方法：看 Naki log / bridge 是否出現 `03 60 ea ...` 開頭的 RESPONSE frame。
-
----
-
-## 尚未驗證的部分
-
-以下**全部未驗證**，任何 code 或文件都不得把它們當事實引用。
-要驗證的唯一方法是**抓真實對局／大廳封包比對**。
-
-### 對局動作（送出面）
-
-| 需求 | 推測方法名 | 狀態 |
-|------|-----------|------|
-| 打牌 / 吃碰槓 / 立直 / 和了 | `.lq.FastTest.inputOperation`（或 `inputChiPengGang`） | ❌ payload schema **未實測** |
-| 確認進入對局 | `.lq.FastTest.authGame` | ❌ 未實測 |
-| 同步 | `.lq.FastTest.syncGame` | ❌ 未實測（接收面 Naki 既有 parser 有處理，送出面未測） |
-
-### 大廳（送出面）
-
-| 需求 | 推測方法名 | 狀態 |
-|------|-----------|------|
-| 匹配 | `.lq.Lobby.matchGame` / `startUnifiedMatch` | ❌ payload schema **未實測** |
-| 建房 / 加入 / 準備 | `.lq.Lobby.createRoom` / `joinRoom` / `readyPlay` | ❌ 未實測 |
-| 帳號資訊（段位） | `.lq.Lobby.fetchAccountInfo` | ❌ 未實測 |
-
-> 這些方法名來自 **Laya 時代**的 `app.NetAgent` 呼叫清單（見舊文件的歷史存檔段落）。
-> Liqi 服務名前綴（`.lq.Lobby.` / `.lq.FastTest.`）與各方法的 request message 欄位定義
-> **本輪都沒有實測**，只有 `.lq.Route.heartbeat` 是實測確認的完整範例。
-
-### 其他未探測項
-
-- 防閒置：Unity 下如何觸發／是否需要 Naki 自己補送 `.lq.Route.heartbeat`
-
----
-
-## Unity 執行期可控面（2026-07-31 實測補充）
-
-**已驗證**：Unity instance **拿得到**，先前「完全未探測」的判定作廢。
-
-### 怎麼取到 instance（關鍵）
-
-`window.unityFramework` 是 **`null`**（`typeof` 回 `"object"` 會誤導），
-`window.unityInstance` 也**不存在**。真正的 instance 存在頁面 inline script 的
-**script scope**（`let`/`const` 宣告不掛上 `window`），所以只能用**裸識別字**取：
-
-```js
-// ❌ 取不到
-window.unityInstance            // undefined
-window.unityFramework           // null
-
-// ✅ 取得到（Debug Server /js 在 page world 執行）
-return typeof unityInstance === 'undefined' ? null : Object.keys(unityInstance);
-// → ["Module", "SetFullscreen", "SendMessage", "Quit", "GetMemoryInfo"]
-```
-
-線索來自 `String(window.onUnityReady)`——它的函式本體是
-`function onUnityReady(instance) { unityInstance = instance; … }`。
-
-### 實測可觸及的面
-
-| 面 | 狀態 | 備註 |
-|----|------|------|
-| `unityInstance.SendMessage(obj, method, value)` | ✅ 存在（`function`） | Unity 標準 JS→C# 橋；**需要知道 GameObject 名稱與 public 方法名**，雀魂並未公開，未驗證有無可用目標 |
-| `unityInstance.Module`（Emscripten） | ✅ 565 個 key | |
-| `Module.HEAP8/16/32/U8/U16/U32/F32/F64` | ✅ 全部在 | 可讀寫整塊線性記憶體 |
-| `Module.ccall` / `cwrap` | ✅ `function` | 但可呼叫的匯出只有下面 17 個 |
-| `Module._malloc` / `_free` | ✅ | |
-| `Module.addFunction` / `getValue` / `setValue` | ❌ `undefined` | 未編入 |
-| Il2Cpp / Mono 符號 | ❌ **零個** | `Object.keys(Module)` 過濾 `il2cpp|mono` = 空 |
-
-**全部匯出函式（`_` 開頭，共 17 個）**——沒有任何遊戲邏輯函式：
-
-```
-_GetFakemodTimeInSeconds  _ReleaseKeys  _getMemInfo
-_SendMessageFloat  _SendMessageString  _SendMessage  _SetFullscreen
-_main  _htonl  _htons  _ntohs  _strlen
-_malloc  _free  _emscripten_builtin_memalign  _setThrew  _saveSetjmp
-```
-
-WebGL 相關只有 `webglContextAttributes`、`matchWebGLToCanvasSize`（設定值，非繪圖介面）。
-
-### 對「控制牌的顏色 / 高亮」的結論
-
-| 做法 | 可行性 |
-|------|--------|
-| Unity 內直接改牌面材質色 | ❌ **做不到**。無 Il2Cpp 符號、無遊戲邏輯匯出，只有 `SendMessage` 一條窄門且目標名未知 |
-| 掃 / 改 `HEAPU8` 找牌色狀態 | ⚠️ 理論可行但需逆向 wasm 佈局，且每次改版失效；**不建議** |
-| Hook WebGL context 攔繪圖呼叫染色 | ⚠️ 需辨識哪個 draw call 是哪張牌，極脆弱 |
-| **DOM 疊層**（在 canvas 上蓋半透明標記） | ✅ 最務實。`<canvas id="unity-canvas">` 是 `#unity-container` 的**唯一子元素**，`position: static`、無 z-index，疊一層絕對定位元素不會被覆蓋。**注意**：attribute 尺寸 2560×1440 但 CSS 實際 1007×566，座標需自行換算；牌的螢幕位置仍要靠校準，會隨版面漂移 |
-| 協定層裝扮（`.lq.Lobby.useCommonView` / `saveCommonViews`） | ✅ 真實存在，但只能換**整套**牌背／牌桌皮膚（`ViewSlot{slot, item_id, type}`，需帳號已擁有該 item），**不能單張高亮** |
-
-> 現況：`HighlightTools.swift` 的 6 個高亮工具在 Unity 下全數回報 unavailable，
-> 推薦改由 Naki 原生 SwiftUI 面板呈現。上表的 DOM 疊層是**唯一**能回到遊戲畫面內的路徑，
-> 但**尚未實作、尚未驗證**。
-
-### 建議的驗證順序
-
-1. 開一局，錄下完整 WebSocket frame（含方向、type、msgId、方法名）。
-2. 從紀錄中抓出真實的 `inputOperation` REQUEST，逐位元組拆 payload。
-3. 用 60000+ 的 msgId 重放**無害**的查詢類請求（如 fetch 類）先確認可行。
-4. 才嘗試動作類請求，且**只在測試帳號上**（CLAUDE.md：NEVER 使用主帳號）。
-
----
-
-**文檔版本**: 1.0
-**建立日期**: 2026-07-31
-**驗證狀態**: envelope 格式、訊息橋接、送出通道、msgId 配對 = 已驗證；遊戲／大廳 payload schema = 未驗證
+- 使用者回報的核心情境：server 有 tsumo、AI 想 discard 時，最新版整合能否每次成功 override 並收到 `ActionHule`。
+- 空 recommendation + tsumo。
+- send failure／server reject／中斷後 retry 與 cleanup。
+- Legacy iOS 實機完整對局。
+- chi variants、赤五 combination、三種槓。
+- WebGL 高亮是否視覺上每次命中正確牌與正確動作按鈕。
+- AI 相對其他模型或版本的實戰強度。

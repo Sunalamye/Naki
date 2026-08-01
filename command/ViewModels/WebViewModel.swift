@@ -626,7 +626,14 @@ class WebViewModel: WebViewModelProtocol {
   func setHidePlayerNames(_ hide: Bool) {
     guard let page = webPage else { return }
 
-    let script = "window.__nakiPlayerNames?.setHidden(\(hide))"
+    // `setHidden` 不存在——實際方法是 hide / show。原本那樣呼叫每次都拋 TypeError
+    // 然後被 catch 吞掉，外界看不出失敗。
+    //
+    // ⚠️ 即使名字改對了，這條路在 Unity 客戶端下仍然無效：`hide()` 依賴
+    // `uiscript.UI_DesktopInfo`，而 uiscript 不存在。JS 端會回
+    // `{available:false, reason:"unity-client-no-laya"}`——那是**明確的失敗**，
+    // 呼叫端拿得到理由，所以 API 保留；但 UI 開關已移除（見 AUDIT §13）。
+    let script = "return window.__nakiPlayerNames?.\(hide ? "hide" : "show")()"
 
     Task {
       do {
