@@ -703,7 +703,9 @@ class NativeBotController {
     var botState: BotStatus {
         BotStatus(
             isActive: isInitialized,
-            modelName: is3P ? "mortal3p" : "mortal",
+            // 內建模型只有四麻一份，modelName 必須反映**實際載入的是哪個**，
+            // 不能因為對局是三麻就標成 mortal3p——那會讓 UI 宣稱有三麻模型
+            modelName: "mortal",
             playerId: Int(playerId),
             is3P: is3P,
             canDiscard: canDiscard,

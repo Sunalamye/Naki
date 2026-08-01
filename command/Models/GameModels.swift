@@ -115,12 +115,19 @@ struct BotStatus: Equatable {
     // MARK: - Computed Properties
 
     /// 模型顯示名稱
+    ///
+    /// 三麻對局要明講「用的是四麻模型」。三麻的牌山、規則與 observation 佈局
+    /// 都跟四麻不同（沒有 2m-8m、北是拔北寶牌、只有三家的分數與河），
+    /// 拿四麻模型去推三麻，輸出不是「稍微偏差」而是**結構上無效**。
+    /// 標成 "Mortal (3P)" 會讓人誤以為有專用模型。
     var modelDisplayName: String {
+        let base: String
         switch modelName {
-        case "mortal": return "Mortal (4P)"
-        case "mortal3p": return "Mortal (3P)"
-        default: return modelName
+        case "mortal": base = "Mortal (4P)"
+        case "mortal3p": base = "Mortal (3P)"
+        default: base = modelName
         }
+        return is3P ? "\(base) ⚠️ 三麻無專用模型" : base
     }
 
     /// 是否有任何可用動作

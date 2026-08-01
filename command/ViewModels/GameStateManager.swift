@@ -187,7 +187,7 @@ final class GameStateManager {
             // 更新 Bot 狀態
             var status = BotStatus()
             status.isActive = true
-            status.modelName = is3P ? "mortal3p" : "mortal"
+            status.modelName = "mortal"   // 同上：只有四麻模型，標籤不得造假
             status.playerId = state.playerId
             status.is3P = state.is3P
             status.canDiscard = canDiscard
