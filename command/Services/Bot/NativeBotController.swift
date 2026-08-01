@@ -127,8 +127,23 @@ class NativeBotController {
     /// ⭐ MortalBot 是 actor，使用 async react() 自動在背景執行推理
     /// - Parameter event: MJAI 事件字典
     /// - Returns: Bot 回應字典，無動作時返回 nil
+    /// 生命週期事件：這些在 Bot 已被刪除後才抵達是正常的，不算錯誤
+    private static let lifecycleEvents: Set<String> = ["end_game", "end_kyoku"]
+
     func react(event: [String: Any]) async throws -> [String: Any]? {
         guard let bot = bot else {
+            // end_game 抵達時 Bot 幾乎一定已經不在了：協調器是先 emit 事件、
+            // 再 deleteNativeBot，消費者從佇列取出時 bot 已為 nil。
+            // 這種情況丟例外會讓每一局結束都走錯誤路徑，log 也從
+            // 「[消費者] end_game → 回應: 無」變成「處理 end_game 時發生錯誤」——
+            // 格式一變就足以讓依賴這行的工具全部失效（AUDIT §17.3）。
+            //
+            // 真正的錯誤（對局中途 bot 不見）仍然照丟。
+            let type = event["type"] as? String ?? ""
+            if Self.lifecycleEvents.contains(type) {
+                botLog("[NativeBotController] \(type) 抵達時 Bot 已刪除（正常，忽略）")
+                return nil
+            }
             botLog("[NativeBotController] ERROR: Bot not initialized!")
             throw NativeBotError.botNotInitialized
         }

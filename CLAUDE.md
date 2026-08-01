@@ -41,7 +41,7 @@ curl -X POST http://127.0.0.1:8765/js \
 
 | Property | Current value |
 |----------|---------------|
-| App version | 2.3.0 |
+| App version | 2.5.0 |
 | macOS target | 26.0 |
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |
@@ -150,6 +150,17 @@ MCP 的 6 個 `highlight_*` 是未接新 hook 的相容失敗樁；不可用它�
 位置校準、推薦溫度、旋轉 Laya 高亮三組無效控制已從 UI 移除，底層仍依賴不存在的 `uiscript`，不可掛回 UI。
 
 隱藏玩家名稱已用協定層重做：`naki-websocket.js` 的 `__nakiHideNames` 在遊戲解析封包前，就地把 `ResAuthGame` 的 nickname bytes 覆寫成等長 ASCII。等長是硬性條件——改長度就要連動所有外層 protobuf 長度前綴。範圍只有 authGame RESPONSE；syncGame 重連與 NotifyGameEndResult 結算畫面仍顯示原名。node 合成 frame 測過（等長、關閉不動、非 authGame 不動、垃圾 bytes 不丟例外），**沒有 live 對局驗證**。
+
+## 測試腳本
+
+| 腳本 | 用途 |
+|------|------|
+| `scripts/soak-test.sh N` | 連續跑 N 局（友人房+人機），逐局收集異常、停滯自救 |
+| `scripts/action-shots.sh [dir]` | 輪到自己或出現異常時自動截圖（JPEG） |
+
+`soak-test.sh` 用 `[協調器] start_game` / `end_game` 判斷局的邊界，**不用 `/game/state` 的 `inGame`**（結束後不會歸位）。開局走 `room_quick_test` + 必要時 `bot_sync`——`startRoom` 只讓伺服器開局，客戶端常常不會自己進場。
+
+MCP 回應是「JSON 包在 JSON 字串裡」，比對前要先 `tr -d '\\'` 去掉跳脫，否則 `grep '"serverAccepted":false'` 永遠對不上。
 
 ## 文件
 

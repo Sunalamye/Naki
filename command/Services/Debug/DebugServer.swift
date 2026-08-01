@@ -37,6 +37,13 @@ class DebugServer {
     /// WebView 執行 JavaScript 的回調
     var executeJavaScript: ((String, @escaping (Any?, Error?) -> Void) -> Void)?
 
+    /// WebView 截圖回調，回傳 PNG bytes
+    ///
+    /// 走 `WebPage.exported(as: .image(...))` 而不是 OS 層的 `screencapture`：
+    /// 後者需要「螢幕錄製」權限，而且抓的是螢幕上那塊區域——視窗被遮住、
+    /// 在其他 Space、或最小化就拍不到。WebView 自己輸出則不受這些影響。
+    var captureScreenshot: ((@escaping (Data?, Error?) -> Void) -> Void)?
+
     /// 日誌回調
     var onLog: ((String) -> Void)?
 
@@ -311,7 +318,10 @@ class DebugServer {
         }
 
         let method = parts[0]
-        let path = parts[1]
+        let rawPath = parts[1]
+        // query string 要拆掉，否則 `/screenshot?mode=view` 會走到 404
+        let path = rawPath.components(separatedBy: "?").first ?? rawPath
+        _ = rawPath.components(separatedBy: "?").dropFirst()  // query 目前沒有端點需要
 
         log("Request: \(method) \(path)")
 
@@ -352,6 +362,9 @@ class DebugServer {
             handleGameAction(body: body, connection: connection)
 
         // Debug 端點
+        case ("GET", "/screenshot"):
+            handleScreenshot(connection: connection)
+
         case ("GET", "/logs"):
             handleLogs(connection: connection)
 
@@ -482,6 +495,22 @@ class DebugServer {
         callToolAndRespond(tool: "execute_js", arguments: ["code": code], connection: connection)
     }
 
+    private func handleScreenshot(connection: NWConnection) {
+        guard let capture = captureScreenshot else {
+            sendJSON(connection: connection, data: ["error": "screenshot not wired"])
+            return
+        }
+        capture { [weak self] data, error in
+            guard let self else { return }
+            if let data, !data.isEmpty {
+                self.sendBinary(connection: connection, data: data, contentType: "image/png")
+            } else {
+                self.sendJSON(connection: connection,
+                              data: ["error": error?.localizedDescription ?? "empty snapshot"])
+            }
+        }
+    }
+
     // MARK: - Game API Handlers
 
     private func handleGameState(connection: NWConnection) {
@@ -585,6 +614,24 @@ class DebugServer {
         """
 
         connection.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
+
+    /// 送 binary body。`sendResponse` 是 String-only，PNG 走那條會被 UTF-8 轉換破壞。
+    private func sendBinary(connection: NWConnection, data: Data, contentType: String) {
+        let header = """
+        HTTP/1.1 200 OK\r
+        Content-Type: \(contentType)\r
+        Content-Length: \(data.count)\r
+        Access-Control-Allow-Origin: http://localhost:\(actualPort)\r
+        Connection: close\r
+        \r
+        
+        """
+        var payload = Data(header.utf8)
+        payload.append(data)
+        connection.send(content: payload, completion: .contentProcessed { _ in
             connection.cancel()
         })
     }

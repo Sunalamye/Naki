@@ -182,6 +182,7 @@ class WebViewModel: WebViewModelProtocol {
           case .startedProvisionalNavigation:
             webCoordinator?.handleNavigationStarted()
             statusMessage = "正在加載雀魂..."
+            systemLog("[生命週期] 頁面開始載入")
             // 重置隱藏名稱設定狀態，以便重新套用
             resetHideNamesSettings()
 
@@ -190,6 +191,7 @@ class WebViewModel: WebViewModelProtocol {
 
           case .finished:
             print("[WebView] 頁面載入成功")
+            systemLog("[生命週期] 頁面載入完成")
             // JS 模組的開關是 closure 內的變數，reload 會歸零，必須重新套用
             applyHideNamesSettingsIfNeeded()
 
@@ -298,6 +300,26 @@ class WebViewModel: WebViewModelProtocol {
       if snapshot.horaOperation != nil {
         logAutoPlayEvent("🎯 oplist 有和牌但模型無推薦 → 交給 resolver (ops=\(snapshot.rawTypes))")
         triggerAutoPlayNow(delay: 0, forcedAction: .hora)
+        return
+      }
+
+      // ⚠️ 「此刻推薦是空的」≠「模型決定不做」。
+      //
+      // 這條路徑是 1 秒輪詢，而推論是非同步的：oplist 到達後 ~50–100ms 才有結果，
+      // 而 `recommendations` 還要再經過 updateUIAfterBotResponse 才同步過來。
+      // 輪詢若在這中間跑到，看到的是**上一巡清空後的空清單**，卻把它當成
+      // 「Mortal 判斷不做」而主動送出「過」。
+      //
+      // 2026-08-01 live 實測兩次：
+      //   20:57:10.704 oplist types=[3] → .707 送出過 → .791 推薦才算完
+      //   20:57:47.183 oplist types=[3] → .238 推薦 pon@85.9% → .638 仍送出過
+      // 第二次直接把模型 85.9% 的碰蓋成過。
+      //
+      // 伺服器給的思考時間是 300 秒（實測），等幾秒完全安全；
+      // 搶在推論完成前送出則不可逆。所以加一段寬限期：快照到達後
+      // 未滿 `callPassGrace` 就先不送，讓推論有機會完成。
+      let sinceCapture = Date().timeIntervalSince(snapshot.capturedAt)
+      if sinceCapture < Self.callPassGrace {
         return
       }
 
@@ -754,6 +776,22 @@ class WebViewModel: WebViewModelProtocol {
       return
     }
 
+    // 沒有 oplist 就別排這次觸發。
+    //
+    // 以前不管有沒有 oplist 都會排進 `executeAutoPlayActionWithRetry`，
+    // 於是在「伺服器根本還沒授權」的時機空轉 50×0.1s 然後印 ❌，
+    // 看起來像故障，其實是安全機制在正常運作。實測兩個觸發情境：
+    //   1. 立直後的強制摸切 —— 客戶端自己摸切，伺服器不再送 oplist
+    //   2. 和牌結算到新局發牌之間 —— 模型已看到新手牌但還不能動作
+    // 兩者都會在真正可動作時由 oplist 到達重新觸發，不需要在這裡等。
+    //
+    // forcedAction（伺服器提供和牌但模型無推薦）不受此限：那條路的前提
+    // 就是 oplist 裡有和牌，本來就有 snapshot。
+    if forcedAction == nil, LiqiOperationStore.shared.pending == nil {
+      bridgeLog("[WebViewModel] 略過觸發: 尚無 oplist（\(actionType.rawValue) \(tileName)）")
+      return
+    }
+
     // 生成執行 ID 用於追蹤
     let executionId = UUID()
     currentExecutionId = executionId
@@ -780,8 +818,19 @@ class WebViewModel: WebViewModelProtocol {
     }
   }
 
+  /// 副露機會在多久之後才允許「因為沒推薦而自動送過」
+  ///
+  /// 只要比「oplist 到達 → 推論完成 → 推薦同步到 view model」的總延遲長就夠。
+  /// 實測該延遲在 100ms 量級，2 秒有 20 倍餘裕；而伺服器等 300 秒，
+  /// 多等 2 秒沒有任何代價。
+  static let callPassGrace: TimeInterval = 2.0
+
   /// 最大重試次數
-  private let maxRetryAttempts = 50
+  ///
+  /// 從 50（5 秒）降到 15（1.5 秒）。觸發點已經確認過 oplist 存在，
+  /// 這裡要處理的只是「延遲期間 oplist 剛好被換掉」的短暫空窗；
+  /// 等 5 秒不會讓它變得比較可能出現，只會讓失敗訊息晚 3.5 秒才出現。
+  private let maxRetryAttempts = 15
 
   /// 僅在 executionId 仍為當前執行時清除 currentExecutionId。
   /// 避免遞迴／延遲後外層路徑清掉「已被新觸發取代」的執行 ID；
@@ -830,7 +879,7 @@ class WebViewModel: WebViewModelProtocol {
         if actionType == .none {
           debugServer?.addLog("✅ Pass: \(attempt) 次嘗試後無 oplist, 無機會")
         } else {
-          debugServer?.addLog("❌ \(attempt) 次嘗試後無 oplist, 放棄")
+          debugServer?.addLog("⏭️ \(attempt) 次嘗試後 oplist 仍未到，這次不送（等下一批）")
         }
         clearExecutionIfCurrent(executionId)
       }
@@ -1139,6 +1188,19 @@ class WebViewModel: WebViewModelProtocol {
   // MARK: - MCP Server
 
   /// 啟動 MCP Server
+  #if os(macOS)
+  /// 整個視窗（Naki 側欄 + 遊戲畫面）轉成 PNG
+  static func windowScreenshot() -> Data? {
+    guard let window = NSApplication.shared.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+          let content = window.contentView,
+          content.bounds.width > 0, content.bounds.height > 0,
+          let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds)
+    else { return nil }
+    content.cacheDisplay(in: content.bounds, to: rep)
+    return rep.representation(using: .png, properties: [:])
+  }
+  #endif
+
   func startDebugServer() {
     guard debugServer == nil else {
       statusMessage = "MCP Server 已在運行"
@@ -1175,6 +1237,34 @@ class WebViewModel: WebViewModelProtocol {
           print("[JS 除錯] 錯誤: \(error)")
           completion(nil, error)
         }
+      }
+    }
+
+    // 設定截圖回調
+    //
+    // `contentView.cacheDisplay` 就抓得到 WKWebView 的內容——實測 macOS 26 上
+    // WebView 那塊會正常出現在 bitmap 裡（`?mode=view` 拍到的載入畫面可證）。
+    //
+    // 原本還疊了一層 `WebPage.exported(as: .image())`，是為了防「WKWebView 跨
+    // process 渲染、cacheDisplay 抓不到」。那個顧慮在這裡不成立，而合成本身
+    // 反而製造了瑕疵（web 影像的 frame 與底圖對不齊，畫面底部出現重複的功能列），
+    // 而且 `exported` 在 macOS 回的是 **TIFF** 不是 PNG。所以整層拿掉。
+    //
+    // 也沒有用 OS 層的 `screencapture`：那要「螢幕錄製」權限，視窗被遮住、
+    // 在其他 Space 或最小化都拍不到。
+    debugServer?.captureScreenshot = { completion in
+      Task { @MainActor in
+        #if os(macOS)
+        if let png = Self.windowScreenshot() {
+          completion(png, nil)
+        } else {
+          completion(nil, NSError(domain: "Naki", code: -1,
+                                  userInfo: [NSLocalizedDescriptionKey: "no visible window"]))
+        }
+        #else
+        completion(nil, NSError(domain: "Naki", code: -1,
+                                userInfo: [NSLocalizedDescriptionKey: "macOS only"]))
+        #endif
       }
     }
 
@@ -1262,6 +1352,7 @@ class WebViewModel: WebViewModelProtocol {
         self?.debugServerPort = newPort
         self?.isDebugServerRunning = true
         self?.statusMessage = "MCP Server 已啟動: http://localhost:\(newPort)"
+        systemLog("[生命週期] MCP Server 已啟動 port=\(newPort)")
       }
     }
 
@@ -1274,6 +1365,7 @@ class WebViewModel: WebViewModelProtocol {
     debugServer = nil
     isDebugServerRunning = false
     statusMessage = "MCP Server 已停止"
+    systemLog("[生命週期] MCP Server 已停止")
   }
 
   /// 切換 MCP Server

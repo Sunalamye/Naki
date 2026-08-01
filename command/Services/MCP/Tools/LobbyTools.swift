@@ -100,7 +100,7 @@ struct MatchModeListTool: MCPTool {
                 "x05xx": "雀聖",
                 "x06xx": "魂天"
             ],
-            "warning": "match_mode 數值來自 Laya 時代的觀察，liqi.json 沒有對應 enum，尚未以真實封包驗證"
+            "warning": "⚠️ 這張表是錯的：整組數值偏移一格。2026-08-01 從遊戲自己送的 .lq.Lobby.fetchCurrentMatchInfo 攔到，銅之間畫面實際輪詢的是 [2,3,17,18]=[四人東,四人南,三人東,三人南]，不是表上的 1/2。送出表上的值伺服器回 error 1306。其他房間的正確值尚未攔到，不要照用。"
         ]
     }
 }
@@ -134,9 +134,10 @@ struct StartMatchTool: MCPTool {
         guard let matchMode = arguments["match_mode"] as? Int else {
             throw MCPToolError.missingParameter("match_mode")
         }
-        let validModes = [1, 2, 4, 5, 7, 8, 10, 11, 13, 14]
-        guard validModes.contains(matchMode) else {
-            throw MCPToolError.invalidParameter("match_mode", expected: "1, 2, 4, 5, 7, 8, 10, 11, 13, 14")
+        // 不再用白名單擋：舊白名單本身就是錯的（見 lobby_match_modes 的 warning），
+        // 擋掉正確值反而更糟。只做基本範圍檢查，合法性交給伺服器判斷。
+        guard matchMode > 0, matchMode < 100 else {
+            throw MCPToolError.invalidParameter("match_mode", expected: "1–99（正確值請攔 fetchCurrentMatchInfo）")
         }
         guard let nakiContext = context as? NakiMCPContext else {
             throw MCPToolError.notAvailable("Naki context")

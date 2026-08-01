@@ -216,7 +216,7 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func handleMJAIEvent(_ event: [String: Any]) async {
         guard let eventType = event["type"] as? String else { return }
 
-        bridgeLog("[Legacy 協調器] MJAI 事件: \(eventType)")
+        mjaiLog("[Legacy 協調器] MJAI 事件: \(eventType)")
 
         switch eventType {
         case "start_game":

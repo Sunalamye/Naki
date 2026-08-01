@@ -157,6 +157,30 @@
     //
     // 任何解析中途遇到看不懂的東西一律 return，維持 bytes 原狀（fail-open 成
     // 「名字照常顯示」，而不是 fail 成壞封包）。
+    /// 依「遊戲自己在哪條線上做過同類事情」挑連線。
+    ///
+    /// 證據強度：**一般 lobby RPC > 登入**。這個順序是實測定的，跟直覺相反：
+    /// 客戶端會在多條線上嘗試登入，但只有真正活著的那條會持續跑
+    /// fetchCurrentMatchInfo 之類的 RPC。照「登入時間較晚」挑會選到
+    /// 已經被放棄的那條（2026-08-01 實測：socket 2 登入較晚但 lobby RPC 是 0，
+    /// 送過去一律 error 1004）。
+    /// 心跳完全不算證據（見 attributeSend）。
+    function candidatesProvenFor(list, isGameMethod) {
+        const tiers = isGameMethod
+            ? [function (c) { return c.lastGameSendAt || 0; }]
+            : [function (c) { return c.lastLobbySendAt || 0; },
+               function (c) { return c.lastLoginAt || 0; }];
+        for (const score of tiers) {
+            let best = null;
+            (list || []).forEach(function (c) {
+                const t = score(c);
+                if (t > 0 && (!best || t > best.t)) best = { t: t, c: c };
+            });
+            if (best) return best.c;
+        }
+        return null;
+    }
+
     const nakiNicknameMask = (function() {
         let enabled = false;
         let maskedCount = 0;
@@ -341,12 +365,52 @@
 
     window.__nakiHideNames = nakiNicknameMask;
 
+
+    /// 從送出的 REQUEST 認出方法名，記錄這條線是 lobby 線還是對局線
+    function attributeSend(info, data) {
+        try {
+            const b = data instanceof ArrayBuffer ? new Uint8Array(data)
+                    : (ArrayBuffer.isView(data)
+                       ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
+            if (!b || b.length < 6 || b[0] !== 2 || b[3] !== 0x0a) return;
+            const msgId = b[1] | (b[2] << 8);
+            if (msgId >= 60000) return;   // Naki 自己送的，不能當證據
+            const len = b[4];
+            let m = '';
+            for (let i = 0; i < len; i++) m += String.fromCharCode(b[5 + i]);
+            if (m.indexOf('.lq.FastTest.') === 0) { info.lastGameSendAt = Date.now(); return; }
+            if (m.indexOf('.lq.Lobby.') !== 0) return;
+
+            // 心跳要排除：`.lq.Lobby.heatbeat` / `loginBeat` 兩條線都會送，
+            // 拿它當證據等於沒判（實測兩條 socket 的時間戳幾乎同時，選錯照樣 1004）。
+            if (m.indexOf('eatbeat') !== -1 || m.indexOf('loginBeat') !== -1) return;
+
+            // 登入類是最強證據：session 就是在那條線上建立的。
+            if (m.indexOf('ogin') !== -1 || m.indexOf('uth') !== -1) info.lastLoginAt = Date.now();
+            else info.lastLobbySendAt = Date.now();
+        } catch (e) { /* 認不出就不記，維持原本的選線邏輯 */ }
+    }
+
     /**
      * 處理 WebSocket 訊息
      */
     function handleMessage(ws, wsId, data, direction, isMajsoul) {
         // 只處理雀魂連接的訊息
         if (!isMajsoul) return;
+
+        // 記錄選線要用的資訊。
+        //
+        // 「最近收到過訊息」不夠用：雀魂同時開兩條 /gateway，兩條都會收心跳，
+        // 時間戳常常完全相同，平手就退回順序——等於沒判。
+        //
+        // 真正有鑑別力的是「**遊戲自己**在哪條線上送 lobby 請求」：那條必然是
+        // 完成 oauth2Login 的那條。Naki 自己送的不算（msgId 從 60000 起跳），
+        // 否則會把自己送錯的那次記成正確答案，錯誤自我強化。
+        const info = wsConnections.get(ws);
+        if (info) {
+            if (direction === 'receive') info.lastRecvAt = Date.now();
+            else if (direction === 'send') attributeSend(info, data);
+        }
 
         // 收到伺服器訊息時，刷新心跳防止閒置登出
         if (direction === 'receive' && window.__nakiAntiIdle && window.__nakiAntiIdle.isEnabled()) {
@@ -509,6 +573,10 @@
                     result.push({
                         id: info.id,
                         url: info.url,
+                        lastRecvAt: info.lastRecvAt || 0,
+                        lastLobbySendAt: info.lastLobbySendAt || 0,
+                        lastLoginAt: info.lastLoginAt || 0,
+                        lastGameSendAt: info.lastGameSendAt || 0,
                         ws: ws
                     });
                 }
@@ -576,7 +644,29 @@
                 return { success: false, reason: 'no_game_gateway_connection' };
             }
 
-            const conn = pick.length > 0 ? pick[pick.length - 1] : conns[0];
+            // 優先選「遊戲自己在上面送過同類請求」的那條——那是登入完成的證據。
+            // 退而求其次才看「最近收到過訊息」，最後才是建立順序。
+            const proven = candidatesProvenFor(pick.length > 0 ? pick : conns, isGameMethod);
+            if (proven) {
+                try { proven.ws.send(bytes.buffer); } catch (e) {
+                    return { success: false, reason: 'send_failed: ' + e.message };
+                }
+                return { success: true, bytes: bytes.length, socketId: proven.id, pickedBy: 'proven' };
+            }
+
+            // 選「最近收到過伺服器訊息」的那條，而不是最後建立的那條。
+            //
+            // 雀魂可能同時開著兩條 /gateway，但登入握手只在其中一條上做過；
+            // 送到另一條伺服器會回 error 1004（連唯讀的 fetchAccountInfo 也一樣）。
+            // 原本的 `pick[pick.length - 1]` 是照建立順序取最後一條，在這種情況下
+            // 剛好選中沒登入的那條，於是匹配一直卡住而且沒有任何 log 說為什麼。
+            //
+            // 「最近收到過東西」是有事實根據的訊號：伺服器只會在活著的 session 上
+            // 推訊息。平手時才退回原本的順序。
+            const candidates = pick.length > 0 ? pick : conns;
+            const conn = candidates.slice().sort(function (a, b) {
+                return (b.lastRecvAt || 0) - (a.lastRecvAt || 0);
+            })[0];
             try {
                 conn.ws.send(bytes.buffer);
             } catch (e) {
@@ -585,7 +675,8 @@
             }
 
             console.log('[Naki WS] sendRaw:', conn.id, bytes.length, 'bytes');
-            return { success: true, bytes: bytes.length, socketId: conn.id };
+            return { success: true, bytes: bytes.length, socketId: conn.id, pickedBy: 'recency',
+                     candidates: candidates.map(function (c) { return c.id; }) };
         },
 
         /**

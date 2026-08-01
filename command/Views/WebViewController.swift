@@ -202,7 +202,7 @@ class NakiWebCoordinator {
     private func handleMJAIEvent(_ event: [String: Any]) async {
         guard let eventType = event["type"] as? String else { return }
 
-        bridgeLog("[協調器] MJAI 事件: \(eventType)")
+        mjaiLog("[協調器] MJAI 事件: \(eventType)")
 
         switch eventType {
         case "start_game":
@@ -224,6 +224,7 @@ class NakiWebCoordinator {
                 try await viewModel?.createNativeBot(playerId: playerId, is3P: is3P)
                 viewModel?.statusMessage = "Bot 已建立 (Player \(playerId))"
                 bridgeLog("[協調器] 已為玩家 \(playerId) 建立 Bot")
+                systemLog("[生命週期] 對局開始，Bot 已建立 (Player \(playerId))")
                 startEventConsumer()
             } catch {
                 bridgeLog("[協調器] 錯誤: 建立 Bot 失敗: \(error)")
@@ -231,6 +232,7 @@ class NakiWebCoordinator {
 
         case "end_game":
             bridgeLog("[協調器] end_game: 清理中")
+            systemLog("[生命週期] 對局結束，清除 Bot 與 UI 狀態")
             eventStream.emit(event)
             eventStream.endGame()
             viewModel?.deleteNativeBot()

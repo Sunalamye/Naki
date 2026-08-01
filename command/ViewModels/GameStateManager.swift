@@ -54,8 +54,15 @@ final class GameStateManager {
     }
 
     /// 是否在對局中
+    ///
+    /// `botStatus.isActive` 只代表「Bot 物件存在」——Bot 在 authGame 當下就建立，
+    /// 那時還沒發牌；重連時也可能先建 Bot 才進局。`/game/state` 的 `inGame`
+    /// 被用來回答「現在是不是在打」，所以再要求真的有局在跑。
+    ///
+    /// 對局結束後這個欄位停在 `true`（配上 東0局 / seat 0）曾讓測試工具誤判，
+    /// 是「欄位名稱與語意不符」的典型代價。
     var isInGame: Bool {
-        botStatus.isActive
+        botStatus.isActive && gameState.kyoku > 0
     }
 
     /// 局數顯示
