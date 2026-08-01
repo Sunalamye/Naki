@@ -16,10 +16,10 @@
 //  存進本檔的 `LiqiOperationStore.shared`，供 `LiqiActionSender` 與
 //  `WebViewModel` 的自動打牌重試框架判斷「現在到底能做什麼」。
 //
-//  ⚠️ 驗收語彙：
-//  - 已驗證：欄位編號取自 docs/protocol/liqi.json（協定定義檔）。
-//  - 未驗證：`LiqiOperationType` 的**數值語意**（1=打牌、2=吃…）來自 Laya 時代觀察，
-//    liqi.json 沒有對應 enum，需要真實對局封包才能確認。
+//  驗收語彙（2026-08-01）：
+//  - 欄位編號取自 docs/protocol/liqi.json；repo snapshot 與當日 live CDN byte-identical。
+//  - runtime 已對到 discard(1)、pon(3)、riichi(7)、tsumo request(8)、ron(9)。
+//  - chi variant／赤五 combination、三種槓、九種九牌與拔北仍需真實對局驗證。
 //
 
 import Foundation
@@ -28,9 +28,8 @@ import Foundation
 
 /// 雀魂 `OptionalOperation.type` 的數值語意。
 ///
-/// ⚠️ **未驗證**：liqi.json 只把 `type` 定義為 `uint32`，沒有 enum 定義。
-/// 這組對應來自 Laya 時代的觀察，屬伺服器端概念，遷移到 Unity 後應仍成立，
-/// 但在真實對局封包對拍之前不可當事實引用。
+/// `liqi.json` 只把 `type` 定義為 `uint32`，沒有 enum；因此每個值仍需 runtime 證據。
+/// 已有證據與未驗項目見檔頭，不能把已驗 subset 外推到整張表。
 nonisolated enum LiqiOperationType: UInt32, CaseIterable {
     /// 無操作
     case none = 0
@@ -59,12 +58,12 @@ nonisolated enum LiqiOperationType: UInt32, CaseIterable {
 
     /// 該操作要送去哪一個 FastTest 方法。
     ///
-    /// 規則（**未驗證**，依 Laya 時代慣例）：
+    /// 現行 channel：
     /// - 吃 / 碰 / 大明槓：回應**他家**打出的牌 → `inputChiPengGang`
     /// - 其餘（打牌、立直、暗槓、加槓、自摸、榮和、九種九牌、拔北）→ `inputOperation`
     ///
-    /// `ron` 特別註記：榮和同樣是回應他家打牌，實務上有可能走 `inputChiPengGang`。
-    /// 這裡依任務規格放在 `inputOperation`；若真實對局對拍發現不符，改這一行即可。
+    /// runtime 已驗證 ron(9) 走 `inputOperation` 並收到 RESPONSE／ActionHule；pon(3)
+    /// 走 `inputChiPengGang`。chi／minkan 與三種槓仍需各別驗證。
     var channel: LiqiActionChannel {
         switch self {
         case .chi, .pon, .minkan:

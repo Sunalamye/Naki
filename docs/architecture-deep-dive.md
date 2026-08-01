@@ -45,7 +45,7 @@ Swift 狀態同時提供給 SwiftUI、Debug HTTP 與 MCP。
 
 `command/` 是 file-system-synchronized shared group，兩個 app target 共用 Swift 與 JavaScript 資源。
 
-`WebViewModelProtocol` 只統一 UI-facing interface，並不代表兩個 implementation 的內部安全性一致。目前 resolver 只整合在新 `WebViewModel`；Legacy 自動打牌仍是已知差距。
+`WebViewModelProtocol` 只統一 UI-facing interface。resolver 現在兩條 path 都接了，但 Legacy 沒有 send 重試，且因為 macOS deployment target 是 26，這條路在本機跑不到、沒有 live 驗證。
 
 ## 啟動順序
 
@@ -126,7 +126,7 @@ Mortal recommendations + LiqiOperationSnapshot
 
 純 resolver 規則已測；整合仍有兩個 P0：沒有 recommendation 時可能不進 resolver，以及 hora send failure 仍可能被 mark handled。完整修正方向見 canonical 文件的「自動打牌決策」。
 
-Legacy path 沒有上述 resolver，不能視為同一條可靠路徑。
+Legacy path 走同一個 resolver 與同一組檢查，差別是失敗不重試（送一次，失敗等下一次推薦更新）。
 
 ## 送出與回應
 

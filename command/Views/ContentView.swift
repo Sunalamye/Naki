@@ -410,6 +410,7 @@ struct ConnectionIndicator: View {
 struct AdvancedSettingsSheet: View {
     @Environment(\.webViewModel) private var viewModel
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("HidePlayerNames") private var hidePlayerNames = false
 
     var body: some View {
         #if os(macOS)
@@ -470,6 +471,22 @@ struct AdvancedSettingsSheet: View {
     private var settingsForm: some View {
         VStack(alignment: .leading, spacing: 20) {
 
+            // 畫面
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("隱藏玩家名稱", isOn: $hidePlayerNames)
+                        .accessibilityIdentifier("hide-player-names-toggle")
+                        .onChange(of: hidePlayerNames) { _, newValue in
+                            viewModel?.setHidePlayerNames(newValue)
+                        }
+
+                    Text("在遊戲解析封包前把暱稱改寫成 Player 1–4。只對開啟之後才開始的對局生效；斷線重連與終局結算畫面仍會顯示原名。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } label: {
+                Label("畫面", systemImage: "eye.slash")
+            }
 
             // Bot 管理
             GroupBox {

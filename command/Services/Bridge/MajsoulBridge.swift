@@ -363,7 +363,7 @@ class MajsoulBridge {
             return
         }
 
-        bridgeLog("[MajsoulBridge] oplist 更新: \(name) seat=\(snapshot.seat) "
+        eventLog("[MajsoulBridge] oplist 更新: \(name) seat=\(snapshot.seat) "
                   + "types=\(snapshot.rawTypes) tile=\(contextTile ?? "-") seq=\(snapshot.sequence)")
     }
 

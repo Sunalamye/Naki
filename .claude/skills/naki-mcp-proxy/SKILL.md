@@ -1,6 +1,6 @@
 ---
 name: naki-mcp-proxy
-description: Token-efficient proxy for Naki's 47 MCP tools. Routes user intent to optimal MCP tool via agent isolation, saving 40-70% tokens. Use for any Naki game control, bot status, or UI operation.
+description: Live-only router for Naki's current 42 MCP tools. Use for every Naki status, game, bot, lobby, room, Unity probe, or action request; discover the running registry first and never answer from a stale catalog.
 allowed-tools:
   - Task
   - Read
@@ -11,144 +11,99 @@ allowed-tools:
 
 Base directory: {baseDir}
 
-## Core Mission
+<IMPORTANT>
+每一次 Naki 查詢都必須真的連到正在執行的 Naki MCP server。先做 live `tools/list`，再依該次回傳的 schema 呼叫實際工具。除了「目前有哪些工具」本身可由 `tools/list` 回答外，只讀 repo、skill、catalog、舊 log 或先前結果都不算完成查詢。
 
-Provide token-efficient access to Naki's 47 MCP tools through agent-based proxy pattern. Main context stays lightweight (~100-200 tokens) while tool schemas load only in agent context.
+若 Naki 無法連線，回報「live Naki 不可用／本次未驗證」並停止；不可拿靜態文件或記憶內容冒充即時結果。
+</IMPORTANT>
 
-## Architecture
+## Current contract
 
-```
-User Intent → Skill Router → Agent (tool discovery + execution) → Result
-     ↓              ↓                    ↓                          ↓
-  ~50 tokens    ~50 tokens        ~500-1500 tokens (isolated)   Formatted output
-```
+- Default endpoint: `http://127.0.0.1:8765/mcp`.
+- 2026-08-01 的 live registry 基準為 42 tools；數字、名稱與參數仍以每次 live `tools/list` 為準。
+- 雀魂頁面是 Unity WebGL，不是 Laya。`window.Laya`、`GameMgr`、`uiscript`、`view.DesktopMgr`、`cfg`、`app.NetAgent` 都不是可用查詢面。
+- 遊戲狀態由 Naki 攔截 WebSocket、解析 Liqi protobuf 後累積在 Swift state；動作由 Naki 組 Liqi REQUEST 並送到正確 gateway。
+- `execute_js` 只用於 Unity/page/WebSocket/WebGL 的唯讀 probe。遊戲狀態走 `game_*`，動作走 `game_action_verify`；禁止用 JS 重造遊戲物件、raw request 或座標點擊。
 
-**Token Savings**: 40-70% compared to direct MCP tool loading.
+## Required execution protocol
 
-## Execution Protocol
+### 1. Connect and discover
 
-### Step 1: Intent Classification
+對每一個使用者 request：
 
-Classify user request into tool category:
+1. 連到 live Naki MCP endpoint。
+2. 呼叫 `tools/list`。
+3. 在這次回傳中確認工具存在，並採用 live `inputSchema`；不可依 catalog 猜參數。
+4. 若問題不是 registry 本身，再呼叫至少一個能回答該問題的 live Naki tool。
 
-| Category | Keywords | Primary Tools |
-|----------|----------|---------------|
-| **Bot 控制** | 推薦、AI、自動打、觸發 | `bot_status`, `bot_trigger` |
-| **遊戲狀態** | 手牌、遊戲、出牌、動作 | `game_state`, `game_hand`, `game_action` |
-| **高亮** | 高亮、顏色、推薦顯示 | `highlight_tile`, `show_recommendations` |
-| **大廳** | 匹配、段位、大廳 | `lobby_start_match`, `lobby_status` |
-| **表情** | 表情、emoji | `game_emoji`, `game_emoji_list` |
-| **UI** | 點擊、JS、玩家名稱 | `execute_js`, `click`, `ui_names_*` |
-| **系統** | 日誌、狀態、幫助 | `get_logs`, `get_status`, `get_help` |
+### 2. Choose the current route
 
-### Step 2: Agent Dispatch
+| Intent | Read/query route | Mutation route |
+|---|---|---|
+| Server／工具 | `get_status`, `get_help` | `clear_logs` 僅在明確要求時 |
+| Bot／AI | `bot_status`, `bot_ops`, `bot_deep` | `bot_trigger`, `bot_chi`, `bot_pon`, `bot_sync` |
+| 對局狀態 | `game_state`, `game_hand`, `game_ops` | `game_action_verify`；必要時 `game_discard`／`game_action` |
+| 大廳 | `lobby_status`, `lobby_match_modes`, `lobby_account_info`, `lobby_server_time` | `lobby_start_match`, `lobby_cancel_match`, heartbeat tools |
+| 友人房 | `room_info` | `room_create`, `room_add_robot`, `room_start`, `room_join`, `room_leave`, `room_quick_test` |
+| 表情 | `game_emoji_listen`（`clear=false`） | `game_emoji` 或 `clear=true` |
+| Unity 頁面 | `execute_js` 的唯讀 probe | 不用 JS 改遊戲狀態或模擬點擊 |
 
-Launch agent with tool execution prompt:
+純查詢一律使用 read/query route。會影響帳號、排隊、房間、對局、連線或 log 的工具，只有在使用者明確要求該副作用時才能呼叫。
 
-```
-Task tool with subagent_type="general-purpose":
-prompt: |
-  Execute Naki MCP tool for: [user intent]
+### 3. Execute against live Naki
 
-  Available tools (port 8765):
-  - [relevant tools based on category]
+若需要 agent isolation，派出的 agent 也必須遵守同一條 live 規則：
 
-  Steps:
-  1. Call mcp__naki__[tool_name] with appropriate parameters
-  2. Parse and format response
-  3. Return concise result
-
-  If tool fails, try alternative or report error.
-```
-
-### Step 3: Result Formatting
-
-Return agent result to user with:
-- Key data points (hand tiles, recommendations, status)
-- Action taken confirmation
-- Error explanation if failed
-
-## Tool Quick Reference
-
-### Most Used Tools
-
-| Intent | Tool | Example |
-|--------|------|---------|
-| 查看 AI 推薦 | `bot_status` | 顯示手牌和推薦動作 |
-| 觸發自動打牌 | `bot_trigger` | 執行 AI 推薦的動作 |
-| 查看遊戲狀態 | `game_state` | 當前局面完整信息 |
-| 執行遊戲動作 | `game_action` | 出牌、吃、碰、槓 |
-| 高亮手牌 | `highlight_tile` | 指定牌高亮顯示 |
-| 開始匹配 | `lobby_start_match` | 段位場匹配 |
-| 執行 JS | `execute_js` | 遊戲內 JavaScript |
-| 查看日誌 | `get_logs` | Debug 日誌記錄 |
-
-### Tool Categories (47 total)
-
-| Category | Count | See Reference |
-|----------|-------|---------------|
-| 系統類 | 4 | `{baseDir}/references/tool-catalog.md` |
-| Bot 控制 | 7 | |
-| 遊戲狀態 | 6 | |
-| 高亮控制 | 6 | |
-| 表情 | 4 | |
-| 大廳 | 9 | |
-| UI 控制 | 11 | |
-
-## Common Workflows
-
-### 1. 自動段位場流程
-
-```
-1. lobby_status      → 確認在大廳
-2. lobby_navigate    → 前往段位場 (page: 1)
-3. lobby_start_match → 開始匹配 (match_mode: 5 = 銀半)
-4. bot_status        → 等待並查看推薦
+```text
+Connect to the configured Naki MCP server.
+1. Call live tools/list for this request.
+2. Select only a tool present in that response and use its returned schema.
+3. Call the live tool; do not answer from repo documentation or earlier output.
+4. Return the raw verification fields plus a concise interpretation.
+5. If connection fails, report live Naki unavailable and do not infer a result.
 ```
 
-### 2. 手牌調試流程
+### 4. Verify the meaning of the result
 
+- `game_state`／`game_hand`／`game_ops` 是 live Naki process 內的 protocol-layer snapshot，不是每次向雀魂 server 重新抓一份完整 snapshot；回報時要保留這個資料語意。
+- 動作前先讀 `game_ops`，確認 server 提供的 `sequence`、`type`、`combination`。
+- 優先用 `game_action_verify`。`sent.success=true` 只表示 bytes 已交給 WebSocket，不等於 server 接受；要看同 msgId RESPONSE、`verified`、oplist/snapshot 推進，以及終局時的權威 action。
+- 只有工具實際回傳的資料可標「已查到」。連線失敗、無對局或 snapshot 缺失都要標「未驗證」。
+
+## Current 42-tool shape
+
+| Category | Count | Notes |
+|---|---:|---|
+| System | 4 | status/help/logs |
+| Bot | 7 | Swift state + Liqi actions |
+| Game | 6 | state/hand/ops/action |
+| JavaScript | 1 | read-only Unity probe |
+| Lobby | 8 | `.lq.Lobby.*` |
+| Anti-idle | 1 | Swift heartbeat scheduler |
+| Room | 7 | protocol room flow |
+| Emoji | 2 | Liqi broadcast send/capture |
+| Highlight compatibility stubs | 6 | fixed unavailable; not a working UI route |
+
+The six highlight tools remain in the registry only as explicit failure stubs. Naki's built-in `window.__nakiHighlight` WebGL renderer is a separate path; do not claim an MCP highlight call succeeded.
+
+## Removed routes
+
+Never call or recreate these old Laya/UI routes:
+
+```text
+detect, explore, test_indicators, click, calibrate
+ui_names_status, ui_names_hide, ui_names_show, ui_names_toggle
+lobby_match_status, lobby_navigate, lobby_idle_status, lobby_account_level
+game_emoji_list, game_emoji_auto_reply
 ```
-1. game_state   → 獲取完整遊戲狀態
-2. game_hand    → 查看手牌詳情
-3. bot_status   → 查看 AI 分析
-4. get_logs     → 檢查操作日誌
-```
 
-### 3. 高亮測試流程
+Do not replace them with `execute_js` that reads `DesktopMgr`, mutates the canvas, or clicks coordinates.
 
-```
-1. highlight_status  → 查看當前狀態
-2. highlight_tile    → 高亮指定牌 (tileIndex, color)
-3. hide_highlight    → 清除所有高亮
-```
+## Resource index
 
-## Match Mode Reference
+| Resource | Purpose |
+|---|---|
+| `{baseDir}/references/tool-catalog.md` | 2026-08-01 42-tool snapshot and safety classification; routing hint only |
+| `{baseDir}/references/usage-patterns.md` | Live-only workflows and verification rules |
 
-| ID | 段位場 |
-|----|-------|
-| 1, 2 | 銅東, 銅半 |
-| 4, 5 | 銀東, 銀半 |
-| 7, 8 | 金東, 金半 |
-| 10, 11 | 玉東, 玉半 |
-| 13, 14 | 王座東, 王座半 |
-
-## Error Handling
-
-| Error | Cause | Resolution |
-|-------|-------|------------|
-| Tool not found | Naki 未啟動 | 啟動 Naki app |
-| Port 8765 unavailable | 埠被佔用 | `lsof -i :8765` 檢查 |
-| Game API unavailable | 遊戲未載入 | 使用 `detect` 檢查 |
-| Bot not active | 未在遊戲中 | 等待遊戲開始 |
-
-## Resource Index
-
-| Resource | Purpose | Load When |
-|----------|---------|-----------|
-| `{baseDir}/references/tool-catalog.md` | 完整 47 工具列表和參數 | 需要查找工具參數 |
-| `{baseDir}/references/usage-patterns.md` | 進階使用模式 | 複雜操作場景 |
-
----
-
-**Naki MCP Proxy v1.0** - Token-Efficient Game Control
+Static resources help choose what to query; they never replace a live Naki call.

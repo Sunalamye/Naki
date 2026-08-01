@@ -1,7 +1,9 @@
 # Naki 現行 Unity／AI 技術基準
 
-**資料日期**：2026-08-01（Asia/Taipei）  
-**程式基準**：Naki `main`，盤點起點 `5eb1aef`  
+**資料日期**：2026-08-01（Asia/Taipei）
+
+**程式基準**：Naki `main`，盤點起點 `7de0a04` 加目前工作樹
+
 **用途**：這是目前唯一的 Unity、Liqi、Mortal、自動打牌與遊戲內高亮技術基準。
 
 本文只保留能由下列來源支持的現況，不保存 Laya 時代做法或已被推翻的中間結論：
@@ -20,7 +22,7 @@
 | Naki 動作來源 | Swift 組 Liqi request，再由 `window.__nakiWebSocket.sendRaw` 送出 |
 | AI package | 本機目前 resolve 到 MortalSwift `0.5.0`，revision `802dc3d…` |
 | AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.0 並不是新訓練模型 |
-| 「最新最強」 | **不能這樣宣稱**。package／encoder 是目前最新版，但權重未更新，也沒有牌力 benchmark |
+| 「最新最強」 | **不能這樣宣稱**。0.5.0 是當日最新公開 package tag，但權重未更新，也沒有牌力 benchmark |
 | 四麻 | 唯一有正確模型形狀與 parity 證據的模式 |
 | 三麻 | 沒有三麻模型；目前仍把三麻狀態送進四麻模型，不應宣稱支援 |
 | 自摸保護 | resolver 純邏輯已存在且單測通過，但整合仍有漏觸發與錯誤完成兩個漏洞 |
@@ -39,7 +41,7 @@
 - `window.__nakiWebSocket` 與 `window.__nakiHighlight` 存在；highlighter 的 `tinted` counter 持續增加。
 - live `POST /mcp` 的 `tools/list` 回傳 42 個工具。
 
-這些 probe 是讀取狀態，不會送遊戲動作。當時執行中的 Naki binary 早於盤點後的最新文件 commit，因此 live 證據只用來確認客戶端、連線、API 與 WebGL hook，不用來替最新 source code 的每條控制流程背書。
+這些 probe 是讀取狀態，不會送遊戲動作。最後重查時，running Naki 的 `/help` 已回 version 3.1 與 42 tools；這只證明部署中的 help／registry 版本，因為架構段落本身是程式內的靜態字串。Unity 客戶端由 `/js` probe 證明，Liqi 動作由 source 與實際 trace 證明；任何一項都不能替尚未走到的自摸、失敗重試或視覺流程背書。running build 未附可識別 commit，因此 source help／Debug 首頁的未提交後續調整仍視為 working-tree candidate。
 
 ### 查詢的資料語意
 
@@ -62,9 +64,9 @@ WebSocket frame
 | 平台路徑 | View model | 自動打牌現況 |
 |----------|------------|--------------|
 | macOS 26+／iOS 26+ | `WebViewModel`（WebPage） | 有 `AutoPlayDecisionResolver`、oplist 合法性與 stale snapshot 檢查 |
-| iOS 17–25 | `LegacyWebViewModel`（WKWebView） | 直接使用 AI 第一推薦，沒有 resolver、seat/action/stale 檢查，也沒有 fail-closed |
+| iOS 17–25 | `LegacyWebViewModel`（WKWebView） | 走同一個 resolver 與 stale 檢查；差別是 send 失敗不重試 |
 
-macOS deployment target 是 26.0，所以 macOS 實際只走新路徑；iOS deployment target 是 17.0，仍會走 Legacy 路徑。README 不可再宣稱兩條路徑功能一致。
+macOS deployment target 是 26.0，所以 macOS 實際只走新路徑；iOS deployment target 是 17.0，仍會走 Legacy 路徑。決策層現在一致，但 Legacy 沒有 live 驗證（本機跑不到），不可宣稱兩條路徑等價。
 
 ## Unity WebGL 可控面
 
@@ -176,7 +178,15 @@ OS 26+ 主路徑的 `AutoPlayDecisionResolver`：
 1. **resolver 的入口仍被 recommendations gate 擋住。** `WebViewModel` 只有在 Mortal 產生非空推薦時才進自動動作；timer 在推薦空時只處理副露 pass。若 server oplist 有 type 8，但 Mortal 回空，resolver 根本不會被呼叫。
 2. **hora 送出失敗仍會被當成已完成。** 外層呼叫送出後，只看 resolved action 是 `.hora` 就 log 成功並 `markHandled`；它沒有取得 `LiqiSendResult`。沒有 game-gateway、JS send 失敗或 server 拒絕時，機會仍可能被吃掉而不重試。
 
-Legacy iOS 17–25 還有第三個漏洞：完全沒走 resolver。
+Legacy iOS 17–25 的第三個漏洞（完全沒走 resolver）已修，見 AUDIT §15.2；剩下的差異是 send 失敗不重試。
+
+同一種「先消化、後確認」問題也出現在其他 failure path：空推薦的副露 pass 在 send 前就 `markHandled`；打牌牌字串轉換失敗或立直找不到捨牌時，也會在沒有 request 的情況下標記 snapshot。這些不直接解釋漏自摸，但會讓重試與 rollback 語意不可靠。
+
+另有一條手動工具風險：MCP／HTTP `game_action` 使用 `action=hora` 且沒有 oplist snapshot 時，
+`NakiGameAction` 目前會 fallback 成 tsumo，而不是 fail closed。這不是自動 resolver 路徑，但同樣應改成缺權威資料就拒絕。
+
+Mode 也有一個 current 語意差距：`.off` 能阻止自動 sender，但 AI 仍在背景推論，
+RecommendationView 與 `syncGameHighlight()` 沒有讀 `showRecommendation`，所以側欄／遊戲內高亮仍可能更新。「關閉 = AI 不算也不顯示」不是目前程式事實。
 
 ### 正確調整方向
 
@@ -185,7 +195,7 @@ Legacy iOS 17–25 還有第三個漏洞：完全沒走 resolver。
 1. **由新 oplist 驅動決策。** snapshot 一到就先檢查 `horaOperation`；不應等待 AI recommendation。
 2. **讓送出回傳結果。** `executeAutoPlayAction` 回傳 `LiqiSendResult`；只有確認 WebSocket send 成功，最好再確認同 msgId RESPONSE／權威 action 後，才 `markHandled`。
 3. **失敗保留 pending 並重試。** 加上 bounded retry、sequence guard 與清楚 log；不能把「函式被呼叫」當成功。
-4. **把 Legacy 收斂到同一個 resolver／sender。** 在此以前，iOS 17–25 必須標為無 server-authoritative 保護。
+4. ~~把 Legacy 收斂到同一個 resolver／sender。~~ 已完成（AUDIT §15.2），但未 live 驗證。
 5. **加整合與 live 驗收。** 至少覆蓋：`[discard,riichi,tsumo] + AI discard`、空推薦 + tsumo、send failure、server reject、stale snapshot、recommend/off 絕不送。
 
 ## MortalSwift 與模型
@@ -198,6 +208,9 @@ Xcode package requirement 是 `upToNextMinorVersion`、minimum `0.5.0`，即允�
 MortalSwift 0.5.0
 revision 802dc3d030da6573094d413e18af34e776eb091d
 ```
+
+2026-08-01 直接查[官方 MortalSwift remote](https://github.com/Sunalamye/MortalSwift) tags，最高 tag 是 `v0.5.0`，其 dereferenced
+commit 正是 `802dc3d…`。所以 Naki 目前解析到最新公開 package tag；這仍不代表模型權重最新或最強。
 
 但 `Package.resolved` 被 `.gitignore` 排除，新 clone 不保證固定在同一 revision。若要求可重現，應把 resolved lockfile 納入版本控制或改成 exact dependency。
 
@@ -235,6 +248,8 @@ Naki 雖有 `is3P` 狀態與 UI 警示，`NativeBotController` 最後仍建立�
 4. draw 完立即還原 uniform。
 
 Swift 由 `WebViewModel.syncGameHighlight()` 呼叫 `window.__nakiHighlight.set(...)`／`clear()`。
+目前工作樹會把第一推薦牌設為綠色，並把其餘手牌 identity 以帶 alpha 的灰色調淡；
+`naki-core.js` 也把字牌 UV 索引改為 `round(u × 10)`。這兩項是 current source candidate，尚未完成 screenshot／實戰視覺驗收。
 
 live `state()` 的 tinted counter 持續增加，能證明 hook 與染色分支有執行；不能證明視覺命中正確。現有限制：
 
@@ -242,6 +257,7 @@ live `state()` 的 tinted counter 持續增加，能證明 hook 與染色分支�
 - 只攔 WebGL2 `drawElements` 與特定 quad signature。
 - 同 UV 的非手牌 draw 可能誤染。
 - popup／動作按鈕用頻率 heuristic，不是穩定 identity。
+- 帶 alpha 的「其餘手牌調淡」與字牌 UV 修正仍是未提交、未做視覺回歸的工作樹變更。
 - 沒有 JS 自動測試或 screenshot-based 驗收。
 
 MCP 的 6 個 `highlight_*` 工具是另一條舊 API，目前仍固定回 unavailable；這不代表 Naki 內建自動 WebGL 高亮不存在。
@@ -298,10 +314,13 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。live registry 為
 |--------|------|----------|
 | P0 | tsumo snapshot 可能因推薦空而沒進 resolver | source code 已確認；尚缺 live failure fixture |
 | P0 | hora send 失敗仍被 mark handled | source code 已確認；尚缺 live failure fixture |
-| P0 | Legacy iOS 沒有 server-authoritative resolver | source code 已確認 |
+| 已處理 | Legacy iOS 已接上 resolver（AUDIT §15.2） | source 已確認；未 live 驗證 |
+| P1 | 手動 `game_action(hora)` 無 snapshot 時會猜 tsumo | source code 已確認；應改 fail closed |
+| P1 | off mode 仍可能顯示推薦／高亮 | source code 已確認；sender mode gate 仍有效 |
+| P1 | pass／無效 discard／riichi failure path 會過早 mark handled | source code 已確認；尚缺 failure-path integration tests |
 | P1 | 三麻使用四麻模型 | source code 已確認 |
 | P1 | Package.resolved 未納入版本控制 | git ignore 與 project 設定已確認 |
-| P1 | 隱藏玩家名稱 toggle 必定無效 | source + live `uiscript` 缺席已確認 |
+| 已處理 | 3 組無效設定已從 UI 移除；隱藏玩家名稱改以協定層重做（AUDIT §15.3） | source 已確認；協定層改寫只有合成 frame 測試，未 live 驗證 |
 | P1 | WebGL highlighter 可能誤染／重複染 | hook 執行已確認；視覺正確性未驗證 |
 | P2 | Liqi generic protobuf tag 只讀一 byte，field > 31 會錯 | source code 已確認 |
 | P2 | AI 實戰強度未知 | 沒有 benchmark，未驗證 |

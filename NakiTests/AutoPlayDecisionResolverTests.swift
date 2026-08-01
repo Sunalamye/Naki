@@ -101,6 +101,35 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
   // MARK: - Fail closed
 
   /// 沒有 oplist 就什麼都不做——不得「預設當自摸送出」
+  /// 模型完全沒有推薦時，伺服器提供的和牌仍然必須被送出。
+  ///
+  /// 這是實際踩到的整合缺口：Mortal 判斷不出和牌時 `react` 回 nil，
+  /// 呼叫端看到推薦是空的就直接 return，resolver 根本沒被呼叫——
+  /// 而 resolver 本身其實是對的（和牌檢查在推薦檢查之前）。
+  /// 這個測試鎖住 resolver 那一半；呼叫端那一半由 WebViewModel 的
+  /// `snapshot.horaOperation != nil` 分支負責。
+  func testHoraIsSentEvenWithNoRecommendations() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard, .riichi, .tsumo]),
+      recommendations: [],
+      mode: .auto,
+      seat: 0)
+    XCTAssertEqual(decision, .send(action: .hora, tile: "9s"),
+                   "模型沒意見不代表可以放掉伺服器給的自摸")
+  }
+
+  /// 榮和被歸類為 isCallOpportunity，所以「無推薦 → 送過」那條路徑
+  /// 會把和牌當成副露機會直接棄掉。resolver 這一層必須擋住。
+  func testRonIsNotTurnedIntoPassWhenNoRecommendations() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.chi, .pon, .ron]),
+      recommendations: [],
+      mode: .auto,
+      seat: 0)
+    XCTAssertEqual(decision, .send(action: .hora, tile: "9s"),
+                   "有榮和機會時絕不能送出「過」")
+  }
+
   func testNoOplistFailsClosed() {
     let decision = AutoPlayDecisionResolver.resolve(
       snapshot: nil,

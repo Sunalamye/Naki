@@ -32,7 +32,10 @@ struct GetStatusTool: MCPTool {
             "port": context.serverPort,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "logFile": await LogManager.shared.logFilePath,
-            "logFileNote": "同目錄下 .1 ~ .5 為前幾次啟動的歷史日誌"
+            "logFileNote": "合併日誌（不含解析細節）；同目錄下 .1 ~ .5 為前幾次啟動的歷史",
+            // 查「剛剛發生什麼」看這個——只有對局事件，一行一件
+            "eventLog": await LogManager.shared.eventLogPath,
+            "categoryLogs": await LogManager.shared.categoryLogPaths
         ]
     }
 }
@@ -41,8 +44,7 @@ struct GetStatusTool: MCPTool {
 
 /// 獲取 API 文檔
 ///
-/// 說明文字在 2026-07-31 隨 Unity 遷移更新：舊版描述的是「讀 JS 遊戲物件」的架構，
-/// 現在狀態與動作都走 Liqi 協定層，工具使用方式完全不同。
+/// 說明文字以 2026-08-01 的 live `tools/list`、Unity probe 與現行程式為準。
 struct GetHelpTool: MCPTool {
     static let name = "get_help"
     static let description = "獲取完整的 API 文檔（JSON 格式），含 Unity 架構下的工具分層與注意事項"
@@ -67,20 +69,20 @@ enum NakiHelpContent {
     static func build(serverPort: UInt16) -> [String: Any] {
         [
             "name": "Naki Debug API",
-            "version": "3.0",
+            "version": "3.1",
             "description": "Naki 麻將 AI 助手的 Debug / MCP API。"
                 + "雀魂客戶端已從 Laya 改為 Unity WebGL，所有遊戲狀態與動作改走 Liqi protobuf 協定層。",
             "base_url": "http://localhost:\(serverPort)",
             "mcp_endpoint": "http://localhost:\(serverPort)/mcp",
             "tools_count": MCPToolRegistry.shared.registeredToolNames.count,
             "architecture": [
-                "client": "Unity WebGL（chs_t-WebGL-release-4.0.45）——window.Laya / GameMgr / uiscript / view.DesktopMgr / cfg 全部不存在",
+                "client": "Unity WebGL（chs_t-WebGL-release-4.0.45(45)）——window.Laya / GameMgr / uiscript / view.DesktopMgr / cfg 全部不存在",
                 "state": "狀態類工具（game_state / game_hand / game_ops / bot_*）讀 Swift 協定層："
                     + "WebSocket 攔截 → LiqiParser → MajsoulBridge → NativeBotController / LiqiOperationStore",
                 "action": "動作類工具（game_action / game_discard / bot_chi / bot_pon / room_* / lobby_*）"
                     + "組 Liqi REQUEST 經 window.__nakiWebSocket.sendRaw 送出（msgId 使用 60000+ 號段）",
-                "unsupported": "highlight_* 等視覺注入類在 Unity 下不可行，一律回 "
-                    + "{success:false, error:'unsupported_on_unity_client'}；請改用 Naki 原生推薦面板"
+                "highlight": "App 內建 __nakiHighlight 會攔截 WebGL draw 做自動推薦染色；"
+                    + "6 個 MCP 手動 highlight_* 工具尚未接到這個新 hook，仍回明確 unavailable"
             ],
             "workflows": [
                 "友人房一條龍": ["room_create（time_fixed=300, time_add=0）", "room_add_robot ×3", "room_start"],
@@ -91,7 +93,9 @@ enum NakiHelpContent {
             "caveats": [
                 "「送出成功」只代表封包進了 WebSocket，不代表伺服器接受；請看回傳的 response 欄位",
                 "RESPONSE 以 protobuf 欄位編號（fieldN）呈現，語意請查 docs/protocol/liqi.json",
-                "操作 type 的數值語意（1=打牌 2=吃 3=碰…）來自 Laya 時代觀察，尚未以真實對局封包對拍",
+                "operation type 已有 discard / pon / riichi / tsumo request / ron 的 runtime 證據；"
+                    + "chi variants、赤五 combination 與三種槓仍需 live 驗證",
+                "server-authoritative 自摸 resolver 尚有 integration gap；不得只看 sendRaw 成功就宣稱漏和已修復",
                 "動作類工具會真的影響帳號，請只在測試帳號使用"
             ],
             "tile_notation": [

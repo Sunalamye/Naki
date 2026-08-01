@@ -324,6 +324,7 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("[LegacyWebView] 頁面載入成功")
+        viewModel?.applyHideNamesSettingsIfNeeded()
         if viewModel?.isConnected == false {
             viewModel?.statusMessage = "已載入，等待 WebSocket 連接..."
         }

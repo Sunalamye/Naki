@@ -416,53 +416,38 @@ class DebugServer {
         <h1>🀄 Naki MCP Server</h1>
         <h2>Available Endpoints:</h2>
         <ul>
+            <li><code>GET /help</code> - Current JSON API help</li>
             <li><code>GET /status</code> - Get server status</li>
-            <li><code>POST /js</code> - Execute JavaScript (body: JS code)</li>
-            <li><code>GET /detect</code> - Detect game API</li>
-            <li><code>GET /explore</code> - Explore game objects</li>
-            <li><code>GET /test-indicators</code> - Show click indicators</li>
-            <li><code>POST /click</code> - Click at position (body: {"x":100,"y":200})</li>
-            <li><code>POST /calibrate</code> - Set calibration (body: {"tileSpacing":96,"offsetX":-200,"offsetY":0})</li>
+            <li><code>POST /js</code> - Execute a JavaScript function body (use return for a value)</li>
+            <li><code>GET /logs</code> / <code>DELETE /logs</code> - Read / clear in-memory logs</li>
+            <li><code>POST /mcp</code> - MCP JSON-RPC endpoint</li>
         </ul>
         <h3>Game API:</h3>
         <ul>
-            <li><code>GET /game/state</code> - Get current game state</li>
-            <li><code>GET /game/hand</code> - Get hand tiles info</li>
-            <li><code>GET /game/ops</code> - Get available operations</li>
-            <li><code>POST /game/discard</code> - Discard tile (body: {"tileIndex":0})</li>
+            <li><code>GET /game/state</code> - Get Naki's Swift protocol-layer snapshot</li>
+            <li><code>GET /game/hand</code> - Get hand and recommendations</li>
+            <li><code>GET /game/ops</code> - Get pending / latest Liqi operations</li>
+            <li><code>POST /game/discard</code> - Discard by tile string (body: {"tile":"5m","moqie":false})</li>
             <li><code>POST /game/action</code> - Execute action (body: {"action":"pass"})</li>
         </ul>
         <h3>Debug & Auto-Play:</h3>
         <ul>
-            <li><code>GET /logs</code> - Get debug logs</li>
-            <li><code>DELETE /logs</code> - Clear logs</li>
             <li><code>GET /bot/status</code> - Get bot and auto-play status</li>
             <li><code>POST /bot/trigger</code> - Manually trigger auto-play</li>
-            <li><code>GET /bot/ops</code> - Explore available operations (chi/pon/kan)</li>
-            <li><code>GET /bot/deep</code> - Deep explore naki API (all methods)</li>
-            <li><code>POST /bot/chi</code> - Test chi operation</li>
-            <li><code>POST /bot/pon</code> - Test pon operation</li>
+            <li><code>GET /bot/ops</code> - Get Liqi operation snapshot</li>
+            <li><code>GET /bot/deep</code> - Get protocol-layer diagnostics</li>
+            <li><code>POST /bot/chi</code> - Send chi (real account action)</li>
+            <li><code>POST /bot/pon</code> - Send pon (real account action)</li>
         </ul>
         <h2>Quick Test:</h2>
         <pre>curl http://localhost:\(actualPort)/status</pre>
         <pre>curl http://localhost:\(actualPort)/bot/status</pre>
         <pre>curl http://localhost:\(actualPort)/logs</pre>
-        <pre>curl -X POST http://localhost:\(actualPort)/bot/trigger</pre>
-        <h2>Naki Test (when opportunity available):</h2>
+        <h2>Account-affecting actions (test account only):</h2>
+        <pre>curl -X POST http://localhost:\(actualPort)/bot/trigger  # requires a current legal oplist</pre>
         <pre>curl http://localhost:\(actualPort)/bot/deep</pre>
         <pre>curl -X POST http://localhost:\(actualPort)/bot/chi</pre>
         <pre>curl -X POST http://localhost:\(actualPort)/bot/pon</pre>
-        <h3>UI Control:</h3>
-        <ul>
-            <li><code>GET /ui/names</code> - Get player names visibility status</li>
-            <li><code>POST /ui/names/hide</code> - Hide all player names</li>
-            <li><code>POST /ui/names/show</code> - Show all player names</li>
-            <li><code>POST /ui/names/toggle</code> - Toggle player names visibility</li>
-        </ul>
-        <h2>Quick UI Control:</h2>
-        <pre>curl http://localhost:\(actualPort)/ui/names</pre>
-        <pre>curl -X POST http://localhost:\(actualPort)/ui/names/hide</pre>
-        <pre>curl -X POST http://localhost:\(actualPort)/ui/names/show</pre>
         </body>
         </html>
         """
@@ -643,17 +628,17 @@ class DebugServer {
     // MARK: - Logging
 
     private func log(_ message: String) {
+        // buffer 自己保留時間戳（`/logs` 直接回這份）
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logMessage = "[\(timestamp)] \(message)"
-        print("[MCPServer] \(message)")
-
-        // 存儲到 buffer
-        logBuffer.append(logMessage)
+        logBuffer.append("[\(timestamp)] \(message)")
         if logBuffer.count > maxLogCount {
             logBuffer.removeFirst()
         }
 
-        onLog?(logMessage)
+        // 轉給 LogManager 的是**原始訊息**。
+        // 先前傳的是已加時間戳的字串，LogManager 又加一次，
+        // 於是檔案裡變成 `[ts] [Bridge] [ts] 訊息`，而且同一件事會出現兩行。
+        onLog?(message)
     }
 
     /// 添加外部日誌

@@ -112,7 +112,7 @@ OptionalOperationList
 
 `WebViewModelFactory`：OS 26+ 用 WebPage `WebViewModel`；iOS 17–25 用 `LegacyWebViewModel`。macOS deployment target 是 26，所以 macOS 不走 Legacy。
 
-只有新 path 使用 `AutoPlayDecisionResolver`。Legacy 仍直接送 AI 第一推薦，沒有 oplist action、seat、stale 或 fail-closed 檢查。禁止寫「兩條路功能一致」。
+兩條 path 現在都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）。差別在重試框架：新 path 會在 hora send 失敗時重試，Legacy 送一次就結束、失敗等下一次推薦更新。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
 
 ## 自摸問題的 current truth
 
@@ -121,13 +121,17 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests �
 1. `WebViewModel` 仍要求 recommendations 非空才進主動作。空推薦 + type 8 可能完全不呼叫 resolver。
 2. hora sender 沒把 `LiqiSendResult` 回給外層；呼叫後可能不論失敗都 `markHandled`。
 
+其他 failure path 也有相同模式：空推薦副露 pass 在 send 前 mark handled；無效 discard／riichi 在沒有 request 時也會消化 snapshot。
+
+另外 `.off` 目前只可靠地禁止自動送出；AI、側欄推薦與 WebGL 高亮仍可能更新，因為 View／highlighter 沒讀 `showRecommendation`。
+
 正確修法：由 oplist arrival 驅動、先處理 hora；sender 回傳結果，收到成功 send／最好同 msgId RESPONSE 或 `ActionHule` 後才 handled；失敗保留 pending、bounded retry；Legacy 收斂到同一 resolver。
 
 在完成 live fixture「server `[1,7,8]` + AI discard → resolver hora → RESPONSE → ActionHule」前，不得宣稱漏自摸已修復。
 
 ## MortalSwift／模型
 
-- local resolution 是 0.5.0，但 bundled Core ML 仍是固定 Mortal v4 四麻模型。
+- local resolution 是 0.5.0；2026-08-01 官方 remote 最高公開 tag 也是 v0.5.0，但 bundled Core ML 仍是固定 Mortal v4 四麻模型。
 - observation `1012 × 34`，action mask 46。
 - libriichi parity 是兩套固定 fixtures 的逐格測試；Debug／Release 各 47 tests 通過，不是全狀態證明。
 - 0.5.0 沒換 model blobs；沒有千局級 strength benchmark。不得稱「最新最強模型」。
@@ -135,7 +139,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests �
 
 ## WebGL 高亮
 
-現行 `__nakiHighlight` 以 `_MainTex_ST` UV 解 tile identity，在 `drawElements(count===6)` 前暫改 `_Tint`／`_Color`，draw 後還原。這不是 Laya material，也不是 `count===606`／ObjectToWorld 位置法。
+現行 `__nakiHighlight` 以 `_MainTex_ST` UV 解 tile identity，在 `drawElements(count===6)` 前暫改 `_Tint`／`_Color`，draw 後還原。
 
 live tinted counter 證明 hook 有執行，不證明每次染對。已知限制：同名牌全染、只攔特定 WebGL2 draw、popup 是 frequency heuristic、沒有 screenshot regression。
 
@@ -143,7 +147,9 @@ MCP 的 6 個 `highlight_*` 是未接新 hook 的相容失敗樁；不可用它�
 
 ## 假功能不得留在 UI／文件
 
-位置校準、推薦溫度、旋轉 Laya 高亮已移除。「隱藏玩家名稱」toggle 仍必定無效：Swift 呼叫不存在的 `setHidden`，現有 JS 又依賴不存在的 `uiscript`。後續需移除或真正實作，文件不可宣稱可用。
+位置校準、推薦溫度、旋轉 Laya 高亮三組無效控制已從 UI 移除，底層仍依賴不存在的 `uiscript`，不可掛回 UI。
+
+隱藏玩家名稱已用協定層重做：`naki-websocket.js` 的 `__nakiHideNames` 在遊戲解析封包前，就地把 `ResAuthGame` 的 nickname bytes 覆寫成等長 ASCII。等長是硬性條件——改長度就要連動所有外層 protobuf 長度前綴。範圍只有 authGame RESPONSE；syncGame 重連與 NotifyGameEndResult 結算畫面仍顯示原名。node 合成 frame 測過（等長、關閉不動、非 authGame 不動、垃圾 bytes 不丟例外），**沒有 live 對局驗證**。
 
 ## 文件
 

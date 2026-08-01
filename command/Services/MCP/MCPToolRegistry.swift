@@ -143,7 +143,7 @@ final class MCPToolRegistry {
 extension MCPToolRegistry {
     /// 註冊所有內建工具
     ///
-    /// 2026-07-31 Unity 遷移後的工具清單（共 **41** 個；`MCPToolsTests` 會檢查這個數字）。
+    /// 2026-08-01 由 live `tools/list` 與下方 registration 交叉確認：共 **42** 個。
     ///
     /// 移除的舊工具（呼叫會得到 `Unknown tool: <name>`）與理由：
     /// - `detect` / `explore` / `test_indicators` / `click` / `calibrate`：Laya DOM 座標探測，
@@ -153,11 +153,12 @@ extension MCPToolRegistry {
     /// - `lobby_match_status`：協定沒有「查自己排隊狀態」的方法，併入 `lobby_status`
     /// - `lobby_navigate`：純 UI 換頁，無協定等價物
     /// - `lobby_idle_status`：讀 `GameMgr._last_heatbeat_time`，改由 `lobby_anti_idle` 回報
-    /// - `game_emoji_list`：表情清單在客戶端配置表（`cfg`）內，已隨引擎進 wasm
+    /// - `game_emoji_list`：registry 沒有提供 catalog tool；需要時應 fresh parse 公開配置資源
     /// - `game_emoji_auto_reply`：需要 `DesktopMgr.seat` + NetAgent，兩者皆無
     ///
-    /// 保留但回明確失敗的（有替代面可導向）：`highlight_*` / `show_recommendations` /
-    /// `hide_highlight` / `reset_tile_color` → 改用 Naki 原生推薦面板。
+    /// 保留但回明確失敗的：`highlight_*` / `show_recommendations` / `hide_highlight` /
+    /// `reset_tile_color`。它們尚未接到 App 現行的 `__nakiHighlight` WebGL hook；推薦資料可讀
+    /// `bot_status` / `game_hand`，App 內建自動高亮則走另一條 Swift → JS 路徑。
     func registerBuiltInTools() {
         // 系統類（4）— 不碰遊戲物件
         register(GetStatusTool.self)
@@ -211,7 +212,7 @@ extension MCPToolRegistry {
         register(SendEmojiTool.self)
         register(EmojiListenTool.self)
 
-        // 高亮類（6）— Unity 下不可行，一律回明確失敗並導向原生推薦面板
+        // 高亮相容樁（6）— 尚未接到 App 的 __nakiHighlight WebGL hook，固定回明確 unavailable
         register(HighlightTileTool.self)
         register(ResetTileColorTool.self)
         register(HighlightStatusTool.self)

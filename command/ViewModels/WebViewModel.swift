@@ -83,6 +83,7 @@ class WebViewModel: WebViewModelProtocol {
 
   /// 是否已經套用過隱藏名稱設定（防止重複套用）
   private var hasAppliedHideNamesSettings = false
+  static let hidePlayerNamesKey = "HidePlayerNames" 
 
   /// 當前正在執行的動作ID（用於追蹤而非阻擋）
   private var currentExecutionId: UUID?
@@ -189,6 +190,8 @@ class WebViewModel: WebViewModelProtocol {
 
           case .finished:
             print("[WebView] 頁面載入成功")
+            // JS 模組的開關是 closure 內的變數，reload 會歸零，必須重新套用
+            applyHideNamesSettingsIfNeeded()
 
           case .receivedServerRedirect:
             break
@@ -282,10 +285,26 @@ class WebViewModel: WebViewModelProtocol {
     // 整局就停在那裡，直到逾時才由伺服器代打——這是「輪到我卻沒推薦、對局卡住」的成因。
     // 只在「確實是我方的副露機會」時補送，且以 sequence 標記已處理避免重複送。
     if recommendations.isEmpty {
+      // ⚠️ 伺服器提供和牌時，絕不因為「模型沒意見」而放過。
+      //
+      // 這裡曾經是漏和的成因：Mortal 判斷不出和牌時 `react` 回 nil，
+      // 推薦清單是空的，於是整段直接 return，resolver 根本沒被呼叫——
+      // 而 resolver 裡明明寫著「伺服器說可以和就一定和」。
+      //
+      // 更糟的是榮和被歸類為 isCallOpportunity，所以下面那段會**主動送出「過」**，
+      // 等於自己棄和，而且送完就 markHandled 不再有第二次機會。
+      //
+      // 「能不能和」的權威在伺服器，不在模型。這裡直接把決策交還給 resolver。
+      if snapshot.horaOperation != nil {
+        logAutoPlayEvent("🎯 oplist 有和牌但模型無推薦 → 交給 resolver (ops=\(snapshot.rawTypes))")
+        triggerAutoPlayNow(delay: 0, forcedAction: .hora)
+        return
+      }
+
       // pass 要送 inputChiPengGang 還是 inputOperation，取決於這批機會的類型
       // （吃/碰/大明槓走前者，榮和等走後者），故從快照裡實際的機會操作取通道。
       if let callOp = snapshot.operations.compactMap({ $0.type }).first(where: { $0.isCallOpportunity }) {
-        debugServer?.addLog("⏰ 副露機會無推薦(Mortal 判斷不做) → 自動送出過 (ops=\(snapshot.rawTypes))")
+        logAutoPlayEvent("⏰ 副露機會無推薦(Mortal 判斷不做) → 自動送出過 (ops=\(snapshot.rawTypes))")
         LiqiOperationStore.shared.markHandled(snapshot.sequence)
         let channel = callOp.channel
         Task { [weak self] in
@@ -410,7 +429,8 @@ class WebViewModel: WebViewModelProtocol {
     // 註：`AutoPlayMode.showRecommendation` 目前沒有 View 讀取（原本只用來開關遊戲內高亮）。
     highlightedTile = recommendations.first?.displayTile
 
-    // 遊戲畫面內高亮：Unity 下改為往 framebuffer 疊色塊（見 naki-core.js 的 __nakiHighlight）
+    // 遊戲畫面內高亮：Unity 下由 naki-core.js 的 __nakiHighlight 攔 WebGL draw，
+    // 依 atlas UV 暫時改 _Tint / _Color，draw 後立刻還原。
     syncGameHighlight()
 
     // 觸發自動打牌
@@ -469,12 +489,10 @@ class WebViewModel: WebViewModelProtocol {
 
   // MARK: - 遊戲畫面內高亮
 
-  /// 依目前推薦，在遊戲畫面的對應手牌上方畫標記條。
+  /// 依目前推薦，暫時改 Unity 畫該牌時的 tint。
   ///
-  /// Unity WebGL 沒有 per-tile 物件可以改材質，JS 端改成在 Unity 畫完的同一幀
-  /// 往 framebuffer 疊色塊；這裡只負責算出「要標第幾張、什麼顏色」。
-  /// index 是手牌由左至右的**顯示序**（含摸到的牌，摸牌排在最後），
-  /// 與 JS 端從畫面量測到的牌框順序一一對應。
+  /// Unity WebGL 沒有 JS per-tile object；JS 從 `_MainTex_ST` atlas UV 辨識牌名。
+  /// Swift 只傳牌 identity 與顏色，不推算螢幕位置或手牌 index。
   private func syncGameHighlight() {
     guard let page = webPage else { return }
 
@@ -490,6 +508,16 @@ class WebViewModel: WebViewModelProtocol {
         // 綠：建議打出的牌。顏色是乘在牌面貼圖上的，太深會看不見牌面，
         // 所以只壓非主色通道。
         marks.append(["tile": top.displayTile, "color": [0.45, 1.0, 0.5]])
+
+        // 其餘手牌調淡，讓推薦那張自己浮出來。
+        //
+        // 只染推薦牌的話，在花色鮮豔的牌面皮膚上對比度不夠——
+        // 把其他牌壓下去比把一張牌拉上來更有效，也比較不吵。
+        // 第 4 個分量是 alpha 倍率，會乘在遊戲原本的 alpha 上。
+        let recommended = top.displayTile
+        for tile in Set(tehaiTiles) where tile != recommended {
+          marks.append(["tile": tile, "color": [0.62, 0.62, 0.68, 0.55]])
+        }
       case .chi, .pon, .kan:
         // 橙：副露會用掉的手牌（組合取自協定層的 oplist，不是推測）
         let snapshot = LiqiOperationStore.shared.latest
@@ -536,6 +564,14 @@ class WebViewModel: WebViewModelProtocol {
     Task { _ = try? await page.callJavaScript(script) }
   }
 
+  /// 自動打牌的關鍵節點：同時進 Debug buffer 與 naki-events.log
+  ///
+  /// 這些是「為什麼這樣打／為什麼沒打」的唯一線索，不能混在 parser 細節裡。
+  private func logAutoPlayEvent(_ message: String) {
+    debugServer?.addLog(message)
+    eventLog(message)
+  }
+
   /// 刪除原生 Bot
   func deleteNativeBot() {
     nativeBotController?.deleteBot()
@@ -557,7 +593,7 @@ class WebViewModel: WebViewModelProtocol {
   /// - Parameter handCount: 摸牌後手牌數量
   func onAddHandPai(handCount: Int) async {
     bridgeLog("[WebViewModel] 摸牌事件: handCount=\(handCount)")
-    // 註：不再重新套用遊戲內牌色高亮（Unity 客戶端無 Laya 物件），推薦顯示於原生面板
+    // 高亮由 recommendation update 的 syncGameHighlight() 驅動，不需 Laya 摸牌 hook。
   }
 
   // MARK: - Auto Play Methods
@@ -572,7 +608,8 @@ class WebViewModel: WebViewModelProtocol {
     bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
     debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
 
-    // 推薦顯示由原生面板依模式自行決定，不再注入遊戲內高亮（Unity 客戶端已不支援）
+    // ⚠️ 目前 mode 只可靠地控制「是否自動送出」。View 與 syncGameHighlight() 沒讀
+    // showRecommendation，所以 off 模式仍可能顯示側欄／遊戲內高亮，需後續收斂語意。
 
     // 只有全自動模式才觸發自動打牌
     if mode.isFullAuto, !recommendations.isEmpty {
@@ -602,7 +639,7 @@ class WebViewModel: WebViewModelProtocol {
   /// 設定遊戲內高亮效果選項
   /// ⚠️ Unity WebGL 客戶端已無 Laya 特效物件，此設定不會產生任何遊戲內視覺變化；
   /// JS 端只會更新 flag 並在實際套用時回報 `unity-client-no-laya`。
-  /// 保留是為了不破壞既有設定 UI 與 MCP `highlight_settings` 工具的介面。
+  /// 保留只為相容 WebViewModelProtocol；設定 UI 已移除，MCP highlighter 另有失敗樁。
   func setHighlightSettings(showRotatingEffect: Bool) {
     guard let page = webPage else { return }
 
@@ -623,34 +660,35 @@ class WebViewModel: WebViewModelProtocol {
   }
 
   /// 設定是否隱藏玩家名稱
+  ///
+  /// 走協定層：`naki-websocket.js` 在遊戲解析封包之前，就地把 `ResAuthGame`
+  /// 的 nickname bytes 換成等長 ASCII。之所以不走 UI 層，是因為舊的
+  /// `__nakiPlayerNames.hide()` 依賴 `uiscript.UI_DesktopInfo`，那在 Unity
+  /// 客戶端不存在（見 AUDIT §13）。
+  ///
+  /// 只對「開啟之後才開始的對局」生效——名牌在 authGame 當下就設定完了，
+  /// 對局中途才打開不會回頭改已經畫出來的畫面。
   func setHidePlayerNames(_ hide: Bool) {
+    UserDefaults.standard.set(hide, forKey: WebViewModel.hidePlayerNamesKey)
     guard let page = webPage else { return }
-
-    // `setHidden` 不存在——實際方法是 hide / show。原本那樣呼叫每次都拋 TypeError
-    // 然後被 catch 吞掉，外界看不出失敗。
-    //
-    // ⚠️ 即使名字改對了，這條路在 Unity 客戶端下仍然無效：`hide()` 依賴
-    // `uiscript.UI_DesktopInfo`，而 uiscript 不存在。JS 端會回
-    // `{available:false, reason:"unity-client-no-laya"}`——那是**明確的失敗**，
-    // 呼叫端拿得到理由，所以 API 保留；但 UI 開關已移除（見 AUDIT §13）。
-    let script = "return window.__nakiPlayerNames?.\(hide ? "hide" : "show")()"
+    let script = "return window.__nakiHideNames?.setEnabled(\(hide)) ?? false"
 
     Task {
       do {
         let result = try await page.callJavaScript(script)
-        bridgeLog(
-          "[WebViewModel] 隱藏玩家名稱: \(hide), 結果: \(String(describing: result))")
+        bridgeLog("[WebViewModel] 隱藏玩家名稱: \(hide), 結果: \(String(describing: result))")
       } catch {
         bridgeLog("[WebViewModel] 設定隱藏名稱錯誤: \(error.localizedDescription)")
       }
     }
   }
 
+
   /// 獲取玩家名稱隱藏狀態
   func getPlayerNamesStatus() async -> [String: Any]? {
     guard let page = webPage else { return nil }
 
-    let script = "JSON.stringify(window.__nakiPlayerNames?.getStatus() || {})"
+    let script = "return JSON.stringify(window.__nakiHideNames?.getStatus() ?? {})"
 
     do {
       let result = try await page.callJavaScript(script)
@@ -669,9 +707,19 @@ class WebViewModel: WebViewModelProtocol {
   /// 重置隱藏名稱設定狀態（頁面重新載入時調用）
   /// 註：自動套用（applyHideNamesSettingsIfNeeded）已移除——它依賴
   /// `window.uiscript.UI_DesktopInfo`，Unity WebGL 客戶端不存在此物件，
-  /// 每秒輪詢只會永遠檢查失敗。手動 API（setHidePlayerNames / MCP ui_names_*）保留。
+  /// 每秒輪詢只會永遠檢查失敗。UI 與 MCP ui_names_* 已移除；Swift API 暫留協定相容。
   func resetHideNamesSettings() {
     hasAppliedHideNamesSettings = false
+  }
+
+  /// 頁面載入完成後把持久化的隱藏名稱設定推回 JS
+  ///
+  /// 這個 flag 以前只被 reset、沒有人讀，等於設定在 reload 之後就消失了。
+  func applyHideNamesSettingsIfNeeded() {
+    guard !hasAppliedHideNamesSettings else { return }
+    hasAppliedHideNamesSettings = true
+    guard UserDefaults.standard.bool(forKey: WebViewModel.hidePlayerNamesKey) else { return }
+    setHidePlayerNames(true)
   }
 
   /// 取消待處理的自動打牌動作
@@ -680,16 +728,31 @@ class WebViewModel: WebViewModelProtocol {
   }
 
   /// 手動觸發自動打牌（使用當前推薦）
+  /// - Parameter forcedAction: 不看 AI 推薦、直接以這個動作進入決策流程。
+  ///   用於「伺服器提供和牌但模型沒有推薦」——最終仍由 resolver 覆核。
   func triggerAutoPlayNow(delay: TimeInterval = 1.2) {
-    guard webPage != nil,
-      let firstRec = recommendations.first
-    else {
-      bridgeLog("[WebViewModel] 無法觸發: 無 WebPage 或推薦")
+    triggerAutoPlayNow(delay: delay, forcedAction: nil)
+  }
+
+  func triggerAutoPlayNow(delay: TimeInterval,
+                          forcedAction: Recommendation.ActionType?) {
+    guard webPage != nil else {
+      bridgeLog("[WebViewModel] 無法觸發: 無 WebPage")
       return
     }
 
-    let actionType = firstRec.actionType
-    let tileName = firstRec.displayTile
+    let actionType: Recommendation.ActionType
+    let tileName: String
+    if let forcedAction {
+      actionType = forcedAction
+      tileName = LiqiOperationStore.shared.pending?.contextTile ?? ""
+    } else if let firstRec = recommendations.first {
+      actionType = firstRec.actionType
+      tileName = firstRec.displayTile
+    } else {
+      bridgeLog("[WebViewModel] 無法觸發: 無推薦")
+      return
+    }
 
     // 生成執行 ID 用於追蹤
     let executionId = UUID()
@@ -803,26 +866,46 @@ class WebViewModel: WebViewModelProtocol {
     }
 
     if resolvedAction != actionType {
-      debugServer?.addLog("⚠️ 決策覆蓋: AI 建議 \(actionType.rawValue) → 實際送出 \(resolvedAction.rawValue)")
+      logAutoPlayEvent("⚠️ 決策覆蓋: AI 建議 \(actionType.rawValue) → 實際送出 \(resolvedAction.rawValue)")
     }
 
     // 送出前最後確認這批 oplist 沒被換掉（決策到送出之間對局可能已往前走）
     guard AutoPlayDecisionResolver.isStillValid(
       decidedOn: snapshot, current: LiqiOperationStore.shared.pending)
     else {
-      debugServer?.addLog("⏭️ oplist 已更新，捨棄過期決策 (seq=\(snapshot.sequence))")
+      logAutoPlayEvent("⏭️ oplist 已更新，捨棄過期決策 (seq=\(snapshot.sequence))")
       clearExecutionIfCurrent(executionId)
       return
     }
 
-    debugServer?.addLog("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes) → \(resolvedAction.rawValue)")
-    await executeAutoPlayAction(actionType: resolvedAction, tileName: resolvedTile)
+    logAutoPlayEvent("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes) → \(resolvedAction.rawValue)")
+    let sendResult = await executeAutoPlayAction(
+      actionType: resolvedAction, tileName: resolvedTile)
 
-    // 和牌是終局動作，送出即結束這一手，不需要任何重試
+    // 和牌：成功才收工，失敗一定要重試。
+    //
+    // 這裡曾經是不論結果都 log「✅ 已宣告和牌」+ markHandled + return，
+    // 判斷的是「我呼叫過那個函式」而不是「封包真的送出去了」。
+    // 送出失敗（沒有 game-gateway、JS 拒絕、伺服器回 error）時和牌機會就永久消失，
+    // 而且 log 上還寫著成功——漏和是不可逆的，不能這樣處理。
+    //
+    // markHandled 由 executeAutoPlayAction 在確認 success 後才做，這裡不重覆標記。
     if resolvedAction == .hora {
-      debugServer?.addLog("✅ 已宣告和牌")
-      LiqiOperationStore.shared.markHandled(snapshot.sequence)
-      clearExecutionIfCurrent(executionId)
+      if sendResult?.success == true {
+        logAutoPlayEvent("✅ 已宣告和牌")
+        clearExecutionIfCurrent(executionId)
+        return
+      }
+      if attempt >= maxRetryAttempts {
+        logAutoPlayEvent("❌ 和牌送出失敗 \(attempt) 次, 放棄 (\(sendResult?.logLine ?? "no result"))")
+        clearExecutionIfCurrent(executionId)
+        return
+      }
+      logAutoPlayEvent("⚠️ 和牌送出失敗, 重試 \(attempt + 1)/\(maxRetryAttempts)")
+      try? await Task.sleep(nanoseconds: 200_000_000)
+      await executeAutoPlayActionWithRetry(
+        actionType: resolvedAction, tileName: resolvedTile,
+        attempt: attempt + 1, executionId: executionId)
       return
     }
 
@@ -883,9 +966,10 @@ class WebViewModel: WebViewModelProtocol {
   /// 那條路徑永遠靜默失敗。現在一律由 `LiqiActionSender` 組 Liqi REQUEST，
   /// 經 `window.__nakiWebSocket.sendRaw` 送出；需要 index／槓型／和牌型的動作
   /// 由協定層 oplist 快照推導。
+  @discardableResult
   private func executeAutoPlayAction(
     actionType: Recommendation.ActionType, tileName: String
-  ) async {
+  ) async -> LiqiSendResult? {
     let snapshot = LiqiOperationStore.shared.pending
     var result: LiqiSendResult?
 
@@ -894,7 +978,7 @@ class WebViewModel: WebViewModelProtocol {
       guard let majsoulTile = LiqiTileCode.majsoul(fromMJAI: tileName) else {
         debugServer?.addLog("打牌: 無法轉換牌字串 \(tileName)")
         markSnapshotHandled(snapshot)
-        return
+        return nil
       }
       let moqie = (tsumoTile == tileName)
       debugServer?.addLog("執行: 打牌 \(tileName) → \(majsoulTile) (moqie=\(moqie))")
@@ -909,7 +993,7 @@ class WebViewModel: WebViewModelProtocol {
       else {
         debugServer?.addLog("立直: 找不到可宣言的捨牌, 跳過")
         markSnapshotHandled(snapshot)
-        return
+        return nil
       }
       let moqie = (tsumoTile == discardRec.displayTile)
       debugServer?.addLog("執行: 立直 + 捨 \(discardRec.displayTile) → \(majsoulTile)")
@@ -959,13 +1043,14 @@ class WebViewModel: WebViewModelProtocol {
 
     case .unknown:
       bridgeLog("[WebViewModel] 未知動作類型, 跳過")
-      return
+      return nil
     }
 
     // 送出成功才把這批 oplist 標記為已處理；失敗留給重試框架再送一次
     if result?.success == true {
       markSnapshotHandled(snapshot)
     }
+    return result
   }
 
   // MARK: - 協定層狀態快照（MCP 狀態類工具的資料來源）

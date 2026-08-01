@@ -418,9 +418,9 @@
         var popupColor = null;
         var installed = false;
         var locCache = new Map();
-        var sigFrames = new Map();
         var totalFrames = 0;
-        var frameSigs = new Set();
+        var baselineSigs = new Set();   // 沒有副露機會時看過的 draw 簽章
+        var baselineFrames = 0;
         var objIds = new WeakMap();
         var nextObjId = 1;
         var tintedCount = 0;
@@ -456,7 +456,16 @@
                 return null;
             }
             if (v === 0) {
-                var idx = Math.round(u * 10) - 1;
+                // 字牌：u × 10 直接就是 HONORS 的索引，不能再減 1。
+                //
+                // 2026-08-01 live 對局實測（手牌 E W W P C）：
+                //   u=0   ×37  → E
+                //   u=0.2 ×74  → W（兩張，次數正好兩倍）
+                //   u=0.4 ×37  → P
+                //   u=0.6 ×37  → C
+                // 原本的 -1 會讓 E 變 null、W 變 S、P 變 N、C 變 F——
+                // 不是解不出來，是**染錯牌**。
+                var idx = Math.round(u * 10);
                 return (idx >= 0 && idx < HONORS.length) ? HONORS[idx] : null;
             }
             return null;
@@ -485,24 +494,35 @@
                     } catch (e) { /* 取不到就當作不是牌 */ }
                 }
 
-                // 二、副露彈出面板：位置與 UV 都認不出，改用「只在有機會時才出現」
-                if (!color && popupColor) {
-                    var sig = count + '/' + objId(prog) + '/'
-                            + objId(gl.getParameter(gl.TEXTURE_BINDING_2D));
-                    frameSigs.add(sig);
-                    var seen = sigFrames.get(sig) || 0;
-                    if (totalFrames > 300 && seen < totalFrames * 0.25) color = popupColor;
-                } else if (popupColor) {
-                    frameSigs.add(count + '/' + objId(prog) + '/'
-                                  + objId(gl.getParameter(gl.TEXTURE_BINDING_2D)));
+                // 二、副露彈出面板：位置與 UV 都認不出，改用「與平時畫面比對」。
+                //
+                // 原本的規則是「出現頻率 < 25% 的 draw 就當成按鈕」，太鬆——
+                // 動畫、特效、過場 UI 都是低頻的，結果整個畫面都被染色（實測確認）。
+                //
+                // 改法：沒有副露機會時持續收集畫面的 draw 簽章當**基準線**；
+                // 有機會時只染「基準線裡沒出現過」的簽章。按鈕是機會出現才有的東西，
+                // 這個判準比頻率精確得多。
+                var sig = count + '/' + objId(prog) + '/'
+                        + objId(gl.getParameter(gl.TEXTURE_BINDING_2D));
+                if (!popupColor) {
+                    // 沒機會時：這一幀畫的東西都算平時就有的
+                    baselineSigs.add(sig);
+                    baselineFrames++;
+                } else if (!color && baselineFrames > 120 && !baselineSigs.has(sig)) {
+                    // 基準線要夠厚才敢下判斷，否則剛開局什麼都會被當成按鈕
+                    color = popupColor;
                 }
 
                 if (!color) return origDraw(mode, count, type, offset);
 
-                // 只在這一次 draw 期間覆寫顏色，畫完立刻還原，不留狀態給遊戲
+                // 只在這一次 draw 期間覆寫顏色，畫完立刻還原，不留狀態給遊戲。
+                //
+                // color 可以是 [r,g,b] 或 [r,g,b,a]。給了第 4 個分量就用它當 alpha，
+                // 用來把「不推薦的牌」調淡；沒給就沿用遊戲原本的 alpha。
                 var prev = gl.getUniform(prog, L.color);
-                gl.uniform4f(L.color, color[0], color[1], color[2],
-                             prev && prev.length > 3 ? prev[3] : 1);
+                var baseAlpha = (prev && prev.length > 3) ? prev[3] : 1;
+                var alpha = (color.length > 3) ? color[3] * baseAlpha : baseAlpha;
+                gl.uniform4f(L.color, color[0], color[1], color[2], alpha);
                 var r = origDraw(mode, count, type, offset);
                 if (prev && prev.length > 3) {
                     gl.uniform4f(L.color, prev[0], prev[1], prev[2], prev[3]);
@@ -513,15 +533,7 @@
 
             var origRAF = window.requestAnimationFrame.bind(window);
             window.requestAnimationFrame = function (cb) {
-                return origRAF(function (t) {
-                    var r = cb(t);
-                    totalFrames++;
-                    frameSigs.forEach(function (s) {
-                        sigFrames.set(s, (sigFrames.get(s) || 0) + 1);
-                    });
-                    frameSigs = new Set();
-                    return r;
-                });
+                return origRAF(function (t) { totalFrames++; return cb(t); });
             };
         }
 
@@ -531,7 +543,7 @@
         }
 
         window.__nakiHighlight = {
-            /// list: [{tile:"9m", color:[r,g,b]}]；popup: [r,g,b] 或 null
+            /// list: [{tile:"9m", color:[r,g,b]}] 或 color:[r,g,b,a]；popup: [r,g,b] 或 null
             set: function (list, popup) {
                 targets = {};
                 (list || []).forEach(function (m) { targets[m.tile] = m.color; });
@@ -543,7 +555,8 @@
             clear: function () { targets = {}; popupColor = null; return true; },
             state: function () {
                 return { targets: targets, popup: popupColor,
-                         tinted: tintedCount, totalFrames: totalFrames };
+                         tinted: tintedCount, totalFrames: totalFrames,
+                         baselineSigs: baselineSigs.size, baselineFrames: baselineFrames };
             },
             /// 除錯用：列出當前這一幀在手牌區畫出的牌（依 UV 反推）
             decode: function (st) { return tileFromST(st); }

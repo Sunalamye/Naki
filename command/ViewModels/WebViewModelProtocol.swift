@@ -52,6 +52,8 @@ protocol WebViewModelProtocol: AnyObject, Observable {
 
     func setHighlightSettings(showRotatingEffect: Bool)
     func setHidePlayerNames(_ hide: Bool)
+    /// 頁面載入完成後重推持久化的隱藏名稱設定（JS 端的開關會被 reload 清掉）
+    func applyHideNamesSettingsIfNeeded()
     func getPlayerNamesStatus() async -> [String: Any]?
     func resetHideNamesSettings()
 

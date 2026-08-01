@@ -207,6 +207,12 @@ class LegacyWebViewModel: WebViewModelProtocol {
         if let firstRec = recommendations.first {
             highlightedTile = firstRec.displayTile
             triggerAutoPlay(recommendation: firstRec)
+        } else if LiqiOperationStore.shared.pending?.horaOperation != nil {
+            // 伺服器提供和牌時，不因為模型沒意見就放過（與主路徑同一條規則）
+            bridgeLog("[LegacyWebViewModel] 🎯 oplist 有和牌但模型無推薦 → 交給 resolver")
+            if autoPlayController?.state.mode == .auto {
+                triggerAutoPlayNow(delay: 0)
+            }
         }
     }
 
@@ -229,12 +235,46 @@ class LegacyWebViewModel: WebViewModelProtocol {
     }
 
     func triggerAutoPlayNow(delay: TimeInterval) {
-        guard let firstRec = recommendations.first else { return }
+        // 與主路徑共用同一個 resolver。
+        //
+        // 這條路徑先前是直接送 `recommendations.first`——沒有 oplist 合法性檢查、
+        // 沒有座位檢查、沒有過期檢查，也沒有 fail-closed。也就是說
+        // 「伺服器說可以自摸但 AI 想打牌」時，它會忠實把和牌牌打掉，
+        // 而那正是主路徑用 resolver 防住的問題。
+        //
+        // 沒有理由讓兩條路的安全性不同——合法性的權威在伺服器，跟走哪個 WebView 無關。
+        let snapshot = LiqiOperationStore.shared.pending
+        let mode = autoPlayController?.state.mode ?? .off
+        let seat = botStatus.playerId
+
+        let decision = AutoPlayDecisionResolver.resolve(
+            snapshot: snapshot, recommendations: recommendations, mode: mode, seat: seat)
+
+        guard case .send(let action, let tile) = decision else {
+            if case .none(let reason) = decision {
+                bridgeLog("[LegacyWebViewModel] 不送出: \(reason)")
+            }
+            return
+        }
+
+        if let top = recommendations.first, action != top.actionType {
+            bridgeLog("[LegacyWebViewModel] ⚠️ 決策覆蓋: AI 建議 \(top.actionType.rawValue) → 送出 \(action.rawValue)")
+        }
+
         Task { [weak self] in
+            guard let self else { return }
             if delay > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
-            await self?.sendAction(actionType: firstRec.actionType, tileName: firstRec.displayTile)
+            // 延遲期間對局可能已經往前走，送出前再確認一次這批 oplist 還是原來那批
+            guard let snapshot,
+                  AutoPlayDecisionResolver.isStillValid(
+                    decidedOn: snapshot, current: LiqiOperationStore.shared.pending)
+            else {
+                bridgeLog("[LegacyWebViewModel] ⏭️ oplist 已更新，捨棄過期決策")
+                return
+            }
+            await self.sendAction(actionType: action, tileName: tile)
         }
     }
 
@@ -327,16 +367,15 @@ class LegacyWebViewModel: WebViewModelProtocol {
     }
 
     func setHidePlayerNames(_ hide: Bool) {
+        // 與主路徑同一條協定層實作；舊的 `__nakiPlayerNames` 依賴不存在的 uiscript。
+        UserDefaults.standard.set(hide, forKey: "HidePlayerNames")
         Task {
-            let script = hide
-                ? "window.__nakiPlayerNames?.hide() || false"
-                : "window.__nakiPlayerNames?.show() || false"
-            _ = try? await executeJavaScript(script)
+            _ = try? await executeJavaScript("window.__nakiHideNames?.setEnabled(\(hide)) ?? false")
         }
     }
 
     func getPlayerNamesStatus() async -> [String: Any]? {
-        let script = "JSON.stringify(window.__nakiPlayerNames?.getStatus() || {available: false})"
+        let script = "JSON.stringify(window.__nakiHideNames?.getStatus() || {available: false})"
         if let result = try? await executeJavaScript(script) as? String,
            let data = result.data(using: .utf8),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -347,6 +386,17 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     func resetHideNamesSettings() {
         hasAppliedHideNamesSettings = false
+    }
+
+    /// 頁面載入完成後把持久化的隱藏名稱設定推回 JS
+    ///
+    /// JS 模組的開關存在 closure 變數裡，reload 會歸零；不重推的話設定只在
+    /// 當次載入有效。
+    func applyHideNamesSettingsIfNeeded() {
+        guard !hasAppliedHideNamesSettings else { return }
+        hasAppliedHideNamesSettings = true
+        guard UserDefaults.standard.bool(forKey: "HidePlayerNames") else { return }
+        setHidePlayerNames(true)
     }
 
     // MARK: - Debug Server

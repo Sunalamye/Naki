@@ -1,233 +1,192 @@
 ---
 name: webui-tester
-description: Test, debug, and modify Majsoul WebUI (Laya engine) within the Naki app. Use when the user asks to adjust "the screen" or "UI" - clarify whether they mean Naki's SwiftUI app or Majsoul's WebUI. This skill handles WebUI JavaScript execution, tile manipulation, and visual debugging.
+description: Diagnose the current Majsoul Unity WebGL page inside Naki. Use live Naki MCP for read-only page probes and Liqi protocol state/action routes; never use legacy Laya objects or coordinate clicking.
 allowed-tools: Read, Glob, Grep, Task
 ---
 
+# Unity WebUI tester
+
 <IMPORTANT>
-**MCP 調用規則**: 所有 Naki MCP 工具必須透過 `/naki-mcp-proxy` skill 調用，禁止直接調用 `mcp__naki__*` 工具。
+所有 Naki 查詢與動作都必須透過 `/naki-mcp-proxy` 連到 live Naki。每一個使用者 request 先做 live `tools/list`，再呼叫當次 registry 中的實際工具。不得只讀本 skill、repo 文件、舊 log 或先前 session 結果後宣稱查到目前狀態。
+
+`execute_js` 僅允許唯讀 Unity/page/WebSocket/WebGL probe。禁止 Laya／DesktopMgr／NakiCoordinator 遊戲物件路徑、DOM/canvas 座標點擊、合成 pointer event、raw Liqi send 或任何 JS 狀態修改。
 </IMPORTANT>
 
-# WebUI Tester Skill
+## Identify the surface
 
-This skill helps test and modify Majsoul's WebUI (game interface) running inside Naki's WKWebView.
+When「畫面／UI」不明確時，先分清楚：
 
-## 🆕 NakiCoordinator - 統一協調器 (推薦)
+| Surface | Current technology | Correct route |
+|---|---|---|
+| Majsoul game page | Unity WebGL in Naki's WKWebView | Read-only `execute_js` probes; state/actions use Liqi MCP tools |
+| Naki application UI | SwiftUI | Inspect/edit Swift source under the task's code-change scope |
 
-Naki 提供了統一的 JavaScript 協調器，**優先使用**它而非直接訪問遊戲物件：
+The Majsoul page is not a JavaScript game-object UI. Unity owns a single `unity-canvas`; individual hand tiles and buttons are not DOM elements.
 
-```javascript
-// 快捷訪問
-window.naki === window.NakiCoordinator
+## Current architecture
 
-// 遊戲狀態 (取代直接訪問 DesktopMgr)
-naki.state.isInGame()           // 是否在遊戲中
-naki.state.canExecuteAction()   // 是否可執行操作
-naki.state.getFullState()       // 完整狀態
-naki.state.getHandInfo()        // 手牌資訊
-naki.state.getAvailableOps()    // 可用操作
+```text
+Majsoul WebSocket frames
+  → Naki WebSocket interceptor
+  → Liqi protobuf parser
+  → Swift game/operation state
+  → game_state / game_hand / game_ops / bot_*
 
-// 遊戲操作 (安全封裝，含驗證)
-naki.action.discard(tileIndex, {verify: true})  // 打牌並驗證
-naki.action.pass({useBuiltin: true})            // 使用內建 auto-nofulu
-naki.action.chi(combIndex)      // 吃
-naki.action.pon()               // 碰
-naki.action.hora({useBuiltin: true})            // 使用內建 auto-hule
-naki.action.execute('pass', {}) // 通用執行
-
-// 自動設定控制
-naki.auto.setHule(true)         // 自動和牌
-naki.auto.setNoFulu(true)       // 自動 pass
-naki.auto.setMoqie(true)        // 自動摸切
-
-// 診斷
-naki.debug.getDiagnostics()     // 完整診斷
-naki.debug.listMethods()        // 列出所有方法
+Authorized action
+  → game_action_verify
+  → Naki builds Liqi REQUEST
+  → correct lobby/game gateway
+  → RESPONSE + authoritative state/action verification
 ```
 
-**完整 API**: 見 [references/api-architecture.md](references/api-architecture.md)
+JavaScript remains useful only for the web page shell, Unity canvas, Naki's injected WebSocket bridge, and the WebGL highlight hook. It is not the game-state source.
 
-## Critical Distinction: WebUI vs App UI
+## Mandatory live workflow
 
-When the user says "adjust the screen" or "modify UI", ALWAYS clarify:
+### Read-only diagnosis
 
-| Term | Meaning | Technology | How to Modify |
-|------|---------|------------|---------------|
-| **WebUI** | Majsoul game interface | Laya 3D Engine (JavaScript) | `mcp__naki__execute_js` |
-| **App UI** | Naki application interface | SwiftUI | Edit Swift files |
-
-**Ask the user**: "Do you mean the Majsoul game screen (WebUI) or the Naki app interface (App UI)?"
-
-## MCP Tool Pitfalls
-
-### 1. execute_js MUST use `return` statement
-
-**CRITICAL**: When using `mcp__naki__execute_js`, the JavaScript code MUST include a `return` statement to get results back.
-
-```javascript
-// ❌ WRONG - returns undefined
-mcp__naki__execute_js({ code: "document.title" })
-
-// ✅ CORRECT - returns the actual value
-mcp__naki__execute_js({ code: "return document.title" })
+```text
+live Naki tools/list
+  → get_status
+  → execute_js (only if page/Unity rendering facts are needed)
+  → game_state / game_hand / game_ops for game facts
+  → bot_status / bot_deep for AI and protocol diagnostics
+  → get_logs when event evidence is needed
 ```
 
-**Why**: The code is wrapped in a function, so without `return`, the result is lost.
+Use only the calls needed for the question. If the live connection fails, say that current state is unverified; do not substitute a static explanation.
 
-### 2. Tile Index Mapping - Critical Pitfall
+### Authorized action
 
-**NEVER use Swift's `tehai` array index to find tiles in WebUI!**
-
-The Problem:
-- Swift's `tehai` array is sorted: `tehai.sort { $0.index < $1.index }`
-- Majsoul's UI displays tiles in visual order (NOT sorted by index)
-- Using `tehai[i]` index will click the WRONG tile
-
-**Correct Approach** (from `WebViewModel.swift:226-266`):
-```javascript
-// 1. Parse tile MJAI name (e.g., "7m", "5mr", "W")
-// 2. Convert to Majsoul type mapping:
-const typeMap = {'m': 1, 'p': 0, 's': 2};
-const honorMap = {
-  'E': [3,1], 'S': [3,2], 'W': [3,3], 'N': [3,4],
-  'P': [3,5], 'F': [3,6], 'C': [3,7]
-};
-
-// 3. Iterate through mr.hand[i] in JavaScript
-// 4. Match by tile.val.type and tile.val.index
-// 5. For red dora (e.g., "5mr"), also check tile.val.dora flag
+```text
+live Naki tools/list
+  → game_state
+  → game_ops
+  → confirm current sequence and server-offered operation
+  → game_action_verify using the live schema
+  → game_state / game_ops again
 ```
 
-## WebUI Object Reference
+Actions require an explicit user request. Never execute an action merely to test whether the UI works.
 
-Key Majsoul/Laya objects accessible via JavaScript:
+## Approved `execute_js` probes
+
+`execute_js` receives a function body. To return a value, include `return`; serialize objects with `JSON.stringify`.
+
+### Page and Unity presence
 
 ```javascript
-// Game manager (main entry point)
-window.view.DesktopMgr.Inst
-
-// Main player role
-const mr = window.view.DesktopMgr.Inst.mainrole
-
-// Hand tiles (14 tile objects)
-mr.hand[]  // Array of tile objects
-
-// Each tile object has:
-tile.val.type   // 0=pinzu, 1=manzu, 2=souzu, 3=honor
-tile.val.index  // 1-9 for suited, 1-7 for honors
-tile.val.dora   // true if red dora (5mr, 5pr, 5sr)
-
-// Visual effects
-tile._doraeffect           // Dora glow effect
-tile._recommendeffect      // AI recommendation highlight
-tile.effect_recommend      // Recommendation control (.active)
-```
-
-See `@docs/majsoul-webui-objects-reference.md` for complete reference.
-
-## Common WebUI Debugging Commands
-
-### Check Game State
-```javascript
-// Get current round info
 return JSON.stringify({
-  bakaze: window.view.DesktopMgr.Inst.gameing_state?.bakaze,
-  kyoku: window.view.DesktopMgr.Inst.gameing_state?.kyoku
-});
+  url: location.href,
+  title: document.title,
+  readyState: document.readyState,
+  canvas: !!document.getElementById('unity-canvas'),
+  canvasSize: (() => {
+    const c = document.getElementById('unity-canvas');
+    return c ? {width: c.width, height: c.height} : null;
+  })()
+})
 ```
 
-### Get Hand Tiles
+### Naki injection presence
+
 ```javascript
-const mr = window.view.DesktopMgr.Inst.mainrole;
-const tiles = mr.hand.map((t, i) => ({
-  index: i,
-  type: t.val?.type,
-  num: t.val?.index,
-  dora: t.val?.dora
-}));
-return JSON.stringify(tiles);
+return JSON.stringify({
+  webSocketBridge: typeof window.__nakiWebSocket,
+  connections: window.__nakiWebSocket?.getConnections?.() ?? null,
+  highlighter: typeof window.__nakiHighlight,
+  highlightState: window.__nakiHighlight?.state?.() ?? null
+})
 ```
 
-### Find Specific Tile Position
-```javascript
-// Find tile "5m" (manzu 5)
-const mr = window.view.DesktopMgr.Inst.mainrole;
-for (let i = 0; i < mr.hand.length; i++) {
-  const t = mr.hand[i];
-  if (t.val?.type === 1 && t.val?.index === 5) {
-    return JSON.stringify({found: true, index: i, pos: t.transform?.position});
-  }
-}
-return JSON.stringify({found: false});
+These probes read state only. `window.__nakiWebSocket.sendRaw`, `forceReconnect`, highlighter setters, DOM writes, WebGL uniform changes and event dispatch are not approved tester probes.
+
+## Game-state route
+
+| Question | Live tool |
+|---|---|
+| Current parsed round/hand/seat | `game_state` |
+| Current hand and recommendation | `game_hand` |
+| Currently legal server-offered operations | `game_ops` |
+| Bot mode/recommendation | `bot_status` |
+| Protocol snapshots, responses, diagnostics | `bot_deep` |
+| Current runtime logs | `get_logs` |
+
+`game_state`/`game_hand`/`game_ops` expose the running Naki process's Swift state accumulated from WebSocket/Liqi events. They are current Naki data, but they are not fresh complete RPC snapshots from the Majsoul server. Preserve that distinction in the report.
+
+## Action route
+
+1. Refresh live `game_ops` immediately before acting.
+2. Confirm the action is present in the server-provided operation list and use its current `sequence`/combination.
+3. Call `game_action_verify` using the live `tools/list` schema.
+4. Inspect RESPONSE, `verified`, sequence/oplist movement and the next authoritative action.
+5. Re-query live state before claiming success.
+
+`sent.success=true` proves only that bytes entered an open WebSocket. It does not prove server acceptance. For terminal actions such as tsumo/ron, confirm the authoritative hand-ending action instead of relying only on send status.
+
+## Forbidden legacy routes
+
+The following objects/routes are absent or invalid in the current Unity client and must not appear in a proposed probe:
+
+```text
+window.Laya
+window.view.DesktopMgr / view.DesktopMgr.Inst
+GameMgr
+uiscript
+cfg
+app.NetAgent
+window.naki / window.NakiCoordinator game-state APIs
+window.__nakiGameAPI
 ```
 
-### Check Player Names
-```javascript
-const dm = window.view.DesktopMgr.Inst;
-const names = dm.players?.map(p => p.character?.charid) || [];
-return JSON.stringify(names);
+The following MCP tools were removed and must not be called:
+
+```text
+detect, explore, test_indicators, click, calibrate
+ui_names_status, ui_names_hide, ui_names_show, ui_names_toggle
 ```
 
-### Toggle Visual Effect
-```javascript
-// Toggle recommendation highlight on first tile
-const mr = window.view.DesktopMgr.Inst.mainrole;
-if (mr.hand[0]?.effect_recommend) {
-  mr.hand[0].effect_recommend.active = !mr.hand[0].effect_recommend.active;
-}
-return "toggled";
-```
+Also forbidden:
 
-## Workflow for WebUI Testing
+- Inferring a tile from screen coordinates or a Swift array index.
+- Clicking the Unity canvas, dispatching mouse/pointer/touch events, or maintaining calibration offsets.
+- Trying to find per-tile DOM nodes; there are none.
+- Mutating WebGL materials/uniforms from an ad-hoc tester query.
+- Sending Liqi bytes from JavaScript instead of the protocol action tools.
 
-1. **Verify game is running**:
-   ```
-   mcp__naki__game_state
-   ```
+## Diagnostic checklists
 
-2. **Get current hand info**:
-   ```
-   mcp__naki__game_hand
-   ```
+### Current screen/render issue
 
-3. **Execute test JavaScript** (always use return!):
-   ```
-   mcp__naki__execute_js({ code: "return ..." })
-   ```
+- [ ] Live `tools/list` succeeded for this request.
+- [ ] `get_status` proves the running Naki endpoint was reached.
+- [ ] Read-only probe confirms current URL, `unity-canvas`, canvas dimensions and injection presence.
+- [ ] `game_state`/`bot_status` distinguish a rendering issue from missing protocol state.
+- [ ] `get_logs` was queried when the conclusion depends on recent events.
+- [ ] No canvas mutation or click was performed.
 
-4. **Check logs for errors**:
-   ```
-   mcp__naki__get_logs
-   ```
+### Wrong/missing action
 
-## Checklist Before WebUI Modification
+- [ ] Live `game_ops` captured the exact offered operation and sequence.
+- [ ] Live `bot_status` captured the recommendation.
+- [ ] `bot_deep`/logs captured response or authoritative action evidence.
+- [ ] No action was sent unless explicitly authorized.
+- [ ] A send was not mistaken for server acceptance.
 
-- [ ] Confirmed user wants WebUI (not App UI)
-- [ ] Game is active (`mcp__naki__game_state` shows valid state)
-- [ ] JavaScript includes `return` statement
-- [ ] NOT using Swift tehai index for tile lookup
-- [ ] Tested in safe scenario first
+## Error handling
 
-## Error Handling
+| Failure | Meaning | Response |
+|---|---|---|
+| MCP/`tools/list` unavailable | Naki was not queried live | Mark all current-state claims unverified |
+| `execute_js` returns null | Missing `return`, unloaded page, or absent value | Re-check with a smaller read-only probe |
+| `unity-canvas` absent | Current page is not at the loaded Unity surface | Report the observed URL/state; do not click around |
+| Game snapshot empty | Naki has not accumulated active game state | Report no current protocol snapshot |
+| Action verification times out | Acceptance/state transition was not observed | Report unverified/failed exactly as returned |
 
-If `execute_js` returns null or undefined:
-1. Check if game page is loaded
-2. Verify JavaScript has `return` statement
-3. Check for JavaScript errors in logs
-4. Ensure object path exists (use optional chaining `?.`)
+## Current references
 
-## Reference Documentation
+- `../../../docs/majsoul-unity-protocol.md` — current Unity/Liqi architecture and runtime evidence.
+- `../../../docs/mcp-server-guide.md` — current 42-tool list, safety classes and verification semantics.
+- `../naki-mcp-proxy/SKILL.md` — mandatory live routing policy.
 
-For complete Majsoul WebUI object documentation, see:
-- [API Architecture](references/api-architecture.md) - **完整 API 架構** (NakiCoordinator, NetAgent, 配置系統, 音效系統等)
-- [WebUI Objects Reference](references/reference.md) - Laya Sprite3D 屬性, 牌編碼, 效果機制
-
-### NakiCoordinator 優先使用指南
-
-| 任務 | 舊方法 | 新方法 (推薦) |
-|------|--------|---------------|
-| 檢查遊戲狀態 | `view.DesktopMgr.Inst.gameing` | `naki.state.isInGame()` |
-| 獲取手牌 | `dm.mainrole.hand` | `naki.state.getHandInfo()` |
-| 執行打牌 | `mr.setChoosePai(); mr.DoDiscardTile()` | `naki.action.discard(idx)` |
-| 執行 pass | 手動發送網路請求 | `naki.action.pass()` |
-| 驗證動作 | 自己寫輪詢 | `naki.action.execute('pass', {verify: true})` |
+No Laya object reference is retained because it is not a valid query surface for the current client.

@@ -1,170 +1,137 @@
-# Naki MCP Tool Catalog
+# Naki MCP live tool catalog
 
-Complete reference for all 47 MCP tools available in Naki.
+**Snapshot checked:** 2026-08-01
 
-**Server**: `http://localhost:8765/mcp`
-**Protocol**: MCP 2025-03-26 (JSON-RPC 2.0)
+**Default endpoint:** `http://127.0.0.1:8765/mcp`
 
----
+**Snapshot count:** 42 tools
 
-## 系統類 (4 tools)
+This file is a routing snapshot, not a data source. For every Naki request, connect to the running Naki process, call live `tools/list`, and use the name and `inputSchema` returned by that call. If live Naki is unavailable, report the query as unverified; do not answer from this catalog.
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `get_status` | 獲取 Server 狀態和埠號 | - |
-| `get_help` | 獲取完整 API 文檔 (JSON) | - |
-| `get_logs` | 獲取 Debug 日誌（最多 10,000 條） | - |
-| `clear_logs` | 清空所有日誌 | - |
+## Mandatory live sequence
 
----
-
-## Bot 控制類 (7 tools)
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `bot_status` | 獲取 Bot 狀態、手牌、AI 推薦 | - |
-| `bot_trigger` | 手動觸發自動打牌（執行 AI 推薦） | - |
-| `bot_ops` | 探索可用的副露操作（吃/碰/槓） | - |
-| `bot_deep` | 深度探索 naki API | - |
-| `bot_chi` | 測試吃操作 | - |
-| `bot_pon` | 測試碰操作 | - |
-| `bot_sync` | 強制斷線重連以重建 Bot 狀態 | - |
-
----
-
-## 遊戲狀態類 (6 tools)
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `game_state` | 獲取當前遊戲狀態 | - |
-| `game_hand` | 獲取手牌資訊 | - |
-| `game_ops` | 獲取當前可用操作 | - |
-| `game_discard` | 打出指定索引的牌 | `tileIndex`: 0-13 |
-| `game_action` | 執行遊戲動作 | `action`: string |
-| `game_action_verify` | 執行動作並驗證結果 | `action`: string |
-
----
-
-## 高亮控制類 (6 tools)
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `highlight_tile` | 高亮指定手牌 | `tileIndex`: int, `color`: string |
-| `reset_tile_color` | 重置手牌顏色 | `tileIndex`: int (可選) |
-| `highlight_status` | 獲取高亮狀態 | - |
-| `highlight_settings` | 設置高亮選項 | `showTileColor`, `showNativeEffect`: bool |
-| `show_recommendations` | 顯示多個推薦高亮 | `recommendations`: JSON array |
-| `hide_highlight` | 隱藏所有高亮 | - |
-
-**Color Options**:
-- `green` - 推薦度高
-- `orange` - 中等推薦
-- `red` - 低推薦
-- `white` - 重置
-- Custom RGBA: `[r, g, b, a]`
-
----
-
-## 表情類 (4 tools)
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `game_emoji` | 發送表情 | `emo_id`: 0-8, `count`: 1-5 |
-| `game_emoji_list` | 獲取可用表情列表 | - |
-| `game_emoji_auto_reply` | 切換自動回應表情 | `enabled`: bool (可選) |
-| `game_emoji_listen` | 獲取表情廣播記錄 | `clear`: bool (可選) |
-
----
-
-## 大廳類 (9 tools)
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `lobby_status` | 獲取大廳狀態 | - |
-| `lobby_match_modes` | 獲取匹配模式列表 | - |
-| `lobby_start_match` | 開始段位場匹配 | `match_mode`: int |
-| `lobby_cancel_match` | 取消匹配 | - |
-| `lobby_match_status` | 獲取匹配狀態 | - |
-| `lobby_navigate` | 導航到指定頁面 | `page`: 0-3 |
-| `lobby_heartbeat` | 發送心跳防閒置 | - |
-| `lobby_anti_idle` | 切換自動防閒置 | `enabled`: bool (可選) |
-| `lobby_idle_status` | 獲取閒置狀態 | - |
-| `lobby_account_level` | 獲取帳號段位 | - |
-
-**Match Mode IDs**:
-
-| ID | 段位場 | ID | 段位場 |
-|----|-------|----|----|
-| 1 | 銅東 | 2 | 銅半 |
-| 4 | 銀東 | 5 | 銀半 |
-| 7 | 金東 | 8 | 金半 |
-| 10 | 玉東 | 11 | 玉半 |
-| 13 | 王座東 | 14 | 王座半 |
-
-**Lobby Pages**:
-
-| Page | 位置 |
-|------|------|
-| 0 | 主頁 |
-| 1 | 段位場 |
-| 2 | 友人場 |
-| 3 | 大會 |
-
----
-
-## UI 控制類 (11 tools)
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `execute_js` | 執行 JavaScript | `code`: string |
-| `detect` | 檢測遊戲 API 可用性 | - |
-| `explore` | 探索遊戲物件結構 | - |
-| `test_indicators` | 顯示測試指示器 | - |
-| `click` | 在指定座標點擊 | `x`, `y`: int, `label`: string |
-| `calibrate` | 設定校準參數 | `tileSpacing`, `offsetX`, `offsetY`: int |
-| `ui_names_status` | 獲取玩家名稱顯示狀態 | - |
-| `ui_names_hide` | 隱藏所有玩家名稱 | - |
-| `ui_names_show` | 顯示所有玩家名稱 | - |
-| `ui_names_toggle` | 切換玩家名稱顯示 | - |
-
----
-
-## 牌記號說明 (MJAI Format)
-
-| 類型 | 格式 | 範例 |
-|-----|------|------|
-| 萬子 | 1-9m | 1m, 5m, 9m |
-| 筒子 | 1-9p | 1p, 5p, 9p |
-| 索子 | 1-9s | 1s, 5s, 9s |
-| 紅寶牌 | 5Xr | 5mr, 5pr, 5sr |
-| 字牌 | E/S/W/N/P/F/C | E(東), S(南), W(西), N(北), P(白), F(發), C(中) |
-
----
-
-## Tool Invocation Examples
-
-### Claude Code Format
-
-```
-mcp__naki__bot_status
-mcp__naki__bot_trigger
-mcp__naki__game_action --action "dahai 5m"
-mcp__naki__highlight_tile --tileIndex 5 --color green
-mcp__naki__lobby_start_match --match_mode 5
-mcp__naki__execute_js --code "return window.location.href"
+```text
+live Naki tools/list
+  → confirm the current tool and schema
+  → call the live query/action tool
+  → preserve its verification fields in the answer
 ```
 
-### HTTP API Mapping
+For a registry question, the live `tools/list` response is the query result. For every other question, `tools/list` alone is not enough.
 
-| MCP Tool | HTTP Endpoint |
-|---------|--------------|
-| `get_status` | GET /status |
-| `get_logs` | GET /logs |
-| `bot_status` | GET /bot/status |
-| `bot_trigger` | POST /bot/trigger |
-| `game_state` | GET /game/state |
-| `execute_js` | POST /js |
+## System (4)
 
----
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `get_status` | none | Live Naki server status, port, time, log path; read-only |
+| `get_help` | none | Help generated by the running Naki build; read-only |
+| `get_logs` | none | Current in-memory logs; read-only |
+| `clear_logs` | none | Clears in-memory logs; local mutation |
 
-**Last Updated**: 2026-01-01
+## Bot (7)
+
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `bot_status` | none | Live Swift bot snapshot and recommendation; read-only |
+| `bot_trigger` | none | Executes the current automatic decision; affects the game |
+| `bot_ops` | none | Pending/latest Liqi operation snapshot; read-only |
+| `bot_deep` | none | Protocol state, response and diagnostics; read-only |
+| `bot_chi` | `index?`, `awaitResponseMs?` | Sends Liqi chi; affects the game |
+| `bot_pon` | `index?`, `awaitResponseMs?` | Sends Liqi pon; affects the game |
+| `bot_sync` | none | Forces WebSocket reconnect and bot rebuild; local/runtime mutation |
+
+## Game state and actions (6)
+
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `game_state` | none | Naki's current Swift protocol snapshot; read-only |
+| `game_hand` | none | Current parsed hand/recommendation; read-only |
+| `game_ops` | none | Server-provided pending/latest operation list; read-only |
+| `game_discard` | `tile` required; `moqie?`, `awaitResponseMs?` | Sends `.lq.FastTest.inputOperation`; affects the game |
+| `game_action` | `action` required; `tile?`, `moqie?`, `index?`, `kanType?`, `timeuse?`, `awaitResponseMs?` | Sends a Liqi game request |
+| `game_action_verify` | `action` required; `tile?`, `moqie?`, `index?`, `kanType?`, `timeout?` | Sends and waits for protocol-layer verification |
+
+Current action names exposed by the live schema are `discard`, `riichi`, `chi`, `pon`, `kan`, `tsumo`, `ron`, `hora`, `kyushu`, `babei`, and `pass`. `discard`/`riichi` require `tile`; `kan` may use `kanType=ankan|kakan|minkan`. Tile strings accept MJAI (`5mr`, `E`) or Majsoul (`0m`, `1z`) notation. Always re-read the live schema before calling.
+
+## JavaScript (1)
+
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `execute_js` | `code` required | Executes a function body in WKWebView; only read-only Unity/page probes are approved query usage |
+
+To receive a value, the function body must contain `return`; objects should be wrapped with `JSON.stringify(...)`. Do not use this tool for game state, actions, raw Liqi sends, canvas mutation, or coordinate clicks.
+
+## Lobby (8)
+
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `lobby_status` | `awaitResponseMs?` | Sends `fetchGamingInfo`; server query |
+| `lobby_match_modes` | none | Returns the running Naki build's mode table; read-only |
+| `lobby_start_match` | `match_mode` required; `client_version_string?`, `awaitResponseMs?` | Joins a server queue |
+| `lobby_cancel_match` | `match_mode` required; `awaitResponseMs?` | Leaves a server queue |
+| `lobby_account_info` | `account_id?`, `awaitResponseMs?` | Sends `fetchAccountInfo`; server query |
+| `lobby_server_time` | `awaitResponseMs?` | Low-risk server-time request |
+| `lobby_heartbeat` | `no_operation_counter?`, `awaitResponseMs?` | Sends lobby heartbeat |
+| `lobby_login_beat` | `contract?`, `awaitResponseMs?` | Sends login beat |
+
+Do not hard-code match-mode IDs from an old document. Query live `lobby_match_modes`, then use the returned value.
+
+## Anti-idle (1)
+
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `lobby_anti_idle` | `enabled?`, `intervalSeconds?` | No `enabled`: query scheduler state. With `enabled`: changes the Swift heartbeat scheduler |
+
+## Friend rooms (7)
+
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `room_create` | `player_count?`, `mode?`, `time_fixed?`, `time_add?`, `ai_level?`, `dora_count?`, `shiduan?`, `init_point?`, `fandian?`, `public_live?`, `enable_ai?`, `client_version_string?`, `awaitResponseMs?` | Creates a room |
+| `room_add_robot` | `position?`, `awaitResponseMs?` | Adds a robot |
+| `room_start` | `awaitResponseMs?` | Starts the room game |
+| `room_info` | `awaitResponseMs?` | Queries current room info |
+| `room_join` | `room_id` required; `client_version_string?`, `awaitResponseMs?` | Joins a room |
+| `room_leave` | `awaitResponseMs?` | Leaves a room |
+| `room_quick_test` | `player_count?`, `time_fixed?`, `time_add?`, `ai_level?` | Create → robots → start; multiple external mutations |
+
+Room mutation tools require explicit user authorization. `room_quick_test` is never a harmless query.
+
+## Emoji (2)
+
+| Tool | Parameters | Source / side effect |
+|---|---|---|
+| `game_emoji` | `emo_id` required; `count?`, `except_self?`, `awaitResponseMs?` | Sends a Liqi game broadcast |
+| `game_emoji_listen` | `clear?` | Reads captured broadcasts; `clear=true` also clears the local store |
+
+## Highlight compatibility stubs (6)
+
+| Tool | Parameters | Current result |
+|---|---|---|
+| `highlight_tile` | legacy `tileIndex?`, `color?` | unavailable |
+| `reset_tile_color` | legacy `tileIndex?` | unavailable |
+| `highlight_status` | none | `available=false` |
+| `highlight_settings` | legacy booleans | unavailable |
+| `show_recommendations` | legacy `recommendations?` | unavailable |
+| `hide_highlight` | none | unavailable |
+
+These six names remain only as explicit compatibility failures. Naki's built-in `window.__nakiHighlight` WebGL hook is separate and does not make these MCP tools functional.
+
+## Removed tools
+
+The current live registry does not contain the following old Laya/UI tools:
+
+```text
+detect, explore, test_indicators, click, calibrate
+ui_names_status, ui_names_hide, ui_names_show, ui_names_toggle
+lobby_match_status, lobby_navigate, lobby_idle_status, lobby_account_level
+game_emoji_list, game_emoji_auto_reply
+```
+
+Never call them and never emulate them with `execute_js`.
+
+## Result semantics
+
+- A live tool call proves what the running Naki process returned at that moment. It does not prove more than the tool's source semantics.
+- `game_state`, `game_hand`, and `game_ops` expose state accumulated from intercepted WebSocket/Liqi events; they are not fresh full-state RPCs to the Majsoul server.
+- A send result is not an acceptance result. For game actions, prefer `game_action_verify` and inspect RESPONSE, `verified`, sequence/oplist changes, and the next authoritative action.
+- No live connection means no current answer.

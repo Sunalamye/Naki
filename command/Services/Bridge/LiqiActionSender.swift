@@ -15,9 +15,9 @@
 //  ⚠️ 驗收語彙：
 //  - **已驗證（位元組層）**：欄位編號與型別取自 docs/protocol/liqi.json；
 //    envelope 格式與 sendRaw 通道有實測封包佐證（見 docs/majsoul-unity-protocol.md）。
-//  - **未驗證（需真實對局）**：操作 type 的數值語意、吃/碰/槓走哪個方法、
-//    timeuse 的單位與必要性、createRoom 的 mode / detail_rule 實際可接受值。
-//    這些在真實對局封包對拍之前都不可當事實引用。
+//  - **runtime 已驗 subset**：discard、pon、riichi、tsumo request、ron；ron 已確認走
+//    inputOperation，pon 走 inputChiPengGang。chi variants、赤五 combination、三種槓、
+//    timeuse 細節仍需真實對局驗證，不能把 subset 外推到全部動作。
 //
 //  proto3 慣例：預設值（0 / false / 空字串）省略不編碼，與 protobufjs 客戶端一致，
 //  這樣送出的位元組才會與遊戲自己送的形狀相同。
@@ -124,11 +124,11 @@ enum LiqiTileCode {
 
 /// 好友房設定（`ReqCreateRoom` / `GameMode` / `GameDetailRule`）
 ///
-/// 欄位編號取自 liqi.json；**數值語意未驗證**（例如 `mode` 1/2 是否為東風/半莊）。
+/// 欄位編號取自 liqi.json；mode 1=東風、2=半莊已由 current config + runtime cross-check。
 struct LiqiFriendRoomConfig {
     /// 人數（4 = 四麻、3 = 三麻）
     var playerCount: UInt32 = 4
-    /// GameMode.mode（未驗證：常見說法 1 = 東風戰、2 = 半莊戰）
+    /// GameMode.mode（1 = 東風戰、2 = 半莊戰）
     var mode: UInt32 = 1
     /// GameMode.ai：是否允許 AI 代打
     var enableAI: Bool = false
@@ -255,8 +255,7 @@ enum LiqiRequestBuilder {
 
     /// 榮和（type=9）
     ///
-    /// ⚠️ 未驗證：榮和是回應他家打牌，實務上有可能需要走 `inputChiPengGang`；
-    /// 這裡依 `LiqiOperationType.ron.channel` 決定（目前為 `inputOperation`）。
+    /// 2026-08-01 runtime 已驗：榮和走 `inputOperation`，server RESPONSE 後收到 ActionHule。
     static func ron(index: UInt32? = nil, timeuse: UInt32 = 0) -> LiqiRequestSpec {
         let type = LiqiOperationType.ron
         switch type.channel {
@@ -379,7 +378,7 @@ enum LiqiRequestBuilder {
     // MARK: - ③ 大廳層：匹配 / 帳號 / 保活
     //
     // 以下欄位編號全部取自 docs/protocol/liqi.json（已逐一查核），
-    // 但**伺服器是否接受**、以及 match_mode 的數值語意仍屬未驗證。
+    // server 是否接受仍須看每筆 RESPONSE；match mode 則由 current config 提供。
 
     /// 段位場排隊（`ReqJoinMatchQueue`：match_mode=1, client_version_string=2）
     static func matchGame(matchMode: UInt32, clientVersionString: String = "") -> LiqiRequestSpec {

@@ -134,6 +134,213 @@
     window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
     window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
 
+
+    // ============================================================
+    // 隱藏玩家名稱：協定層等長改寫
+    // ============================================================
+    //
+    // 舊實作靠 `uiscript.UI_DesktopInfo`，在 Unity WebGL 客戶端根本不存在，
+    // 所以那條路沒救。名字要消失，只能在**遊戲自己解析封包之前**動手。
+    //
+    // 做法：本檔的 'message' listener 在 WebSocket 建構當下就註冊，一定排在遊戲
+    // 自己的 handler 前面，而 event.data 的 ArrayBuffer 是同一份記憶體——就地改
+    // bytes，遊戲後面讀到的就是改過的內容。
+    //
+    // 關鍵約束是**長度必須完全一樣**。protobuf 的 string 前面有一個 varint 長度，
+    // 改長度就得改前綴、改前綴又會連動外層所有 nested message 的長度，一路錯到底。
+    // 等長覆寫則完全不碰結構，最壞情況只是名字變成怪字串，不會讓遊戲解析爆掉。
+    //
+    // 範圍刻意收窄：只處理 `.lq.FastTest.authGame` 的 RESPONSE（ResAuthGame 的
+    // players / robots）。那是名牌的來源。斷線重連走 syncGame、終局結算走
+    // NotifyGameEndResult，兩者目前不處理——寧可漏掉幾個畫面，也不要為了覆蓋率
+    // 去改一堆沒實測過的訊息。
+    //
+    // 任何解析中途遇到看不懂的東西一律 return，維持 bytes 原狀（fail-open 成
+    // 「名字照常顯示」，而不是 fail 成壞封包）。
+    const nakiNicknameMask = (function() {
+        let enabled = false;
+        let maskedCount = 0;
+        const pendingMethods = new Map();   // msgId -> method name
+
+        const TYPE_REQUEST = 2;
+        const TYPE_RESPONSE = 3;
+        const AUTH_GAME = '.lq.FastTest.authGame';
+
+        // 回傳 [value, nextOffset]，讀不完整回 null。
+        // 用乘法而非 <<：JS 位移是 32-bit，長 varint 會靜默算錯。
+        function readVarint(b, i, end) {
+            let result = 0;
+            let shift = 1;
+            while (i < end) {
+                const byte = b[i++];
+                result += (byte & 0x7f) * shift;
+                if ((byte & 0x80) === 0) return [result, i];
+                shift *= 128;
+                if (shift > 1e15) return null;
+            }
+            return null;
+        }
+
+        // 找出 wrapper `{1: method, 2: payload}` 的兩個欄位。
+        function parseEnvelopeBody(b, start) {
+            let i = start;
+            let method = null;
+            let payload = null;
+            while (i < b.length) {
+                const tag = readVarint(b, i, b.length);
+                if (!tag) return null;
+                const field = Math.floor(tag[0] / 8);
+                const wire = tag[0] & 7;
+                i = tag[1];
+                if (wire === 2) {
+                    const len = readVarint(b, i, b.length);
+                    if (!len) return null;
+                    const from = len[1];
+                    const to = from + len[0];
+                    if (to > b.length) return null;
+                    if (field === 1) method = decodeAscii(b, from, to);
+                    else if (field === 2) payload = [from, to];
+                    i = to;
+                } else if (wire === 0) {
+                    const v = readVarint(b, i, b.length);
+                    if (!v) return null;
+                    i = v[1];
+                } else if (wire === 5) i += 4;
+                else if (wire === 1) i += 8;
+                else return null;
+            }
+            return { method: method, payload: payload };
+        }
+
+        function decodeAscii(b, from, to) {
+            let out = '';
+            for (let k = from; k < to; k++) {
+                if (b[k] > 127) return null;   // method name 一定是 ASCII
+                out += String.fromCharCode(b[k]);
+            }
+            return out;
+        }
+
+        // 把 [from,to) 當成 PlayerGameView，改寫 field 4 (nickname)。
+        function maskPlayerGameView(b, from, to, seat) {
+            let i = from;
+            while (i < to) {
+                const tag = readVarint(b, i, to);
+                if (!tag) return;
+                const field = Math.floor(tag[0] / 8);
+                const wire = tag[0] & 7;
+                i = tag[1];
+                if (wire === 2) {
+                    const len = readVarint(b, i, to);
+                    if (!len) return;
+                    const s = len[1];
+                    const e = s + len[0];
+                    if (e > to) return;
+                    if (field === 4 && len[0] > 0) {
+                        writeLabel(b, s, e, seat);
+                        maskedCount++;
+                    }
+                    i = e;
+                } else if (wire === 0) {
+                    const v = readVarint(b, i, to);
+                    if (!v) return;
+                    i = v[1];
+                } else if (wire === 5) i += 4;
+                else if (wire === 1) i += 8;
+                else return;
+            }
+        }
+
+        // 等長覆寫，長度不足就換更短的標籤——截斷 'Player 1' 會得到 "Pl" 這種
+        // 看起來像壞掉的字串，不如直接降級成 "P1"。全 ASCII，所以一定是合法
+        // UTF-8，不會讓遊戲的字串解碼失敗。
+        function writeLabel(b, from, to, seat) {
+            const size = to - from;
+            let label = 'Player ' + seat;
+            if (size < label.length) label = 'P' + seat;
+            if (size < label.length) label = String(seat);
+            for (let k = from; k < to; k++) {
+                b[k] = (k - from < label.length) ? label.charCodeAt(k - from) : 0x20;
+            }
+        }
+
+        function maskAuthGame(b, from, to) {
+            let i = from;
+            let seat = 1;
+            while (i < to) {
+                const tag = readVarint(b, i, to);
+                if (!tag) return;
+                const field = Math.floor(tag[0] / 8);
+                const wire = tag[0] & 7;
+                i = tag[1];
+                if (wire === 2) {
+                    const len = readVarint(b, i, to);
+                    if (!len) return;
+                    const s = len[1];
+                    const e = s + len[0];
+                    if (e > to) return;
+                    // field 2 = players[], field 7 = robots[]
+                    if (field === 2 || field === 7) maskPlayerGameView(b, s, e, seat++);
+                    i = e;
+                } else if (wire === 0) {
+                    const v = readVarint(b, i, to);
+                    if (!v) return;
+                    i = v[1];
+                } else if (wire === 5) i += 4;
+                else if (wire === 1) i += 8;
+                else return;
+            }
+        }
+
+        function observe(bytes, direction) {
+            // send 面即使關閉也要記 msgId→method：開關可能在對局中途才打開，
+            // 沒有這份對照表就認不出後面的 RESPONSE 是哪一個方法。
+            if (!bytes || bytes.length < 4) return;
+            const type = bytes[0];
+            const msgId = bytes[1] | (bytes[2] << 8);
+
+            if (direction === 'send' && type === TYPE_REQUEST) {
+                const env = parseEnvelopeBody(bytes, 3);
+                if (env && env.method) {
+                    pendingMethods.set(msgId, env.method);
+                    if (pendingMethods.size > 256) {
+                        pendingMethods.delete(pendingMethods.keys().next().value);
+                    }
+                }
+                return;
+            }
+
+            if (direction !== 'receive' || type !== TYPE_RESPONSE) return;
+            const method = pendingMethods.get(msgId);
+            if (method) pendingMethods.delete(msgId);
+            if (!enabled || method !== AUTH_GAME) return;
+
+            const env = parseEnvelopeBody(bytes, 3);
+            if (!env || !env.payload) return;
+            maskAuthGame(bytes, env.payload[0], env.payload[1]);
+        }
+
+        return {
+            observe: observe,
+            setEnabled: function(v) {
+                enabled = !!v;
+                console.log('[Naki WS] 隱藏玩家名稱:', enabled);
+                return enabled;
+            },
+            getStatus: function() {
+                return {
+                    available: true,
+                    enabled: enabled,
+                    maskedFields: maskedCount,
+                    scope: 'authGame-response-only',
+                    note: '只在下一局 authGame 生效；重連 syncGame 與終局結算不在範圍內'
+                };
+            }
+        };
+    })();
+
+    window.__nakiHideNames = nakiNicknameMask;
+
     /**
      * 處理 WebSocket 訊息
      */
@@ -153,6 +360,7 @@
 
         try {
             if (data instanceof ArrayBuffer) {
+                nakiNicknameMask.observe(new Uint8Array(data), direction);
                 // ArrayBuffer：轉成 Base64
                 const base64 = arrayBufferToBase64(data);
                 sendToSwift('websocket_message', {
@@ -167,6 +375,7 @@
                 // （Laya 時代送 ArrayBuffer，只判 instanceof ArrayBuffer 會整批漏掉送出面，
                 //  連帶讓 LiqiParser 收不到 REQUEST、無法配對 RESPONSE）
                 const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+                nakiNicknameMask.observe(view, direction);
                 sendToSwift('websocket_message', {
                     socketId: wsId,
                     direction: direction,

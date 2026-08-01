@@ -109,7 +109,8 @@ enum NakiGameAction {
             return LiqiRequestBuilder.ron(timeuse: timeuse)
 
         case "hora":
-            // 由 oplist 決定自摸還是榮和；沒有快照時保守取自摸
+            // 由 oplist 決定自摸還是榮和。⚠️ 現行 legacy fallback 在沒有 snapshot 時取自摸；
+            // 這不是 server-authoritative，呼叫端必須先查 game_ops，後續應改成 fail closed。
             if (snapshot?.horaOperation ?? .tsumo) == .ron {
                 return LiqiRequestBuilder.ron(timeuse: timeuse)
             }
@@ -197,7 +198,7 @@ struct GameOpsTool: MCPTool {
     static let description = """
         獲取當前可用操作（協定層 OptionalOperationList）。\
         type 對照：1=打牌 2=吃 3=碰 4=暗槓 5=大明槓 6=加槓 7=立直 8=自摸 9=榮和 10=九種九牌 11=拔北。\
-        ⚠️ type 數值語意來自 Laya 時代觀察，liqi.json 沒有 enum 定義，尚未以真實對局封包對拍。
+        runtime 已驗 discard / pon / riichi / tsumo request / ron；chi variants、赤五組合與三種槓仍待驗。
         """
     static let inputSchema = MCPInputSchema.empty
 
@@ -269,7 +270,8 @@ struct GameActionTool: MCPTool {
     static let description = """
         執行遊戲動作，送出對應的 Liqi REQUEST。\
         action: discard / riichi（需 tile）、chi / pon / kan（可帶 index）、\
-        tsumo / ron / hora / kyushu / babei / pass。\
+        tsumo / ron / hora / kyushu / babei / pass。hora 必須先有 game_ops snapshot；\
+        現行無 snapshot fallback 會猜 tsumo，不具 server-authoritative 保證。\
         kan 未指定 kanType 時依 game_ops 推導（暗槓→加槓→大明槓）；\
         pass 依 game_ops 判斷送 inputChiPengGang 或 inputOperation。
         """

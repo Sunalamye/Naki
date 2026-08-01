@@ -1,6 +1,6 @@
 ---
 name: mcp-tool-writer
-description: Create, modify, and manage MCP tools for the Naki mahjong AI assistant. Use when adding new MCP tools, modifying existing tools, or fixing tool-related issues. This skill understands the Protocol-based MCPTool architecture.
+description: Create or modify Naki MCP tools against the current 42-tool Swift registry, Unity WebGL client, and Liqi protocol state/action boundaries.
 allowed-tools: Read, Glob, Grep, Write, Edit, Bash
 ---
 
@@ -9,211 +9,296 @@ allowed-tools: Read, Glob, Grep, Write, Edit, Bash
 Base directory: {baseDir}
 
 <IMPORTANT>
-**MCP 調用規則**: 測試新建的 MCP 工具時，使用 `/naki-mcp-proxy` skill 調用。
+Runtime 查詢與驗收一律透過 `/naki-mcp-proxy` 真實連到正在執行的 Naki。每個 request 先呼叫 live `tools/list`，再依該次回傳的名稱與 `inputSchema` 呼叫實際工具。若 Naki 無法連線，只能標記「runtime 未驗證」；不可用本 skill、repo source、靜態 catalog、build 成功或之前的輸出冒充 live 結果。
+
+目前雀魂頁面是 Unity WebGL。遊戲狀態來自 Naki 的 Swift Liqi protocol state，遊戲／大廳／房間動作由 Swift 組 Liqi REQUEST。`executeJavaScript` 只適合唯讀 page／Unity canvas／Naki injection probe；不得拿來讀遊戲物件、送遊戲動作或模擬座標點擊。
 </IMPORTANT>
 
-This skill helps create and modify MCP (Model Context Protocol) tools for the Naki project using the Protocol-based architecture.
+## Invariant
 
-## Architecture Overview
+新增或修改工具時必須維持三個邊界：
 
-Naki uses a Protocol-based MCP architecture:
+1. `tools/list` 由 `MCPToolRegistry` 自動生成，是名稱、描述與 schema 的 runtime truth。
+2. 查詢結果必須揭露資料來源；local Swift snapshot 不可描述成 fresh server snapshot。
+3. 會改 log、連線、帳號、排隊、房間或對局的工具，description 與結果都要清楚揭露 side effect，且 runtime 驗收需要明確授權。
 
-```
+## Current architecture
+
+```text
 command/Services/MCP/
-├── MCPTool.swift          - Protocol 定義 + Schema 類型
-├── MCPContext.swift       - 執行上下文 (async/await 支持)
-├── MCPToolRegistry.swift  - 工具註冊表 (單例)
-├── MCPHandler.swift       - MCP 協議處理器
+├── MCPTool.swift          MCPKit re-export、NakiMCPTool、NakiUnsupported
+├── MCPContext.swift       NakiMCPContext + DefaultNakiMCPContext
+├── MCPToolRegistry.swift  registration order、tools/list definitions、execution
+├── MCPHandler.swift       MCP JSON-RPC handler
 └── Tools/
-    ├── SystemTools.swift  - 系統類工具 (get_status, get_help, get_logs, clear_logs)
-    ├── BotTools.swift     - Bot 控制工具 (bot_status, bot_trigger, bot_ops, bot_deep, bot_chi, bot_pon, bot_sync)
-    ├── GameTools.swift    - 遊戲狀態工具 (game_state, game_hand, game_ops, game_discard, game_action)
-    └── UITools.swift      - UI 操作工具 (execute_js, detect, explore, test_indicators, click, calibrate, ui_names_*)
+    ├── SystemTools.swift     status/help/logs
+    ├── BotTools.swift        bot snapshot/control + Liqi chi/pon
+    ├── GameTools.swift       protocol state + Liqi game actions
+    ├── UITools.swift         one read-only-capable JavaScript surface: execute_js
+    ├── LobbyTools.swift      lobby requests + Swift anti-idle scheduler
+    ├── RoomTools.swift       friend-room protocol flow
+    ├── EmojiTools.swift      Liqi broadcast send/capture
+    └── HighlightTools.swift  six explicit compatibility failure stubs
+
+command/Services/Bridge/
+├── LiqiActionSender.swift   LiqiRequestSpec/Builder, send outcome/result
+├── LiqiOperationStore.swift current server-offered operation snapshots
+└── LiqiResponseStore.swift  responses and captured broadcasts
 ```
 
-## Current Registered Tools (47 total)
+State and action flow:
 
-| Category | Count | Examples |
-|----------|-------|----------|
+```text
+WebSocket frames
+  → Liqi parser / Majsoul bridge
+  → Swift snapshot + operation/response stores
+  → read tools
+
+authorized MCP action
+  → LiqiRequestBuilder / NakiGameAction
+  → NakiMCPContext.sendLiqi
+  → LiqiActionSender
+  → correct gateway
+  → RESPONSE and/or authoritative state transition
+```
+
+## Current registered tools: 42
+
+This is the 2026-08-01 source snapshot. Before runtime work, call live `tools/list`; do not assume this count remains current after code changes.
+
+| Category | Count | Current names |
+|---|---:|---|
 | System | 4 | `get_status`, `get_help`, `get_logs`, `clear_logs` |
 | Bot | 7 | `bot_status`, `bot_trigger`, `bot_ops`, `bot_deep`, `bot_chi`, `bot_pon`, `bot_sync` |
-| Game | 6 | `game_state`, `game_hand`, `game_ops`, `game_discard`, `game_action`, `game_emoji` |
-| Highlight | 6 | `highlight_tile`, `highlight_status`, `show_recommendations`, `hide_highlight` |
-| Emoji | 4 | `game_emoji`, `game_emoji_list`, `game_emoji_random` |
-| Lobby | 9 | `lobby_status`, `lobby_navigate`, `lobby_start_match`, `lobby_cancel_match` |
-| UI | 11 | `execute_js`, `detect`, `explore`, `click`, `calibrate`, `ui_names_*` |
+| Game | 6 | `game_state`, `game_hand`, `game_ops`, `game_discard`, `game_action`, `game_action_verify` |
+| JavaScript | 1 | `execute_js` |
+| Lobby | 8 | `lobby_status`, `lobby_match_modes`, `lobby_start_match`, `lobby_cancel_match`, `lobby_account_info`, `lobby_server_time`, `lobby_heartbeat`, `lobby_login_beat` |
+| Anti-idle | 1 | `lobby_anti_idle` |
+| Friend room | 7 | `room_create`, `room_add_robot`, `room_start`, `room_info`, `room_join`, `room_leave`, `room_quick_test` |
+| Emoji | 2 | `game_emoji`, `game_emoji_listen` |
+| Highlight compatibility stubs | 6 | `highlight_tile`, `reset_tile_color`, `highlight_status`, `highlight_settings`, `show_recommendations`, `hide_highlight` |
 
-See `/naki-mcp-proxy` for complete tool catalog.
+The six highlight tools are registered contracts that currently return explicit unavailable results. Naki's built-in WebGL recommendation highlighter is a separate Swift-to-JavaScript path; do not implement or document the MCP stubs as successful UI controls without wiring and testing a new contract.
 
-## How to Create a New MCP Tool
+## Before writing a tool
 
-### Step 1: Define the Tool Struct
+Define these facts first:
 
-Create a new struct implementing `MCPTool` protocol in the appropriate `Tools/*.swift` file:
+| Question | Required decision |
+|---|---|
+| What is the source? | Server RESPONSE, Swift protocol snapshot, operation store, response store, bot state, local logs, or read-only page probe |
+| Is it a query or mutation? | Identify every account/game/file/log/connection side effect |
+| Does a current tool already cover it? | Prefer extending a coherent tool over adding an alias |
+| Which gateway/method applies? | Derive from current Liqi schema and existing builders; never guess from UI behavior |
+| How is success proven? | Return/throw, server RESPONSE, operation sequence movement, or another explicit authoritative signal |
+| What happens without runtime context? | Fail clearly; never fabricate an empty success |
+
+Check `git status` before editing and preserve concurrent/user changes.
+
+## Implementing an MCP tool
+
+### 1. Choose the owning file
+
+Add the tool to the category that owns its source and side effects. A tool that sends a lobby request belongs with lobby protocol tools; it does not become a UI tool merely because the result is visible on screen.
+
+### 2. Implement `MCPTool`
 
 ```swift
-struct MyNewTool: MCPTool {
-    // 1. 工具名稱 (唯一標識符)
-    static let name = "my_new_tool"
+struct MyQueryTool: MCPTool {
+    static let name = "my_query"
+    static let description = "Read a clearly identified live Naki state source; no external mutation"
 
-    // 2. 工具描述 (給 AI 看的說明)
-    static let description = "描述這個工具做什麼，何時使用"
-
-    // 3. 輸入參數 Schema
     static let inputSchema = MCPInputSchema(
         properties: [
-            "param1": .string("參數1的描述"),
-            "param2": .integer("參數2的描述")
+            "limit": .integer("Maximum number of records")
         ],
-        required: ["param1"]  // 必填參數
+        required: []
     )
 
-    // 4. 上下文 (用於訪問 JS、Bot 等)
     private let context: MCPContext
 
     init(context: MCPContext) {
         self.context = context
     }
 
-    // 5. 執行邏輯
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let param1 = arguments["param1"] as? String else {
-            throw MCPToolError.missingParameter("param1")
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+        guard let snapshot = nakiContext.getGameSnapshot() else {
+            throw MCPToolError.notAvailable("game protocol snapshot")
         }
 
-        // 執行邏輯...
-
-        return ["success": true, "result": "..."]
+        return [
+            "success": true,
+            "source": "swift-protocol-layer",
+            "snapshot": snapshot
+        ]
     }
 }
 ```
 
-### Step 2: Register the Tool
+Use a unique snake_case name. Descriptions must say whether the tool is read-only, what it reads, and whether it sends or mutates anything.
 
-在 `MCPToolRegistry.swift:142-182` 的 `registerBuiltInTools()` 方法中添加：
-
-```swift
-register(MyNewTool.self)
-```
-
-**注意**: Tools 列表會自動從 Registry 生成，無需手動維護 JSON 檔案。
-
-## Input Schema Types
+### 3. Define an exact schema
 
 ```swift
-// 無參數
 static let inputSchema = MCPInputSchema.empty
 
-// 有參數
 static let inputSchema = MCPInputSchema(
     properties: [
-        "stringParam": .string("字串參數描述"),
-        "intParam": .integer("整數參數描述"),
-        "numberParam": .number("數字參數描述"),
-        "boolParam": .boolean("布林參數描述"),
-        "objectParam": .object("物件參數描述")
+        "text": .string("Meaning and accepted format"),
+        "count": .integer("Bounds and default"),
+        "ratio": .number("Bounds and default"),
+        "enabled": .boolean("Omitted means query-only")
     ],
-    required: ["stringParam"]  // 必填參數列表
+    required: ["text"]
 )
 ```
 
-## Context API
+- Schema, validation, defaults and description must agree.
+- Validate enum/range/format before touching external state.
+- Echo action-critical normalized inputs in the result when useful for review.
+- Do not keep dead parameters for a surface that no longer exists.
 
-工具可以通過 `context` 訪問以下功能（定義在 `MCPContext.swift:15-38`）：
+### 4. Use the current context boundary
+
+`NakiMCPContext` currently exposes:
 
 ```swift
-// 執行 JavaScript（async/await）
-let result = try await context.executeJavaScript("return document.title")
-
-// 獲取 Bot 狀態
-let status = context.getBotStatus()
-
-// 觸發自動打牌
-context.triggerAutoPlay()
-
-// 日誌操作
-let logs = context.getLogs()
-context.clearLogs()
-context.log("記錄訊息")
-
-// 服務器埠號
-let port = context.serverPort
+let bot = nakiContext.getBotStatus()
+nakiContext.triggerAutoPlay()
+let game = nakiContext.getGameSnapshot()
+let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: 1500)
+let antiIdle = nakiContext.setAntiIdle(enabled: nil, intervalSeconds: nil)
 ```
 
-## ⚠️ JavaScript 執行注意事項
-
-**重要**：`context.executeJavaScript()` 必須使用 `return` 語句才能正確返回值！
+Base `MCPContext` also provides server port, logs and `executeJavaScript`. Use JavaScript only for read-only page/Unity/injection diagnostics, and include `return` when a value is needed:
 
 ```swift
-// ✅ 正確：使用 return 語句
-let title = try await context.executeJavaScript("return document.title")
-let sum = try await context.executeJavaScript("return 1 + 1")
-let json = try await context.executeJavaScript("return JSON.stringify({a:1})")
-
-// ❌ 錯誤：沒有 return，結果為 nil
-let title = try await context.executeJavaScript("document.title")  // 返回 nil！
-```
-
-**常見模式**：
-
-```swift
-// 調用遊戲 API 並返回 JSON
-let script = "return JSON.stringify(window.__nakiGameAPI.getGameState())"
+let script = "return JSON.stringify({url:location.href,canvas:!!document.getElementById('unity-canvas')})"
 let result = try await context.executeJavaScript(script)
-
-// 執行操作並返回布林值
-let script = "return window.__nakiGameAPI.discardTile(0)"
-let success = try await context.executeJavaScript(script) as? Bool ?? false
-
-// 檢查 API 是否存在
-let script = "return typeof window.__nakiGameAPI !== 'undefined'"
-let exists = try await context.executeJavaScript(script) as? Bool ?? false
 ```
 
-## Error Handling
+Do not create a game-state or action tool around JavaScript.
 
-使用 `MCPToolError`（定義在 `MCPTool.swift:129-147`）處理錯誤：
+### 5. Build Liqi actions through the shared sender
+
+For a request tool:
+
+1. Reuse or extend `LiqiRequestBuilder`; game action parsing belongs in `NakiGameAction` when applicable.
+2. Read `LiqiOperationStore` before an action whose legality/type/combination depends on the server-provided oplist.
+3. Call `nakiContext.sendLiqi(spec, awaitResponseMs:)`.
+4. Return `LiqiToolResult.dictionary(outcome, spec:extra:)` so method, payload, msgId, send status and RESPONSE semantics stay consistent.
+5. For an action that claims completion, verify RESPONSE and/or an authoritative operation/state transition.
 
 ```swift
-throw MCPToolError.missingParameter("paramName")
-throw MCPToolError.invalidParameter("paramName", expected: "string")
-throw MCPToolError.executionFailed("原因描述")
-throw MCPToolError.notAvailable("資源名稱")
+let spec = LiqiRequestBuilder.fetchServerTime()
+let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: 1500)
+return LiqiToolResult.dictionary(outcome, spec: spec)
 ```
 
-## Tool Categories & File Locations
+`sent.success == true` proves only that bytes were accepted by an open WebSocket. It is not server acceptance. Preserve `response`, `serverAccepted`, timeout and verification fields rather than flattening them into an unconditional success.
 
-| Category | File | When to Add Here |
-|----------|------|-----------------|
-| 系統 | `SystemTools.swift` | Server status, logs, help |
-| Bot | `BotTools.swift` | Bot control, AI inference |
-| 遊戲 | `GameTools.swift` | Game state, hand, actions |
-| UI | `UITools.swift` | JS execution, clicks, detection |
+Never manually assemble raw WebSocket JavaScript in an MCP action tool; routing, message IDs, encoding and response correlation belong to the shared Liqi sender.
 
-## Checklist for New Tools
+### 6. Handle errors and unsupported contracts
 
-- [ ] 定義唯一的 `name`（snake_case 格式）
-- [ ] 寫清楚的 `description`（給 AI 理解，包含何時使用）
-- [ ] 定義正確的 `inputSchema`
-- [ ] 實現 `execute()` 方法（async throws）
-- [ ] 處理所有錯誤情況（使用 MCPToolError）
-- [ ] 在 `MCPToolRegistry.swift:142-182` 中註冊
-- [ ] 構建測試通過
-- [ ] 使用 MCP 工具測試功能
+Use `MCPToolError` for invalid input or missing execution context:
 
-## Testing
+```swift
+throw MCPToolError.missingParameter("name")
+throw MCPToolError.invalidParameter("name", expected: "documented format")
+throw MCPToolError.notAvailable("required runtime source")
+```
 
-構建並測試：
+For a retained compatibility contract with no current implementation, use the shared failure shape:
+
+```swift
+return NakiUnsupported.result(
+    reason: "specific missing current surface",
+    alternative: "current supported route"
+)
+```
+
+Failure must contain `success: false` as a Bool plus machine-readable `error` and human-readable `reason`. Never place a failure dictionary inside a truthy `success` field.
+
+### 7. Register it
+
+Add the type to the correct ordered section of `MCPToolRegistry.registerBuiltInTools()`:
+
+```swift
+register(MyQueryTool.self)
+```
+
+`tools/list` definitions are generated from the registry; do not maintain a separate JSON list. If the registered set changes, update all explicit counts/category docs/help/tests in the same change and verify the live registry after launching the new build.
+
+## Verification
+
+### Static and unit verification
+
+At minimum, cover the paths relevant to the tool:
+
+- Schema required/optional parameters and validation failures.
+- Missing `NakiMCPContext` or unconfigured callbacks.
+- Empty/missing protocol snapshot.
+- Pure request builder payload and method.
+- WebSocket send failure, missing RESPONSE, server error RESPONSE and accepted RESPONSE.
+- Verification timeout and operation-sequence transition for action tools.
+- Registry name uniqueness, expected category placement and generated schema.
+- Side effects are absent on validation failure.
+
+Project commands:
 
 ```bash
-# 構建
 xcodebuild build -project Naki.xcodeproj -scheme Naki
-
-# 啟動應用後，使用 MCP 工具測試
-mcp__naki__<tool_name>
+xcodebuild test -project Naki.xcodeproj -scheme Naki -only-testing:NakiTests
 ```
 
-## Reference Documentation
+Inspect actual command output, test results and `git diff`; an exit code alone is not enough when the environment is dirty.
 
-For detailed specifications and more examples, see:
-- [Protocol Reference](references/reference.md) - Complete MCPTool protocol, context API, schema types, and code examples
+### Runtime verification
+
+Runtime verification is a separate gate after the new build is running:
+
+```text
+/naki-mcp-proxy
+  → live tools/list
+  → confirm the new/current schema
+  → call the live tool
+  → inspect the returned source, send, RESPONSE and verification fields
+  → re-query relevant state when the tool mutates anything
+```
+
+- A query must return data from the live Naki call, not from source inspection.
+- A mutation requires explicit authorization and an appropriate test account/state.
+- If Naki is stopped, unreachable, running an older build, or lacks the required game snapshot, mark runtime verification incomplete.
+- Never report a tool as runtime-working solely because it compiled or appeared in static registration.
+
+## Completion checklist
+
+- [ ] Current source and side-effect boundaries are documented.
+- [ ] Tool name is unique and schema matches validation/defaults.
+- [ ] State reads use Swift protocol/bot/store sources.
+- [ ] Actions use shared Liqi builders/sender and current oplist where required.
+- [ ] JavaScript, if any, is a read-only Unity/page probe with an explicit `return`.
+- [ ] Failure results cannot be mistaken for success.
+- [ ] Tool is registered in the correct ordered category.
+- [ ] Explicit registry counts and current documentation were updated if the set changed.
+- [ ] Normal, invalid-input, unavailable-context, send-failure and timeout paths were considered.
+- [ ] Build/tests were actually run, or clearly marked not run.
+- [ ] Runtime was queried through live `tools/list` and an actual tool call, or clearly marked unverified.
+- [ ] Final `git status`/diff contains only authorized changes.
+
+## Current references
+
+- `command/Services/MCP/MCPTool.swift`
+- `command/Services/MCP/MCPContext.swift`
+- `command/Services/MCP/MCPToolRegistry.swift`
+- `command/Services/MCP/Tools/`
+- `command/Services/Bridge/LiqiActionSender.swift`
+- `command/Services/Bridge/LiqiOperationStore.swift`
+- `command/Services/Bridge/LiqiResponseStore.swift`
+- `.claude/skills/naki-mcp-proxy/SKILL.md`
+- `docs/mcp-server-guide.md`
+- `docs/majsoul-unity-protocol.md`

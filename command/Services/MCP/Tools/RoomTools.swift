@@ -46,7 +46,7 @@ struct RoomCreateTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "player_count": .integer("人數：4=四麻、3=三麻（預設 4）"),
-            "mode": .integer("GameMode.mode：1=東風戰、2=半莊戰（預設 2，未驗證）"),
+            "mode": .integer("GameMode.mode：1=東風戰、2=半莊戰（預設 2；current config + runtime 已交叉確認）"),
             "time_fixed": .integer("固定思考時間秒數（預設 300）"),
             "time_add": .integer("每巡加時秒數（預設 0）"),
             "ai_level": .integer("AI 等級 GameDetailRule.ai_level（不填則不送此欄位）"),
@@ -299,8 +299,8 @@ struct RoomLeaveTool: MCPTool {
 
 /// 一鍵開測試局：建房 → 補滿人機 → 開局
 ///
-/// 每次測自動打牌都要手動跑 `room_create` → `room_add_robot` ×3 → `room_start`，
-/// 中間任一步失敗還得自己看 error code；這個工具把整串包起來並逐步回報。
+/// 建立自動打牌測試局的前置原本要手動跑 `room_create` → `room_add_robot` ×3 →
+/// `room_start`；這個工具只把建房流程包起來並逐步回報，不驗證後續 AI 動作。
 ///
 /// ⚠️ 開局後 Unity 客戶端**不會自動進入對局**（房是走協定層建的，客戶端 UI 不知情）。
 /// 需要呼叫端接著觸發一次 WebSocket 重連，客戶端才會以「斷線重連」路徑進入該局。
@@ -308,7 +308,7 @@ struct RoomQuickTestTool: MCPTool {
     static let name = "room_quick_test"
     static let description = """
         一鍵開測試局：createRoom → addRoomRobot 補滿 → startRoom，逐步回報結果。\
-        用於快速驗證自動打牌。\
+        只建立測試局，不驗證 AI 動作、RESPONSE 或權威 action。\
         ⚠️ 這會真的開一局；請只在測試帳號使用。\
         開局後客戶端需重連才會進入對局（reconnect_hint 會提示）。
         """

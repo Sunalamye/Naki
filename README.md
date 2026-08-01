@@ -39,7 +39,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 下載、打開、登入，AI 推薦就直接疊在遊戲畫面上。
 
 推論引擎是 [Mortal](https://github.com/Equim-chan/Mortal)，透過 Core ML 跑在 Apple Neural Engine 上。
-沒有網路請求，模型和運算全都在你的機器裡。
+AI 推論不呼叫外部推論服務，模型和運算都在本機；雀魂遊戲本身仍需要網路連線。
 
 ---
 
@@ -71,7 +71,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 ### Mac 和 iPhone 都能用
 
-- **macOS** — 完整功能，含全自動打牌
+- **macOS** — 支援自動送出；自摸整合仍有下方列出的 P0 缺口
 - **iPhone / iPad** — 查看 AI 推薦
 - 深色模式、響應式排版
 
@@ -83,15 +83,18 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 | 模式 | 行為 |
 |:---:|-----|
-| **關閉** | 完全手動。AI 不算也不顯示 |
+| **關閉** | 不自動送動作；目前 AI 仍在背景計算，側欄／WebGL 高亮可能繼續更新 |
 | **推薦** | 顯示建議，你自己決定 |
-| **自動** | AI 全權代打 |
+| **自動** | 依 AI／server oplist 自動送出；自摸整合仍有已知 P0 缺口 |
 
 模式會記住，重開 App 不會被重設。
 
 ### 其他
 
-- **自動回應表情** — 被立直、被和牌時自動回敬
+- **協定層表情工具** — MCP 可發送表情並讀取收到的廣播；舊自動回覆路徑在 Unity 下不可用
+- **隱藏玩家名稱** — 進階設定裡的開關。在遊戲解析封包之前把暱稱改寫成 `Player 1`–`Player 4`，
+  不靠任何 UI hook（Unity 客戶端沒有可以 hook 的 UI 層）。只對開啟之後才開始的對局生效；
+  斷線重連與終局結算畫面仍會顯示原名
 - **MCP Server** — 讓 Claude Code 之類的 AI 助手直接操作遊戲
 - **本機 Debug API** — 只綁 loopback，同網段的其他裝置連不到
 
@@ -110,7 +113,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 > AI 模型跑在 Apple Neural Engine 上，那是 Apple Silicon 獨有的硬體，Intel Mac 沒有。
 
 > **iOS 17–25** 走 `WKWebView` Legacy 路徑，**iOS 26+** 用新的 `WebPage` API。
-> 兩條路目前**不完全等價**：Legacy 自動打牌尚未接上 server-authoritative resolver，
+> 兩條路的決策層現在一致（同一個 resolver），但 Legacy 的 send 失敗不重試，
 > 也尚未在實機跑過完整對局。需要自動模式的安全保護時，以 macOS／iOS 26+ 為準。
 
 ### 安裝
@@ -128,7 +131,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 ---
 
-## AI 的輸入是經過驗證的
+## 固定 fixtures 的 AI 輸入 parity 已驗證
 
 這件事值得單獨講，因為它決定推薦到底可不可信。
 
@@ -143,7 +146,8 @@ Naki 這邊如果某一格填錯東西，模型不會報錯，它會**照樣算�
 **目前內建兩套 fixtures 的所有 action-required snapshots 都是 1012 格零落差，
 動作遮罩也一致。** 這是有力的回歸證據，但不是所有可能牌局狀態的形式證明。
 
-> 誠實補充：MortalSwift 0.5.0 更新的是 encoder／計算與 parity，bundled 模型權重沒有換。
+> 誠實補充：0.5.0 是 2026-08-01 查到的 MortalSwift 最新公開 tag，但它更新的是
+> encoder／計算與 parity，bundled 模型權重沒有換。
 > Naki 也還沒有千局級評測，所以不能把它稱為「最新最強模型」。
 
 ---
@@ -173,19 +177,19 @@ Naki 這邊如果某一格填錯東西，模型不會報錯，它會**照樣算�
 └──────────────────────────────────────────────────────────┘
 ```
 
-雀魂在 2026 年 7 月把客戶端換成 Unity WebGL，遊戲邏輯與畫面全都進了 wasm，
-JavaScript 再也拿不到任何遊戲物件。所以 Naki 一律走**協定層**：
+雀魂目前的客戶端是 Unity WebGL，遊戲邏輯與畫面位於 wasm；
+JavaScript 拿不到遊戲內部物件。所以 Naki 一律走**協定層**：
 狀態從 WebSocket 封包解析，動作自己組 protobuf 送出。
 
 協定欄位定義取自**遊戲自己公開的資源檔** `res/proto/liqi.json`，不是反組譯客戶端得來的。
 
-畫面高亮則是攔截 WebGL 繪圖呼叫、改遊戲畫那張牌時用的顏色參數——
-**位置由遊戲自己給**，不需要猜螢幕座標，也不會因為版面調整就失效。
+畫面高亮則是攔截 WebGL 繪圖呼叫，從 atlas UV 辨識牌種，再暫改該次 draw 的顏色參數；
+它不依賴螢幕座標。不過目前只確認 hook 有執行，尚未用 screenshot regression 證明每次都命中正確牌與按鈕。
 
 **合法性應由伺服器決定，不由模型決定。** macOS／iOS 26+ 主路徑已有 resolver：
 缺 oplist 時 fail closed、和牌凌駕 AI、其餘動作必須存在於同一份 oplist。
 但目前仍有兩個整合缺口：空推薦可能讓自摸完全不進 resolver；hora send 失敗仍可能被
-標成 handled。Legacy iOS 17–25 也尚未接上這層，因此「漏自摸已完全消除」仍未驗證。
+標成 handled。Legacy iOS 17–25 已接上同一個 resolver，但兩者都缺 live 對局驗證，因此「漏自摸已完全消除」仍未驗證。
 
 技術細節：[`docs/majsoul-unity-protocol.md`](docs/majsoul-unity-protocol.md) ·
 [`AUDIT.md`](AUDIT.md)
@@ -236,7 +240,8 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 | 表情 | 2 | `game_emoji` · `game_emoji_listen` |
 | 其他 | 8 | JS 執行、防閒置、高亮 |
 
-`room_quick_test` 一次跑完「建房 → 補人機 → 開局」，用來快速驗證自動打牌。
+`room_quick_test` 一次跑完「建房 → 補人機 → 開局」，只負責建立測試局；
+客戶端重連、AI 動作、RESPONSE 與權威 action 仍要另行驗證。
 
 > MCP 的 6 個手動高亮工具目前是一律回明確失敗的相容樁；它們沒有接到新的
 > `__nakiHighlight`。這與 App 內建的自動 WebGL 高亮是兩條不同路徑。
@@ -255,9 +260,9 @@ xcodebuild build -project Naki.xcodeproj -scheme Naki
 xcodebuild test  -project Naki.xcodeproj -scheme Naki -only-testing:NakiTests
 ```
 
-**想要順的話請用 Release 建置。** 期望值推演在 Debug（無最佳化）下，
-開局散牌手的一次運算要 1.2 秒；Release 是 **37 毫秒**，差 33 倍。
-Xcode 裡改 `Product → Scheme → Edit Scheme → Run → Build Configuration`。
+**實際打牌請用 Release 建置。** Core ML 與期望值計算會受最佳化設定影響；
+本次盤點沒有重跑延遲 benchmark，因此不保留舊的固定毫秒數。
+Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configuration` 調整。
 
 </details>
 
@@ -267,24 +272,21 @@ Xcode 裡改 `Product → Scheme → Edit Scheme → Run → Build Configuration
 
 | | 狀態 |
 |---|---|
-| AI 推薦與畫面高亮 | ✅ 真實對局驗證過 |
-| 全自動打牌 | ✅ 真實對局驗證過 |
-| 動作按鈕高亮 | ✅ |
-| 模型輸入正確性 | ✅ 1012 格與 libriichi 逐格一致 |
-| MCP Server / 自動表情 | ✅ |
+| AI encoder fixture parity | ✅ 兩套固定 fixtures 逐格一致 |
+| live AI 推薦資料 | ✅ `bot_status`／`game_hand` 有 runtime 證據 |
+| 原生側欄視覺呈現 | ⚠️ source binding 已確認；本次沒有 screenshot regression |
+| 全自動打牌 | ⚠️ discard／pon／riichi／ron 有 runtime 證據；自摸整合仍有 P0 缺口 |
+| WebGL 牌面／動作按鈕高亮 | ⚠️ hook 活性已確認；視覺命中尚未驗證 |
+| MCP Server | ✅ live registry 為 42 tools |
+| 表情協定收送 | ⚠️ 現行 tools／Liqi 路徑存在；本次未做 live 收送 round-trip |
 | iOS 17–25 相容路徑 | ⚠️ 只驗過編譯與單元測試，未實機跑過對局 |
 | 三麻 | ❌ 見下 |
 | 牌譜回放分析 | ❌ 尚未開始 |
 
 ### 關於三麻
 
-**做不了，卡在模型檔。**
-
-三麻的引擎有開源版本（[mortal-sanma](https://github.com/Mateces/mortal-sanma)），
-規格也清楚：observation 是 `775 × 34`、動作空間 44、沒有 2–8 萬、北是拔北寶牌。
-但**訓練好的三麻權重沒有公開發布**，找遍 HuggingFace 與各個 repo 都沒有。
-
-所以三麻對局時，Naki 用的仍是四麻模型——輸入結構根本不同，
+Naki repo 目前沒有三麻 constructor、encoder 或 bundled 權重。
+三麻對局時仍會建立同一個 Mortal v4 四麻模型——輸入結構根本不同，
 輸出不是「稍微偏差」而是**結構上無效**。因此 UI 會明確標示
 `Mortal (4P) ⚠️ 三麻無專用模型`，不會假裝有支援。
 
@@ -294,7 +296,6 @@ Xcode 裡改 `Product → Scheme → Edit Scheme → Run → Build Configuration
 
 - [Mortal](https://github.com/Equim-chan/Mortal) — 麻將 AI 引擎與 libriichi
 - [Akagi](https://github.com/shinkuan/Akagi) — Python 版參考實現
-- [mortal-sanma](https://github.com/Mateces/mortal-sanma) — 三麻引擎規格
 - 雀魂（Majsoul） — 很好的麻將遊戲
 
 ---

@@ -220,7 +220,7 @@ class NativeBotController {
             .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
             .joined(separator: " ")
         let opsSummary = LiqiOperationStore.shared.latest.map { "\($0.rawTypes)" } ?? "-"
-        botLog("[NativeBotController] Bot returned action, updated recommendations: "
+        eventLog("[Bot] Bot returned action, updated recommendations: "
                + "\(lastRecommendations.count) items [\(recSummary)] oplist=\(opsSummary)")
 
         return response
@@ -517,22 +517,41 @@ class NativeBotController {
             }
         }
 
-        // ⭐ 嘗試獲取概率（如果 Bot 已經計算過）(await 因為是 actor)
-        var probs = await bot.getLastProbs()
+        // 對**當前狀態**重新推論。
+        //
+        // 這裡曾經是「拿 lastProbs，取不到就用均勻分布」。但副露之後 MJAI 不會再送
+        // 事件，react 沒被呼叫過，lastProbs 停在副露前那一次——手牌早就變了。
+        // 於是實際走的一律是均勻分布那條路，等於「拿 mask 裡第一個合法的牌」，
+        // 完全沒有模型參與。使用者的體感是「有時候不會丟最推薦的牌」，
+        // 真相是**那時候根本沒有推薦**。
+        //
+        // 側欄還把它顯示得跟真推薦一模一樣，看不出差別——正是 AUDIT §13
+        // 「不能運作又不說」要防的那類問題。
+        var probs: [Float] = []
+        do {
+            _ = try await bot.inferCurrentState()
+            probs = await bot.getLastProbs()
+            mask = await bot.getLastMask()
+        } catch {
+            botLog("[NativeBotController] 副露後推論失敗: \(error)")
+        }
 
-        // 如果沒有有效概率，使用均勻分佈
-        let hasValidProbs = probs.contains(where: { $0 > 0 })
         let currentValidCount = mask.filter { $0 == 1 }.count
+        let hasValidProbs = probs.contains(where: { $0 > 0 })
 
-        if !hasValidProbs || currentValidCount != probs.filter({ $0 > 0 }).count {
+        if !hasValidProbs {
+            // 推論真的失敗才退回均勻分布，而且要在 log 裡講清楚這不是模型的判斷
+            guard currentValidCount > 0 else {
+                lastRecommendations = []
+                return
+            }
             let uniformProb = Float(1.0) / Float(currentValidCount)
             probs = [Float](repeating: 0, count: PlayerState.actionSpace)
             for (index, isAvailable) in mask.enumerated() where isAvailable == 1 {
-                if index < probs.count {
-                    probs[index] = uniformProb
-                }
+                if index < probs.count { probs[index] = uniformProb }
             }
-            botLog("[NativeBotController] Using uniform probabilities for \(currentValidCount) actions")
+            eventLog("[Bot] ⚠️ 副露後推論失敗，退回均勻分布 (\(currentValidCount) 個動作)"
+                   + "——這批推薦不是模型的判斷")
         }
 
         // 建立推薦列表
@@ -547,7 +566,10 @@ class NativeBotController {
 
         // 按機率排序（高到低）
         lastRecommendations = recommendations.sorted { $0.probability > $1.probability }
-        botLog("[NativeBotController] Generated \(lastRecommendations.count) recommendations after meld")
+        let summary = lastRecommendations.prefix(6)
+            .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
+            .joined(separator: " ")
+        eventLog("[Bot] 副露後推論: \(lastRecommendations.count) items [\(summary)]")
     }
 
     /// 將 Tile 轉換為對應的打牌動作索引

@@ -17,11 +17,11 @@ import MortalSwift
 
 /// 自動打牌模式
 enum AutoPlayMode: String, CaseIterable {
-    case off = "關閉"            // 不顯示推薦，不自動打牌（AI 仍在背景運算）
+    case off = "關閉"            // 不自動打牌；目前 AI、側欄與 WebGL 高亮仍可能更新
     case recommend = "推薦"      // 顯示推薦，需要手動打牌
     case auto = "自動"           // 顯示推薦，自動執行推薦動作
 
-    /// 是否顯示推薦（推薦和自動模式都顯示）
+    /// 產品意圖上的顯示旗標；目前 View／WebGL highlighter 尚未讀取它。
     var showRecommendation: Bool {
         return self != .off
     }
