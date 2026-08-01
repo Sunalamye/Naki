@@ -276,6 +276,14 @@ class LiqiParser {
 
         let innerData = blocks[1].data
 
+        // 從遊戲自己的流量學 match_mode。寫死的對照表是錯的（見 ObservedMatchModes）。
+        if methodName == ".lq.Lobby.fetchCurrentMatchInfo" {
+            let modes = parseRepeatedVarint(innerData, field: 1)
+            if !modes.isEmpty {
+                Task { @MainActor in ObservedMatchModes.shared.record(modes: modes) }
+            }
+        }
+
         var result: [String: Any] = [
             "id": msgId,
             "type": "request",
@@ -322,6 +330,18 @@ class LiqiParser {
     }
 
     /// 解析內部消息（根據方法名）
+    /// 取出某個 field 的所有 varint 值（repeated uint32 用）
+    ///
+    /// protobuf 的 repeated 標量可能是 packed 也可能逐筆出現；
+    /// `mode_list` 實測是逐筆（每個值一個 field 1 block）。
+    private func parseRepeatedVarint(_ data: Data, field: Int) -> [Int] {
+        parseProtobufBlocks(data)
+            .filter { $0.fieldId == field && $0.wireType == 0 }
+            .compactMap { block in
+                parseVarint(block.data, offset: 0).map { Int($0.0) }
+            }
+    }
+
     private func parseInnerMessage(methodName: String, data: Data, isResponse: Bool = false) -> [String: Any]? {
         // 調試：顯示內部消息原始數據
         let rawPreview = data.prefix(min(80, data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
@@ -546,7 +566,13 @@ class LiqiParser {
             // 舊版把 7 當 liqibang 用 varint 硬解 operation 的訊息位元組 → kyotaku 是垃圾值，
             // 且開局第一巡的可用操作（親家打牌／天和）永遠拿不到。
             case 7: // operation (OptionalOperationList)
-                result["operation"] = parseOperation(block.data)
+                // 帶上原始長度：莊家第一打拿不到 oplist 時，要能分辨
+                // 「blob 本身是空的（伺服器沒給）」與「blob 有內容但解錯」。
+                // 只看解析結果都是 seat=-1/list=0，兩者無法區分。
+                var op = parseOperation(block.data)
+                op["_rawBytes"] = block.data.count
+                op["_rawHex"] = block.data.prefix(24).map { String(format: "%02x", $0) }.joined()
+                result["operation"] = op
             case 8: // liqibang (立直棒)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["liqibang"] = v }
             case 11: // al (是否有操作)

@@ -62,10 +62,20 @@ struct LobbyStatusTool: MCPTool {
 
 // MARK: - Match Mode List Tool
 
-/// 匹配模式對照表（靜態，不碰遊戲物件）
+/// 段位場 match_mode：**從遊戲流量觀察**，不是寫死的表
+///
+/// 舊版回一張 Laya 時代觀察來的靜態表，整組偏移一格（銅之間四人東實際是 2，
+/// 表上寫 1），送出去伺服器回 error 1306。`liqi.json` 幫不上忙——`match_mode`
+/// 是 uint32，沒有 enum 定義。
+///
+/// 真值一直在流量裡：玩家點進場次畫面時，客戶端持續送 `fetchCurrentMatchInfo`，
+/// 其 `mode_list` 就是該畫面所有入口的 match_mode。
 struct MatchModeListTool: MCPTool {
     static let name = "lobby_match_modes"
-    static let description = "獲取段位場 match_mode 對照表（給 lobby_start_match / lobby_cancel_match 用）"
+    static let description = """
+        列出從遊戲流量觀察到的 match_mode。⚠️ 不是靜態對照表——舊表整組偏移一格且已移除。\
+        要有資料，請先在遊戲裡點進段位場的場次畫面（客戶端會開始輪詢 fetchCurrentMatchInfo）。
+        """
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext
@@ -75,33 +85,10 @@ struct MatchModeListTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let modes: [[String: Any]] = [
-            ["id": 1, "room": "銅之間", "type": "東風", "minLevel": 0, "description": "銅之間 - 東風戰"],
-            ["id": 2, "room": "銅之間", "type": "半莊", "minLevel": 0, "description": "銅之間 - 半莊戰"],
-            ["id": 4, "room": "銀之間", "type": "東風", "minLevel": 10200, "description": "銀之間 - 東風戰"],
-            ["id": 5, "room": "銀之間", "type": "半莊", "minLevel": 10200, "description": "銀之間 - 半莊戰"],
-            ["id": 7, "room": "金之間", "type": "東風", "minLevel": 10300, "description": "金之間 - 東風戰"],
-            ["id": 8, "room": "金之間", "type": "半莊", "minLevel": 10300, "description": "金之間 - 半莊戰"],
-            ["id": 10, "room": "玉之間", "type": "東風", "minLevel": 10400, "description": "玉之間 - 東風戰"],
-            ["id": 11, "room": "玉之間", "type": "半莊", "minLevel": 10400, "description": "玉之間 - 半莊戰"],
-            ["id": 13, "room": "王座之間", "type": "東風", "minLevel": 10501, "description": "王座之間 - 東風戰"],
-            ["id": 14, "room": "王座之間", "type": "半莊", "minLevel": 10501, "description": "王座之間 - 半莊戰"]
-        ]
-
-        return [
-            "modes": modes,
-            "levelEncoding": [
-                "10xxx": "四麻 (4-player)",
-                "20xxx": "三麻 (3-player)",
-                "x01xx": "初心",
-                "x02xx": "雀士",
-                "x03xx": "雀傑",
-                "x04xx": "雀豪",
-                "x05xx": "雀聖",
-                "x06xx": "魂天"
-            ],
-            "warning": "⚠️ 這張表是錯的：整組數值偏移一格。2026-08-01 從遊戲自己送的 .lq.Lobby.fetchCurrentMatchInfo 攔到，銅之間畫面實際輪詢的是 [2,3,17,18]=[四人東,四人南,三人東,三人南]，不是表上的 1/2。送出表上的值伺服器回 error 1306。其他房間的正確值尚未攔到，不要照用。"
-        ]
+        var result = await ObservedMatchModes.shared.dictionary
+        result["source"] = "遊戲自己送的 .lq.Lobby.fetchCurrentMatchInfo（mode_list）"
+        result["knownErrorForBadMode"] = "1306 = match_mode 不存在"
+        return result
     }
 }
 
@@ -112,7 +99,7 @@ struct StartMatchTool: MCPTool {
     static let name = "lobby_start_match"
     static let description = """
         開始段位場匹配。送出 .lq.Lobby.matchGame（ReqJoinMatchQueue：match_mode=1, \
-        client_version_string=2）。match_mode 對照表見 lobby_match_modes。\
+        client_version_string=2）。match_mode 用 lobby_match_modes 查（從流量觀察，不是靜態表）。\
         ⚠️ 真的會排進伺服器隊列，請只在測試帳號使用。
         """
     static let inputSchema = MCPInputSchema(

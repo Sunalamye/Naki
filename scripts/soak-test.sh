@@ -180,10 +180,10 @@ while [ "$done_games" -lt "$GAMES" ]; do
     elif [ $((now - last_progress)) -ge "$STALL_SECS" ]; then
       unstick_count=$((unstick_count + 1))
       if [ "$unstick_count" -gt "$MAX_UNSTICK" ]; then
-        say "✗ 連續 $MAX_UNSTICK 次自救無效，停止（活動行數卡在 $activity）"
+        say "✗ 連續 $MAX_UNSTICK 次自救無效，停止（活動行數卡在 ${activity}）"
         exit 1
       fi
-      say "⏱ ${STALL_SECS}s 沒有任何牌局活動 → 自救 $unstick_count/$MAX_UNSTICK：強制重連"
+      say "⏱ ${STALL_SECS}s 沒有任何牌局活動 → 自救 $unstick_count/${MAX_UNSTICK}：強制重連"
       mcp bot_sync "{}" > "$OUT/sync.json" 2>&1 || true
       last_progress=$now
       sleep 12
@@ -231,7 +231,7 @@ while [ "$done_games" -lt "$GAMES" ]; do
       # 客戶端可能正好在進場，幾秒後 createRoom 就會被拒。
       # 所以不再一次失敗就退出，改成連續失敗才放棄。
       create_fails=$((create_fails + 1))
-      say "   建房被拒（連續 $create_fails/$MAX_CREATE_FAILS）"
+      say "   建房被拒（連續 $create_fails/${MAX_CREATE_FAILS}）"
       if [ "$create_fails" -ge "$MAX_CREATE_FAILS" ]; then
         say "✗ 連續 $MAX_CREATE_FAILS 次建房失敗，停止"
         unesc "$OUT/start.json" | head -c 400 | tee -a "$REPORT"; echo | tee -a "$REPORT"
@@ -246,16 +246,31 @@ while [ "$done_games" -lt "$GAMES" ]; do
     # startRoom 讓伺服器開局，但客戶端有時收不到 NotifyRoomGameStart。
     # 先給它自己進場的機會，真的沒進去才強制重連——無條件 bot_sync 會把
     # 剛建好的連線又拆掉，下一輪 createRoom 就打在沒登入的 socket 上（error 1004）。
+    # 把客戶端弄進場：等一下 → 重連 → 再等 → 再重連，最多 3 輪。
+    #
+    # 實測 startRoom 之後客戶端**幾乎不會自己進場**（連續兩局都是），所以「等它」
+    # 只是浪費時間；但太早 bot_sync 也沒用——伺服器那邊的對局還沒準備好。
+    # 先前的版本第一次 bot_sync 在 3 秒後送出，永遠無效，要等 90 秒逾時後
+    # 第二次才成功，**每局固定浪費約 2 分鐘**。
+    #
+    # 改成先給 8 秒讓伺服器把局準備好，再重連；沒進去就每 20 秒再試一次。
     entered=0
-    for _ in $(seq 1 8); do
-      sleep 2
-      tail -n +$((START_LINE + 1)) "$BRIDGE_LOG" > "$OUT/window.log" 2>/dev/null || true
-      if [ "$(count '\[協調器\] start_game')" -gt "$((done_games))" ]; then entered=1; break; fi
-    done
-    if [ "$entered" -eq 0 ]; then
-      say "   客戶端沒自己進場，強制重連"
+    for round in 1 2 3; do
+      for _ in $(seq 1 4); do
+        sleep 2
+        tail -n +$((START_LINE + 1)) "$BRIDGE_LOG" > "$OUT/window.log" 2>/dev/null || true
+        if [ "$(count '\[協調器\] start_game')" -gt "$done_games" ]; then entered=1; break; fi
+      done
+      [ "$entered" -eq 1 ] && break
+      say "   客戶端沒自己進場，強制重連（第 $round 次）"
       mcp bot_sync "{}" > "$OUT/sync.json" 2>&1 || true
-    fi
+      for _ in $(seq 1 6); do
+        sleep 2
+        tail -n +$((START_LINE + 1)) "$BRIDGE_LOG" > "$OUT/window.log" 2>/dev/null || true
+        if [ "$(count '\[協調器\] start_game')" -gt "$done_games" ]; then entered=1; break; fi
+      done
+      [ "$entered" -eq 1 ] && break
+    done
 
     match_sent_at=$(date +%s)
   fi

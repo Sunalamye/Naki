@@ -27,6 +27,13 @@ class MJAIEventStream {
     /// 當前遊戲是否進行中
     private(set) var isGameInProgress: Bool = false
 
+    /// 對局錄影（寫進當次 session 的 log 目錄）
+    ///
+    /// 錄的是**送進 Bot 的 MJAI 事件**，不是原始 WS frame：replay 的目的是
+    /// 重跑決策，而決策的輸入就是這一層。原始 frame 另有 liqi log 可查。
+    let recorder = GameRecorder(
+        directory: LogManager.shared.logDirectory.appendingPathComponent("games", isDirectory: true))
+
     /// 事件歷史數量
     var eventCount: Int { eventHistory.count }
 
@@ -47,6 +54,7 @@ class MJAIEventStream {
         // 清空歷史
         eventHistory = []
         isGameInProgress = true
+        recorder.startGame()
     }
 
     /// 結束遊戲
@@ -59,6 +67,7 @@ class MJAIEventStream {
         continuation = nil
         eventHistory = []
         isGameInProgress = false
+        recorder.finishGame()
     }
 
     // MARK: - Event Emission
@@ -67,6 +76,7 @@ class MJAIEventStream {
     func emit(_ event: [String: Any]) {
         // 保存到歷史
         eventHistory.append(event)
+        recorder.record(event)
 
         // 發送給消費者
         continuation?.yield(event)

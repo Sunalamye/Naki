@@ -31,8 +31,11 @@ struct GetStatusTool: MCPTool {
             "status": "running",
             "port": context.serverPort,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
+            // 每次啟動一個獨立目錄；要回報問題就整包送出，不必挑檔案
+            "logDir": await LogManager.shared.logDirectory.path,
             "logFile": await LogManager.shared.logFilePath,
-            "logFileNote": "合併日誌（不含解析細節）；同目錄下 .1 ~ .5 為前幾次啟動的歷史",
+            "logFileNote": "合併日誌（不含解析細節）。每次啟動一個 <timestamp> 目錄，"
+                + "同一層的其他目錄是前幾次執行（保留 8 次）",
             // 查「剛剛發生什麼」看這個——只有對局事件，一行一件
             "eventLog": await LogManager.shared.eventLogPath,
             "categoryLogs": await LogManager.shared.categoryLogPaths

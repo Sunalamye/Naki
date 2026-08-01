@@ -359,6 +359,38 @@ class MajsoulBridge {
         guard let snapshot = LiqiOperationStore.shared.record(fromParsed: operation,
                                                              contextTile: contextTile,
                                                              source: name) else {
+            // 動作**帶了** operation 卻建不出快照，代表解析結果不合預期
+            // （operationList 空、或每筆都缺 type）。這在莊家第一打時實測發生過：
+            // ActionNewRound 的 keys 有 operation，但沒有任何 oplist 更新，
+            // 於是自動打牌整巡不送，直到伺服器逾時代打。
+            //
+            // 原本這條路是靜默的 `clear()`，查不出所以然。把內容印出來，
+            // 下次發生時可以直接看到 operation 長什麼樣。
+            let list = operation["operationList"] as? [[String: Any]]
+
+            // 空的 operationList 是**正常**的：別家摸牌時伺服器也會附一個
+            // operation，只是裡面沒有我們可做的事。實測一局出現 14 次。
+            // 只有「有內容卻建不出快照」才值得看——那才是解析出問題。
+            guard let list, !list.isEmpty else {
+                // ActionNewRound 的空 operation 不正常：莊家第一打的授權就在這裡。
+                // 別的動作（別家摸牌）帶空清單是常態，維持靜默。
+                if name == "ActionNewRound" {
+                    eventLog("[MajsoulBridge] ⚠️ ActionNewRound 的 operation 是空的"
+                             + "（莊家第一打會因此拿不到 oplist）: "
+                             + "rawBytes=\(operation["_rawBytes"] as? Int ?? -1) "
+                             + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
+                             + "keys=\(operation.keys.sorted())")
+                }
+                LiqiOperationStore.shared.clear()
+                return
+            }
+
+            eventLog("[MajsoulBridge] ⚠️ \(name) 帶了 operation 但無法建立快照: "
+                     + "seat=\(operation["seat"] as? Int ?? -1) "
+                     + "list=\(list.count) keys=\(operation.keys.sorted()) "
+                     + "rawBytes=\(operation["_rawBytes"] as? Int ?? -1) "
+                     + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
+                     + "list3=\(String(describing: list.prefix(3)))")
             LiqiOperationStore.shared.clear()
             return
         }

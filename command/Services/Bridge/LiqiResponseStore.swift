@@ -42,14 +42,55 @@ nonisolated struct LiqiResponseRecord {
     let receivedAt: Date
 
     /// 所有雀魂 `Res*` 的 field 1 都是 `Error error`；出現代表伺服器拒絕了這個請求。
-    ///
-    /// 通用解析會把巢狀 message 轉成 base64 字串，所以這裡只判斷「有沒有 error 欄位」，
-    /// 不解析 error code（要 code 請自行對 base64 解 protobuf）。
     var hasError: Bool { fields["field1"] != nil }
+
+    /// 伺服器回的錯誤碼（`Error.code`，field 1 的 varint）
+    ///
+    /// 通用解析把巢狀 message 轉成 base64，所以這裡自己解一層。
+    /// 不解的話，每次排查都要人工 base64 → hex → varint——2026-08-01 那輪
+    /// 為了找出四個錯誤碼手工解了四次，而每一次都是「`sendRaw` 回 success:true
+    /// 但伺服器其實拒絕了」，肉眼完全看不出來。
+    var errorCode: Int? {
+        guard let b64 = fields["field1"] as? String,
+              let data = Data(base64Encoded: b64),
+              data.count >= 2,
+              data[0] == 0x08                      // field 1, wire type 0 (varint)
+        else { return nil }
+
+        var value = 0
+        var shift = 0
+        for byte in data.dropFirst() {
+            value |= Int(byte & 0x7f) << shift
+            if byte & 0x80 == 0 { return value }
+            shift += 7
+            if shift > 35 { return nil }
+        }
+        return nil
+    }
+
+    /// 已知錯誤碼的語意
+    ///
+    /// ⚠️ 全部由 2026-08-01 的實測歸納，**不是官方文件**，也不完整。
+    /// 不在表內的碼會如實回報數字，不要猜。
+    static let knownErrors: [Int: String] = [
+        1004: "該 socket 未完成登入（送到沒做過 oauth2Login 的那條 /gateway），或已在對局中",
+        1023: "對局進行中，不能建房／離房",
+        1105: "已在友人房中，不能再建房",
+        1306: "match_mode 不存在（對照表偏移，見 lobby_match_modes 的 warning）"
+    ]
+
+    /// 人看得懂的錯誤描述
+    var errorDescription: String? {
+        guard let code = errorCode else { return nil }
+        if let known = Self.knownErrors[code] {
+            return "error \(code): \(known)"
+        }
+        return "error \(code)（未收錄；語意未知，不要猜）"
+    }
 
     /// 給 MCP 工具輸出用的字典
     var dictionary: [String: Any] {
-        [
+        var d: [String: Any] = [
             "msgId": msgId,
             "method": method,
             "hasError": hasError,
@@ -57,6 +98,9 @@ nonisolated struct LiqiResponseRecord {
             "receivedAt": ISO8601DateFormatter().string(from: receivedAt),
             "note": "fields 的 key 是 protobuf 欄位編號（fieldN），語意請查 docs/protocol/liqi.json"
         ]
+        if let code = errorCode { d["errorCode"] = code }
+        if let desc = errorDescription { d["errorDescription"] = desc }
+        return d
     }
 }
 

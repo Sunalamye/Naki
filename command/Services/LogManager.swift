@@ -36,7 +36,7 @@ enum LogLevel: Int, Comparable, CaseIterable {
     /// 一般訊息
     case info = 1
     /// 對局時間軸上的事件：MJAI 事件、oplist 變化、決策、送出結果。
-    /// 這一級會另外寫進 `naki-events.log`
+    /// 這一級會另外寫進 `events.log`
     case event = 2
 
     static func < (lhs: LogLevel, rhs: LogLevel) -> Bool { lhs.rawValue < rhs.rawValue }
@@ -118,55 +118,82 @@ class LogManager {
     var categoryLogPaths: [String: String] {
         var m: [String: String] = [:]
         for c in LogCategory.allCases {
-            m[c.rawValue] = logDirectory.appendingPathComponent("naki-\(c.rawValue.lowercased()).log").path
+            m[c.rawValue] = logDirectory.appendingPathComponent("\(c.rawValue.lowercased()).log").path
         }
         return m
     }
 
-    private let logDirectory: URL
+    /// 這次啟動的 log 目錄
+    let logDirectory: URL
 
-    /// 保留幾份歷史日誌（不含當前這份）
-    private let rotationKeepCount = 5
+    /// 保留幾次執行的紀錄（不含當次）
+    private let sessionKeepCount = 8
 
     private init() {
-        let dir = FileManager.default.temporaryDirectory
-        logDirectory = dir
-        logFile = dir.appendingPathComponent("akagi_websocket.log")
-        eventFile = dir.appendingPathComponent("naki-events.log")
-
-        // 啟動時輪替而非覆寫。
+        // 每次啟動一個獨立目錄，而不是固定檔名 + 輪替。
         //
-        // 舊行為是每次啟動就 createFile 把檔案清空，於是「重啟前發生了什麼」永遠查不到——
-        // 偏偏跨重啟的問題（重連後 Bot 狀態是否正確）正是最需要回溯的。
-        // 改為把上一份改名保留，最多留 rotationKeepCount 份。
+        // 舊做法把所有 log 寫在 temp 的固定檔名（akagi_websocket.log、naki-*.log）：
+        //
+        //   1. `xcodebuild test` 是 app-hosted，test host 會用**同一組檔名**，
+        //      所以「跑測試」與「App 正在跑」互斥——2026-08-01 那輪必須先停掉
+        //      soak test 才能跑單元測試。
+        //   2. 輪替可能在對局中途發生，log 就從中間斷掉。
+        //   3. 分析工具要從一個被多方寫入的共用檔案裡切出「這一次執行」的範圍，
+        //      soak 的異常統計因此變成累計而不是單次。
+        //
+        // 改成 `~/Library/Logs/Naki/<timestamp>/`：test host 自然不會撞到，
+        // 要回報問題就整個目錄送出。
         let fm = FileManager.default
-        if fm.fileExists(atPath: logFile.path) {
-            let oldest = dir.appendingPathComponent("akagi_websocket.log.\(rotationKeepCount)")
-            try? fm.removeItem(at: oldest)
-            for i in stride(from: rotationKeepCount - 1, through: 1, by: -1) {
-                let from = dir.appendingPathComponent("akagi_websocket.log.\(i)")
-                let to = dir.appendingPathComponent("akagi_websocket.log.\(i + 1)")
-                if fm.fileExists(atPath: from.path) {
-                    try? fm.removeItem(at: to)
-                    try? fm.moveItem(at: from, to: to)
-                }
-            }
-            let first = dir.appendingPathComponent("akagi_websocket.log.1")
-            try? fm.removeItem(at: first)
-            try? fm.moveItem(at: logFile, to: first)
+        let root = (fm.urls(for: .libraryDirectory, in: .userDomainMask).first
+                    ?? fm.temporaryDirectory)
+            .appendingPathComponent("Logs/Naki", isDirectory: true)
+
+        let stamp = Self.sessionStampFormatter.string(from: Date())
+        var dir = root.appendingPathComponent(stamp, isDirectory: true)
+        do {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            // 建不出來就退回 temp，寧可 log 位置不理想也不要完全沒有 log
+            dir = fm.temporaryDirectory
         }
+        logDirectory = dir
+
+        logFile = dir.appendingPathComponent("all.log")
+        eventFile = dir.appendingPathComponent("events.log")
 
         fm.createFile(atPath: logFile.path, contents: nil)
         fileHandle = try? FileHandle(forWritingTo: logFile)
 
-        // 事件時間軸與各類別檔案：每次啟動重建（合併檔已負責跨啟動保留）
         fm.createFile(atPath: eventFile.path, contents: nil)
         eventHandle = try? FileHandle(forWritingTo: eventFile)
 
         for c in LogCategory.allCases {
-            let url = dir.appendingPathComponent("naki-\(c.rawValue.lowercased()).log")
+            let url = dir.appendingPathComponent("\(c.rawValue.lowercased()).log")
             fm.createFile(atPath: url.path, contents: nil)
             categoryHandles[c] = try? FileHandle(forWritingTo: url)
+        }
+
+        Self.pruneOldSessions(root: root, keep: sessionKeepCount)
+    }
+
+    private static let sessionStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        return f
+    }()
+
+    /// 只留最近 N 次執行的目錄
+    ///
+    /// 目錄名是可排序的時間戳，所以字典序就是時間序，不需要讀 attributes。
+    private static func pruneOldSessions(root: URL, keep: Int) {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: root.path) else { return }
+        let sessions = entries.filter { $0.count == 15 && $0.contains("-") }.sorted()
+        guard sessions.count > keep else { return }
+        for name in sessions.prefix(sessions.count - keep) {
+            try? fm.removeItem(at: root.appendingPathComponent(name))
         }
     }
 
@@ -272,7 +299,7 @@ func botLog(_ message: String, level: LogLevel = .info) {
 }
 
 /// 系統日誌
-/// 對局時間軸事件——會另外寫進 naki-events.log
+/// 對局時間軸事件——會另外寫進當次 session 目錄的 events.log
 func eventLog(_ message: String, category: LogCategory = .bridge) {
     LogManager.shared.log(message, category: category, level: .event)
 }

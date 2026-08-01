@@ -496,17 +496,11 @@ class WebViewModel: WebViewModelProtocol {
   }
 
   /// 計算動作延遲時間
+  ///
+  /// 交給 `ActionDelayModel`。以前這裡是每種動作一個固定秒數——固定時序是指紋，
+  /// 而且 1.9 秒的窗口讓 `/screenshot`（要 1–2 秒）常常拍到牌已經打掉之後。
   private func calculateDelay(for actionType: Recommendation.ActionType?) -> TimeInterval {
-    switch actionType {
-    case .hora:
-      return 1.0
-    case .chi, .pon, .kan:
-      return 1.5
-    case .some(.none):
-      return 1.0
-    default:
-      return 1.8
-    }
+    ActionDelayModel.delay(for: actionType)
   }
 
   // MARK: - 遊戲畫面內高亮
@@ -636,17 +630,7 @@ class WebViewModel: WebViewModelProtocol {
     // 只有全自動模式才觸發自動打牌
     if mode.isFullAuto, !recommendations.isEmpty {
       let firstAction = recommendations.first?.actionType
-      let delay: TimeInterval
-      switch firstAction {
-      case .hora:
-        delay = 0
-      case .chi, .pon, .kan:
-        delay = 1.5
-      case .some(.none):
-        delay = 1.2
-      default:
-        delay = 1.8
-      }
+      let delay = ActionDelayModel.delay(for: firstAction)
       debugServer?.addLog(
         "模式變更時自動觸發: \(firstAction?.rawValue ?? "?") (延遲: \(delay)秒)")
       triggerAutoPlayNow(delay: delay)

@@ -164,6 +164,8 @@ extension MCPToolRegistry {
         register(GetStatusTool.self)
         register(GetHelpTool.self)
         register(GetLogsTool.self)
+        register(ListRecordingsTool.self)
+        register(ReplayGameTool.self)
         register(ClearLogsTool.self)
 
         // Bot 控制類（7）— 讀 Swift 協定層狀態 / 送 Liqi 動作

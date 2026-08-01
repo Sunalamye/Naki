@@ -59,7 +59,9 @@ xcodebuild build -project Naki.xcodeproj -scheme Naki
 xcodebuild test -project Naki.xcodeproj -scheme Naki -only-testing:NakiTests
 ```
 
-開始前先看 `git status`、Xcode／package resolution 與現有 Naki process。NakiTests 是 app-hosted，會啟動 test host 並使用相同暫存 log 名稱；若正式 Naki 正在跑，可能觸發 `akagi_websocket.log` rotation。未經確認不要在 live 對局期間跑 tests。
+開始前先看 `git status`、Xcode／package resolution 與現有 Naki process。
+
+log 每次啟動寫進 `~/Library/Logs/Naki/<timestamp>/`（`all.log`、`events.log`、六個分類、保留 8 次），所以 test host 與正式 App 不再共用檔名。仍建議不要在 live 對局期間跑 tests——test host 會另外啟一個 App instance。
 
 ## 現行架構
 
@@ -151,12 +153,21 @@ MCP 的 6 個 `highlight_*` 是未接新 hook 的相容失敗樁；不可用它�
 
 隱藏玩家名稱已用協定層重做：`naki-websocket.js` 的 `__nakiHideNames` 在遊戲解析封包前，就地把 `ResAuthGame` 的 nickname bytes 覆寫成等長 ASCII。等長是硬性條件——改長度就要連動所有外層 protobuf 長度前綴。範圍只有 authGame RESPONSE；syncGame 重連與 NotifyGameEndResult 結算畫面仍顯示原名。node 合成 frame 測過（等長、關閉不動、非 authGame 不動、垃圾 bytes 不丟例外），**沒有 live 對局驗證**。
 
+## 專案結構的坑
+
+`Naki.xcodeproj` 的 `membershipExceptions` 是**包含清單**不是排除清單——新增的 Swift 檔要手動加進對應的 exception set（跟著同目錄既有檔案加），否則不會被編譯，錯誤訊息是 `cannot find 'X' in scope`，看起來像 import 問題。
+
+MCP 工具需要 `import MCPKit`。
+
 ## 測試腳本
 
 | 腳本 | 用途 |
 |------|------|
 | `scripts/soak-test.sh N` | 連續跑 N 局（友人房+人機），逐局收集異常、停滯自救 |
 | `scripts/action-shots.sh [dir]` | 輪到自己或出現異常時自動截圖（JPEG） |
+| `scripts/replay-check.sh` | 重跑所有對局錄影，決策指紋與 baseline diff |
+
+改完決策相關的程式碼後用 `replay-check.sh` 驗，不必真打一局。它**只**能驗事件流之內的東西（encoder／resolver／推論／決策順序），送出通道、oplist 時序、高亮、UI 都驗不到——不要拿它的綠燈當成全部驗過。
 
 `soak-test.sh` 用 `[協調器] start_game` / `end_game` 判斷局的邊界，**不用 `/game/state` 的 `inGame`**（結束後不會歸位）。開局走 `room_quick_test` + 必要時 `bot_sync`——`startRoom` 只讓伺服器開局，客戶端常常不會自己進場。
 

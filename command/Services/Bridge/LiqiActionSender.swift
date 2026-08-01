@@ -518,6 +518,11 @@ enum LiqiToolResult {
         if let response = outcome.response {
             result["response"] = response.dictionary
             result["serverAccepted"] = !response.hasError
+            // 被拒絕時直接把碼寫進 log。以前只記 `✅ 已送出`（那只代表 bytes 出去了），
+            // 要知道伺服器其實拒絕了得去翻 MCP 回應再手工解 base64。
+            if let desc = response.errorDescription {
+                eventLog("[Liqi] ❌ \(response.method) msgId=\(response.msgId) 被伺服器拒絕: \(desc)")
+            }
         } else {
             result["response"] = NSNull()
             result["note"] = "請求已送出但尚未收到對應 msgId 的 RESPONSE；"
