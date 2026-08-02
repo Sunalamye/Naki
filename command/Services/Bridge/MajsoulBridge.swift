@@ -39,6 +39,22 @@ class MajsoulBridge {
     /// Liqi 協議解析器
     private let liqiParser = LiqiParser()
 
+    /// 解析失敗的去處（UI 橫幅、`/status`、`get_status` 都讀這一份）。
+    ///
+    /// p4-1：解析器只負責「這段 bytes 解不開」，**後果由這裡判定**。
+    /// 少一個未知欄位是 degraded；拿不到座位或開不出 start_kyoku 是 blocking
+    /// ——後者代表這一局 Naki 不會工作，必須讓使用者看見，而不是只留一行 log。
+    ///
+    /// 測試注入獨立實例，避免跨測試互相汙染。
+    let faultState: LiqiParseFaultState
+
+    init(faultState: LiqiParseFaultState = .shared) {
+        self.faultState = faultState
+    }
+
+    /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
+    nonisolated deinit { }
+
     /// 帳號 ID
     private(set) var accountId: Int = 0
 
@@ -94,6 +110,8 @@ class MajsoulBridge {
         hasReceivedAuthGame = false
         LiqiOperationStore.shared.clear()
         LiqiResponseStore.shared.reset()
+        // 頁面重新載入＝重新開始：上一次載入留下的解析失敗不該掛在新頁面上
+        faultState.reset()
         bridgeLog("[MajsoulBridge] 完整重置 (accountId 已清除)")
     }
 
@@ -104,12 +122,41 @@ class MajsoulBridge {
 
     /// 解析雀魂消息並返回原始解析結果（用於調試和請求跟蹤）
     func parseRaw(_ data: Data) -> [String: Any]? {
-        return liqiParser.parse(data)
+        let parsed = liqiParser.parse(data)
+        drainParserFaults()
+        return parsed
+    }
+
+    /// 把解析器這一則訊息累積的失敗收進 `faultState`。
+    ///
+    /// 解析器報上來的一律是 degraded；要升級成 blocking 的地方（座位、start_kyoku）
+    /// 由 `convertToMJAI` 自己判斷後另外記一筆。
+    private func drainParserFaults() {
+        for fault in liqiParser.faults {
+            faultState.record(fault)
+        }
+    }
+
+    /// 記一筆「這一局不會運作」的失敗（UI 會掛出常駐錯誤）
+    private func recordBlockingFault(site: String,
+                                     fieldId: Int? = nil,
+                                     byteCount: Int = 0,
+                                     reason: String) {
+        let fault = LiqiParseFault(site: site,
+                                   fieldId: fieldId,
+                                   byteCount: byteCount,
+                                   reason: reason,
+                                   severity: .blocking)
+        faultState.record(fault)
+        eventLog("[MajsoulBridge] ⛔️ \(fault.text)")
     }
 
     /// 解析雀魂消息並返回 MJAI 事件 (字典格式，保持兼容性)
     func parse(_ data: Data) -> [[String: Any]]? {
-        guard let parsed = liqiParser.parse(data) else {
+        let parsedOrNil = liqiParser.parse(data)
+        drainParserFaults()
+
+        guard let parsed = parsedOrNil else {
             return nil
         }
 
@@ -186,6 +233,15 @@ class MajsoulBridge {
                 bridgeLog("[MajsoulBridge] 座位列表: \(seatList)")
                 is3P = seatList.count == 3
 
+                // 座位是查出來的還是猜出來的，要說清楚（p4-1）。
+                // heuristic = 沒有 seat_list，拿 players 的順序頂替；
+                // 座位猜錯的後果是 resolver 的 `seat_mismatch` fail-closed 整批不動作，
+                // 表象是「自動打牌完全不動」——不寫下來就查不到根因。
+                if msgData["seatListConfidence"] as? String == LiqiParseConfidence.heuristic.rawValue {
+                    eventLog("[MajsoulBridge] ⚠️ seatList 是從 players 順序推出來的（heuristic），"
+                             + "座位可能是錯的：\(seatList)")
+                }
+
                 if let index = seatList.firstIndex(of: accountId) {
                     seat = index
                     bridgeLog("[MajsoulBridge] 找到座位索引: \(seat)")
@@ -197,7 +253,7 @@ class MajsoulBridge {
                     var names: [String] = []
                     if let players = msgData["players"] as? [[String: Any]] {
                         names = players.compactMap {
-                            ($0["nickname"] as? String) ?? ($0["account_id"] as? Int).map { "Player\($0)" }
+                            ($0["nickname"] as? String) ?? ($0["accountId"] as? Int).map { "Player\($0)" }
                         }
                     }
                     if names.count != playerCount {
@@ -211,13 +267,28 @@ class MajsoulBridge {
                         "is3P": is3P,
                         "names": names
                     ])
+
+                    // 這一局的前提（座位）拿到了 → 收掉之前掛著的常駐錯誤
+                    faultState.clearBlocking()
                 } else {
                     // #10: 找不到 accountId → 不發 start_game（不再靜默預設座位 0），
                     // 避免上層以錯誤座位建立 bot。記錄 accountId 與 seatList 供診斷。
                     bridgeLog("[MajsoulBridge] ERROR: accountId \(accountId) 在 seatList \(seatList) 中找不到! 不發送 start_game，避免以錯座位建立 bot。")
+                    // p4-1：不發 start_game 代表**整局都不會工作**（沒有 bot、沒有推薦、
+                    // 沒有自動打牌），這種狀態不能只留在 log 裡。
+                    recordBlockingFault(site: "ResAuthGame.seat_list",
+                                        fieldId: 3,
+                                        reason: "accountId \(accountId) 不在 seatList \(seatList) 中，"
+                                            + "無法決定自家座位 → 不建立 Bot")
                 }
             } else {
+                // p4-1：舊版只 log 一行，start_game 不發、整局靜默不工作，
+                // 畫面上完全看不出來（側欄仍顯示「已連線」）。
                 bridgeLog("[MajsoulBridge] 錯誤: authGame 回應中找不到 seatList!")
+                recordBlockingFault(site: "ResAuthGame.seat_list",
+                                    fieldId: 3,
+                                    reason: "authGame 回應沒有 seatList（keys=\(msgData.keys.sorted())）"
+                                        + "，無法決定自家座位 → 不建立 Bot")
             }
         }
 
@@ -418,7 +489,21 @@ class MajsoulBridge {
         let kyoku = ju + 1
         let honba = data["ben"] as? Int ?? 0
         let kyotaku = data["liqibang"] as? Int ?? 0
-        var scores = data["scores"] as? [Int] ?? [25000, 25000, 25000, 25000]
+
+        // p4-1：分數解不出來就**不開這一局**。
+        //
+        // 舊版在 parser 端補 [25000, 25000, 25000, 25000]，這裡再 `?? ` 一次同樣的預設值：
+        // 於是「解析失敗」與「大家都還是起始分」在 Bot 眼裡完全一樣，而 Mortal 的
+        // 決策吃順位與點差——拿假點數推出來的推薦看起來一樣正常，只是錯的。
+        // 少一個 start_kyoku 會讓後續事件在 log 裡大聲報錯，那是可以查的；
+        // 用假分數打完一整局不會留下任何痕跡。
+        guard var scores = data["scores"] as? [Int], scores.count == 3 || scores.count == 4 else {
+            recordBlockingFault(site: "ActionNewRound.scores",
+                                fieldId: 6,
+                                reason: "拿不到本局起始點數（scores=\(data["scores"] ?? "nil")）"
+                                    + " → 不發 start_kyoku，這一局不做推薦")
+            return nil
+        }
 
         if is3P && scores.count == 3 {
             scores.append(0)
@@ -453,6 +538,9 @@ class MajsoulBridge {
             "scores": scores,
             "tehais": tehais
         ])
+
+        // 這一局開起來了 → 收掉上一局留下的常駐錯誤
+        faultState.clearBlocking()
 
         // 如果配牌有 14 張（親家），添加自摸事件
         let isOya = (seat == ju)
@@ -773,7 +861,17 @@ class MajsoulBridge {
         let bakaze = BAKAZE_NAMES[chang % 4]
         let kyoku = ju + 1
 
-        var scores = gameState["scores"] as? [Int] ?? [25000, 25000, 25000, 25000]
+        // 與 `parseNewRound` 同一條規則：解不出點數就不發 start_kyoku（p4-1）。
+        // 這條是重連且沒有 actions 可重放時的後備路徑；`GameSnapshot` 的點數在
+        // `players[].score`（liqi.json field 9 → PlayerSnapshot field 1）。
+        guard var scores = gameState["scores"] as? [Int], scores.count == 3 || scores.count == 4 else {
+            recordBlockingFault(site: "GameSnapshot.players.score",
+                                fieldId: 9,
+                                reason: "重連快照拿不到點數（scores=\(gameState["scores"] ?? "nil")）"
+                                    + " → 不發 start_kyoku")
+            return nil
+        }
+
         if is3P && scores.count == 3 {
             scores.append(0)
         }
@@ -810,6 +908,9 @@ class MajsoulBridge {
             "scores": scores,
             "tehais": tehais
         ])
+
+        // 重連的局面接起來了 → 收掉常駐錯誤
+        faultState.clearBlocking()
 
         // #18: 後備路徑（無 actions 重連）補發已翻的 kan-dora。
         // start_kyoku 僅帶第一個 dora_marker，doraList 第 2 個(index 1)以後需逐一以 dora 事件補上，

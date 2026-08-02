@@ -28,6 +28,10 @@ struct GetStatusTool: MCPTool {
         // 而不是等使用者自己去翻 log。沒有 fallback 攔截器可以掩蓋這件事。
         let injection = await JSInjectionState.shared.report
 
+        // 同一個道理：封包解析失敗到「這局不會運作」時，`game_*` / `bot_*` 的內容
+        // 是不完整的。與其讓查詢端自己去比對 log，不如在 status 就講清楚（p4-1）。
+        let parseFaults = LiqiParseFaultState.shared.statusPayload
+
         // 帶上檔案日誌路徑：`/logs` 只回記憶體裡的近期條目，跨重啟或回查上一局要直接讀檔。
         var payload: [String: Any] = [
             "status": "running",
@@ -55,6 +59,7 @@ struct GetStatusTool: MCPTool {
             "categoryLogs": await LogManager.shared.categoryLogPaths
         ]
         payload.merge(injection.statusPayload) { _, new in new }
+        payload.merge(parseFaults) { _, new in new }
         return payload
     }
 }

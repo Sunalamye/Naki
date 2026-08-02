@@ -107,7 +107,10 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .top) {
-            JSInjectionFailureBanner()
+            VStack(spacing: 0) {
+                JSInjectionFailureBanner()
+                LiqiParseFailureBanner()
+            }
         }
         .safeAreaInset(edge: .bottom) {
             StatusBar()
@@ -229,6 +232,9 @@ struct ContentView: View {
             .ignoresSafeArea(edges: .bottom)
             .safeAreaInset(edge: .top) {
                 JSInjectionFailureBanner()
+            }
+            .safeAreaInset(edge: .top) {
+                LiqiParseFailureBanner()
             }
             .navigationTitle("Naki")
             .navigationBarTitleDisplayMode(.inline)
@@ -675,6 +681,52 @@ struct JSInjectionFailureBanner: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("js-injection-failure-banner")
             .accessibilityLabel("JavaScript 注入失敗")
+            .accessibilityValue(summary)
+        }
+    }
+}
+
+// MARK: - Liqi 解析失敗橫幅
+
+/// 封包解析失敗到「這一局不會運作」程度時的常駐橫幅（p4-1）。
+///
+/// 為什麼要有它：以前 authGame 回應少了 seatList 只會寫一行 log，
+/// `start_game` 不發、Bot 不建立、推薦永遠是空的——而畫面上顯示的是
+/// 「已連線到雀魂服务器」。使用者唯一的線索是「怎麼都沒有推薦」。
+///
+/// 與 `JSInjectionFailureBanner` 的分工：那個是「Naki 根本沒接上頁面」，
+/// 這個是「接上了，但這一局的關鍵欄位解不開」。後者會自己好
+/// （下一局 authGame／start_kyoku 成功就 `clearBlocking()`），所以不寫
+/// 「重裝 App」那種指示。
+struct LiqiParseFailureBanner: View {
+
+    var body: some View {
+        if let summary = LiqiParseFaultState.shared.bannerSummary {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .imageScale(.large)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("牌局封包解析失敗：這一局 Naki 不會給推薦，也不會自動打牌")
+                        .font(.headline)
+                    Text(summary)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Text("下一局（或重連）解析成功就會自動消失；持續出現代表雀魂改了協定欄位。")
+                        .font(.caption)
+                        .opacity(0.9)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("liqi-parse-failure-banner")
+            .accessibilityLabel("牌局封包解析失敗")
             .accessibilityValue(summary)
         }
     }

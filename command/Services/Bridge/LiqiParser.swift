@@ -98,10 +98,25 @@ func parseProtobufBlocks(_ data: Data) -> [ProtobufBlock] {
     var offset = 0
 
     while offset < data.count {
-        let tag = data[offset]
-        let wireType = Int(tag & 0x07)
-        let fieldId = Int(tag >> 3)
-        offset += 1
+        // tag 本身是 varint：field >= 16 要兩個 bytes（19 → 0x98 0x01）。
+        // 舊版只讀一個 byte 就當成 tag，於是 field >= 16 之後整條訊息**錯位**：
+        // 值的 bytes 會被當成下一個 tag，解出一堆 fieldId 與 wireType 都是假的 block
+        // ——其中任何一個假 fieldId 撞到真欄位（例如 6 = scores）就會覆蓋掉正確的值。
+        // liqi.json 裡 field >= 16 很常見（ActionNewRound 16/17/19/20/21/26、
+        // HuleInfo 15…27），所以這不是理論問題。
+        guard let (tag, tagEnd) = parseVarint(data, offset: offset) else {
+            liqiLog("[LiqiParser] parseProtobufBlocks: tag 解不出來 at offset \(offset)，停止（保留 \(blocks.count) blocks）")
+            return blocks
+        }
+        let wireType = tag & 0x07
+        let fieldId = tag >> 3
+        offset = tagEnd
+
+        // field 0 不是合法欄位編號；出現它代表這段 bytes 不是我們以為的 protobuf
+        guard fieldId >= 1 else {
+            liqiLog("[LiqiParser] parseProtobufBlocks: 非法 field 0（tag=\(tag)），停止（保留 \(blocks.count) blocks）")
+            return blocks
+        }
 
         switch wireType {
         case 0: // Varint
@@ -159,6 +174,15 @@ func parseProtobufBlocks(_ data: Data) -> [ProtobufBlock] {
 // MARK: - Liqi Parser
 
 /// 雀魂協議解析器
+///
+/// ## p4-1：失敗不再偽裝成資料
+///
+/// 解不開的欄位一律**不寫進結果**，同時往 `faults` 記一筆帶上下文的
+/// `LiqiParseFault`（解析點、liqi.json 欄位編號、bytes 長度、原因）。
+/// 呼叫端（`MajsoulBridge`）看得到「這個 key 不存在」，也拿得到「為什麼不存在」，
+/// 才有辦法決定要 log 跳過還是讓整局停下來。預設值一律不再產生。
+///
+/// 欄位編號一律來自 `docs/protocol/liqi.json`（見各 case 的註解），不憑記憶。
 class LiqiParser {
 
     /// 請求 ID 到方法名的映射
@@ -167,16 +191,49 @@ class LiqiParser {
     /// 當前消息 ID
     private var currentMsgId: Int = 1
 
+    /// **這一次 `parse(_:)` 期間**累積的解析失敗。
+    ///
+    /// 刻意不直接寫進 `LiqiParseFaultState.shared`：解析器不知道少了某個欄位
+    /// 會不會讓整局不工作，那是呼叫端的判斷。呼叫端 `parse` 完把這裡讀走
+    /// （`MajsoulBridge.drainParserFaults`），決定升級成 blocking 或維持 degraded。
+    private(set) var faults: [LiqiParseFault] = []
+
+    /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
+    nonisolated deinit { }
+
     /// 重置解析器狀態
     func reset() {
         pendingRequests.removeAll()
         currentMsgId = 1
+        faults.removeAll()
+    }
+
+    /// 記一筆解析失敗（嚴重度先一律 degraded，由呼叫端升級）
+    private func recordFault(site: String,
+                             fieldId: Int? = nil,
+                             byteCount: Int,
+                             reason: String) {
+        let fault = LiqiParseFault(site: site,
+                                   fieldId: fieldId,
+                                   byteCount: byteCount,
+                                   reason: reason)
+        faults.append(fault)
+        liqiLog("[LiqiParser] ⚠️ 解析失敗 \(fault.text)")
+    }
+
+    /// bytes 的 hex 前綴（失敗訊息用；沒有這個就只知道「失敗」不知道「失敗在什麼上面」）
+    private func hexPreview(_ data: Data, limit: Int = 16) -> String {
+        let head = data.prefix(limit).map { String(format: "%02x", $0) }.joined()
+        return data.count > limit ? head + "…" : head
     }
 
     /// 解析雀魂消息
     /// - Parameter data: 原始二進制消息
     /// - Returns: 解析後的消息字典，包含 type, method, data 等字段
     func parse(_ data: Data) -> [String: Any]? {
+        // 每則訊息各自結帳：呼叫端讀到的 faults 只屬於剛剛那一則
+        faults.removeAll()
+
         guard data.count >= 3 else {
             liqiLog("[LiqiParser] Message too short: \(data.count) bytes")
             return nil
@@ -405,9 +462,8 @@ class LiqiParser {
 
         liqiLog("[LiqiParser] parseActionPrototype: \(blocks.count) blocks, xorDecode=\(xorDecode)")
 
-        // 使用 field ID 來正確識別字段
-        // ActionPrototype 結構:
-        // - field 1: step (varint)
+        // 欄位編號依 docs/protocol/liqi.json 的 `.lq.ActionPrototype`：
+        // - field 1: step (uint32)
         // - field 2: name (string) - e.g., "ActionDealTile"
         // - field 3: data (bytes) - 可能需要 XOR 解碼（取決於來源）
         for block in blocks {
@@ -425,6 +481,11 @@ class LiqiParser {
                     actionName = str
                     result["name"] = str
                     liqiLog("[LiqiParser] ActionPrototype name: \(str)")
+                } else {
+                    recordFault(site: "ActionPrototype.name",
+                                fieldId: 2,
+                                byteCount: block.data.count,
+                                reason: "name 不是合法 UTF-8：\(hexPreview(block.data))")
                 }
 
             case 3: // data
@@ -433,60 +494,60 @@ class LiqiParser {
                 liqiLog("[LiqiParser] ActionPrototype data (raw): \(rawPreview)")
 
             default:
-                // 其他字段，顯示用於調試
+                // 其他欄位只記錄。**不再拿它頂替 field 3**——
+                // 舊版「找不到 data 就抓任何一個 wireType 2 的 block 當 data」，
+                // schema 一改（多一個字串欄位）就會安靜地把別的東西 XOR 解碼後
+                // 當成動作內容餵給 Bot，而 log 裡看起來一切正常。
                 if block.wireType == 2 {
                     let rawPreview = block.data.prefix(min(40, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                    liqiLog("[LiqiParser] ActionPrototype unknown field \(block.fieldId): \(rawPreview)")
-
-                    // 備用邏輯：如果沒有找到 field 3，嘗試用這個作為 data
-                    if actionData == nil {
-                        actionData = block.data
-                    }
+                    liqiLog("[LiqiParser] ActionPrototype 未知欄位 \(block.fieldId): \(rawPreview)")
                 }
             }
         }
 
-        // 處理 data 欄位
-        if let data = actionData {
-            liqiLog("[LiqiParser] ActionPrototype: name='\(actionName)', data size=\(data.count) bytes")
-
-            // 如果 data 為空，記錄警告
-            if data.count == 0 {
-                liqiLog("[LiqiParser] WARNING: ActionPrototype '\(actionName)' has empty data!")
-                result["data"] = [String: Any]()
-                return result
-            }
-
-            // 根據 xorDecode 參數決定是否進行 XOR 解碼
-            let decodedData: Data
-            if xorDecode {
-                decodedData = liqiDecode(data)
-                let preview = decodedData.prefix(min(50, decodedData.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                liqiLog("[LiqiParser] ActionPrototype '\(actionName)' XOR decoded: \(preview)")
-            } else {
-                decodedData = data
-                let preview = decodedData.prefix(min(50, decodedData.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                liqiLog("[LiqiParser] ActionPrototype '\(actionName)' raw (no XOR): \(preview)")
-            }
-
-            let actionBlocks = parseProtobufBlocks(decodedData)
-            liqiLog("[LiqiParser] ActionPrototype parsed \(actionBlocks.count) action blocks")
-
-            // 如果還沒有找到 name，嘗試從解碼後的數據中找
-            if actionName.isEmpty {
-                for ab in actionBlocks {
-                    if ab.wireType == 2, let str = ab.stringValue, str.hasPrefix("Action") {
-                        actionName = str
-                        result["name"] = str
-                        liqiLog("[LiqiParser] ActionPrototype name from data: \(str)")
-                        break
-                    }
-                }
-            }
-
-            result["data"] = parseActionData(name: actionName, blocks: actionBlocks)
+        // name 是 `parseActionData` 的分派依據，沒有它整則動作無法解讀 → 顯式失敗
+        guard !actionName.isEmpty else {
+            recordFault(site: "ActionPrototype.name",
+                        fieldId: 2,
+                        byteCount: 0,
+                        reason: "缺少 name 欄位，無法判斷這是哪一種動作（blocks=\(blocks.count)）")
+            return nil
         }
 
+        // data 缺席與 data 為空是兩件事：前者是 schema 對不上（顯式失敗），
+        // 後者是伺服器真的沒帶內容（合法，交給呼叫端處理空 dict）。
+        guard let data = actionData else {
+            recordFault(site: "ActionPrototype.data",
+                        fieldId: 3,
+                        byteCount: 0,
+                        reason: "'\(actionName)' 沒有 field 3（blocks=\(blocks.count)）")
+            return nil
+        }
+
+        liqiLog("[LiqiParser] ActionPrototype: name='\(actionName)', data size=\(data.count) bytes")
+
+        if data.isEmpty {
+            liqiLog("[LiqiParser] WARNING: ActionPrototype '\(actionName)' has empty data!")
+            result["data"] = [String: Any]()
+            return result
+        }
+
+        // 根據 xorDecode 參數決定是否進行 XOR 解碼
+        let decodedData: Data
+        if xorDecode {
+            decodedData = liqiDecode(data)
+            let preview = decodedData.prefix(min(50, decodedData.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
+            liqiLog("[LiqiParser] ActionPrototype '\(actionName)' XOR decoded: \(preview)")
+        } else {
+            decodedData = data
+            let preview = decodedData.prefix(min(50, decodedData.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
+            liqiLog("[LiqiParser] ActionPrototype '\(actionName)' raw (no XOR): \(preview)")
+        }
+
+        let actionBlocks = parseProtobufBlocks(decodedData)
+        liqiLog("[LiqiParser] ActionPrototype parsed \(actionBlocks.count) action blocks")
+
+        result["data"] = parseActionData(name: actionName, blocks: actionBlocks)
         return result
     }
 
@@ -522,9 +583,14 @@ class LiqiParser {
 
     // MARK: - Action Parsers
 
+    /// 欄位編號依 `docs/protocol/liqi.json` 的 `.lq.ActionNewRound`
+    /// （1=chang, 2=ju, 3=ben, 4=tiles, 5=dora, 6=scores, 7=operation, 8=liqibang,
+    ///  11=al, 12=md5, 13=left_tile_count, 14=doras）。
     private func parseActionNewRound(_ blocks: [ProtobufBlock]) -> [String: Any] {
         var result: [String: Any] = [:]
         var tiles: [String] = []  // 累積所有手牌
+        var scores: [Int] = []    // field 6 可能是 packed，也可能逐筆出現
+        var scoresFailed = false
 
         liqiLog("[LiqiParser] parseActionNewRound: \(blocks.count) blocks")
 
@@ -552,16 +618,23 @@ class LiqiParser {
                         result["doras"] = doras
                     }
                 }
-            case 6: // scores
+            case 6: // scores（liqi.json：`repeated int32`）
                 // 調試: 打印原始數據
                 let rawHex = block.data.map { String(format: "%02x", $0) }.joined(separator: " ")
                 liqiLog("[LiqiParser] NewRound field 6 (scores) raw bytes: \(rawHex)")
                 liqiLog("[LiqiParser] NewRound field 6 wireType: \(block.wireType), size: \(block.data.count)")
 
-                // 嘗試解析為 packed int32
-                let scores = parsePackedInt32(block.data)
-                liqiLog("[LiqiParser] NewRound scores parsed: \(scores)")
-                result["scores"] = scores
+                // packed（wireType 2）與逐筆（wireType 0）兩種編碼都收；
+                // 解不開就標記失敗、**不寫 scores**。
+                // 舊版在這裡回 [25000, 25000, 25000, 25000]，於是「起手就是 25000」
+                // 與「這段 bytes 解不開」在呼叫端長得一模一樣。
+                if let parsed = parseRepeatedVarintField(block,
+                                                         site: "ActionNewRound.scores",
+                                                         fieldId: 6) {
+                    scores.append(contentsOf: parsed)
+                } else {
+                    scoresFailed = true
+                }
             // 依 liqi.json 的 ActionNewRound：7=operation、8=liqibang。
             // 舊版把 7 當 liqibang 用 varint 硬解 operation 的訊息位元組 → kyotaku 是垃圾值，
             // 且開局第一巡的可用操作（親家打牌／天和）永遠拿不到。
@@ -594,6 +667,13 @@ class LiqiParser {
 
         // 設置累積的手牌
         result["tiles"] = tiles
+
+        // 有一個 block 解不開就整個 scores 不給：半份分數比沒有分數更難查。
+        if !scoresFailed && !scores.isEmpty {
+            result["scores"] = scores
+            liqiLog("[LiqiParser] NewRound scores parsed: \(scores)")
+        }
+
         liqiLog("[LiqiParser] NewRound tiles=\(tiles.count): \(tiles)")
         liqiLog("[LiqiParser] NewRound result: \(result)")
         return result
@@ -706,9 +786,13 @@ class LiqiParser {
         return result
     }
 
+    /// 欄位編號依 `docs/protocol/liqi.json` 的 `.lq.ActionChiPengGang`
+    /// （1=seat, 2=type, 3=tiles[repeated string], 4=froms[repeated uint32],
+    ///  5=liqi, 6=operation）。
     private func parseActionChiPengGang(_ blocks: [ProtobufBlock]) -> [String: Any] {
         var result: [String: Any] = [:]
         var tiles: [String] = []  // ⭐ 累積所有 tiles
+        var froms: [Int] = []
 
         for block in blocks {
             switch block.fieldId {
@@ -716,19 +800,25 @@ class LiqiParser {
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
             case 2: // type (0=chi, 1=pon, 2=daiminkan)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["type"] = v }
-            case 3: // tiles - repeated string, 每個 block 是一張牌
-                // ⭐ 對於 repeated 字段，每個 block 包含一張牌，需要累積
+            case 3: // tiles（repeated string：一個 block 就是一張牌）
+                // schema 已經說清楚一個 block 一張牌，解不出牌就是解錯了——
+                // 舊版在這裡退回 `parseTileList` 的逐 byte 掃描，掃出來的東西
+                // 與真的牌無法區分。現在直接記一筆失敗，讓呼叫端看得到。
                 if let tile = block.stringValue, isTileString(tile) {
                     tiles.append(tile)
                     liqiLog("[LiqiParser] ChiPengGang tile: \(tile)")
                 } else {
-                    // 備用：使用 parseTileList
-                    let parsed = parseTileList(block.data)
-                    tiles.append(contentsOf: parsed)
+                    recordFault(site: "ActionChiPengGang.tiles",
+                                fieldId: 3,
+                                byteCount: block.data.count,
+                                reason: "不是合法的牌字串：\(hexPreview(block.data))")
                 }
-            case 4: // froms (從哪個玩家拿的牌)
-                result["froms"] = parseIntList(block.data)
-            // liqi.json ActionChiPengGang：5=liqi(LiQiSuccess)、6=operation
+            case 4: // froms（repeated uint32；packed 與逐筆都要接住並累積）
+                if let parsed = parseRepeatedVarintField(block,
+                                                         site: "ActionChiPengGang.froms",
+                                                         fieldId: 4) {
+                    froms.append(contentsOf: parsed)
+                }
             case 6: // operation (OptionalOperationList)
                 result["operation"] = parseOperation(block.data)
             default:
@@ -738,7 +828,8 @@ class LiqiParser {
 
         // ⭐ 設置累積的 tiles
         result["tiles"] = tiles
-        liqiLog("[LiqiParser] ChiPengGang tiles accumulated: \(tiles)")
+        if !froms.isEmpty { result["froms"] = froms }
+        liqiLog("[LiqiParser] ChiPengGang tiles accumulated: \(tiles), froms=\(froms)")
 
         return result
     }
@@ -764,22 +855,126 @@ class LiqiParser {
         return result
     }
 
+    /// 欄位編號依 `docs/protocol/liqi.json` 的 `.lq.ActionHule`
+    /// （1=hules[repeated HuleInfo], 2=old_scores, 3=delta_scores, 4=wait_timeout,
+    ///  5=scores, 6=gameend, 7=doras）。
+    ///
+    /// 舊版把 field 1 的**塊數**存成 `hules`（和牌詳情整個丟掉），
+    /// 又把 field 3（delta_scores）當成 `scores`——兩個欄位編號都沒對過 schema。
     private func parseActionHule(_ blocks: [ProtobufBlock]) -> [String: Any] {
         var result: [String: Any] = ["type": "hule"]
+        var hules: [[String: Any]] = []
+        var oldScores: [Int] = []
+        var deltaScores: [Int] = []
+        var scores: [Int] = []
+        var doras: [String] = []
 
         for block in blocks {
             switch block.fieldId {
-            case 1: // hules (和牌信息列表)
-                // 複雜結構，簡化處理
-                result["hules"] = parseProtobufBlocks(block.data).count
-            case 3: // scores
-                result["scores"] = parseIntList(block.data)
+            case 1: // hules（repeated HuleInfo：一個 block 一筆和牌）
+                hules.append(parseHuleInfo(block.data))
+            case 2: // old_scores（repeated int32）
+                if let parsed = parseRepeatedVarintField(block,
+                                                         site: "ActionHule.old_scores",
+                                                         fieldId: 2) {
+                    oldScores.append(contentsOf: parsed)
+                }
+            case 3: // delta_scores（repeated int32）
+                if let parsed = parseRepeatedVarintField(block,
+                                                         site: "ActionHule.delta_scores",
+                                                         fieldId: 3) {
+                    deltaScores.append(contentsOf: parsed)
+                }
+            case 5: // scores（repeated int32；和牌後的點數）
+                if let parsed = parseRepeatedVarintField(block,
+                                                         site: "ActionHule.scores",
+                                                         fieldId: 5) {
+                    scores.append(contentsOf: parsed)
+                }
+            case 7: // doras（repeated string）
+                if let tile = block.stringValue { doras.append(tile) }
             default:
                 break
             }
         }
 
+        result["hules"] = hules
+        if !oldScores.isEmpty { result["oldScores"] = oldScores }
+        if !deltaScores.isEmpty { result["deltaScores"] = deltaScores }
+        if !scores.isEmpty { result["scores"] = scores }
+        // 刻意**不叫** `doras`：`MajsoulBridge.parseAction` 看到 `doras` 就會補一個
+        // MJAI `dora` 事件，而 ActionHule 已經產生 `end_kyoku`——局結束後再補 dora
+        // 會讓 Bot 收到一個屬於上一局的事件。這裡只是把資料保留下來給診斷看。
+        if !doras.isEmpty { result["huleDoras"] = doras }
+
         return result
+    }
+
+    /// 解析單筆 `HuleInfo`（欄位編號依 `docs/protocol/liqi.json` 的 `.lq.HuleInfo`）
+    ///
+    /// 只取「事後看得懂這局怎麼結束」需要的欄位；`fans`（FanInfo）等巢狀結構暫不展開。
+    private func parseHuleInfo(_ data: Data) -> [String: Any] {
+        var info: [String: Any] = [:]
+        var hand: [String] = []
+        var ming: [String] = []
+        var doras: [String] = []
+        var liDoras: [String] = []
+
+        for block in parseProtobufBlocks(data) {
+            switch block.fieldId {
+            case 1: // hand（repeated string）
+                if let tile = block.stringValue { hand.append(tile) }
+            case 2: // ming（repeated string，副露表記如 "shunzi(1m,2m,3m)"）
+                if let str = block.stringValue { ming.append(str) }
+            case 3: // hu_tile
+                if let tile = block.stringValue { info["huTile"] = tile }
+            case 4: // seat
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["seat"] = v }
+            case 5: // zimo
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["zimo"] = v != 0 }
+            case 6: // qinjia（是否親家）
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["qinjia"] = v != 0 }
+            case 7: // liqi
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["liqi"] = v != 0 }
+            case 8: // doras（repeated string）
+                if let tile = block.stringValue { doras.append(tile) }
+            case 9: // li_doras（裏寶牌，repeated string）
+                if let tile = block.stringValue { liDoras.append(tile) }
+            case 10: // yiman
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["yiman"] = v != 0 }
+            case 11: // count（飜數／役滿倍數）
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["count"] = v }
+            case 13: // fu
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["fu"] = v }
+            case 14: // title（滿貫／跳滿…）
+                if let str = block.stringValue { info["title"] = str }
+            case 15: // point_rong
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["pointRong"] = v }
+            case 16: // point_zimo_qin
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["pointZimoQin"] = v }
+            case 17: // point_zimo_xian
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["pointZimoXian"] = v }
+            case 19: // point_sum
+                if let (v, _) = parseVarint(block.data, offset: 0) { info["pointSum"] = v }
+            default:
+                break
+            }
+        }
+
+        if !hand.isEmpty { info["hand"] = hand }
+        if !ming.isEmpty { info["ming"] = ming }
+        if !doras.isEmpty { info["doras"] = doras }
+        if !liDoras.isEmpty { info["liDoras"] = liDoras }
+
+        // 座位是這筆和牌最基本的識別；沒有它整筆沒有意義（誰和的都不知道）
+        if info["seat"] == nil {
+            recordFault(site: "HuleInfo.seat",
+                        fieldId: 4,
+                        byteCount: data.count,
+                        reason: "和牌詳情缺少 seat：\(hexPreview(data))")
+        }
+
+        return info
     }
 
     private func parseActionBaBei(_ blocks: [ProtobufBlock]) -> [String: Any] {
@@ -803,10 +998,14 @@ class LiqiParser {
 
     // MARK: - Auth Game Response
 
+    /// 欄位編號依 `docs/protocol/liqi.json` 的 `.lq.ResAuthGame`
+    /// （1=error, 2=players[repeated PlayerGameView], 3=seat_list[repeated uint32],
+    ///  4=is_game_start, 5=game_config）。
     private func parseAuthGameResponse(_ blocks: [ProtobufBlock]) -> [String: Any]? {
         var result: [String: Any] = [:]
         var seatList: [Int] = []
-        var playerAccountIds: [Int] = []  // 從 PlayerGameView 提取的 accountIds（按 field 順序）
+        var seatListFailed = false
+        var players: [[String: Any]] = []  // PlayerGameView（順序即座位順序）
 
         liqiLog("[LiqiParser] parseAuthGameResponse: \(blocks.count) blocks")
 
@@ -815,46 +1014,73 @@ class LiqiParser {
 
             switch block.fieldId {
             case 2: // players (repeated PlayerGameView) - 每個玩家依座位順序排列
-                // 解析 PlayerGameView 提取 account_id（僅用於備用）
-                let playerBlocks = parseProtobufBlocks(block.data)
-                for playerBlock in playerBlocks {
-                    if playerBlock.fieldId == 1 { // account_id
-                        if let (accountId, _) = parseVarint(playerBlock.data, offset: 0) {
-                            playerAccountIds.append(accountId)
-                            liqiLog("[LiqiParser] PlayerGameView accountId: \(accountId)")
-                        }
-                    }
+                players.append(parsePlayerGameView(block.data))
+            case 3: // seat_list（repeated uint32）— ⭐ 座位的權威來源
+                // seatList[座位] = accountId；自家座位 = seatList.firstIndex(of: accountId)
+                if let parsed = parseRepeatedVarintField(block,
+                                                         site: "ResAuthGame.seat_list",
+                                                         fieldId: 3) {
+                    seatList.append(contentsOf: parsed)
+                } else {
+                    seatListFailed = true
                 }
-            case 3: // seat_list (packed repeated uint32) - ⭐ 這是正確的 seatList！
-                // Python 使用這個: seatList = liqi_message['data']['seatList']
-                let packedList = parsePackedUInt32(block.data)
-                if !packedList.isEmpty {
-                    seatList = packedList
-                    liqiLog("[LiqiParser] ⭐ Using field 3 seatList: \(packedList)")
-                }
-            case 4: // isGameStart
+            case 4: // is_game_start
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["isGameStart"] = v != 0 }
-            case 5: // gameConfig
+            case 5: // game_config
                 result["gameConfig"] = blocksToDict(parseProtobufBlocks(block.data))
             default:
                 break
             }
         }
 
-        // ⭐ 優先使用 field 3 的 seatList（這是 Python 的做法）
-        // seatList[座位] = accountId，用戶座位 = seatList.firstIndex(of: userAccountId)
-        if !seatList.isEmpty {
+        if !players.isEmpty { result["players"] = players }
+
+        // seatList 的來源要**標在結果裡**：field 3 是 schema 說的權威來源（exact）；
+        // 拿 players 的順序頂替只是「通常也對」（heuristic）。舊版兩者都寫進同一個
+        // key、不留痕跡，於是「座位是查出來的還是猜出來的」在呼叫端無法分辨。
+        if !seatListFailed && !seatList.isEmpty {
             result["seatList"] = seatList
-            liqiLog("[LiqiParser] Final seatList (from field 3): \(seatList)")
-        } else if !playerAccountIds.isEmpty {
-            // 備用方案：使用 PlayerGameView 的順序（可能不正確）
-            result["seatList"] = playerAccountIds
-            liqiLog("[LiqiParser] Final seatList (fallback from players): \(playerAccountIds)")
+            result["seatListConfidence"] = LiqiParseConfidence.exact.rawValue
+            liqiLog("[LiqiParser] ⭐ seatList（field 3, exact）: \(seatList)")
         } else {
-            liqiLog("[LiqiParser] ERROR: No seatList found in authGame response!")
+            let accountIds = players.compactMap { $0["accountId"] as? Int }
+            if !accountIds.isEmpty {
+                result["seatList"] = accountIds
+                result["seatListConfidence"] = LiqiParseConfidence.heuristic.rawValue
+                recordFault(site: "ResAuthGame.seat_list",
+                            fieldId: 3,
+                            byteCount: 0,
+                            reason: "缺少 seat_list，改用 players 的順序推座位（heuristic，可能是錯的）")
+            } else {
+                recordFault(site: "ResAuthGame.seat_list",
+                            fieldId: 3,
+                            byteCount: 0,
+                            reason: "沒有 seat_list，也沒有可用的 players（blocks=\(blocks.count)）")
+            }
         }
 
         return result
+    }
+
+    /// 解析單筆 `PlayerGameView`（liqi.json：1=account_id, 4=nickname）
+    private func parsePlayerGameView(_ data: Data) -> [String: Any] {
+        var player: [String: Any] = [:]
+
+        for block in parseProtobufBlocks(data) {
+            switch block.fieldId {
+            case 1: // account_id
+                if let (accountId, _) = parseVarint(block.data, offset: 0) {
+                    player["accountId"] = accountId
+                    liqiLog("[LiqiParser] PlayerGameView accountId: \(accountId)")
+                }
+            case 4: // nickname
+                if let name = block.stringValue { player["nickname"] = name }
+            default:
+                break
+            }
+        }
+
+        return player
     }
 
     /// 解析 authGame 請求（獲取 accountId）
@@ -872,10 +1098,26 @@ class LiqiParser {
                     result["accountId"] = accountId
                     liqiLog("[LiqiParser] ⭐ authGame request accountId: \(accountId)")
                 }
+            // 解不出字串就**不寫 key**（舊版寫空字串，呼叫端無法分辨
+            // 「伺服器沒給」與「給了但解不開」）。
             case 2: // token
-                result["token"] = String(data: block.data, encoding: .utf8) ?? ""
+                if let token = block.stringValue {
+                    result["token"] = token
+                } else {
+                    recordFault(site: "ReqAuthGame.token",
+                                fieldId: 2,
+                                byteCount: block.data.count,
+                                reason: "token 不是合法 UTF-8")
+                }
             case 3: // game_uuid
-                result["gameUuid"] = String(data: block.data, encoding: .utf8) ?? ""
+                if let uuid = block.stringValue {
+                    result["gameUuid"] = uuid
+                } else {
+                    recordFault(site: "ReqAuthGame.game_uuid",
+                                fieldId: 3,
+                                byteCount: block.data.count,
+                                reason: "game_uuid 不是合法 UTF-8")
+                }
             default:
                 break
             }
@@ -884,67 +1126,63 @@ class LiqiParser {
         return result
     }
 
-    /// 解析 packed repeated uint32
-    private func parsePackedUInt32(_ data: Data) -> [Int] {
-        var result: [Int] = []
-        var offset = 0
-        while offset < data.count {
-            if let (value, newOffset) = parseVarint(data, offset: offset) {
-                result.append(value)
-                offset = newOffset
-            } else {
-                break
+    /// 解析一個 `repeated` 數值欄位的單一 block（packed 或逐筆都接）。
+    ///
+    /// protobuf 的 repeated 標量可以 packed（wireType 2，一個 block 裝全部）
+    /// 也可以逐筆（wireType 0，每個值一個 block），解碼端兩種都必須接住。
+    /// 呼叫端把多個 block 的結果**累積**起來，才不會像舊版那樣被最後一個 block 覆蓋掉。
+    ///
+    /// - Returns: 解出來的值；**解不完整就回 nil**（不回半份、不回預設值），
+    ///            同時記一筆 `LiqiParseFault`。
+    private func parseRepeatedVarintField(_ block: ProtobufBlock,
+                                          site: String,
+                                          fieldId: Int) -> [Int]? {
+        if block.wireType == 0 {
+            guard let (value, _) = parseVarint(block.data, offset: 0) else {
+                recordFault(site: site,
+                            fieldId: fieldId,
+                            byteCount: block.data.count,
+                            reason: "varint 解不出來：\(hexPreview(block.data))")
+                return nil
             }
+            return [value]
         }
-        return result
+
+        guard block.wireType == 2 else {
+            recordFault(site: site,
+                        fieldId: fieldId,
+                        byteCount: block.data.count,
+                        reason: "預期 varint(0) 或 packed(2)，實際 wireType \(block.wireType)")
+            return nil
+        }
+
+        guard let values = parsePackedVarints(block.data) else {
+            recordFault(site: site,
+                        fieldId: fieldId,
+                        byteCount: block.data.count,
+                        reason: "packed varint 解不出來：\(hexPreview(block.data))")
+            return nil
+        }
+        return values
     }
 
-    /// 解析 packed repeated int32 (帶符號)
-    /// Protobuf 的 int32 使用 zigzag 編碼: (n << 1) ^ (n >> 31)
-    private func parsePackedInt32(_ data: Data) -> [Int] {
-        var result: [Int] = []
+    /// packed repeated 數值：整段 bytes 必須剛好解成一串 varint。
+    ///
+    /// 有任何一個 byte 落單就代表這段不是我們以為的東西 → 回 nil。
+    /// 負數（int32）在 wire 上是 10 bytes 的 64-bit 二補數，`parseVarint` 解得出來。
+    private func parsePackedVarints(_ data: Data) -> [Int]? {
+        guard !data.isEmpty else { return nil }
+
+        var values: [Int] = []
         var offset = 0
-
-        // 首先嘗試作為 packed varints 解析
         while offset < data.count {
-            if let (value, newOffset) = parseVarint(data, offset: offset) {
-                // 嘗試 zigzag 解碼 (sint32 格式)
-                // 注意: 普通 int32 不使用 zigzag，但分數可能使用 sint32
-                result.append(value)
-                offset = newOffset
-            } else {
-                break
+            guard let (value, newOffset) = parseVarint(data, offset: offset) else {
+                return nil
             }
+            values.append(value)
+            offset = newOffset
         }
-
-        // 如果結果看起來不像分數 (應該是 4 個在 0-100000 範圍內的數字)
-        // 可能是編碼問題
-        if result.count != 4 || result.contains(where: { $0 < 0 || $0 > 200000 }) {
-            liqiLog("[LiqiParser] parsePackedInt32: unusual scores \(result), checking if data is nested message")
-
-            // 嘗試解析為嵌套消息
-            let blocks = parseProtobufBlocks(data)
-            if !blocks.isEmpty {
-                var nestedScores: [Int] = []
-                for block in blocks {
-                    if let (v, _) = parseVarint(block.data, offset: 0) {
-                        nestedScores.append(v)
-                    }
-                }
-                if nestedScores.count == 4 {
-                    liqiLog("[LiqiParser] parsePackedInt32: found nested scores \(nestedScores)")
-                    return nestedScores
-                }
-            }
-
-            // 如果還是不對，返回默認分數
-            if result.count != 4 {
-                liqiLog("[LiqiParser] parsePackedInt32: falling back to default scores")
-                return [25000, 25000, 25000, 25000]
-            }
-        }
-
-        return result
+        return values
     }
 
     // MARK: - Login Response
@@ -1088,9 +1326,21 @@ class LiqiParser {
         return result
     }
 
-    /// 解析遊戲狀態 Protobuf
+    /// 解析 `GameSnapshot`（重連時的局面快照）。
+    ///
+    /// 欄位編號依 `docs/protocol/liqi.json` 的 `.lq.GameSnapshot`：
+    /// 1=chang, 2=ju, 3=ben, 4=index_player, 5=left_tile_count,
+    /// 6=hands[repeated string], 7=doras[repeated string], 8=liqibang,
+    /// 9=players[repeated PlayerSnapshot], 10=zhenting。
+    ///
+    /// 舊版的對照是 4=tiles、5=doras、6=scores、7=liqibang——沒有一個對。
+    /// 於是這條後備路徑（重連且沒有 actions 可重放）產出的手牌是空的、
+    /// 分數是把牌字串當 varint 解出來的垃圾，而畫面上看起來只是「重連後怪怪的」。
     private func parseGameStateProto(_ blocks: [ProtobufBlock]) -> [String: Any] {
         var result: [String: Any] = [:]
+        var hands: [String] = []
+        var doras: [String] = []
+        var scores: [Int] = []
 
         for block in blocks {
             switch block.fieldId {
@@ -1100,20 +1350,60 @@ class LiqiParser {
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["ju"] = v }
             case 3: // ben
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["ben"] = v }
-            case 4: // tiles (手牌)
-                result["tiles"] = parseTileList(block.data)
-            case 5: // doras
-                result["doras"] = parseTileList(block.data)
-            case 6: // scores
-                result["scores"] = parseIntList(block.data)
-            case 7: // liqibang
+            case 4: // index_player
+                if let (v, _) = parseVarint(block.data, offset: 0) { result["indexPlayer"] = v }
+            case 5: // left_tile_count
+                if let (v, _) = parseVarint(block.data, offset: 0) { result["leftTileCount"] = v }
+            case 6: // hands（repeated string：自家手牌，一個 block 一張）
+                if let tile = block.stringValue, isTileString(tile) {
+                    hands.append(tile)
+                } else {
+                    recordFault(site: "GameSnapshot.hands",
+                                fieldId: 6,
+                                byteCount: block.data.count,
+                                reason: "不是合法的牌字串：\(hexPreview(block.data))")
+                }
+            case 7: // doras（repeated string）
+                if let tile = block.stringValue, isTileString(tile) {
+                    doras.append(tile)
+                } else {
+                    recordFault(site: "GameSnapshot.doras",
+                                fieldId: 7,
+                                byteCount: block.data.count,
+                                reason: "不是合法的牌字串：\(hexPreview(block.data))")
+                }
+            case 8: // liqibang
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["liqibang"] = v }
+            case 9: // players（repeated PlayerSnapshot；score 是 field 1）
+                if let score = parsePlayerSnapshotScore(block.data) {
+                    scores.append(score)
+                }
+            case 10: // zhenting
+                if let (v, _) = parseVarint(block.data, offset: 0) { result["zhenting"] = v != 0 }
             default:
                 break
             }
         }
 
+        // 手牌／寶牌用 `MajsoulBridge` 既有的 key 名，避免呼叫端跟著改
+        result["tiles"] = hands
+        result["doras"] = doras
+        if !scores.isEmpty { result["scores"] = scores }
+
         return result
+    }
+
+    /// 從 `PlayerSnapshot` 取點數（liqi.json `.lq.GameSnapshot.PlayerSnapshot`：1=score int32）
+    private func parsePlayerSnapshotScore(_ data: Data) -> Int? {
+        for block in parseProtobufBlocks(data) where block.fieldId == 1 {
+            if let (score, _) = parseVarint(block.data, offset: 0) { return score }
+        }
+
+        recordFault(site: "GameSnapshot.players.score",
+                    fieldId: 9,
+                    byteCount: data.count,
+                    reason: "PlayerSnapshot 缺少 score：\(hexPreview(data))")
+        return nil
     }
 
     // MARK: - Helper Methods
@@ -1172,103 +1462,19 @@ class LiqiParser {
         return op
     }
 
-    private func parseTileList(_ data: Data) -> [String] {
-        var tiles: [String] = []
-
-        let rawPreview = data.prefix(min(60, data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-        liqiLog("[LiqiParser] parseTileList: \(data.count) bytes, raw: \(rawPreview)")
-
-        // ⭐ 對於小數據（2-3 字節），優先嘗試直接解析為牌字符串
-        // 這避免了 "8s" (38 73) 被錯誤解析為 protobuf tag 的問題
-        if data.count >= 2 && data.count <= 3 {
-            if let tile = String(data: data, encoding: .utf8), isTileString(tile) {
-                liqiLog("[LiqiParser] parseTileList using direct string (small data): \(tile)")
-                return [tile]
-            }
-        }
-
-        let blocks = parseProtobufBlocks(data)
-        liqiLog("[LiqiParser] parseTileList: \(blocks.count) blocks parsed")
-
-        for block in blocks {
-            liqiLog("[LiqiParser] parseTileList block: fieldId=\(block.fieldId), wireType=\(block.wireType), size=\(block.data.count)")
-            if let tile = block.stringValue, isTileString(tile) {
-                tiles.append(tile)
-                liqiLog("[LiqiParser] parseTileList found tile: \(tile)")
-            }
-        }
-
-        // 如果沒有嵌套塊，嘗試直接解析字符串
-        if tiles.isEmpty, let tile = String(data: data, encoding: .utf8), isTileString(tile) {
-            liqiLog("[LiqiParser] parseTileList using direct string: \(tile)")
-            return [tile]
-        }
-
-        // 如果還是空的，嘗試另一種解析方式（tile 可能是連續的字符串）
-        if tiles.isEmpty {
-            // 嘗試將數據按照 2-3 字節的字符串解析
-            var offset = 0
-            while offset < data.count {
-                // 檢查是否是有效的牌字符串開頭 (數字 1-9 或字母)
-                let b = data[offset]
-                if (b >= 0x31 && b <= 0x39) || b == 0x30 { // '0'-'9'
-                    // 可能是牌字符串
-                    if offset + 1 < data.count {
-                        let suit = data[offset + 1]
-                        if suit == 0x6d || suit == 0x70 || suit == 0x73 || suit == 0x7a { // 'm', 'p', 's', 'z'
-                            if offset + 2 < data.count && data[offset + 2] == 0x72 { // 'r' (red five)
-                                tiles.append(String(format: "%c%c%c", b, suit, data[offset + 2]))
-                                offset += 3
-                            } else {
-                                tiles.append(String(format: "%c%c", b, suit))
-                                offset += 2
-                            }
-                            continue
-                        }
-                    }
-                }
-                offset += 1
-            }
-            if !tiles.isEmpty {
-                liqiLog("[LiqiParser] parseTileList using byte scan: \(tiles)")
-            }
-        }
-
-        liqiLog("[LiqiParser] parseTileList result: \(tiles)")
-        return tiles
-    }
+    // `parseTileList` 已於 p4-1 刪除。
+    //
+    // 它做三層 heuristic：短 bytes 直接當字串 → 拆 protobuf blocks → 逐 byte 掃 ASCII
+    // 找 `[0-9][mpsz]`。三層都是在猜格式，而 `docs/protocol/liqi.json` 早就寫清楚
+    // 這些欄位是 `repeated string`——一個 block 就是一張牌。逐 byte 掃描最糟：
+    // 任何一段二進位資料都可能「掃出」幾張牌，掃出來的東西與真手牌無法區分。
+    // 現在 tiles／hands／doras 一律照 schema 逐 block 解，解不出來就記 fault。
 
     /// 檢查字符串是否為有效的牌表示
     private func isTileString(_ str: String) -> Bool {
         // 有效格式: [0-9][mps], [0-9][mps]r, [1-7]z
         let pattern = "^[0-9][mpsz]r?$"
         return str.range(of: pattern, options: .regularExpression) != nil
-    }
-
-    private func parseIntList(_ data: Data) -> [Int] {
-        var values: [Int] = []
-        var offset = 0
-
-        while offset < data.count {
-            if let (value, newOffset) = parseVarint(data, offset: offset) {
-                values.append(value)
-                offset = newOffset
-            } else {
-                break
-            }
-        }
-
-        // 處理 packed repeated
-        if values.isEmpty {
-            let blocks = parseProtobufBlocks(data)
-            for block in blocks {
-                if let (v, _) = parseVarint(block.data, offset: 0) {
-                    values.append(v)
-                }
-            }
-        }
-
-        return values
     }
 
     private func blocksToDict(_ blocks: [ProtobufBlock]) -> [String: Any] {
