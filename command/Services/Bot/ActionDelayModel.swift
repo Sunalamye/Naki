@@ -45,10 +45,16 @@ struct ActionDelayModel {
     ///
     /// 真人偶爾會明顯停久一點。沒有這個尾巴，時間分布會是一個乾淨的
     /// 均勻區間——那本身就是可辨識的特徵。
-    static let pauseProbability = 0.12
+    ///
+    /// 2026-08-03 從 0.12 調到 0.06：使用者回報偶發的 3–4 秒停頓讓人以為卡住、
+    /// 提前手動點。降低機率讓長停頓更罕見，但保留尾巴（防偵測）。
+    static let pauseProbability = 0.06
 
     /// 思考停頓額外加多久
-    static let pauseRange = Range(low: 1.5, high: 4.0)
+    ///
+    /// 2026-08-03 上限從 4.0 收到 2.5：配合上面降低機率，把「感覺卡住」的高尾壓掉，
+    /// 同時仍保留 1.5–2.5s 的思考尾巴。
+    static let pauseRange = Range(low: 1.5, high: 2.5)
 
     /// 驗證模式的倍率
     ///
