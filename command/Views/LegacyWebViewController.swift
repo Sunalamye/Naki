@@ -60,9 +60,19 @@ struct LegacyNakiWebView: NSViewRepresentable {
         let configuration = WKWebViewConfiguration()
         let userContentController = WKUserContentController()
 
-        // 注入 WebSocket 攔截腳本
-        let websocketScript = WebSocketInterceptor.createUserScript()
-        userContentController.addUserScript(websocketScript)
+        // 注入 WebSocket 攔截腳本。
+        // nil = 模組載入失敗且沒有 fallback，一律不注入；失敗狀態記在
+        // `JSInjectionState.shared`，由 StatusBar／橫幅與 /status 呈現。
+        if let websocketScript = WebSocketInterceptor.createUserScript() {
+            userContentController.addUserScript(websocketScript)
+        } else {
+            // 這裡還在 make*View 的更新週期內，直接改 @Observable 會撞
+            // 「Modifying state during view update」；延到下一個 runloop。
+            let vm = viewModel
+            DispatchQueue.main.async {
+                vm?.statusMessage = "錯誤：JavaScript 注入失敗，Naki 無法讀牌局也無法送出動作"
+            }
+        }
 
         // ⭐ 關鍵：註冊 Message Handler 來接收 JavaScript 的 WebSocket 消息
         userContentController.add(coordinator.websocketHandler, name: "websocketBridge")
@@ -121,9 +131,19 @@ struct LegacyNakiWebView: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         let userContentController = WKUserContentController()
 
-        // 注入 WebSocket 攔截腳本
-        let websocketScript = WebSocketInterceptor.createUserScript()
-        userContentController.addUserScript(websocketScript)
+        // 注入 WebSocket 攔截腳本。
+        // nil = 模組載入失敗且沒有 fallback，一律不注入；失敗狀態記在
+        // `JSInjectionState.shared`，由 StatusBar／橫幅與 /status 呈現。
+        if let websocketScript = WebSocketInterceptor.createUserScript() {
+            userContentController.addUserScript(websocketScript)
+        } else {
+            // 這裡還在 make*View 的更新週期內，直接改 @Observable 會撞
+            // 「Modifying state during view update」；延到下一個 runloop。
+            let vm = viewModel
+            DispatchQueue.main.async {
+                vm?.statusMessage = "錯誤：JavaScript 注入失敗，Naki 無法讀牌局也無法送出動作"
+            }
+        }
 
         // ⭐ 關鍵：註冊 Message Handler 來接收 JavaScript 的 WebSocket 消息
         userContentController.add(coordinator.websocketHandler, name: "websocketBridge")

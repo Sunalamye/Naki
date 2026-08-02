@@ -112,9 +112,11 @@ class WebViewModel: WebViewModelProtocol {
       userContentController.add(coordinator.websocketHandler, name: "websocketBridge")
     }
 
-    // 注入所有 JavaScript 模組（WebSocket 攔截、Shimmer 效果等）
-    let websocketScript = WebSocketInterceptor.createUserScript()
-    userContentController.addUserScript(websocketScript)
+    // 注入所有 JavaScript 模組（WebSocket 攔截、WebGL 高亮）。
+    // nil = 模組載入失敗且沒有 fallback：不注入任何東西，改在下面把失敗掛到 UI。
+    if let websocketScript = WebSocketInterceptor.createUserScript() {
+      userContentController.addUserScript(websocketScript)
+    }
 
     configuration.userContentController = userContentController
 
@@ -168,7 +170,13 @@ class WebViewModel: WebViewModelProtocol {
     // 監聽導航事件
     observeNavigations()
 
-    statusMessage = "準備就緒 (全自動模式)"
+    // JS 注入失敗時不要顯示「準備就緒」——那正是舊 fallback 最危險的地方：
+    // 看起來一切正常，實際上一個動作都送不出去。
+    if let failure = JSInjectionState.shared.report.failureSummary {
+      statusMessage = "錯誤：JavaScript 注入失敗，Naki 無法讀牌局也無法送出動作（\(failure)）"
+    } else {
+      statusMessage = "準備就緒 (全自動模式)"
+    }
   }
 
   /// 監聽導航事件

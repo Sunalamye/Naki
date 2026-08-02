@@ -52,6 +52,9 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .top) {
+            JSInjectionFailureBanner()
+        }
         .safeAreaInset(edge: .bottom) {
             StatusBar()
         }
@@ -198,6 +201,9 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
             .ignoresSafeArea(edges: .bottom)
+            .safeAreaInset(edge: .top) {
+                JSInjectionFailureBanner()
+            }
             .navigationTitle("Naki")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -565,6 +571,51 @@ struct AdvancedSettingsSheet: View {
             #endif
         }
         .padding()
+    }
+}
+
+// MARK: - JS 注入失敗橫幅
+
+/// JavaScript 模組載入失敗時的常駐紅色橫幅。
+///
+/// 為什麼要獨立於 `StatusBar`：`statusMessage` 會被載入、連線、Bot 建立等事件
+/// 一路覆蓋掉，錯誤看一眼就消失。而注入失敗是**不會自己好**的狀態
+/// ——在這個狀態下 Naki 收不到任何封包、送不出任何動作，
+/// 側欄的推薦、`/game/*`、`/bot/*` 全部不可信，所以必須一直掛著。
+///
+/// 資料來源是 `JSInjectionState.shared`（`@Observable`），
+/// 由 `WebSocketInterceptor.createUserScript()` 在建立 WebView 時寫入。
+struct JSInjectionFailureBanner: View {
+
+    var body: some View {
+        if let summary = JSInjectionState.shared.report.failureSummary {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .imageScale(.large)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("JavaScript 注入失敗：Naki 讀不到牌局，也送不出任何動作")
+                        .font(.headline)
+                    Text(summary)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Text("這不是暫時性錯誤，重新載入頁面不會修好；請重新安裝／重新建置 App。")
+                        .font(.caption)
+                        .opacity(0.9)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("js-injection-failure-banner")
+            .accessibilityLabel("JavaScript 注入失敗")
+            .accessibilityValue(summary)
+        }
     }
 }
 

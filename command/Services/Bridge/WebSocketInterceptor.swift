@@ -7,13 +7,149 @@
 //  Updated: 2025/12/01 - 新增自動打牌支援
 //  Updated: 2025/12/03 - 重構為從外部 JS 檔案載入
 //  Updated: 2025/12/04 - 支援 WebPage API (macOS 26.0+)
+//  Updated: 2026/08/02 - 刪除 fallback inlineScript，載入失敗改為 fail loud
 //
 
 import Foundation
+import Observation
 import WebKit
 import os.log
 
 // 使用 LogManager 的 wsLog 函式
+
+// MARK: - JS 模組載入失敗模型
+
+/// 單一 JS 模組載不進來的原因。
+///
+/// 分三種而不是一個 bool，因為處置完全不同：
+/// - `notFound`：幾乎都是打包漏檔（`Naki.xcodeproj` 的 `membershipExceptions`
+///   是**包含清單**，新增的 resource 沒加就不會進 bundle）。
+/// - `unreadable`：檔在但讀不出來（權限／編碼／IO）。
+/// - `empty`：讀得到但內容是空的。這種最陰險——注入「成功」，頁面上卻什麼都沒有。
+nonisolated enum JSModuleFailureReason: String, Sendable {
+    case notFound = "not_found"
+    case unreadable = "unreadable"
+    case empty = "empty"
+
+    /// 給人看的說明
+    var text: String {
+        switch self {
+        case .notFound: return "Bundle 內找不到檔案"
+        case .unreadable: return "檔案存在但讀取失敗"
+        case .empty: return "檔案內容為空"
+        }
+    }
+}
+
+/// 一個模組的載入失敗紀錄
+nonisolated struct JSModuleFailure: Error, Sendable, Equatable {
+    /// 模組名（不含 `.js`）
+    let module: String
+    let reason: JSModuleFailureReason
+    /// 底層錯誤描述；只有 `unreadable` 會有
+    let detail: String?
+
+    init(module: String, reason: JSModuleFailureReason, detail: String? = nil) {
+        self.module = module
+        self.reason = reason
+        self.detail = detail
+    }
+
+    /// 單行人類可讀說明
+    var text: String {
+        if let detail, !detail.isEmpty {
+            return "\(module).js：\(reason.text)（\(detail)）"
+        }
+        return "\(module).js：\(reason.text)"
+    }
+
+    /// `/status` 用的機械可判讀欄位
+    var payload: [String: String] {
+        var dict = ["module": "\(module).js", "reason": reason.rawValue]
+        if let detail, !detail.isEmpty { dict["detail"] = detail }
+        return dict
+    }
+}
+
+/// 組注入腳本的結果。
+///
+/// 沒有「部分成功」這個選項：只要有一個模組缺，就整批不注入。
+/// 舊版是「載到幾個算幾個，全掛才退回內嵌腳本」，於是
+/// `naki-core` 有、`naki-websocket` 沒有的情況會得到一個
+/// 「會高亮但送不出任何動作」的半套 App，而 UI 完全看不出來。
+nonisolated enum JSInjectionOutcome: Sendable {
+    case ready(source: String, modules: [String])
+    case failed(loaded: [String], failures: [JSModuleFailure])
+}
+
+/// 注入狀態快照（可安全跨 isolation 傳遞）
+nonisolated struct JSInjectionReport: Sendable {
+    /// 是否已經嘗試過建立注入腳本（false = WebView 還沒建起來）
+    let attempted: Bool
+    /// 成功載入的模組
+    let loadedModules: [String]
+    /// 失敗的模組
+    let failures: [JSModuleFailure]
+
+    static let notAttempted = JSInjectionReport(attempted: false, loadedModules: [], failures: [])
+
+    /// 注入是否失敗（沒嘗試過不算失敗）
+    var isFailed: Bool { attempted && !failures.isEmpty }
+
+    /// 給 UI 的單行摘要；沒失敗回 nil
+    var failureSummary: String? {
+        guard isFailed else { return nil }
+        return failures.map(\.text).joined(separator: "；")
+    }
+
+    /// `get_status` / `GET /status` 用的欄位
+    var statusPayload: [String: Any] {
+        var payload: [String: Any] = [
+            "jsInjectionFailed": isFailed,
+            "jsInjectionAttempted": attempted,
+            "jsModulesLoaded": loadedModules
+        ]
+        if isFailed {
+            payload["jsInjectionFailures"] = failures.map(\.payload)
+            payload["jsInjectionNote"] =
+                "JavaScript 注入腳本沒有建立成功，且沒有 fallback。"
+                + "Naki 不會收到任何 WebSocket 封包，也送不出任何 Liqi 動作；"
+                + "此時所有 game_* / bot_* / room_* / lobby_* 工具的結果都不可信。"
+        }
+        return payload
+    }
+}
+
+/// 注入狀態的唯一真相來源。
+///
+/// `@Observable`：UI 要能在載入失敗時立刻掛出紅色橫幅，而不是等下一次狀態更新。
+@Observable
+final class JSInjectionState {
+
+    static let shared = JSInjectionState()
+
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 會給這個 class 一個 isolated deinit，
+    /// 單元測試釋放它時會 SIGABRT（見 CLAUDE.md）。singleton 實務上不會釋放，
+    /// 但測試可能建臨時實例，所以照樣補上。
+    nonisolated deinit { }
+
+    private(set) var report: JSInjectionReport = .notAttempted
+
+    /// 記錄一次注入嘗試的結果
+    func record(_ outcome: JSInjectionOutcome) {
+        switch outcome {
+        case .ready(_, let modules):
+            report = JSInjectionReport(attempted: true, loadedModules: modules, failures: [])
+        case .failed(let loaded, let failures):
+            report = JSInjectionReport(attempted: true, loadedModules: loaded, failures: failures)
+        }
+    }
+
+    /// 回到「還沒嘗試過」（測試用）
+    func reset() {
+        report = .notAttempted
+    }
+}
 
 // MARK: - WebSocket Interceptor
 
@@ -29,170 +165,115 @@ class WebSocketInterceptor {
     /// 注入腳本是 `forMainFrameOnly: false`，每個 iframe 都要 parse 一次，留著只有成本。
     ///
     /// 順序仍然重要：`naki-websocket` 會取 `naki-core` 的 base64／sendToSwift。
-    private static let jsModules = [
+    static let jsModules = [
         "naki-core",
         "naki-websocket"
     ]
 
-    /// 從 Bundle 載入 JavaScript 文件
-    private static func loadJavaScript(named filename: String) -> String? {
-        // 嘗試從 Resources/JavaScript 子目錄載入
-        if let url = Bundle.main.url(forResource: filename, withExtension: "js", subdirectory: "Resources/JavaScript") {
-            return try? String(contentsOf: url, encoding: .utf8)
+    /// 從 Bundle 載入單一 JavaScript 模組。
+    ///
+    /// 舊版是 `try?` + 回 `nil`，於是「檔不存在」與「檔在但讀不出來」長得一模一樣，
+    /// 而後者代表打包是對的、環境壞了——兩者要查的地方完全不同。
+    ///
+    /// - Throws: `JSModuleFailure`
+    static func loadJavaScript(named filename: String, in bundle: Bundle = .main) throws -> String {
+        // 先找 Resources/JavaScript 子目錄，再退回 bundle 根目錄
+        let url = bundle.url(forResource: filename, withExtension: "js", subdirectory: "Resources/JavaScript")
+            ?? bundle.url(forResource: filename, withExtension: "js")
+
+        guard let url else {
+            throw JSModuleFailure(module: filename, reason: .notFound)
         }
-        // 嘗試直接從 bundle 根目錄載入
-        if let url = Bundle.main.url(forResource: filename, withExtension: "js") {
-            return try? String(contentsOf: url, encoding: .utf8)
+
+        let source: String
+        do {
+            source = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            throw JSModuleFailure(
+                module: filename,
+                reason: .unreadable,
+                detail: "\(url.lastPathComponent): \(error.localizedDescription)")
         }
-        wsLog("[JS] Failed to find \(filename).js in bundle")
-        return nil
+
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw JSModuleFailure(module: filename, reason: .empty)
+        }
+        return source
     }
 
-    /// 注入到網頁的 JavaScript 代碼（從外部文件載入，回退到內嵌腳本）
-    static var injectionScript: String {
-        var scripts: [String] = []
+    /// 組出要注入的腳本。全有或全無——任何一個模組失敗就不注入。
+    static func buildInjection(modules: [String] = jsModules, in bundle: Bundle = .main) -> JSInjectionOutcome {
+        guard !modules.isEmpty else {
+            // 不可能在正常組態下發生；真的發生就是有人把 jsModules 清空了，
+            // 這同樣是「什麼都沒注入」，必須走失敗路徑而不是回一個空腳本。
+            return .failed(
+                loaded: [],
+                failures: [JSModuleFailure(module: "(none)", reason: .notFound,
+                                           detail: "沒有列出任何 JS 模組")])
+        }
 
-        for module in jsModules {
-            if let script = loadJavaScript(named: module) {
-                scripts.append("// === \(module).js ===")
-                scripts.append(script)
-                wsLog("[JS] Loaded module: \(module).js")
-            } else {
-                wsLog("[JS] Warning: Could not load \(module).js")
+        var sources: [String] = []
+        var loaded: [String] = []
+        var failures: [JSModuleFailure] = []
+
+        for module in modules {
+            do {
+                let source = try loadJavaScript(named: module, in: bundle)
+                sources.append("// === \(module).js ===")
+                sources.append(source)
+                loaded.append(module)
+            } catch let failure as JSModuleFailure {
+                failures.append(failure)
+            } catch {
+                failures.append(
+                    JSModuleFailure(module: module, reason: .unreadable, detail: "\(error)"))
             }
         }
 
-        // 如果成功載入任何模組，使用外部文件
-        if !scripts.isEmpty {
-            wsLog("[JS] Using external JavaScript modules (\(scripts.count / 2) loaded)")
-            return scripts.joined(separator: "\n\n")
+        guard failures.isEmpty, !loaded.isEmpty else {
+            return .failed(loaded: loaded, failures: failures)
         }
-
-        // 回退：使用內嵌腳本
-        wsLog("[JS] Warning: No JavaScript modules loaded, using fallback inline script")
-        return inlineScript
+        return .ready(source: sources.joined(separator: "\n\n"), modules: loaded)
     }
 
-    /// 內嵌腳本（回退用）- 精簡版，僅包含核心 WebSocket 攔截
-    /// 完整功能由外部 JS 模組提供
-    private static var inlineScript: String {
-        """
-        (function() {
-            'use strict';
+    /// 創建用於注入的 `WKUserScript`。
+    ///
+    /// **回傳 nil 代表注入失敗，而且沒有 fallback。**
+    /// 舊版在這裡會退回一份內嵌的簡化攔截器：它有自己的 majsoul URL 判定、
+    /// socketId 從 0 起算（模組版從 1），而且**沒有 `sendRaw`**。
+    /// 一旦踩到，App 表象只是「不會自動打牌」——沒有任何錯誤、沒有 UI 提示，
+    /// 而所有 Liqi 動作（打牌、副露、和牌、開房、匹配）全部靜默失效。
+    /// 半套的 fallback 比沒有 fallback 危險，所以整段刪掉，改成大聲失敗。
+    ///
+    /// 呼叫端必須處理 nil：不要注入、並讓失敗在 UI 上看得見
+    /// （`JSInjectionState.shared.report` 已同步更新，`/status` 會帶 `jsInjectionFailed`）。
+    static func createUserScript() -> WKUserScript? {
+        let outcome = buildInjection()
+        JSInjectionState.shared.record(outcome)
 
-            // 避免重複注入
-            if (window.__nakiWebSocketHooked) return;
-            window.__nakiWebSocketHooked = true;
+        switch outcome {
+        case .ready(let source, let modules):
+            wsLog("[JS] 注入 \(modules.count) 個模組：\(modules.map { "\($0).js" }.joined(separator: ", "))")
+            return WKUserScript(
+                source: source,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            )
 
-            const OriginalWebSocket = window.WebSocket;
-            let socketCounter = 0;
-            window.__nakiMajsoulSockets = {};
-
-            // Base64 編碼
-            function arrayBufferToBase64(buffer) {
-                const bytes = new Uint8Array(buffer);
-                let binary = '';
-                for (let i = 0; i < bytes.byteLength; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                return btoa(binary);
+        case .failed(let loaded, let failures):
+            let detail = failures.map(\.text).joined(separator: "；")
+            wsLog("[JS] ❌ JavaScript 注入中止：\(detail)", level: .event)
+            wsLog("[JS] ❌ 沒有 fallback：Naki 不會收到任何 WebSocket 封包，也送不出任何 Liqi 動作。",
+                  level: .event)
+            if !loaded.isEmpty {
+                wsLog("[JS] 已載入但一併放棄的模組：\(loaded.joined(separator: ", "))"
+                    + "（部分注入會產生「能高亮但送不出動作」的半套狀態，故整批不注入）",
+                      level: .event)
             }
-
-            function blobToBase64(blob, callback) {
-                const reader = new FileReader();
-                reader.onloadend = function() {
-                    callback(reader.result.split(',')[1]);
-                };
-                reader.readAsDataURL(blob);
-            }
-
-            // 發送到 Swift
-            function sendToSwift(type, data) {
-                try {
-                    if (window.webkit?.messageHandlers?.websocketBridge) {
-                        window.webkit.messageHandlers.websocketBridge.postMessage({
-                            type: type, data: data, timestamp: Date.now()
-                        });
-                    }
-                } catch (e) {}
-            }
-
-            // WebSocket 攔截
-            window.WebSocket = function(url, protocols) {
-                const ws = protocols !== undefined
-                    ? new OriginalWebSocket(url, protocols)
-                    : new OriginalWebSocket(url);
-
-                const socketId = socketCounter++;
-                const isMajsoul = url.includes('majsoul') || url.includes('maj-soul') ||
-                                  url.includes('mahjongsoul') || url.includes('mjs') ||
-                                  url.includes('gateway');
-
-                if (isMajsoul) {
-                    console.log('[Naki] Majsoul WebSocket:', url);
-                    sendToSwift('websocket_open', { socketId: socketId, url: url });
-                    window.__nakiMajsoulSockets[socketId] = ws;
-
-                    ws.addEventListener('open', () => sendToSwift('websocket_connected', { socketId }));
-                    ws.addEventListener('close', (e) => {
-                        delete window.__nakiMajsoulSockets[socketId];
-                        sendToSwift('websocket_closed', { socketId, code: e.code, reason: e.reason });
-                    });
-                    ws.addEventListener('error', () => sendToSwift('websocket_error', { socketId }));
-
-                    ws.addEventListener('message', function(event) {
-                        try {
-                            if (event.data instanceof ArrayBuffer) {
-                                sendToSwift('websocket_message', {
-                                    socketId, direction: 'receive',
-                                    data: arrayBufferToBase64(event.data), dataType: 'arraybuffer'
-                                });
-                            } else if (event.data instanceof Blob) {
-                                blobToBase64(event.data, (b64) => {
-                                    sendToSwift('websocket_message', {
-                                        socketId, direction: 'receive', data: b64, dataType: 'blob'
-                                    });
-                                });
-                            }
-                        } catch (e) {}
-                    });
-
-                    const originalSend = ws.send.bind(ws);
-                    ws.__originalSend = originalSend;
-                    ws.send = function(data) {
-                        try {
-                            if (data instanceof ArrayBuffer) {
-                                sendToSwift('websocket_message', {
-                                    socketId, direction: 'send',
-                                    data: arrayBufferToBase64(data), dataType: 'arraybuffer'
-                                });
-                            }
-                        } catch (e) {}
-                        return originalSend(data);
-                    };
-                }
-                return ws;
-            };
-
-            window.WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
-            window.WebSocket.OPEN = OriginalWebSocket.OPEN;
-            window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
-            window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
-            window.WebSocket.prototype = OriginalWebSocket.prototype;
-
-            console.log('[Naki] WebSocket interceptor installed (fallback mode)');
-            sendToSwift('interceptor_ready', { version: '4.0', fallback: true });
-        })();
-        """
-    }
-
-    /// 創建用於注入的 WKUserScript
-    static func createUserScript() -> WKUserScript {
-        return WKUserScript(
-            source: injectionScript,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: false
-        )
+            systemLog("[JS] ❌ JavaScript 注入失敗：\(detail)。請檢查 App bundle 是否含 "
+                + "Resources/JavaScript/*.js（Xcode membershipExceptions 是包含清單）。")
+            return nil
+        }
     }
 }
 

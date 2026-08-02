@@ -26,8 +26,12 @@ struct GetStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
+        // JS 注入失敗是「所有其他欄位都不可信」的前置條件，所以放在 status 裡，
+        // 而不是等使用者自己去翻 log。沒有 fallback 攔截器可以掩蓋這件事。
+        let injection = await JSInjectionState.shared.report
+
         // 帶上檔案日誌路徑：`/logs` 只回記憶體裡的近期條目，跨重啟或回查上一局要直接讀檔。
-        return [
+        var payload: [String: Any] = [
             "status": "running",
             "port": context.serverPort,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
@@ -40,6 +44,8 @@ struct GetStatusTool: MCPTool {
             "eventLog": await LogManager.shared.eventLogPath,
             "categoryLogs": await LogManager.shared.categoryLogPaths
         ]
+        payload.merge(injection.statusPayload) { _, new in new }
+        return payload
     }
 }
 
