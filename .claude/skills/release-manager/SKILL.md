@@ -6,116 +6,74 @@ allowed-tools: Read, Glob, Grep, Write, Edit, Bash
 
 # Release Manager Skill
 
-Base directory: {baseDir}
+把 Naki 發到 GitHub（build → package → tag → push → release）。**2026-08-02 硬化版**：
+把上一次真實發布踩到的坑固化進來，之後照這份跑就不用重試。
 
-## Quick Release
-
-```bash
-# 完整發布腳本 (推薦)
-bash {baseDir}/scripts/release.sh <version>
-# Example: bash {baseDir}/scripts/release.sh 2.3.1
-```
-
-## Release Workflow
-
-```
-1. Generate Release Notes → git log $PREV_TAG..HEAD
-2. Build App             → xcodebuild -configuration Release
-3. Create Packages       → DMG + ZIP in dist/
-4. Update Version        → README.md, CLAUDE.md, project.pbxproj
-5. Create Git Tag        → git tag -a "v$VERSION"
-6. Push to Remote        → git push origin main && git push --tags
-7. GitHub Release        → gh release create with assets
-```
-
-## Step-by-Step Commands
-
-### 1. Build Release App
+## 一句話流程
 
 ```bash
-xcodebuild clean build \
-  -project Naki.xcodeproj \
-  -scheme Naki \
-  -configuration Release \
-  -derivedDataPath ./build \
-  CODE_SIGN_IDENTITY="-" \
-  CODE_SIGNING_REQUIRED=NO
+# 先過「發布前決策 gate」（見下），再跑：
+bash .claude/skills/release-manager/scripts/release.sh <version> --yes
+# version 不帶 v，例如 2.7.1
 ```
 
-### 2. Create Packages
+腳本會 preflight（工作樹乾淨、版本沒撞 tag、gh 授權、MortalSwift pin 提示）→ build →
+package（DMG 含 /Applications 捷徑）→ bump 三處版本 → commit → tag → push origin main + tag →
+gh release。**push origin main 要用戶明示授權**（全域規則）；`--yes` 只跳互動確認，不代表授權 push。
+
+## 發布前決策 gate（腳本不做，要先想清楚）
+
+### 1. 版本號（semver）
+
+`git describe --tags` 看最新。**不能重用已存在的 tag**（腳本會擋）。
+PATCH＝bug 修復（2.7.0→2.7.1）｜MINOR＝新功能／大重構但對外相容（2.6.0→2.7.0）｜MAJOR＝不相容。
+
+### 2. ⚠️ MortalSwift 依賴要不要一起發（最容易漏，漏了 release 會靜默缺料）
+
+**Naki 用 `XCRemoteSwiftPackageReference` 綁 MortalSwift（remote git tag）。**
+MortalSwift 有本地未 push 的 commit／tag 時，Naki 的 Release build 會用 **remote 舊版**——
+AI 修正（紅五 decode、振聽…）**不在 binary 裡，而且不報錯**。上次就是這個坑。
+
+要包含 MortalSwift 修正，發 Naki **之前**先做：
 
 ```bash
-# Locate built app
-APP_PATH=$(find ./build -name "Naki.app" -type d | head -1)
-
-# Create dist directory
-mkdir -p dist
-
-# ZIP
-cd "$(dirname "$APP_PATH")" && zip -r -y ../../../dist/Naki.zip Naki.app && cd -
-
-# DMG
-mkdir -p dmg_temp && cp -R "$APP_PATH" dmg_temp/
-hdiutil create -volname "Naki" -srcfolder dmg_temp -ov -format UDZO dist/Naki.dmg
-rm -rf dmg_temp
+cd ../MortalSwift
+git ls-remote --tags origin                  # remote 有沒有那個 tag
+git push origin <branch>:master              # 確認是 ff、8 commit 沒動 .github（別洗掉 CI）
+git push origin v<x.y.z>
+cd ../Naki
+# re-pin：改 minimumVersion（只改 MortalSwift 那段，別動 MCPKit）→ 重解 → 提交 Package.resolved
+xcodebuild -resolvePackageDependencies -project Naki.xcodeproj -scheme Naki
+# 確認 Package.resolved 的 mortalswift 指到新版；它是 tracked（已從 .gitignore 移出）
 ```
 
-### 3. Update Version & Tag
+腳本 preflight 會印目前 pin 的 revision 提醒你。不確定就先做完這步再跑 release.sh。
 
-```bash
-VERSION="2.3.1"  # Set your version
+### 3. push 目標
 
-# Update version in files
-sed -i '' "s/Version-[0-9.]*-green/Version-$VERSION-green/" README.md
-sed -i '' "s/| Version | [0-9.]* |/| Version | $VERSION |/" CLAUDE.md
+`git remote -v` 確認 `origin = git@github.com:Sunalamye/Naki.git`。`gh auth status` 要是 Sunalamye。
+NEVER force push、NEVER 推別人的 main。
 
-# Commit and tag
-git add README.md CLAUDE.md Naki.xcodeproj/project.pbxproj
-git commit -m "chore: Release v$VERSION"
-git tag -a "v$VERSION" -m "Release v$VERSION"
-git push origin main && git push origin "v$VERSION"
-```
+## 上次踩到的坑（都已修進 release.sh）
 
-### 4. GitHub Release
-
-```bash
-gh release create "v$VERSION" \
-  --title "Naki v$VERSION" \
-  --generate-notes \
-  dist/Naki.dmg dist/Naki.zip
-```
-
-## Version Guidelines (Semantic Versioning)
-
-| Type | When | Example |
-|------|------|---------|
-| PATCH | Bug 修復、小調整 | 2.3.0 → 2.3.1 |
-| MINOR | 新功能、新工具 | 2.3.0 → 2.4.0 |
-| MAJOR | 架構重構、不相容變更 | 2.3.0 → 3.0.0 |
-
-## Pre-release Checklist
-
-- [ ] All changes committed: `git status`
-- [ ] Build succeeds without errors
-- [ ] On correct branch (usually `main`)
-- [ ] Previous tag exists: `git describe --tags --abbrev=0`
-
-## Resource Index
-
-| Resource | Purpose | Load When |
-|----------|---------|-----------|
-| `{baseDir}/scripts/release.sh` | 完整發布腳本 | 執行完整發布 |
-| `{baseDir}/references/reference.md` | 版本位置、構建配置詳情 | 需要詳細參數 |
+| 坑 | 症狀 | 修法 |
+|----|------|------|
+| 舊 sed pattern 對不上檔案 | 版本**靜默沒改**（badge 是小寫 `version-`、CLAUDE.md 是 `\| App version \|`） | pattern 對齊實際檔；`MARKETING_VERSION` 有 12 處 |
+| MortalSwift 依賴沒處理 | release binary 缺 AI 修正、無報錯 | 見決策 gate 2；preflight 印 pin |
+| DMG 沒有 /Applications | 拖不進去 | `ln -s /Applications` 進 DMG 來源 |
+| 版本撞已存在 tag | tag 失敗到一半 | preflight `git rev-parse v$VERSION` 先擋 |
+| `read -p` 互動 | agent 跑不動 | `--yes` |
+| 最終 URL 寫錯帳號 | 貼錯連結 | `$REPO=Sunalamye/Naki` |
+| Package.resolved 沒 commit | clean clone 拿舊 revision | 腳本 `git add` 有含它 |
+| 舊 instance 佔 8765 | 新 build 退到 8766 | 重啟前 `pkill -x Naki` |
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| Build fails | `xcodebuild -project Naki.xcodeproj -list` |
-| DMG fails | Check disk space: `df -h` |
-| gh not authorized | `gh auth login` |
-| Tag exists | `git tag -d "v$VERSION"` then retry |
+- Build fails → `xcodebuild -project Naki.xcodeproj -list`
+- gh not authorized → `gh auth login`（Sunalamye 帳號）
+- Tag exists → 換版本號，別 `-d` 刪已 push 的 tag
+- release binary 少 AI 修正 → 漏了決策 gate 2；push MortalSwift + re-pin 再重發
 
 ---
 
-**Release Manager v1.1** - Streamlined Release Workflow
+**Release Manager v2.0** — 硬化版，MortalSwift-dependency-first + 上次踩坑固化
