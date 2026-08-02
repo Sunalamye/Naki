@@ -8,7 +8,6 @@
 
 import Foundation
 import MCPKit
-import MCPWebKit
 
 // MARK: - Naki MCP Context Protocol
 

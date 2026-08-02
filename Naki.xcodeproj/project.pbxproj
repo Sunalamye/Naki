@@ -9,8 +9,8 @@
 /* Begin PBXBuildFile section */
 		EC3077B12EDDAFF200216E0C /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC3076D42EDBE64400216E0C /* MortalSwift */; };
 		ECAAD5222EE1BBB50056F965 /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = ECAAD5212EE1BBB50056F965 /* MortalSwift */; };
-		ECAADCF72EE57B3F0056F965 /* MCPWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF62EE57B3F0056F965 /* MCPWebKit */; };
-		ECAADCF92EE57B420056F965 /* MCPWebKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF82EE57B420056F965 /* MCPWebKit */; };
+		ECAADCF72EE57B3F0056F965 /* MCPKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF62EE57B3F0056F965 /* MCPKit */; };
+		ECAADCF92EE57B420056F965 /* MCPKit in Frameworks */ = {isa = PBXBuildFile; productRef = ECAADCF82EE57B420056F965 /* MCPKit */; };
 		ECAADDE82EE586F00056F965 /* MortalSwift in Frameworks */ = {isa = PBXBuildFile; productRef = EC3077AF2EDC6A1600216E0C /* MortalSwift */; };
 /* End PBXBuildFile section */
 
@@ -106,6 +106,7 @@
 				Services/MCP/Tools/RoomTools.swift,
 				Services/MCP/Tools/SystemTools.swift,
 				Services/MCP/Tools/UITools.swift,
+				Services/MCP/WebViewMCPContext.swift,
 				ViewModels/GameStateManager.swift,
 				ViewModels/LegacyWebViewModel.swift,
 				ViewModels/WebViewModel.swift,
@@ -201,6 +202,7 @@
 				Services/MCP/Tools/RoomTools.swift,
 				Services/MCP/Tools/SystemTools.swift,
 				Services/MCP/Tools/UITools.swift,
+				Services/MCP/WebViewMCPContext.swift,
 				ViewModels/GameStateManager.swift,
 				ViewModels/LegacyWebViewModel.swift,
 				ViewModels/WebViewModel.swift,
@@ -291,7 +293,7 @@
 			files = (
 				ECAADDE82EE586F00056F965 /* MortalSwift in Frameworks */,
 				EC3077B12EDDAFF200216E0C /* MortalSwift in Frameworks */,
-				ECAADCF72EE57B3F0056F965 /* MCPWebKit in Frameworks */,
+				ECAADCF72EE57B3F0056F965 /* MCPKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -300,7 +302,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				ECAAD5222EE1BBB50056F965 /* MortalSwift in Frameworks */,
-				ECAADCF92EE57B420056F965 /* MCPWebKit in Frameworks */,
+				ECAADCF92EE57B420056F965 /* MCPKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -392,7 +394,7 @@
 			packageProductDependencies = (
 				EC3076D42EDBE64400216E0C /* MortalSwift */,
 				EC3077AF2EDC6A1600216E0C /* MortalSwift */,
-				ECAADCF62EE57B3F0056F965 /* MCPWebKit */,
+				ECAADCF62EE57B3F0056F965 /* MCPKit */,
 			);
 			productName = akagi;
 			productReference = EC30765E2EDAFD2300216E0C /* Naki.app */;
@@ -416,7 +418,7 @@
 			name = "Naki-M";
 			packageProductDependencies = (
 				ECAAD5212EE1BBB50056F965 /* MortalSwift */,
-				ECAADCF82EE57B420056F965 /* MCPWebKit */,
+				ECAADCF82EE57B420056F965 /* MCPKit */,
 			);
 			productName = "Naki-M";
 			productReference = ECAAD41C2EE1BAB40056F965 /* Naki-M.app */;
@@ -559,7 +561,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				EC3077AE2EDC6A1600216E0C /* XCRemoteSwiftPackageReference "MortalSwift" */,
-				ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */,
+				ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EC30765F2EDAFD2300216E0C /* Products */;
@@ -1190,12 +1192,12 @@
 				minimumVersion = 0.5.1;
 			};
 		};
-		ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */ = {
+		ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/Sunalamye/MCPWebKit";
+			repositoryURL = "https://github.com/Sunalamye/MCPKit";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.3.0;
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.2.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -1215,15 +1217,15 @@
 			package = EC3077AE2EDC6A1600216E0C /* XCRemoteSwiftPackageReference "MortalSwift" */;
 			productName = MortalSwift;
 		};
-		ECAADCF62EE57B3F0056F965 /* MCPWebKit */ = {
+		ECAADCF62EE57B3F0056F965 /* MCPKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */;
-			productName = MCPWebKit;
+			package = ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */;
+			productName = MCPKit;
 		};
-		ECAADCF82EE57B420056F965 /* MCPWebKit */ = {
+		ECAADCF82EE57B420056F965 /* MCPKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPWebKit" */;
-			productName = MCPWebKit;
+			package = ECAADCF52EE57B2B0056F965 /* XCRemoteSwiftPackageReference "MCPKit" */;
+			productName = MCPKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
