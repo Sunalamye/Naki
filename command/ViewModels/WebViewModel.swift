@@ -14,6 +14,7 @@
 //  - 2025/12/02: v1.1.2 重構 - 提取重複程式碼，清理未使用變數
 //  - 2025/12/03: v1.2.0 服務化重構 - 提取狀態管理（AutoPlayService 已移除，自動打牌邏輯內建於本檔）
 //  - 2026/08/02: p3-1 狀態合併 - GameStateManager 與鏡像屬性收斂成單一 `GameStore`
+//  - 2026/08/02: p3-2 自動打牌狀態機抽出 - Timer/asyncAfter/遞迴重試 → `AutoPlayEngine`
 //  - 2025/12/04: v1.3.0 WebPage API - 使用 macOS 26.0+ 新 API
 //
 
@@ -76,23 +77,20 @@ class WebViewModel: WebViewModelProtocol {
   var botEngineMode: String = "native"
   var isProxyRunning: Bool = false
 
-  /// 防止重複觸發自動打牌
-  private var lastAutoPlayTriggerTime: Date = .distantPast
-  private var lastAutoPlayActionType: Recommendation.ActionType?
-
   /// 是否已經套用過隱藏名稱設定（防止重複套用）
   private var hasAppliedHideNamesSettings = false
-  static let hidePlayerNamesKey = "HidePlayerNames" 
+  static let hidePlayerNamesKey = "HidePlayerNames"
 
-  /// 當前正在執行的動作ID（用於追蹤而非阻擋）
-  private var currentExecutionId: UUID?
-
-  /// 上次觸發的動作和時間（防抖動）
-  private var lastTriggerKey: String?
-  private var lastTriggerTime: Date?
-
-  /// 定期檢查計時器
-  private var autoPlayCheckTimer: Timer?
+  /// 自動打牌狀態機（p3-2）。
+  ///
+  /// 這裡先前是約 260 行的狀態機本體：`Timer.scheduledTimer` 輪詢、
+  /// `DispatchQueue.main.asyncAfter` 延遲、`Task { @MainActor }` 跳執行緒、
+  /// 深度 15 的 async 遞迴重試，外加一個裸 `currentExecutionId` 與一組去抖變數
+  /// （`lastTriggerKey` / `lastTriggerTime`）。四種併發原語交織，
+  /// 而「executionId 殘留會讓輪詢永久停用」這個不變量只靠註解維繫。
+  ///
+  /// 現在 view model 只做兩件事：建立它、把上下文（模式／推薦／座位／就緒）餵給它。
+  private var autoPlayEngine: AutoPlayEngine?
 
   init() {
     // 初始化協調器和輔助類別
@@ -154,8 +152,8 @@ class WebViewModel: WebViewModelProtocol {
     autoPlayMode = AutoPlayModeStore.load()
     bridgeLog("[WebViewModel] 自動打牌模式（沿用上次）: \(autoPlayMode.rawValue)")
 
-    // 啟動定期檢查計時器（每 1 秒檢查一次）
-    startAutoPlayCheckTimer()
+    // 啟動自動打牌狀態機（單一 Task 迴圈，取代原本的 Timer）
+    startAutoPlayEngine()
 
     // 監聽導航事件
     observeNavigations()
@@ -241,87 +239,35 @@ class WebViewModel: WebViewModelProtocol {
     }
   }
 
-  /// 啟動定期檢查計時器（每 1 秒檢查一次）
-  private func startAutoPlayCheckTimer() {
-    autoPlayCheckTimer?.invalidate()
-    autoPlayCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) {
-      [weak self] _ in
-      guard let self else { return }
-      Task { @MainActor in
-        self.checkAndRetriggerAutoPlay()
-      }
-    }
-  }
+  /// 建立並啟動自動打牌狀態機
+  ///
+  /// 引擎不認得 view model：它只拿到 oplist 儲存體、送出器、一個「現在的上下文」
+  /// closure 與兩條 log 通道。這是它能被單測的前提（`AutoPlayEngineTests` 與
+  /// p0-5 的 fail-safe fixture 建的是同一個型別）。
+  ///
+  /// 註：遊戲內高亮 / 隱藏玩家名稱的輪詢已移除。雀魂已改用 Unity WebGL 客戶端，
+  /// `window.view.DesktopMgr` / `Laya` / `uiscript` 均不存在，相關注入只會靜默失敗
+  /// 形成假訊號；推薦一律由原生面板（`RecommendationView`、`BotStatusView`）呈現。
+  private func startAutoPlayEngine() {
+    let engine = AutoPlayEngine(
+      store: LiqiOperationStore.shared,
+      sender: liqiSender,
+      context: { [weak self] in
+        guard let self else { return .init(mode: .off, isReady: false) }
+        return .init(
+          mode: self.autoPlayMode,
+          recommendations: self.store.recommendations,
+          // 座位來源在 `WebViewModelProtocol.autoPlaySeat` 一份定義（Legacy 走同一個）
+          seat: self.autoPlaySeat,
+          isSanma: self.store.gameState.is3P,
+          tsumoTile: self.store.tsumoTile,
+          isReady: self.webPage != nil)
+      },
+      log: { [weak self] message in self?.debugServer?.addLog(message) },
+      event: { [weak self] message in self?.logAutoPlayEvent(message) })
 
-  /// 定期檢查：如果有推薦且沒有正在執行的動作，重新觸發
-  /// 走與事件路徑相同的去抖（triggerAutoPlayIfNeeded），共用 lastTriggerKey/lastTriggerTime，
-  /// 避免計時器重複觸發同一推薦；若推薦為 discard，額外確認仍輪到自己打牌後才觸發。
-  private func checkAndRetriggerAutoPlay() {
-    guard webPage != nil else { return }
-
-    // 註：遊戲內高亮 / 隱藏玩家名稱的輪詢已移除。
-    // 雀魂已改用 Unity WebGL 客戶端，window.view.DesktopMgr / Laya / uiscript 均不存在，
-    // 相關注入只會靜默失敗形成假訊號；推薦一律由原生面板
-    // (Views/RecommendationView.swift、Views/BotStatusView.swift) 呈現。
-
-    let snapshot = LiqiOperationStore.shared.pending
-    let decision = AutoPlayGate.evaluate(.init(
-      isAutoMode: autoPlayMode == .auto,
-      isSanma: store.gameState.is3P,
-      hasActionInFlight: currentExecutionId != nil,
-      snapshot: snapshot,
-      recommendations: store.recommendations,
-      now: Date(),
-      callPassGrace: Self.callPassGrace))
-
-    switch decision {
-    case .skip:
-      // 刻意不記 log：這條路一秒跑一次，記下來會把 log 淹掉。
-      // 要看被哪一關擋住時，改用 /bot/deep（回傳同一組輸入）重新判一次。
-      return
-
-    case .forceHora:
-      guard let snapshot else { return }
-      logAutoPlayEvent("🎯 oplist 有和牌但模型無推薦 → 交給 resolver (ops=\(snapshot.rawTypes))")
-      triggerAutoPlayNow(delay: 0, forcedAction: .hora)
-
-    case .sendPass:
-      guard let snapshot,
-            let callOp = snapshot.operations.compactMap({ $0.type })
-              .first(where: { $0.isCallOpportunity })
-      else { return }
-      // pass 要送 inputChiPengGang 還是 inputOperation，取決於這批機會的類型
-      // （吃/碰/大明槓走前者，榮和等走後者），故從快照裡實際的機會操作取通道。
-      logAutoPlayEvent("⏰ 副露機會無推薦(Mortal 判斷不做) → 自動送出過 (ops=\(snapshot.rawTypes))")
-      let channel = callOp.channel
-      let sequence = snapshot.sequence
-
-      // 這裡曾經是「先 markHandled 再 await pass()」：送出失敗時這批機會
-      // 在沒有送出任何 request 的情況下就被消化，只能等伺服器逾時代打。
-      // 改成由 AutoPassDispatcher 在**送出成功之後**才 markHandled。
-      //
-      // 代價是「決定要送」到「真的送出去」之間多了一段空窗，而 1 秒輪詢
-      // 只看 currentExecutionId 有沒有東西；不佔住執行位的話下一拍會對同一批
-      // oplist 再送一次過。所以這裡沿用既有的 executionId 機制當互斥，
-      // 並保證每條結束路徑都會歸零（殘留會讓輪詢被永久停用）。
-      let executionId = UUID()
-      currentExecutionId = executionId
-      Task { [weak self] in
-        guard let self else { return }
-        await AutoPassDispatcher.send(
-          sequence: sequence,
-          store: LiqiOperationStore.shared,
-          isCurrent: { self.currentExecutionId == executionId },
-          log: { self.logAutoPlayEvent($0) },
-          send: { await self.liqiSender.pass(channel: channel) })
-        self.clearExecutionIfCurrent(executionId)
-      }
-
-    case .proceed:
-      debugServer?.addLog("⏰ 計時器: 檢查重新觸發 (ops=\(snapshot?.rawTypes ?? []))")
-      // 共用事件路徑的去抖邏輯（lastTriggerKey/lastTriggerTime），避免同一推薦被重複觸發
-      triggerAutoPlayIfNeeded()
-    }
+    autoPlayEngine = engine
+    engine.start()
   }
 
   // MARK: - Native Bot Methods
@@ -423,51 +369,12 @@ class WebViewModel: WebViewModelProtocol {
     // 依 atlas UV 暫時改 _Tint / _Color，draw 後立刻還原。
     syncGameHighlight()
 
-    // 觸發自動打牌
-    triggerAutoPlayIfNeeded()
-  }
-
-  /// 根據當前推薦觸發自動打牌
-  private func triggerAutoPlayIfNeeded() {
-    let hasRecs = !store.recommendations.isEmpty
-
-    guard autoPlayMode == .auto, hasRecs else { return }
-
-    // 根據動作類型決定延遲時間
-    guard let firstRec = store.recommendations.first else { return }
-    let firstAction = firstRec.actionType
-    let tileName = firstRec.displayTile
-    let delay: TimeInterval = calculateDelay(for: firstAction)
-
-    // 防抖動：如果同一個動作在短時間內已經觸發過，跳過
-    // 但對於 none (pass) 動作，不使用防抖動，因為每次有新的副露機會都需要回應
-    let triggerKey = "\(firstAction.rawValue)-\(tileName)"
-    let now = Date()
-    let isPassAction = firstAction == .none
-
-    if !isPassAction,
-      let lastKey = lastTriggerKey,
-      let lastTime = lastTriggerTime,
-      lastKey == triggerKey,
-      now.timeIntervalSince(lastTime) < delay + 0.5
-    {
-      return
-    }
-
-    // 記錄這次觸發
-    lastTriggerKey = triggerKey
-    lastTriggerTime = now
-
-    debugServer?.addLog("自動檢查: \(firstAction.rawValue)-\(tileName) (延遲: \(delay)秒)")
-    triggerAutoPlayNow(delay: delay)
-  }
-
-  /// 計算動作延遲時間
-  ///
-  /// 交給 `ActionDelayModel`。以前這裡是每種動作一個固定秒數——固定時序是指紋，
-  /// 而且 1.9 秒的窗口讓 `/screenshot`（要 1–2 秒）常常拍到牌已經打掉之後。
-  private func calculateDelay(for actionType: Recommendation.ActionType?) -> TimeInterval {
-    ActionDelayModel.delay(for: actionType)
+    // 通知自動打牌狀態機：有新推薦了，不必等下一拍輪詢
+    //
+    // 先前這裡直接呼叫 `triggerAutoPlayIfNeeded()`——那是第二個觸發源，
+    // **不經閘門**（沒有三麻檢查、沒有「已非本家打牌回合」檢查），
+    // 只與輪詢共用去抖變數。現在兩個觸發源走同一輪 `AutoPlayEngine.runCycle()`。
+    autoPlayEngine?.recommendationsDidChange()
   }
 
   // MARK: - 遊戲畫面內高亮
@@ -525,14 +432,10 @@ class WebViewModel: WebViewModelProtocol {
     store.updateHighlight(showRecommendation: autoPlayMode.showRecommendation)
     syncGameHighlight()
 
-    // 只有全自動模式才觸發自動打牌（用生效值，不是要求值）
-    if autoPlayMode.isFullAuto, !store.recommendations.isEmpty {
-      let firstAction = store.recommendations.first?.actionType
-      let delay = ActionDelayModel.delay(for: firstAction)
-      debugServer?.addLog(
-        "模式變更時自動觸發: \(firstAction?.rawValue ?? "?") (延遲: \(delay)秒)")
-      triggerAutoPlayNow(delay: delay)
-    }
+    // 引擎自己會在下一輪讀新的模式；這裡只是叫它別等下一拍，並重設去抖
+    // （切模式是明確的使用者意圖，不該被「剛才才觸發過同一個推薦」擋掉）。
+    // 送不送得出去仍由閘門與 resolver 決定，這裡不再自己判 `isFullAuto`。
+    autoPlayEngine?.modeDidChange()
   }
 
   // 註：`setAutoPlayDelay(_:)` 已移除。它唯一的寫入點是 toolbar 的 Stepper，
@@ -606,303 +509,28 @@ class WebViewModel: WebViewModelProtocol {
   // 這條路徑上沒有「先提示、等使用者確認」的流程：推薦一產生就依模式決定是否送出。
   // 兩者要取消／確認的那個 pending action 容器（連同它的 Timer）從來沒被建立過。
 
-  /// 手動觸發自動打牌（使用當前推薦）
-  /// - Parameter forcedAction: 不看 AI 推薦、直接以這個動作進入決策流程。
-  ///   用於「伺服器提供和牌但模型沒有推薦」——最終仍由 resolver 覆核。
+  /// 手動觸發自動打牌（MCP `bot_trigger`）。
+  ///
+  /// 排進引擎的下一輪，不自己送。三麻 fail-closed、無推薦、無 oplist 三道閘門
+  /// 在 `AutoPlayEngine.runManualCycle` 裡（手動路徑不經 `AutoPlayGate`，
+  /// 那三道是它自己擋的）。
   func triggerAutoPlayNow(delay: TimeInterval = 1.2) {
-    triggerAutoPlayNow(delay: delay, forcedAction: nil)
+    autoPlayEngine?.requestManualTrigger(delay: delay)
   }
 
-  func triggerAutoPlayNow(delay: TimeInterval,
-                          forcedAction: Recommendation.ActionType?) {
-    guard webPage != nil else {
-      bridgeLog("[WebViewModel] 無法觸發: 無 WebPage")
-      return
-    }
-
-    // 三麻 fail-closed（與 `AutoPlayGate` / `AutoPlayDecisionResolver` 同一條規則）。
-    //
-    // 這裡是手動觸發（含 MCP `bot_trigger`）的入口，不經過 1 秒輪詢的閘門，
-    // 所以要自己擋一次。內建模型只有四麻一份，三麻的推薦不該被自動送出。
-    if store.gameState.is3P {
-      bridgeLog("[WebViewModel] 略過觸發: 三麻不支援自動送出（只有四麻模型）")
-      debugServer?.addLog("⏭️ 三麻對局：自動送出已停用（僅支援四麻）")
-      return
-    }
-
-    let actionType: Recommendation.ActionType
-    let tileName: String
-    if let forcedAction {
-      actionType = forcedAction
-      tileName = LiqiOperationStore.shared.pending?.contextTile ?? ""
-    } else if let firstRec = store.recommendations.first {
-      actionType = firstRec.actionType
-      tileName = firstRec.displayTile
-    } else {
-      bridgeLog("[WebViewModel] 無法觸發: 無推薦")
-      return
-    }
-
-    // 沒有 oplist 就別排這次觸發。
-    //
-    // 以前不管有沒有 oplist 都會排進 `executeAutoPlayActionWithRetry`，
-    // 於是在「伺服器根本還沒授權」的時機空轉 50×0.1s 然後印 ❌，
-    // 看起來像故障，其實是安全機制在正常運作。實測兩個觸發情境：
-    //   1. 立直後的強制摸切 —— 客戶端自己摸切，伺服器不再送 oplist
-    //   2. 和牌結算到新局發牌之間 —— 模型已看到新手牌但還不能動作
-    // 兩者都會在真正可動作時由 oplist 到達重新觸發，不需要在這裡等。
-    //
-    // forcedAction（伺服器提供和牌但模型無推薦）不受此限：那條路的前提
-    // 就是 oplist 裡有和牌，本來就有 snapshot。
-    if forcedAction == nil, LiqiOperationStore.shared.pending == nil {
-      bridgeLog("[WebViewModel] 略過觸發: 尚無 oplist（\(actionType.rawValue) \(tileName)）")
-      return
-    }
-
-    // 生成執行 ID 用於追蹤
-    let executionId = UUID()
-    currentExecutionId = executionId
-
-    bridgeLog("[WebViewModel] 觸發: \(actionType.rawValue) - \(tileName) (延遲: \(delay)秒)")
-    debugServer?.addLog("觸發: \(actionType.rawValue) - \(tileName)")
-
-    // 延遲執行避免太快
-    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-      guard let self = self else { return }
-
-      // 檢查是否被更新的觸發取代
-      if self.currentExecutionId != executionId {
-        self.debugServer?.addLog("跳過: 已被新觸發取代")
-        return
-      }
-
-      // 所有動作都使用重試機制
-      Task {
-        await self.executeAutoPlayActionWithRetry(
-          actionType: actionType, tileName: tileName, attempt: 1,
-          executionId: executionId)
-      }
-    }
-  }
-
-  /// 副露機會在多久之後才允許「因為沒推薦而自動送過」
-  ///
-  /// 只要比「oplist 到達 → 推論完成 → 推薦同步到 view model」的總延遲長就夠。
-  /// 實測該延遲在 100ms 量級，2 秒有 20 倍餘裕；而伺服器等 300 秒，
-  /// 多等 2 秒沒有任何代價。
-  static let callPassGrace: TimeInterval = 2.0
-
-  /// 最大重試次數
-  ///
-  /// 從 50（5 秒）降到 15（1.5 秒）。觸發點已經確認過 oplist 存在，
-  /// 這裡要處理的只是「延遲期間 oplist 剛好被換掉」的短暫空窗；
-  /// 等 5 秒不會讓它變得比較可能出現，只會讓失敗訊息晚 3.5 秒才出現。
-  private let maxRetryAttempts = 15
-
-  /// 僅在 executionId 仍為當前執行時清除 currentExecutionId。
-  /// 避免遞迴／延遲後外層路徑清掉「已被新觸發取代」的執行 ID；
-  /// 所有終止路徑（成功／放棄／逾時／錯誤／catch）都必須經此歸零，
-  /// 否則 currentExecutionId 殘留會讓 1 秒輪詢（checkAndRetriggerAutoPlay 以
-  /// currentExecutionId == nil 為前提）被永久停用，自動打牌黏著卡死。
-  private func clearExecutionIfCurrent(_ executionId: UUID) {
-    if currentExecutionId == executionId {
-      currentExecutionId = nil
-    }
-  }
-
-  /// 帶重試的自動打牌執行
-  ///
-  /// 保留原本的 executionId 守衛 / 去抖 / 重試框架，只把「怎麼把動作送出去」換成
-  /// Liqi protobuf；可用操作（oplist）改讀協定層快照 `LiqiOperationStore`
-  /// （Unity 客戶端沒有 `DesktopMgr.Inst.oplist`）。
-  private func executeAutoPlayActionWithRetry(
-    actionType: Recommendation.ActionType, tileName: String, attempt: Int,
-    executionId: UUID
-  ) async {
-
-    // 檢查是否被新的觸發取代
-    if currentExecutionId != executionId {
-      debugServer?.addLog("⏭️ 重試已取消: 被取代 (第 \(attempt) 次)")
-      return
-    }
-
-    // 先檢查是否還有操作可執行（協定層 oplist）
-    guard let snapshot = LiqiOperationStore.shared.pending else {
-      // 沒有 oplist 就不送。
-      //
-      // 舊行為是「打牌不等 oplist，直接送出」——那等於在沒有伺服器授權的情況下
-      // 硬送，實測有一半以上根本不是我們的回合而被丟棄，而且會繞過終局保護
-      // （伺服器可能正提供自摸，我們卻盲送打牌）。合法性的權威在 oplist，
-      // 缺資料一律 fail closed，等下一批 oplist 到齊再說。
-      if attempt < maxRetryAttempts {
-        if attempt == 1 || attempt % 10 == 0 {
-          debugServer?.addLog("等待 oplist \(attempt)/\(maxRetryAttempts)")
-        }
-        try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1s
-        await executeAutoPlayActionWithRetry(
-          actionType: actionType, tileName: tileName, attempt: attempt + 1,
-          executionId: executionId)
-      } else {
-        if actionType == .none {
-          debugServer?.addLog("✅ Pass: \(attempt) 次嘗試後無 oplist, 無機會")
-        } else {
-          debugServer?.addLog("⏭️ \(attempt) 次嘗試後 oplist 仍未到，這次不送（等下一批）")
-        }
-        clearExecutionIfCurrent(executionId)
-      }
-      return
-    }
-
-    // 送出前的唯一決策點。
-    //
-    // 不直接照 `actionType` 送——那是「觸發當下」的 AI 推薦，
-    // 中間隔了 1.0–1.8 秒的延遲，這段期間 oplist 可能已經換了一批。
-    // Resolver 會做三件事：終局保護（伺服器提供自摸就一定自摸，凌駕 AI）、
-    // 模式閘門、以及確認該動作真的在這批 oplist 裡。
-    let decision = AutoPlayDecisionResolver.resolve(
-      snapshot: snapshot,
-      recommendations: store.recommendations,
-      mode: autoPlayMode,
-      // 座位來源在 `WebViewModelProtocol.autoPlaySeat` 一份定義（Legacy 走同一個）
-      seat: autoPlaySeat,
-      isSanma: store.gameState.is3P)
-
-    let resolvedAction: Recommendation.ActionType
-    let resolvedTile: String
-    switch decision {
-    case .send(let action, let tile):
-      resolvedAction = action
-      resolvedTile = tile.isEmpty ? tileName : tile
-    case .surfaceOnly(let action, _):
-      debugServer?.addLog("模式非自動，僅顯示不送出: \(action.rawValue)")
-      clearExecutionIfCurrent(executionId)
-      return
-    case .none(let reason):
-      debugServer?.addLog("⏭️ 不送出: \(reason)")
-      clearExecutionIfCurrent(executionId)
-      return
-    }
-
-    if resolvedAction != actionType {
-      logAutoPlayEvent("⚠️ 決策覆蓋: AI 建議 \(actionType.rawValue) → 實際送出 \(resolvedAction.rawValue)")
-    }
-
-    // 送出前最後確認這批 oplist 沒被換掉（決策到送出之間對局可能已往前走）
-    guard AutoPlayDecisionResolver.isStillValid(
-      decidedOn: snapshot, current: LiqiOperationStore.shared.pending)
-    else {
-      logAutoPlayEvent("⏭️ oplist 已更新，捨棄過期決策 (seq=\(snapshot.sequence))")
-      clearExecutionIfCurrent(executionId)
-      return
-    }
-
-    logAutoPlayEvent("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes) → \(resolvedAction.rawValue)")
-    let sendResult = await executeAutoPlayAction(
-      actionType: resolvedAction, tileName: resolvedTile)
-
-    // 和牌：成功才收工，失敗一定要重試。
-    //
-    // 這裡曾經是不論結果都 log「✅ 已宣告和牌」+ markHandled + return，
-    // 判斷的是「我呼叫過那個函式」而不是「封包真的送出去了」。
-    // 送出失敗（沒有 game-gateway、JS 拒絕、伺服器回 error）時和牌機會就永久消失，
-    // 而且 log 上還寫著成功——漏和是不可逆的，不能這樣處理。
-    //
-    // markHandled 由 executeAutoPlayAction 在確認 success 後才做，這裡不重覆標記。
-    if resolvedAction == .hora {
-      if sendResult?.success == true {
-        logAutoPlayEvent("✅ 已宣告和牌")
-        clearExecutionIfCurrent(executionId)
-        return
-      }
-      if attempt >= maxRetryAttempts {
-        logAutoPlayEvent("❌ 和牌送出失敗 \(attempt) 次, 放棄 (\(sendResult?.logLine ?? "no result"))")
-        clearExecutionIfCurrent(executionId)
-        return
-      }
-      logAutoPlayEvent("⚠️ 和牌送出失敗, 重試 \(attempt + 1)/\(maxRetryAttempts)")
-      try? await Task.sleep(nanoseconds: 200_000_000)
-      await executeAutoPlayActionWithRetry(
-        actionType: resolvedAction, tileName: resolvedTile,
-        attempt: attempt + 1, executionId: executionId)
-      return
-    }
-
-    // pass 操作：較長間隔 (0.5s)，最多重試 5 次
-    if resolvedAction == .none {
-      let maxPassRetries = 5
-      if attempt >= maxPassRetries {
-        debugServer?.addLog("✅ Pass 已發送 (第 \(attempt) 次)")
-        clearExecutionIfCurrent(executionId)
-        return
-      }
-      try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s
-      await checkAndRetryIfNeeded(
-        actionType: resolvedAction, tileName: resolvedTile, attempt: attempt, executionId: executionId)
-      return
-    }
-
-    // 其他操作：0.1 秒後檢查是否成功
-    try? await Task.sleep(nanoseconds: 100_000_000)
-    await checkAndRetryIfNeeded(
-      actionType: resolvedAction, tileName: resolvedTile, attempt: attempt, executionId: executionId)
-  }
-
-  /// 檢查動作是否成功，失敗則重試
-  ///
-  /// 判準改為協定層：動作送出成功時會把當批 oplist 標記為已處理，
-  /// 因此「仍有未處理的 oplist」＝動作沒送出去（或被 JS 端拒絕），需要重試。
-  private func checkAndRetryIfNeeded(
-    actionType: Recommendation.ActionType, tileName: String, attempt: Int, executionId: UUID
-  ) async {
-
-    // 檢查是否被新的觸發取代
-    if currentExecutionId != executionId {
-      debugServer?.addLog("⏭️ 檢查已取消: 被取代")
-      return
-    }
-
-    guard let snapshot = LiqiOperationStore.shared.pending else {
-      debugServer?.addLog("✅ 動作成功, 第 \(attempt) 次 (oplist 已消化)")
-      clearExecutionIfCurrent(executionId)
-      return
-    }
-
-    if attempt >= maxRetryAttempts {
-      debugServer?.addLog("❌ 已達最大重試次數 (\(attempt)), ops=\(snapshot.rawTypes)")
-      clearExecutionIfCurrent(executionId)
-      return
-    }
-
-    debugServer?.addLog("重試 \(attempt + 1): ops 仍存在 \(snapshot.rawTypes)")
-    await executeAutoPlayActionWithRetry(
-      actionType: actionType, tileName: tileName, attempt: attempt + 1, executionId: executionId)
-  }
-
-  /// 實際送出自動打牌動作（Liqi protobuf）
-  ///
-  /// 舊實作呼叫 `window.naki.action.*`（Laya 物件），Unity WebGL 客戶端已不存在，
-  /// 那條路徑永遠靜默失敗。現在一律由 `LiqiActionSender` 組 Liqi REQUEST，
-  /// 經 `window.__nakiWebSocket.sendRaw` 送出；需要 index／槓型／和牌型的動作
-  /// 由協定層 oplist 快照推導。
-  ///
-  /// 7-case switch 與「成功才 markHandled」都在 `AutoPlayActionExecutor`（p2-1 收斂，
-  /// Legacy 路徑與測試 harness 走同一份）；這裡只負責把 view model 的上下文
-  /// （推薦、這一巡摸到的牌、兩條 log 通道）接上去。
-  @discardableResult
-  private func executeAutoPlayAction(
-    actionType: Recommendation.ActionType, tileName: String
-  ) async -> LiqiSendResult? {
-    await AutoPlayActionExecutor.execute(
-      action: actionType,
-      tile: tileName,
-      snapshot: LiqiOperationStore.shared.pending,
-      recommendations: store.recommendations,
-      tsumoTile: store.tsumoTile,
-      sender: liqiSender,
-      store: LiqiOperationStore.shared,
-      log: { self.debugServer?.addLog($0) },
-      event: { self.logAutoPlayEvent($0) })
-  }
+  // 註：自動打牌的狀態機本體（觸發、延遲、去抖、執行位互斥、決策、重試）已整批搬進
+  // `Services/Bot/AutoPlayEngine.swift`（p3-2）。這裡曾經有：
+  //
+  //   static let callPassGrace / maxRetryAttempts        常數
+  //   clearExecutionIfCurrent(_:)                        「每條 return 都要記得歸零」
+  //   executeAutoPlayActionWithRetry(...)                async 遞迴（深度 15）
+  //   checkAndRetryIfNeeded(...)                         與上面互相遞迴
+  //   executeAutoPlayAction(...)                         接到 AutoPlayActionExecutor
+  //
+  // 搬走的理由不是行數，是**可驗收性**：這些方法要有 WebPage / DebugServer / Timer
+  // 才建得起來，於是「送出失敗會不會重試」「執行位會不會殘留」這種問題在單測裡
+  // 一句都問不出來，只能靠 live 對局撞。引擎把儲存體、送出器、上下文與時間常數
+  // 全部參數化，p0-5 的 fail-safe fixture 因此測得到產品狀態機本身。
 
   // MARK: - 協定層狀態快照（MCP 狀態類工具的資料來源）
 

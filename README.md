@@ -171,6 +171,7 @@ Naki 這邊如果某一格填錯東西，模型不會報錯，它會**照樣算�
 │  MajsoulBridge  →  NativeBotController  →  LiqiActionSender
 │   (Liqi→MJAI)      (純 Swift + Core ML)      (組包送出)
 │                           │                              │
+│   AutoPlayEngine（單一 Task 迴圈：閘門 → 延遲 → 重試）      │
 │      AutoPlayDecisionResolver（合法性與模式閘門）          │
 │                           │                              │
 │              GameStore  ←→  SwiftUI Views / MCP          │

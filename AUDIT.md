@@ -33,7 +33,7 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 
 原始差距：`AutoPlayDecisionResolver` 本身會讓 server oplist 的 tsumo／ron 凌駕 AI，但 `WebViewModel` 以 Mortal recommendation 是否非空作為進入自動動作的條件；空推薦時 timer 只補副露 pass。結果是 server 即使給 type 8，只要 Mortal 回空推薦就可能完全不進 resolver。
 
-現況：1 秒輪詢改走 `AutoPlayGate`，空推薦 ＋ `snapshot.horaOperation != nil` 回 `.forceHora`，`triggerAutoPlayNow(forcedAction: .hora)` 不受「無推薦就不觸發」限制。
+現況：輪詢改走 `AutoPlayGate`，空推薦 ＋ `snapshot.horaOperation != nil` 回 `.forceHora`，該分支不受「無推薦就不觸發」限制（p3-2 起這條路在 `AutoPlayEngine.runCycle()` 裡，延遲 0 直接進 resolver）。
 
 機械驗收（2026-08-02）：`NakiTests/AutoPlayFailsafeFixtureTests` 的 fixture A（空推薦 ＋ oplist `[8]`）與 D（老化 3 秒的 `[3,9]`）以注入的 oplist 走完 gate → resolver → sender，斷言送出的 bytes 是 `12020808`／`12020809`。實跑 mutation：拿掉 gate 的 `forceHora` 分支 → A、B、B'、D 四個測試轉紅。
 **仍未驗證**：live 對局沒有出現過這個分支（§15.4：兩次和牌模型都給 `hora@99.6%` 以上）。
@@ -42,7 +42,7 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 
 原始差距：外層在呼叫 sender 後，只看 resolved action 是 `.hora` 就 `markHandled`，沒有拿到實際 `LiqiSendResult`；沒有 game-gateway、JS send 失敗或 server 拒絕時，pending opportunity 會被吃掉且不重試。
 
-現況：送出層收斂成 `AutoPlayActionExecutor`（p2-1），它回傳 `LiqiSendResult?`，只有 `success == true` 才 `markHandled`；和牌失敗由 `WebViewModel.executeAutoPlayActionWithRetry` 走 bounded retry（15 次 × 0.2 秒），用完仍不標記。
+現況：送出層收斂成 `AutoPlayActionExecutor`（p2-1），它回傳 `LiqiSendResult?`，只有 `success == true` 才 `markHandled`；和牌失敗由 `AutoPlayEngine.deliver`（p3-2，`while` 迴圈取代原本的 async 遞迴）走 bounded retry（15 次 × 0.2 秒），用完仍不標記。
 
 機械驗收（2026-08-02）：fixture B（第 1 次 `no_open_majsoul_connection`、第 2 次成功）斷言重試期間看到的 oplist 序號沒變、成功後才 `pending == nil`；fixture B'（一路失敗）斷言 3 次用完後 `pending` 仍在，且通道恢復後同一批 oplist 還能送成功。
 p2-1 之後 fixture 走的是**正式的** `AutoPlayActionExecutor`（不再是 harness 自己抄的第三份 switch），所以 mutation 直接動產品程式碼即可：把 `if result.success` 拿掉（不論成敗都 `markHandled`）→ B、B' 與 `AutoPlayActionExecutorTests.testFailedSendKeepsOplistPending` 三個測試轉紅（9 個 assertion）。
@@ -64,7 +64,7 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 `WebPage` 路徑（`WebViewModel`）三條路徑已改成「沒送出去就不消化 oplist」：
 
-- 空推薦的副露 pass 改由 `AutoPassDispatcher` 送出，只有 `LiqiSendResult.success == true` 才 `markHandled`；失敗保留 pending、bounded retry（5 次 × 0.2 秒），用完次數仍不標記，留給 1 秒輪詢的下一輪。送出期間佔用 `currentExecutionId` 當互斥，避免同一批 oplist 被送兩次過。
+- 空推薦的副露 pass 改由 `AutoPassDispatcher` 送出，只有 `LiqiSendResult.success == true` 才 `markHandled`；失敗保留 pending、bounded retry（5 次 × 0.2 秒），用完次數仍不標記，留給輪詢的下一輪。送出期間佔住 `AutoPlayEngine` 的執行位（p3-2 起是 `occupy(...)` 作用域＋`defer`，先前是裸 `currentExecutionId`），避免同一批 oplist 被送兩次過。
 - 打牌字串轉換失敗、立直找不到宣言牌：只 log，不 `markHandled`。
 
 機械驗收：`NakiTests/AutoPassDispatcherTests`（7 tests，含「先 mark 再送」的 mutation 會讓 4 個測試轉紅）。
@@ -84,9 +84,9 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 2026-08-02 起（MortalSwift p3-1「不做」路線的驗收項）：
 
-- **自動送出在三麻一律停用**，三層 fail-closed：`AutoPlayGate`（1 秒輪詢，含**繞過 resolver 的
+- **自動送出在三麻一律停用**，三層 fail-closed：`AutoPlayGate`（輪詢路徑，含**繞過 resolver 的
   `.sendPass`** 那條路）、`AutoPlayDecisionResolver`（`.auto` 降級成 `.recommend`）、
-  `WebViewModel.triggerAutoPlayNow`（手動／MCP `bot_trigger` 入口）。
+  `AutoPlayEngine.runManualCycle`（手動／MCP `bot_trigger` 入口，不經閘門所以自己擋）。
 - **UI 明示**：`BotStatusView` 的 `SanmaUnsupportedNotice` 顯示
   「三麻不支援：內建只有四麻模型，推薦結果無效；自動打牌已停用。」
   模型標籤仍是 `Mortal (4P) ⚠️ 三麻無專用模型`。
@@ -364,10 +364,12 @@ fixture（server `[1,7,8]` + **AI 想 discard** → resolver 覆蓋成 hora）�
 （`@testable import` 需要 testability）。這是既有專案設定，不是本次改動造成的；
 Release 能驗的是 `xcodebuild build -configuration Release` 成功（已跑）＋ 上面的符號檢查。
 
-**這些走的是 `AutoPlayFailsafePipeline`（測試 harness），不是 `WebViewModel` 本體**：
-證明的是 gate → resolver → sender → markHandled 這條組合的語意，不含 asyncAfter 延遲、
-去抖與 `currentExecutionId` 互斥。CLAUDE.md 要求的 live fixture
-（RESPONSE → `ActionHule`）**仍未驗證**。
+**p3-2 起這些跑的是產品狀態機 `AutoPlayEngine`**：`AutoPlayFailsafePipeline` 只剩擺參數
+（時間常數歸零、注入上下文），`run()` 直接呼叫 `AutoPlayEngine.runCycle()`。
+先前它自己抄了一份順序，所以「延遲、去抖、執行位互斥」三件事一句都測不到；
+現在去抖與執行位歸零有專項測試（`AutoPlayEngineTests`，mutation 已驗），
+唯一仍不在單測範圍內的是**真實時序**（1 秒節奏、擬人延遲分布）。
+CLAUDE.md 要求的 live fixture（RESPONSE → `ActionHule`）**仍未驗證**。
 
 仍未驗證：P0-1／P0-2 的 live 重現、Legacy 路徑（macOS 跑不到）、暱稱在畫面上的實際顯示、
 非推薦牌透明度的視覺結果。
@@ -527,7 +529,8 @@ const conn = pick.length > 0 ? pick[pick.length - 1] : conns[0];
 使用者回報「碰／過都不會自動」。實際情況比「沒反應」嚴重：**Naki 主動送出了「過」，
 把模型的建議蓋掉。**
 
-`checkAndRetriggerAutoPlay` 是 1 秒輪詢，推論是非同步的：
+`checkAndRetriggerAutoPlay`（當時的 1 秒輪詢；p3-2 起是 `AutoPlayEngine` 的 Task 迴圈）
+與推論是非同步的：
 
 ```
 oplist 到達 → (~50–100ms) 推論完成 → updateUIAfterBotResponse 同步到 view model
@@ -560,8 +563,9 @@ live 實測兩次：
 
 ### 18.3 同一類錯誤：沒有 oplist 也照樣重試
 
-`triggerAutoPlayNow` 以前不管有沒有 oplist 都排進 `executeAutoPlayActionWithRetry`，
-在「伺服器根本還沒授權」時空轉 50×0.1s 然後印 `❌ 放棄`（§16.6.1）。
+`triggerAutoPlayNow` 以前不管有沒有 oplist 都排進 `executeAutoPlayActionWithRetry`
+（兩個符號都在 p3-2 併進 `AutoPlayEngine`），在「伺服器根本還沒授權」時空轉 50×0.1s
+然後印 `❌ 放棄`（§16.6.1）。
 
 修法：觸發前先確認 `LiqiOperationStore.shared.pending` 存在；重試上限從 50 降到 15。
 觸發點已確認過 oplist，重試只需涵蓋「延遲期間 oplist 剛好換批」的短暫空窗——

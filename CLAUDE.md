@@ -98,6 +98,7 @@ OptionalOperationList
 | parser／bridge | `command/Services/Bridge/LiqiParser.swift`、`MajsoulBridge.swift` |
 | oplist／sender | `command/Services/Bridge/LiqiOperationStore.swift`、`LiqiActionSender.swift` |
 | decision | `command/Services/Bot/AutoPlayDecisionResolver.swift` |
+| 自動打牌狀態機 | `command/Services/Bot/AutoPlayEngine.swift`（單一 Task 迴圈：輪詢＋延遲＋重試都用 `Task.sleep`；執行狀態是 enum，進出只有 `occupy(...)` 一個作用域） |
 | action 送出 | `command/Services/Bot/AutoPlayActionExecutor.swift`（兩條 WebView path 共用的唯一 7-case switch；成功才 markHandled） |
 | AI | `command/Services/Bot/NativeBotController.swift` |
 | WebGL highlighter | `command/Resources/JavaScript/naki-core.js` |
@@ -119,7 +120,7 @@ OptionalOperationList
 
 `WebViewModelFactory`：OS 26+ 用 WebPage `WebViewModel`；iOS 17–25 用 `LegacyWebViewModel`。macOS deployment target 是 26，所以 macOS 不走 Legacy。
 
-兩條 path 現在都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override），送出也都走同一個 `AutoPlayActionExecutor`（7-case switch、chi 組合對照、成功才 markHandled、診斷輸出）；`sendRaw` 的腳本字串與回傳值解析同樣只剩 `NakiWebSocketScript` 一份。差別在重試框架：新 path 會在 hora send 失敗時重試（15 次，每次重跑 resolver），Legacy 送一次就結束、失敗等下一次推薦更新。重試刻意留在呼叫端而不是 executor 裡——盲目重送等於拿舊決策操作可能已換批的 oplist。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
+兩條 path 現在都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override），送出也都走同一個 `AutoPlayActionExecutor`（7-case switch、chi 組合對照、成功才 markHandled、診斷輸出）；`sendRaw` 的腳本字串與回傳值解析同樣只剩 `NakiWebSocketScript` 一份。差別在狀態機：新 path 有 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、bounded retry 15 次，每次重跑 resolver），Legacy 只有 `triggerAutoPlayNow` 送一次就結束、失敗等下一次推薦更新。重試刻意留在引擎而不是 executor 裡——盲目重送等於拿舊決策操作可能已換批的 oplist。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
 
 ## 自摸問題的 current truth
 

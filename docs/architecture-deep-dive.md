@@ -58,7 +58,8 @@ Swift 狀態同時提供給 SwiftUI、Debug HTTP 與 MCP。
 5. 建立 `NativeBotController`，並從 `AutoPlayModeStore` 讀回上次選的自動打牌模式。
 6. 設定 `LiqiActionSender` 的 JS send handler。
 7. 啟動 loopback Debug／MCP server（預設 port 8765）。
-8. 觀察頁面導覽與遊戲事件。
+8. 啟動 `AutoPlayEngine`（單一 Task 迴圈；p3-2 之前這一步是 `Timer.scheduledTimer(1.0)`）。
+9. 觀察頁面導覽與遊戲事件。
 
 ## 接收與狀態
 
@@ -112,23 +113,28 @@ sync／reconnect 會重放 restore actions 或 snapshot 以恢復狀態；不應
 ## 自動打牌主路徑
 
 ```text
-Mortal recommendations + LiqiOperationSnapshot
+AutoPlayEngine（單一 Task 迴圈，@MainActor）
+  → AutoPlayGate                     觸發閘門（模式／三麻／oplist／寬限期／回合）
+      .forceHora / .sendPass / .proceed
+  → delay（Task.sleep，ActionDelayModel 抽樣）＋去抖
+  → stale snapshot check             閘門看到的那一份 snapshot 一路往下傳
   → AutoPlayDecisionResolver
       - mode gate
       - server hora override
       - action-in-oplist
       - seat check
-  → delay
-  → stale snapshot check
+  → AutoPlayActionExecutor
   → LiqiActionSender
   → Swift encode request
   → __nakiWebSocket.sendRaw(base64)
   → correct gateway
 ```
 
-純 resolver 規則已測；整合仍有兩個 P0：沒有 recommendation 時可能不進 resolver，以及 hora send failure 仍可能被 mark handled。完整修正方向見 canonical 文件的「自動打牌決策」。
+p3-2 之前這整條散在 `WebViewModel`，混用 `Timer.scheduledTimer`、`DispatchQueue.main.asyncAfter`、`Task { @MainActor }` 與深度 15 的 async 遞迴；執行位是一個裸 `UUID?`，「每條 return 都要記得歸零」只寫在註解裡（殘留＝輪詢永久停用）。現在輪詢／延遲／重試都是同一個迴圈裡的 `Task.sleep`，執行位是 enum 且只能經 `occupy(...)` 進出。
 
-Legacy path 走同一個 resolver 與同一組檢查，差別是失敗不重試（送一次，失敗等下一次推薦更新）。
+純 resolver 規則已測；整合的兩個 P0（空推薦時不進 resolver、hora send failure 被 mark handled）source 已收斂並有注入式 fixture，**live 仍未驗證**。完整判準見 canonical 文件的「自動打牌決策」。
+
+Legacy path 走同一個 resolver 與同一個 executor，差別是沒有引擎（送一次，失敗等下一次推薦更新）。
 
 ## 送出與回應
 
@@ -189,6 +195,7 @@ MCP registry 的靜態註冊是 38 個工具（2026-08-02 移除 6 個高亮失�
 | oplist | `command/Services/Bridge/LiqiOperationStore.swift` |
 | sender | `command/Services/Bridge/LiqiActionSender.swift` |
 | decision | `command/Services/Bot/AutoPlayDecisionResolver.swift` |
+| 自動打牌狀態機 | `command/Services/Bot/AutoPlayEngine.swift` |
 | AI controller | `command/Services/Bot/NativeBotController.swift` |
 | Unity highlighter | `command/Resources/JavaScript/naki-core.js` |
 | WS sendRaw | `command/Resources/JavaScript/naki-websocket.js` |
