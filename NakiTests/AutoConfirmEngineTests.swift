@@ -159,6 +159,39 @@ final class AutoConfirmEngineTests: XCTestCase {
         XCTAssertFalse(engine.confirmPending, "放掉待確認，自動打牌才不會被永久餓死")
     }
 
+    /// p5 #3（Codex 二次復核）：進入 recovery 後重送**一直回 .failed**，也必須消耗 budget
+    /// 並最終放掉 pending——否則 confirmAckedAt 停在 nil、counter 卡住、confirm 永久佔住 tick。
+    func testFailedResendsStillConsumeBudgetAndAbandon() async {
+        var calls = 0
+        let t0 = Date(timeIntervalSince1970: 3_000_000)
+        let clockBox = ClockBox(t0)
+        var succeed = true
+        let engine = makeEngine(mode: .auto,
+                                confirmAckWatchdog: 1.0,
+                                maxWatchdogResends: 2,
+                                clock: { clockBox.now },
+                                confirmSend: {
+                                    calls += 1
+                                    // 第一次 ACK 成功進入等待；之後 server 已推進，重送一律失敗
+                                    return succeed ? self.confirmed() : self.sendFailure()
+                                })
+        engine.roundDidEnd()
+
+        _ = await engine.runConfirmCycle()           // 第一次：ACK 成功
+        XCTAssertTrue(engine.confirmPending)
+        succeed = false                              // 之後重送一律 .failed
+
+        // 每次逾時 → recovery 重送（回 .failed，但仍消耗 budget）
+        var last: AutoConfirmCycleResult = .noPending
+        for i in 1...4 {
+            clockBox.now = t0.addingTimeInterval(Double(i) * 1.5)
+            last = await engine.runConfirmCycle()
+            if last == .abandoned { break }
+        }
+        XCTAssertEqual(last, .abandoned, "失敗的重送也要消耗 budget，用完就放掉，不能無限佔 tick")
+        XCTAssertFalse(engine.confirmPending)
+    }
+
     /// `.off`：不送，pending 保留（使用者自己在遊戲內確認）
     func testOffModeDoesNotSend() async {
         var calls = 0

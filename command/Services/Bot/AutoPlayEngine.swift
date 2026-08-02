@@ -260,6 +260,12 @@ final class AutoPlayEngine {
     /// 已 watchdog 重送幾次（p5 #3 Codex 復核）。到上限就放掉 pending，避免自動打牌餓死。
     private var confirmWatchdogResends = 0
 
+    /// 是否已進入「ACK 逾時後的 recovery 模式」（p5 #3 Codex 二次復核）。
+    /// 一旦第一次 ACK-timeout 就設 true，之後**每次** recovery dispatch（不論 confirmed
+    /// 或 failed）都消耗 budget——否則 resend 一直回 .failed 時 confirmAckedAt 停在 nil，
+    /// 永遠不進 watchdog 分支、counter 卡住、confirm 永久佔住 tick 讓自動打牌餓死。
+    private var confirmInRecovery = false
+
     /// 本輪的診斷軌跡（每輪開頭清空）
     private var trace: [String] = []
     private var overrode: (requested: Recommendation.ActionType,
@@ -309,6 +315,7 @@ final class AutoPlayEngine {
         confirmPending = false
         confirmAckedAt = nil
         confirmWatchdogResends = 0
+        confirmInRecovery = false
     }
 
     /// 提早結束這次輪詢間隔。
@@ -351,6 +358,7 @@ final class AutoPlayEngine {
         confirmPending = true
         confirmAckedAt = nil   // 新一局結束，重新開始「送出 → 受理 → 等下一局」
         confirmWatchdogResends = 0
+        confirmInRecovery = false
     }
 
     /// 下一局開始（`ActionNewRound` → `start_kyoku`）——權威推進（第 3 層），確認已生效。
@@ -358,6 +366,7 @@ final class AutoPlayEngine {
         confirmPending = false
         confirmAckedAt = nil
         confirmWatchdogResends = 0
+        confirmInRecovery = false
     }
 
     /// 對局結束（`NotifyGameEndResult` / `NotifyGameTerminate` → `end_game`）。
@@ -368,6 +377,7 @@ final class AutoPlayEngine {
         confirmPending = false
         confirmAckedAt = nil
         confirmWatchdogResends = 0
+        confirmInRecovery = false
     }
 
     private func tick() async {
@@ -519,6 +529,15 @@ final class AutoPlayEngine {
             return finish(gate: nil, outcome: .notSent(reason: "no_oplist"))
         }
 
+        // 已知 stale 也要擋（p5 #1c Codex 復核）：推薦明確是為更早的機會（recSeq < snapshot）
+        // 算的，就算是手動／MCP `bot_trigger` 也不該把它套到新機會——那動作不可逆，
+        // 而 bot_trigger 可能由自動化呼叫。nil provenance 仍放行（與 auto path 一致，
+        // 不重現 strict 等號的 0 觸發），只擋有正面 stale 證據的。
+        if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence {
+            note("略過觸發: 推薦是為更早的機會算的（stale）", to: .log)
+            return finish(gate: nil, outcome: .notSent(reason: "recommendations_stale"))
+        }
+
         note("觸發: \(top.actionType.rawValue) - \(top.displayTile) (延遲: \(delay)秒)", to: .log)
         return await perform(requested: top.actionType,
                              requestedTile: top.displayTile,
@@ -544,14 +563,21 @@ final class AutoPlayEngine {
 
         beginCycle()
 
-        // 已受理、正在等 ActionNewRound：watchdog 內就安靜等，逾時才重送。
+        // 已受理、正在等 ActionNewRound：watchdog 內就安靜等，逾時才進入 recovery。
         if let ackedAt = confirmAckedAt {
             if timing.clock().timeIntervalSince(ackedAt) < timing.confirmAckWatchdog {
                 return .awaitingRound
             }
-            // 逾時：ActionNewRound 沒到。有上限的重送——用完仍沒進下一局就放掉 pending，
-            // 避免「瀏覽器其實已進下一局、我們漏收 frame」時 confirm 無限重送把自動打牌餓死
-            // （p5 #3 Codex 復核）。
+            // 逾時：ActionNewRound 沒到 → 進入 recovery 模式（下面消耗 budget 重送）。
+            confirmAckedAt = nil
+            confirmInRecovery = true
+        }
+
+        // Recovery 模式：**每一次** dispatch 都消耗 budget，不論這次是 confirmed 還是 failed
+        // （p5 #3 Codex 二次復核）。先前只在「ACK 後再次逾時」才 +1，於是 resend 一直回
+        // .failed 時 confirmAckedAt 停在 nil、永遠不進 watchdog 分支、counter 卡在 1，confirm
+        // 永久佔住 tick 讓自動打牌餓死。改成「進入 recovery 後每次重送都算一次」即封住。
+        if confirmInRecovery {
             confirmWatchdogResends += 1
             if confirmWatchdogResends > timing.confirmMaxWatchdogResends {
                 note("⚠️ confirmNewRound 重送 \(timing.confirmMaxWatchdogResends) 次仍等不到 "
@@ -559,11 +585,11 @@ final class AutoPlayEngine {
                 confirmPending = false
                 confirmAckedAt = nil
                 confirmWatchdogResends = 0
+                confirmInRecovery = false
                 return .abandoned
             }
-            note("⏱️ confirmNewRound 已受理但 ActionNewRound 逾時未到 → 重送 "
+            note("⏱️ confirmNewRound recovery 重送 "
                  + "(\(confirmWatchdogResends)/\(timing.confirmMaxWatchdogResends))", to: .event)
-            confirmAckedAt = nil
         }
 
         let ctx = context()

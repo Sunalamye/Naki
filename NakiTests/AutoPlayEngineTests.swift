@@ -157,6 +157,29 @@ final class AutoPlayEngineTests: XCTestCase {
         XCTAssertEqual(sends, 1, "provenance 未知時放行，避免整局不自動打")
     }
 
+    /// p5 #1c（Codex 復核）：手動／MCP `bot_trigger` 也要擋已知 stale——bot_trigger
+    /// 可能由自動化呼叫，把屬於舊機會的推薦套到新機會同樣是不可逆錯誤。nil 仍放行。
+    func testManualTriggerAlsoRejectsKnownStaleRecommendation() async {
+        let store = LiqiOperationStore()
+        discardSnapshot(store)
+        let snapshot = discardSnapshot(store)   // sequence S >= 1
+        var sends = 0
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in sends += 1; return self.ok() }
+
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(),
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: self.discardRecommendation,
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: snapshot.sequence - 1)
+            })
+        let run = await engine.runManualCycle()
+        XCTAssertEqual(run.outcome, .notSent(reason: "recommendations_stale"))
+        XCTAssertEqual(sends, 0, "手動觸發也不該把舊推薦套到新機會")
+    }
+
     /// `.forceHora`／`.sendPass` 是不看推薦內容的 server-authoritative 防護，
     /// **不受** sequence 閘門限制——否則漏自摸防護會被這個閘門一起關掉。
     func testForceHoraIgnoresRecommendationSequence() async {
