@@ -860,9 +860,32 @@ final class AutoPlayEngine {
         overrode = nil
     }
 
+    /// 上一次「沒送出」記過的原因——用來只在**原因變化時**記一次 log（p5-verify 教訓）。
+    /// 先前 skip 路徑刻意完全不記 log，導致「沒自動打」無從查（連 skip 原因都看不到，
+    /// 只能猜）。這裡在 finish() 這個唯一收尾點，把沒送出的原因去重後記進 events.log：
+    /// 一秒一次的重複原因只會出現一行，卡住時能直接 grep 出「為什麼沒送」。
+    private var lastNonSendReason: String?
+
     private func finish(gate: AutoPlayGate.Decision?,
                         outcome: AutoPlayCycleOutcome) -> AutoPlayCycle {
-        AutoPlayCycle(gate: gate, outcome: outcome, log: trace, overrode: overrode)
+        let reason: String?
+        switch outcome {
+        case .skipped(let r):        reason = "skip:\(r)"
+        case .notSent(let r):        reason = "notSent:\(r)"
+        case .surfaced(let a):       reason = "surfaced:\(a.rawValue)"
+        case .sendFailed(_, let n):  reason = "sendFailed:\(n)"
+        case .passSuperseded:        reason = "passSuperseded"
+        case .sent, .passed:         reason = nil   // 真的送出去了，重置
+        }
+        if let reason {
+            if reason != lastNonSendReason {
+                note("🔍 未自動送出：\(reason)（ops=\(store.pending?.rawTypes.description ?? "-")）", to: .event)
+                lastNonSendReason = reason
+            }
+        } else {
+            lastNonSendReason = nil
+        }
+        return AutoPlayCycle(gate: gate, outcome: outcome, log: trace, overrode: overrode)
     }
 
     // MARK: - 睡眠
