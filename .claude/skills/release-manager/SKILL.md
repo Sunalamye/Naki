@@ -66,6 +66,7 @@ NEVER force push、NEVER 推別人的 main。
 | 最終 URL 寫錯帳號 | 貼錯連結 | `$REPO=Sunalamye/Naki` |
 | Package.resolved 沒 commit | clean clone 拿舊 revision | 腳本 `git add` 有含它 |
 | 舊 instance 佔 8765 | 新 build 退到 8766 | 重啟前 `pkill -x Naki` |
+| `set -u` 下 `$VAR` 緊接中文 | echo 到 CJK 前的變數（`$APP_PATH（版本…`）被誤判成 unbound variable，腳本中途死掉（2.7.2 因此改手動發布） | 變數後面接非 ASCII 一律 `${VAR}` 界定邊界；改腳本後 `grep -nP '\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]'` 掃殘留 |
 
 ## Troubleshooting
 

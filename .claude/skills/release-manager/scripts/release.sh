@@ -34,7 +34,7 @@ fi
 
 # 0b. 分支
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
-[ "$BRANCH" = "main" ] || echo "⚠️  目前在 $BRANCH（通常應在 main）"
+[ "$BRANCH" = "main" ] || echo "⚠️  目前在 ${BRANCH}（通常應在 main）"
 
 # 0c. 版本不能撞已存在的 tag
 if git rev-parse "v$VERSION" >/dev/null 2>&1; then
@@ -58,7 +58,7 @@ fi
 gh auth status >/dev/null 2>&1 || { echo "❌ gh 未授權：gh auth login"; exit 1; }
 
 if [ "$YES" != "--yes" ]; then
-  read -p "以上檢查沒問題，繼續發布 v$VERSION？(y/n) " -n 1 -r; echo
+  read -p "以上檢查沒問題，繼續發布 v${VERSION}？(y/n) " -n 1 -r; echo
   [[ $REPLY =~ ^[Yy]$ ]] || exit 1
 fi
 
@@ -83,7 +83,7 @@ xcodebuild clean build -project Naki.xcodeproj -scheme Naki -configuration Relea
   2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | tail -3
 APP_PATH=$(find ./build -name "Naki.app" -type d | head -1)
 [ -n "$APP_PATH" ] || { echo "❌ 找不到 Naki.app"; exit 1; }
-echo "  built: $APP_PATH（版本此時還是舊號，稍後 bump）"
+echo "  built: ${APP_PATH}（版本此時還是舊號，稍後 bump）"
 
 # ── 3. Package DMG + ZIP ─────────────────────────────────────
 echo "▶ Package"
