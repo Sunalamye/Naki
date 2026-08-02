@@ -131,6 +131,12 @@ final class AutoPlayEngine {
         var tsumoTile: String?
         /// WebView 是否已就緒（正式路徑 `webPage != nil`）
         var isReady: Bool = true
+        /// 使用者的延遲基準係數（`SettingsStore.actionDelayScale`）。
+        ///
+        /// 每輪從 context 重取，所以 stepper 一調就在下一手生效，不必重啟引擎。
+        /// 1.0＝現行行為；乘進 `ActionDelayModel.delay(for:scale:)`。做進 context 而不是
+        /// 讓引擎持有 settings：引擎不認得 UI／設定物件，這是它能被單測的前提。
+        var actionDelayScale: Double = 1.0
     }
 
     /// 所有時間常數與次數上限。
@@ -164,8 +170,12 @@ final class AutoPlayEngine {
         /// 閘門判定「模型判斷不做副露」時的送出策略；nil＝`AutoPassDispatcher` 的預設
         /// （型別本身是 MainActor 隔離的，所以這裡存 optional，用到時才取預設值）
         var passPolicy: AutoPassDispatcher.RetryPolicy?
-        /// 送出前的模擬人類延遲；nil＝用 `ActionDelayModel`（正式路徑）
-        var actionDelay: ((Recommendation.ActionType?) -> TimeInterval)?
+        /// 送出前的模擬人類延遲；nil＝用 `ActionDelayModel`（正式路徑）。
+        ///
+        /// 第二個參數是使用者的延遲係數（`Context.actionDelayScale`）：seam 帶著它，
+        /// 測試才驗得到「引擎真的把 stepper 的值讀出來並往下傳」，而不是像 p1-3 那批
+        /// 假控制一樣寫進去沒人讀。正式路徑（nil）走 `ActionDelayModel.delay(for:scale:)`。
+        var actionDelay: ((Recommendation.ActionType?, Double) -> TimeInterval)?
 
         // MARK: 局間確認（confirmNewRound）
 
@@ -412,7 +422,7 @@ final class AutoPlayEngine {
             guard let snapshot, let top = ctx.recommendations.first else {
                 return finish(gate: gate, outcome: .notSent(reason: "no_recommendation"))
             }
-            let delay = actionDelay(for: top.actionType)
+            let delay = actionDelay(for: top.actionType, scale: ctx.actionDelayScale)
             guard debounce.allows(key: "\(top.actionType.rawValue)-\(top.displayTile)",
                                   isPass: top.actionType == .none,
                                   window: delay + 0.5,
@@ -693,9 +703,11 @@ final class AutoPlayEngine {
 
     // MARK: - 參數
 
-    private func actionDelay(for action: Recommendation.ActionType?) -> TimeInterval {
-        // 固定時序是指紋：正式路徑一律由 `ActionDelayModel` 依動作類型抽樣。
-        timing.actionDelay?(action) ?? ActionDelayModel.delay(for: action)
+    private func actionDelay(for action: Recommendation.ActionType?,
+                             scale: Double) -> TimeInterval {
+        // 固定時序是指紋：正式路徑一律由 `ActionDelayModel` 依動作類型抽樣，
+        // `scale` 只縮放分布不取代它。使用者的基準秒數係數走 `Context.actionDelayScale`。
+        timing.actionDelay?(action, scale) ?? ActionDelayModel.delay(for: action, scale: scale)
     }
 
     private func retryLimit(for action: Recommendation.ActionType) -> Int {

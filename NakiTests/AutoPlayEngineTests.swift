@@ -32,7 +32,7 @@ final class AutoPlayEngineTests: XCTestCase {
         timing.maxAttempts = maxAttempts
         timing.passAttempts = maxAttempts
         timing.passPolicy = .init(maxAttempts: maxAttempts, delay: 0)
-        timing.actionDelay = { _ in 0 }
+        timing.actionDelay = { _, _ in 0 }
         return timing
     }
 
@@ -192,6 +192,50 @@ final class AutoPlayEngineTests: XCTestCase {
         let third = await engine.runCycle(now: now)
         XCTAssertEqual(third.outcome, .sendFailed(action: .discard, attempts: 1))
         XCTAssertEqual(sends, 2)
+    }
+
+    // MARK: - 延遲 stepper 的讀取端（p2-6）
+
+    /// 引擎必須把 `Context.actionDelayScale` 讀出來、傳進延遲計算。
+    ///
+    /// 這正是 p1-3 抓到那批假控制的根因：stepper 寫得進值卻**沒有任何讀取端**。
+    /// seam 帶著 scale，這條測試證明「引擎確實從 context 取了那個值並往下傳」——
+    /// 換句話說，UI 上調 stepper 不會像從前一樣石沉大海。
+    func testEngineThreadsContextDelayScaleIntoTheDelaySeam() async {
+        let store = LiqiOperationStore()
+        store.record(seat: 0,
+                     operations: [LiqiOperation(type: .discard)],
+                     contextTile: "1m",
+                     source: "ActionDealTile")
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in self.ok() }
+
+        final class Box { var scale: Double = -1 }
+        let box = Box()
+
+        var t = timing()
+        t.actionDelay = { _, scale in box.scale = scale; return 0 }
+
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: t,
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: self.discardRecommendation,
+                                       seat: 0,
+                                       isSanma: false,
+                                       tsumoTile: nil,
+                                       isReady: true,
+                                       actionDelayScale: 2.5)
+            })
+
+        let run = await engine.runCycle()
+
+        guard case .sent(let action, _, _) = run.outcome else {
+            return XCTFail("應該走到 .proceed 並送出，實際: \(run.outcome)")
+        }
+        XCTAssertEqual(action, .discard)
+        XCTAssertEqual(box.scale, 2.5, accuracy: 1e-9,
+                       "引擎沒有把 stepper 的係數讀出來傳給延遲計算——又變回假控制")
     }
 
     // MARK: - 手動觸發（不經閘門，三道自己擋）

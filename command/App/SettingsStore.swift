@@ -44,6 +44,75 @@ final class SettingsStore {
         }
     }
 
+    // MARK: - 自動打牌基準延遲
+
+    /// 延遲 stepper 的持久化 key。
+    ///
+    /// p2-6：延遲控制在 p1-3 被整個移除（當時它寫進去的值零讀取點，是假控制）。
+    /// 這次做回來並接真——不是取代 `ActionDelayModel` 的隨機分布（那是防偵測的刻意
+    /// 設計），而是當它的**縮放係數**：stepper 的秒數乘在整個抽樣值上，1.0s 等於現行行為。
+    /// 讀取端是 `AutoPlayEngine`（經 `Context.actionDelayScale`）→ `ActionDelayModel.delay(for:scale:)`。
+    ///
+    /// 持久化機制與 mode 同一套（單一 UserDefaults key、重啟還原）；差別是它沒有需要
+    /// 一次性遷移的舊 key，所以直接住在 `SettingsStore` 而不必像 `AutoPlayModeStore` 另立型別。
+    nonisolated static let actionDelaySecondsKey = "naki.actionDelaySeconds"
+
+    /// stepper 範圍與步進（UI 與 clamp 共用同一份定義）。
+    ///
+    /// 1.0s＝現行行為；向下更快、向上更慢。
+    nonisolated static let actionDelayRange: ClosedRange<Double> = 0.5...3.0
+    nonisolated static let actionDelayStep: Double = 0.1
+    nonisolated static let defaultActionDelaySeconds: Double = 1.0
+
+    /// 把任意輸入夾回合法區間（防止舊版或外部寫入落在範圍外）。
+    nonisolated static func clampActionDelay(_ value: Double) -> Double {
+        min(max(value, actionDelayRange.lowerBound), actionDelayRange.upperBound)
+    }
+
+    /// 讀取持久化的基準秒數（沒有存檔回預設 1.0s；越界值夾回區間）。
+    nonisolated static func loadActionDelaySeconds(_ defaults: UserDefaults = .standard) -> Double {
+        guard defaults.object(forKey: actionDelaySecondsKey) != nil else {
+            return defaultActionDelaySeconds
+        }
+        return clampActionDelay(defaults.double(forKey: actionDelaySecondsKey))
+    }
+
+    /// 寫入基準秒數（寫入即夾回區間，永不持久化越界值）。
+    nonisolated static func saveActionDelaySeconds(_ value: Double,
+                                                   to defaults: UserDefaults = .standard) {
+        defaults.set(clampActionDelay(value), forKey: actionDelaySecondsKey)
+    }
+
+    /// 使用者設定的自動打牌基準延遲（秒）。UI 顯示成 `1.0s`。
+    ///
+    /// 寫入即持久化：stepper 的 Binding 直接讀寫這一份，`AutoPlayEngine` 每一輪
+    /// 從 `actionDelayScale` 讀新值——這正是 p1-3 抓到那批假控制欠缺的「讀取端」。
+    var actionDelaySeconds: Double = SettingsStore.loadActionDelaySeconds() {
+        didSet {
+            let clamped = Self.clampActionDelay(actionDelaySeconds)
+            if clamped != actionDelaySeconds {
+                actionDelaySeconds = clamped   // 二次進 didSet：clamped==self → 下面 guard 擋住
+                return
+            }
+            guard actionDelaySeconds != oldValue else { return }
+            Self.saveActionDelaySeconds(actionDelaySeconds)
+        }
+    }
+
+    /// 基準秒數 → `ActionDelayModel.delay(for:scale:)` 的縮放係數。
+    ///
+    /// 語意是「基準秒數 / 1.0」——基準預設 1.0s，所以係數就等於秒數；除法留著是為了
+    /// 讓「1.0s＝現行行為（scale 1.0）」寫在型別上，而不是靠 reader 記得預設值剛好是 1。
+    /// 抽成 `nonisolated static` 是為了不必建立實例（更不必碰 `.standard`）就能單測這條換算。
+    nonisolated static func actionDelayScale(forSeconds seconds: Double) -> Double {
+        seconds / defaultActionDelaySeconds
+    }
+
+    /// 給 `AutoPlayEngine.Context.actionDelayScale` 讀的縮放係數。
+    var actionDelayScale: Double {
+        Self.actionDelayScale(forSeconds: actionDelaySeconds)
+    }
+
     /// 目前這條 WebView 路徑是否提供自動送出。
     ///
     /// 不是使用者設定，而是「設定選單上有沒有這個選項」的依據：

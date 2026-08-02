@@ -176,7 +176,9 @@ final class NakiRuntime {
                     seat: self.store.autoPlaySeat,
                     isSanma: self.store.gameState.is3P,
                     tsumoTile: self.store.tsumoTile,
-                    isReady: self.session.isReady)
+                    isReady: self.session.isReady,
+                    // 延遲 stepper 的讀取端：每輪重取，調一下下一手就生效（p2-6）
+                    actionDelayScale: self.settings.actionDelayScale)
             },
             log: { [weak self] message in self?.debugServer?.addLog(message) },
             event: { [weak self] message in self?.logAutoPlayEvent(message) })

@@ -54,16 +54,30 @@ struct ActionDelayModel {
     ///
     /// 開啟後所有延遲乘上這個數，讓 `/screenshot`（1–2 秒）來得及在送出前
     /// 拍到高亮。只在測試時開；正常對局用會讓每一手都明顯變慢。
+    ///
+    /// 與使用者的延遲 stepper（`scale` 參數）是兩件事：`verificationScale` 是
+    /// 驗證時才開的全域旗標，`scale` 是使用者長期設定的基準秒數係數。兩者相乘。
     static var verificationScale: Double = 1.0
 
     /// 上限。伺服器實測給 300 秒思考時間，這個上限純粹是保護——
     /// 延遲再長也不該讓對局停住。
+    ///
+    /// **設計決策：`maximum` 是絕對硬上限，不隨 `scale` 一起放大。** 它的職責是
+    /// 「延遲再長也不該讓對局停住」，那是一條與使用者偏好無關的保護線；使用者把
+    /// stepper 拉到 3.0s 只放大分布本身，碰到上限就截在 12 秒（副露＋思考停頓的
+    /// 高尾在 scale=3.0 時才會偶爾觸頂，日常打牌牌的區間遠在其下）。
     static let maximum: TimeInterval = 12.0
 
     /// 算出這次動作要等多久
     ///
-    /// - Parameter generator: 注入亂數來源以便測試；正式路徑用系統預設
+    /// - Parameters:
+    ///   - scale: 使用者的基準秒數係數（`SettingsStore.actionDelayScale`）。
+    ///     `1.0` 等於現行行為，向下更快、向上更慢。乘在**整個抽樣值**上
+    ///     （基準區間＋偶發思考停頓），所以拉長的是分布本身而不是換成固定值
+    ///     ——防偵測的隨機性保留。`maximum` 不隨它縮放（見上）。
+    ///   - generator: 注入亂數來源以便測試；正式路徑用系統預設
     static func delay(for actionType: Recommendation.ActionType?,
+                      scale: Double = 1.0,
                       using generator: inout some RandomNumberGenerator) -> TimeInterval {
         let range: Range
         switch actionType {
@@ -79,12 +93,15 @@ struct ActionDelayModel {
             value += Double.random(in: pauseRange.low...pauseRange.high, using: &generator)
         }
 
-        return min(value * verificationScale, maximum)
+        // 抽樣順序刻意不動：`scale` 只乘在最後，所以 scale=1.0 與加入這個參數之前
+        // 用同一顆種子逐位元等價（`ActionDelayModelTests` 鎖著這一點）。
+        return min(value * scale * verificationScale, maximum)
     }
 
     /// 便利版本：用系統亂數
-    static func delay(for actionType: Recommendation.ActionType?) -> TimeInterval {
+    static func delay(for actionType: Recommendation.ActionType?,
+                      scale: Double = 1.0) -> TimeInterval {
         var g = SystemRandomNumberGenerator()
-        return delay(for: actionType, using: &g)
+        return delay(for: actionType, scale: scale, using: &g)
     }
 }

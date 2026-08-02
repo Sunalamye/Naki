@@ -31,10 +31,14 @@ final class ActionDelayModelTests: XCTestCase {
         super.tearDown()
     }
 
-    private func samples(_ action: Recommendation.ActionType?, count: Int = 500) -> [TimeInterval] {
+    private func samples(_ action: Recommendation.ActionType?,
+                         scale: Double = 1.0,
+                         count: Int = 500) -> [TimeInterval] {
         var g = SeededGenerator(seed: 42)
-        return (0..<count).map { _ in ActionDelayModel.delay(for: action, using: &g) }
+        return (0..<count).map { _ in ActionDelayModel.delay(for: action, scale: scale, using: &g) }
     }
+
+    private func mean(_ xs: [TimeInterval]) -> Double { xs.reduce(0, +) / Double(xs.count) }
 
     /// 舊實作每種動作回固定值——那正是要消除的指紋
     func testDelayIsNotConstant() {
@@ -92,5 +96,61 @@ final class ActionDelayModelTests: XCTestCase {
     /// 同一顆種子必須給同一串結果，否則測試本身不可信
     func testDeterministicWithSameSeed() {
         XCTAssertEqual(samples(.discard, count: 20), samples(.discard, count: 20))
+    }
+
+    // MARK: - p2-6：延遲 stepper 的縮放係數
+
+    /// scale=1.0 與「不帶 scale 參數」逐位元等價——加入 stepper 沒有偷改現行行為。
+    ///
+    /// 兩者用同一顆種子、同一組動作抽樣：`delay(for:using:)`（scale 預設 1.0）與
+    /// `delay(for:scale:1.0,using:)` 必須給出完全相同的序列。抽樣順序沒動、scale 只乘在
+    /// 最後、1.0 是乘法單位元，所以這是結構保證而不是巧合。
+    func testScaleOfOneEqualsUnscaledBehavior() {
+        for action in [Recommendation.ActionType.discard, .pon, .hora, Recommendation.ActionType.none] {
+            var g1 = SeededGenerator(seed: 7)
+            var g2 = SeededGenerator(seed: 7)
+            let unscaled = (0..<300).map { _ in ActionDelayModel.delay(for: action, using: &g1) }
+            let scaledOne = (0..<300).map { _ in
+                ActionDelayModel.delay(for: action, scale: 1.0, using: &g2)
+            }
+            XCTAssertEqual(unscaled, scaledOne, "\(action.rawValue)：scale=1.0 必須等於現行行為")
+        }
+    }
+
+    /// 同輸入、不同 scale → 每一筆延遲**逐筆**按係數縮放（比例正確，不是換成固定值）。
+    ///
+    /// 用和牌（區間＋思考停頓上限 (1.6+4.0)×2.0=11.2s < 12s 上限）避免觸頂，
+    /// 所以在 0.5／1.0／2.0 三檔可以要求精確比例。同一顆種子 ⇒ 抽樣值相同 ⇒
+    /// `scaled[i] == factor × base[i]`。
+    func testScaleScalesEachSampleProportionally() {
+        let base = samples(.hora, scale: 1.0, count: 300)
+        let half = samples(.hora, scale: 0.5, count: 300)
+        let doubled = samples(.hora, scale: 2.0, count: 300)
+
+        XCTAssertEqual(base.count, 300)
+        for i in 0..<base.count {
+            XCTAssertEqual(half[i], base[i] * 0.5, accuracy: 1e-9,
+                           "scale=0.5 應把每一筆延遲縮成一半")
+            XCTAssertEqual(doubled[i], base[i] * 2.0, accuracy: 1e-9,
+                           "scale=2.0 應把每一筆延遲拉成兩倍")
+        }
+    }
+
+    /// 分布整體隨 scale 平移：均值單調上升，且 stepper 拉大真的變慢（driver 的驗收語意）。
+    func testScaleShiftsDistributionMean() {
+        let slow = mean(samples(.discard, scale: 0.5, count: 2000))
+        let normal = mean(samples(.discard, scale: 1.0, count: 2000))
+        let fastNo = mean(samples(.discard, scale: 3.0, count: 2000))
+        XCTAssertLessThan(slow, normal, "0.5 檔應比 1.0 檔快")
+        XCTAssertLessThan(normal, fastNo, "3.0 檔應比 1.0 檔慢")
+    }
+
+    /// 上限是絕對硬線：即使 scale 拉到最大，延遲仍不得超過 `maximum`（保護對局不停住）。
+    func testScaleStillRespectsAbsoluteMaximum() {
+        for value in samples(.discard, scale: 3.0, count: 3000) {
+            XCTAssertLessThanOrEqual(value, ActionDelayModel.maximum,
+                                     "scale 只放大分布，maximum 仍是絕對上限")
+            XCTAssertGreaterThan(value, 0)
+        }
     }
 }

@@ -70,6 +70,31 @@ struct ContentView: View {
                            ? "" : AutoPlayAvailability.autoUnavailableReason)
     }
 
+    /// 自動打牌基準延遲 stepper：`[ 1.0s ⌃⌄ ]`。
+    ///
+    /// p1-3 移除的假控制在 p2-6 做回來並接真——它不是取代 `ActionDelayModel` 的隨機
+    /// 分布（那是防偵測的刻意設計），而是當它的**縮放係數**：1.0s＝現行行為，
+    /// 向下更快、向上更慢。值寫進 `SettingsStore`（重啟保留），讀取端是 `AutoPlayEngine`。
+    ///
+    /// **只在這條 path 真的會自動送出時才出現**（`supportsAutoPlay`）：Legacy 路徑
+    /// 不提供自動送出，延遲永遠不會生效，掛在那裡就又是一個假控制（見 picker 的同款判斷）。
+    /// 在支援的 path 上不隨當前模式隱藏——它是「未來切到自動時」的設定，不是即時動作，
+    /// 跟著模式閃現反而干擾。
+    private var actionDelayStepper: some View {
+        Stepper(value: Binding(get: { naki.settings.actionDelaySeconds },
+                               set: { naki.settings.actionDelaySeconds = $0 }),
+                in: SettingsStore.actionDelayRange,
+                step: SettingsStore.actionDelayStep) {
+            Text(String(format: "%.1fs", naki.settings.actionDelaySeconds))
+                .font(.system(.caption, design: .monospaced))
+                .monospacedDigit()
+        }
+        .accessibilityIdentifier("autoplay-delay-stepper")
+        .accessibilityLabel("自動打牌基準延遲")
+        .accessibilityValue(String(format: "%.1f 秒", naki.settings.actionDelaySeconds))
+        .help("送出前的模擬人類延遲基準；1.0s 為預設，向上更慢、向下更快（隨機分布保留）")
+    }
+
     var body: some View {
         Group {
 #if os(macOS)
@@ -144,9 +169,15 @@ struct ContentView: View {
                       : "AI 推薦模式（此裝置不提供自動送出）")
         }
 
-        // 註：「延遲調整」Stepper 已移除。它寫進去的值沒有任何讀取者，
-        // 真正的送出延遲由 `ActionDelayModel` 依動作類型隨機決定（刻意設計，
-        // 避免固定節奏）。留著只是一個看得到、轉得動、但不會改變任何行為的假控制。
+        // 延遲基準 stepper（p2-6）：它縮放 `ActionDelayModel` 的隨機分布，讀取端是
+        // `AutoPlayEngine`。只在支援自動送出的 path 上出現——否則延遲永不生效，
+        // 掛著就是 p1-3 抓到的那種假控制。
+        if naki.settings.supportsAutoPlay {
+            ToolbarItem(placement: .navigation) {
+                actionDelayStepper
+                    .frame(width: 96)
+            }
+        }
 
         // MCP Server
         ToolbarItem(placement: .navigation) {
@@ -302,6 +333,14 @@ struct ContentView: View {
             // iOS 17–25 走 Legacy WebView，那條路不提供自動送出：
             // picker 只會列出「關 / 推薦」，理由在進階設定裡說明。
             autoPlayModePicker(width: 150)
+        }
+
+        // 延遲基準 stepper：與 macOS 同款、同一份 `SettingsStore` 讀寫；
+        // 只在支援自動送出的 path（iOS 26+ WebPage）出現，Legacy 不掛假控制。
+        if naki.settings.supportsAutoPlay {
+            ToolbarItem(placement: .automatic) {
+                actionDelayStepper
+            }
         }
 
         // 右側：遊戲面板
