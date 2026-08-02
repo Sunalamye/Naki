@@ -6,8 +6,6 @@
 //  Naki 專用的 MCP 工具 Protocol
 //
 
-#if os(macOS)
-
 import Foundation
 import MCPKit
 
@@ -77,5 +75,3 @@ class NakiToolBase {
         self.context = context
     }
 }
-
-#endif  // os(macOS)

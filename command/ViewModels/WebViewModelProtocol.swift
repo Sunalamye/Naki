@@ -73,11 +73,25 @@ protocol WebViewModelProtocol: AnyObject, Observable {
 
     // MARK: - Debug Server
 
-    #if os(macOS)
+    // 兩個平台都有：`scripts/soak-test.sh`、`action-shots.sh`、`replay-check.sh` 與所有
+    // MCP 工具都只透過 loopback 8765 說話，iOS 少了它就等於少了整個外部驗證面。
+    // 先前這三個方法包在 `#if os(macOS)` 裡，但 `WebViewModel.init()` 無條件呼叫
+    // `startDebugServer()`、`LegacyWebViewModel` 又遵守條件編譯——結果「iOS 上有沒有 MCP」
+    // 取決於 **OS 版本**（26+ 走哪條 VM）而不是平台意圖。現在兩條 path、兩個平台一律啟動。
     func startDebugServer()
     func stopDebugServer()
     func toggleDebugServer()
-    #endif
+
+    // MARK: - View
+
+    /// 建立這條 path 對應的 WebView。
+    ///
+    /// **版本分歧只在 `WebViewModelFactory` 判一次**：VM 由 factory 挑，View 由 VM 自己給，
+    /// 兩者不可能配錯。先前 factory 與 `AdaptiveNakiWebView` 各寫一次
+    /// `if #available(macOS 26.0, iOS 26.0, *)`，靠註解要求兩處一致——改一處忘另一處會拿到
+    /// `WebViewModel` + `LegacyNakiWebView`（或反過來）的組合，View 層的 `as?` 轉型靜靜失敗，
+    /// 畫面只剩「正在初始化…」，沒有任何編譯期或執行期的錯誤訊息。
+    func makeWebView() -> AnyView
 
     // MARK: - JavaScript Execution
 
@@ -115,12 +129,17 @@ extension WebViewModelProtocol {
 
 // MARK: - Factory
 
-/// 根據系統版本創建適當的 WebViewModel
-/// 注意：需要與 AdaptiveNakiWebView 的版本判斷保持一致
+/// 根據系統版本創建適當的 WebViewModel。
+///
+/// **這是全專案唯一的 `#available(macOS 26.0, iOS 26.0, *)`**（`AdaptiveNakiWebView`
+/// 不再自己判版本，改問 VM 要 `makeWebView()`）。要驗這件事：
+///
+/// ```
+/// grep -rn '#available' --include='*.swift' command   # 只能有這一行
+/// ```
 @MainActor
 enum WebViewModelFactory {
     static func create() -> any WebViewModelProtocol {
-        // 與 AdaptiveNakiWebView 的版本判斷保持一致
         if #available(macOS 26.0, iOS 26.0, *) {
             return WebViewModel()
         } else {

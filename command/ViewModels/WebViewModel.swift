@@ -20,6 +20,11 @@ import MortalSwift
 import SwiftUI
 import WebKit
 
+/// 這條 path 整個建立在 `WebPage` 上（macOS 26 / iOS 26 才有的 API），所以型別本身就標
+/// 26+。macOS deployment target 是 26，標不標對 macOS 沒差；但 iOS target 是 17，
+/// 不標的話 `Naki-M` 連編譯都過不了。唯一的建立點是 `WebViewModelFactory.create()`
+/// 的 `#available` 分支。
+@available(macOS 26.0, iOS 26.0, *)
 @Observable
 @MainActor
 class WebViewModel: WebViewModelProtocol {
@@ -120,11 +125,9 @@ class WebViewModel: WebViewModelProtocol {
 
     configuration.userContentController = userContentController
 
-    // 啟用 Web Inspector（僅用於開發除錯）
-    #if DEBUG
-      // WebPage 使用 isInspectable 屬性
-      webPage?.isInspectable = true
-    #endif
+    // 註：這裡原本還有一份 `#if DEBUG webPage?.isInspectable = true`。
+    // 它在 `webPage` 被建立**之前**執行，optional chaining 對 nil 直接短路，
+    // 一行都沒生效；真正有效的是下面建立完 WebPage 之後那份。
 
     // 建立 WebPage
     if let decider = navigationDecider, let presenter = dialogPresenter {
@@ -999,7 +1002,8 @@ class WebViewModel: WebViewModelProtocol {
 
   // MARK: - MCP Server
 
-  /// 啟動 MCP Server
+  // 截圖是真正的平台分歧（AppKit）：iOS 沒有 `NSApplication`，
+  // `captureScreenshot` 回調在 iOS 分支直接回錯誤。Debug Server 本身兩個平台都跑。
   #if os(macOS)
   /// 整個視窗（Naki 側欄 + 遊戲畫面）轉成 PNG
   static func windowScreenshot() -> Data? {
@@ -1215,6 +1219,13 @@ class WebViewModel: WebViewModelProtocol {
     guard let page = webPage else { return }
     page.reload()
     statusMessage = "正在重新載入…"
+  }
+
+  // MARK: - View
+
+  /// WebPage path 對應的 View。由 VM 自己指定，`AdaptiveNakiWebView` 不再判版本。
+  func makeWebView() -> AnyView {
+    AnyView(NakiWebView())
   }
 
   // MARK: - WebViewModelProtocol 補齊

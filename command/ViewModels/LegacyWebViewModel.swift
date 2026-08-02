@@ -63,10 +63,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
     /// 推薦顯示保留（`.recommend`），送出交回使用者。
     let supportsAutoPlay = false
 
-    /// Debug Server (macOS only)
-    #if os(macOS)
+    /// Debug Server（macOS 與 iOS 都有，見 `WebViewModelProtocol` 的 Debug Server 段）
     private var debugServer: DebugServer?
-    #endif
 
     // MARK: - WKWebView Reference
 
@@ -120,10 +118,10 @@ class LegacyWebViewModel: WebViewModelProtocol {
     func setWebView(_ webView: WKWebView) {
         self.webView = webView
 
-        // 啟動 Debug Server（在設置 WebView 後）
-        #if os(macOS)
+        // 啟動 Debug Server（在設置 WebView 後——`executeJavaScript` 回調要用它）。
+        // 兩個平台都啟動：主 path 的 `WebViewModel.init()` 本來就無條件啟動，
+        // 這裡再依平台分歧的話，「iOS 有沒有 MCP」就變成 OS 版本的函數。
         startDebugServer()
-        #endif
     }
 
     // MARK: - Bot Methods
@@ -331,8 +329,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     /// Legacy 路徑的診斷輸出路由（`liqiSender.logHandler` 與 executor 共用）。
     ///
-    /// macOS 有 Debug Server 時走它的 buffer（`addLog` 內部就會寫進 LogManager），
-    /// 否則退回 `bridgeLog`；兩者都寫會讓同一件事在 `/logs` 出現兩次。
+    /// Debug Server 起來之後走它的 buffer（`addLog` 內部就會寫進 LogManager），
+    /// 否則（`setWebView` 之前）退回 `bridgeLog`；兩者都寫會讓同一件事在 `/logs` 出現兩次。
     ///
     /// - Parameter isEvent: 「為什麼沒送出」這類關鍵事件，額外寫進當次 session 的
     ///   events.log（與主路徑 `logAutoPlayEvent` 同一條規則）。
@@ -341,12 +339,10 @@ class LegacyWebViewModel: WebViewModelProtocol {
         if isEvent {
             eventLog(line)
         }
-        #if os(macOS)
         if let server = debugServer {
             server.addLog(line)
             return
         }
-        #endif
         bridgeLog(line)
     }
 
@@ -392,7 +388,6 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     // MARK: - Debug Server
 
-    #if os(macOS)
     func startDebugServer() {
         guard debugServer == nil else {
             statusMessage = "Debug Server 已在運行"
@@ -486,11 +481,13 @@ class LegacyWebViewModel: WebViewModelProtocol {
             startDebugServer()
         }
     }
-    #else
-    func startDebugServer() {}
-    func stopDebugServer() {}
-    func toggleDebugServer() {}
-    #endif
+
+    // MARK: - View
+
+    /// Legacy path 對應的 View。由 VM 自己指定，`AdaptiveNakiWebView` 不再判版本。
+    func makeWebView() -> AnyView {
+        AnyView(LegacyNakiWebView())
+    }
 
     // MARK: - JavaScript Execution
 

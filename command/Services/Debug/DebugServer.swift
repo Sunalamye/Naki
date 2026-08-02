@@ -5,8 +5,13 @@
 //  Created by Claude on 2025/12/01.
 //  本地 HTTP MCP Server - 允許外部工具控制 App
 //
-
-#if os(macOS)
+//  平台：**macOS 與 iOS 都編譯**。整層只用 Foundation / Network / MCPKit，沒有一行 AppKit
+//  （唯一真正的平台分歧是視窗截圖，留在 `WebViewModel.windowScreenshot` 的 `#if os(macOS)`）。
+//  先前整個檔案包在 `#if os(macOS)` 裡，但 `scripts/soak-test.sh`、`action-shots.sh`、
+//  `replay-check.sh` 與所有 MCP 工具都只透過 loopback 8765 說話——把它從 iOS 拿掉等於
+//  iOS build 完全沒有外部驗證面，而且 `WebViewModel.init()` 本來就無條件啟動它，
+//  於是「iOS 上有沒有 MCP」變成 OS 版本（26+ 走哪條 VM）的函數而不是平台決策。
+//
 
 import Foundation
 import Network
@@ -751,5 +756,3 @@ class DebugServer {
         LogManager.shared.clear()
     }
 }
-
-#endif  // os(macOS)

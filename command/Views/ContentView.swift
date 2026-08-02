@@ -539,8 +539,9 @@ struct AdvancedSettingsSheet: View {
                 Label("Bot 管理", systemImage: "cpu")
             }
 
-            #if os(macOS)
-            // MCP Server (僅 macOS)
+            // MCP Server（兩個平台都有——p2-3 之後 DebugServer 不再是 macOS 專屬）。
+            // 這個 GroupBox 先前包在 `#if os(macOS)` 裡，寫著「僅 macOS」；
+            // 現在 iOS 也會綁 loopback 8765，控制項再藏起來就變成「跑著卻看不到、關不掉」。
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -581,7 +582,6 @@ struct AdvancedSettingsSheet: View {
             } label: {
                 Label("MCP Server", systemImage: "server.rack")
             }
-            #endif
         }
         .padding()
     }

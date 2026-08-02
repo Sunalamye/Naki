@@ -13,8 +13,6 @@
 //  - `bot_status` / `bot_trigger` / `bot_sync`：本來就不碰遊戲物件，維持原樣。
 //
 
-#if os(macOS)
-
 import Foundation
 import MCPKit
 
@@ -255,5 +253,3 @@ struct BotSyncTool: MCPTool {
         ]
     }
 }
-
-#endif  // os(macOS)

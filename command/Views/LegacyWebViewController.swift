@@ -109,7 +109,7 @@ struct LegacyNakiWebView: UIViewRepresentable {
         // 保存 webView 引用到 coordinator
         context.coordinator.webView = webView
 
-        // 設置 WebView 引用到 ViewModel（iOS 上不啟動 Debug Server）
+        // 設置 WebView 引用到 ViewModel（同時啟動 Debug Server，與 macOS 一致）
         if let legacyViewModel = viewModel as? LegacyWebViewModel {
             legacyViewModel.setWebView(webView)
         }
@@ -387,17 +387,21 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
 
 // MARK: - Adaptive WebView
 
-/// 自適應 WebView - 根據系統版本選擇實現
+/// 自適應 WebView —— **不自己判版本**。
+///
+/// 版本分歧只在 `WebViewModelFactory.create()` 判一次；View 由當時選中的 VM
+/// 用 `makeWebView()` 交出來，所以「WebPage VM 配到 Legacy View」這種組合
+/// 從結構上就不存在。先前這裡與 factory 各寫一次 `#available`，靠註解要求一致，
+/// 改一處忘另一處只會得到一個永遠轉型失敗的 `as?` 和一片空白畫面。
 struct AdaptiveNakiWebView: View {
     @Environment(\.webViewModel) private var viewModel
 
     var body: some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
-            // 使用新版 WebPage API
-            NakiWebView()
+        if let viewModel {
+            viewModel.makeWebView()
         } else {
-            // 使用舊版 WKWebView
-            LegacyNakiWebView()
+            // Environment 還沒注入 VM（理論上只有預覽／測試會走到）
+            ProgressView("正在初始化...")
         }
     }
 }

@@ -194,11 +194,12 @@ final class SeatSourceDouble: WebViewModelProtocol {
     func getPlayerNamesStatus() async -> [String: Any]? { nil }
     func resetHideNamesSettings() {}
 
-    #if os(macOS)
+    // 兩個平台都要（p2-3 統一啟動語意後，protocol 不再包 `#if os(macOS)`）
     func startDebugServer() {}
     func stopDebugServer() {}
     func toggleDebugServer() {}
-    #endif
+
+    func makeWebView() -> AnyView { AnyView(EmptyView()) }
 
     func executeJavaScript(_ script: String) async throws -> Any? { nil }
 
