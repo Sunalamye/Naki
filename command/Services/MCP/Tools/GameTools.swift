@@ -393,3 +393,79 @@ struct GameActionVerifyTool: MCPTool {
         return result
     }
 }
+
+// MARK: - Confirm New Round Tool
+
+/// 局間確認：手動送 `confirmNewRound`（進下一局）
+///
+/// 自動模式下這個由 `AutoPlayEngine` 在 `end_kyoku` 後自動送；本工具是手動觸發，
+/// 便於除錯與驗證（`.off`/`.recommend`/三麻等不自動送的情境下手動推進）。
+struct GameConfirmNewRoundTool: MCPTool {
+    static let name = "game_confirm_new_round"
+    static let description = """
+        送出 .lq.FastTest.confirmNewRound（ReqCommon，空 payload），確認局間結算並進下一局。\
+        走 game-gateway。成功判準：sendRaw 成功 → 同 msgId RESPONSE 無 error → \
+        下一局 ActionNewRound 到達。⚠️ 這是會改變對局狀態的動作，只在測試帳號使用。\
+        自動模式下 end_kyoku 後會由引擎自動送，本工具供手動除錯。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+        let spec = LiqiRequestBuilder.confirmNewRound()
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
+        return LiqiToolResult.dictionary(outcome, spec: spec)
+    }
+}
+
+// MARK: - Vote Game End Tool
+
+/// 投票提前結束對局：送 `voteGameEnd`
+///
+/// ⚠️ **破壞性**：發起「中途結束對局」的投票，不是唯讀查詢，也**不接進任何自動路徑**。
+struct GameVoteEndTool: MCPTool {
+    static let name = "game_vote_game_end"
+    static let description = """
+        送出 .lq.FastTest.voteGameEnd（ReqVoteGameEnd { yes }），投票提前結束對局。\
+        ⚠️ 破壞性操作：會發起中途結束對局的投票，非唯讀查詢。只在測試帳號使用。\
+        不接進任何自動路徑，需手動呼叫。yes 預設 true（投贊成票）。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "yes": .boolean("是否投贊成票（預設 true）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+        let yes = arguments["yes"] as? Bool ?? true
+        let spec = LiqiRequestBuilder.voteGameEnd(yes: yes)
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
+        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["yes": yes])
+    }
+}

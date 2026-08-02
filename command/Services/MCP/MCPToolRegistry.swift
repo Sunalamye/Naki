@@ -148,7 +148,7 @@ final class MCPToolRegistry {
 extension MCPToolRegistry {
     /// 註冊所有內建工具
     ///
-    /// 下方 registration 是工具數的**唯一真實來源**（本次靜態計數 38 個）；
+    /// 下方 registration 是工具數的**唯一真實來源**（本次靜態計數 40 個）；
     /// `get_status` 的 `tools_count` 直接數 `registeredToolNames`，不會跟註解漂移，
     /// 要確認 live 數字請看 `tools/list` 或 `get_status`。
     /// 2026-08-02 移除 6 個 highlight 失敗樁（見下）。
@@ -188,13 +188,16 @@ extension MCPToolRegistry {
         register(BotPonTool.self)
         register(BotSyncTool.self)
 
-        // 遊戲狀態與動作類（6）— 狀態走協定層、動作走 protobuf
+        // 遊戲狀態與動作類（8）— 狀態走協定層、動作走 protobuf
         register(GameStateTool.self)
         register(GameHandTool.self)
         register(GameOpsTool.self)
         register(GameDiscardTool.self)
         register(GameActionTool.self)
         register(GameActionVerifyTool.self)
+        // 局間確認 / 投票結束（p2-5）— 都送 .lq.FastTest.* 走 game-gateway
+        register(GameConfirmNewRoundTool.self)
+        register(GameVoteEndTool.self)
 
         // JavaScript 執行（1）
         register(ExecuteJSTool.self)

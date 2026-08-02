@@ -31,6 +31,22 @@ protocol BotResponseObserving: AnyObject {
     func botDidRespond()
     /// Bot 被刪除，本局資料已清空
     func botDidReset()
+
+    // 對局流程生命週期（p2-5）：coordinator 看到 MJAI 事件邊界時通知，
+    // `NakiRuntime` 轉給 `AutoPlayEngine` 決定要不要自動送 confirmNewRound。
+    /// 一局結束（`end_kyoku`：ActionHule / ActionNoTile / ActionLiuJu）
+    func roundDidEnd()
+    /// 下一局開始（`start_kyoku`：ActionNewRound）
+    func roundDidBegin()
+    /// 整場對局結束（`end_game`：NotifyGameEndResult / NotifyGameTerminate）
+    func gameDidEnd()
+}
+
+/// 生命週期回調預設 no-op：只有需要接自動確認的一方（`NakiRuntime`）才實作。
+extension BotResponseObserving {
+    func roundDidEnd() {}
+    func roundDidBegin() {}
+    func gameDidEnd() {}
 }
 
 /// WebSocket → MJAI → Bot → `GameStore`。
@@ -184,10 +200,21 @@ final class NakiWebCoordinator {
         case "end_game":
             bridgeLog("[協調器] end_game: 清理中")
             systemLog("[生命週期] 對局結束，清除 Bot 與 UI 狀態")
+            observer?.gameDidEnd()   // 終局：取消任何待送的 confirmNewRound
             eventStream.emit(event)
             eventStream.endGame()
             deleteBot()   // 手牌／推薦／botStatus 一併清空
             store.statusMessage = "遊戲結束"
+
+        case "end_kyoku":
+            // 局間結算：伺服器停在結算窗口等 confirmNewRound。通知引擎（受閘門控制）。
+            observer?.roundDidEnd()
+            eventStream.emit(event)
+
+        case "start_kyoku":
+            // 下一局的權威 action 已到 → 局間確認已生效，清掉待確認。
+            observer?.roundDidBegin()
+            eventStream.emit(event)
 
         default:
             eventStream.emit(event)

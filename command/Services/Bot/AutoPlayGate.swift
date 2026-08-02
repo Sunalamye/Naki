@@ -111,4 +111,21 @@ enum AutoPlayGate {
 
         return .proceed
     }
+
+    /// 局間確認（`confirmNewRound`）的閘門：只看 mode 與三麻 fail-closed。
+    ///
+    /// confirmNewRound 沒有 oplist（它不是牌桌上的一個可用操作，而是「進下一局」的
+    /// 流程訊號），所以不走 `evaluate` 的 snapshot 分支。但「只有自動模式才自動送、
+    /// 三麻一律不自動」與打牌完全同一條規則，故共用同一組 `Reason`，收斂在同一個檔案：
+    ///
+    /// - `.off` / `.recommend`：不自動送（使用者要自己在遊戲內確認）→ `.skip(.notAutoMode)`
+    /// - 三麻：fail-closed（內建模型只有四麻一份，自動流程一律不介入三麻）
+    ///   → `.skip(.sanmaUnsupported)`
+    ///
+    /// - Returns: `.proceed` 表示可以送；否則 `.skip(reason)`（永遠不會回 `.forceHora`/`.sendPass`）
+    static func allowsConfirm(isAutoMode: Bool, isSanma: Bool) -> Decision {
+        guard isAutoMode else { return .skip(.notAutoMode) }
+        guard !isSanma else { return .skip(.sanmaUnsupported) }
+        return .proceed
+    }
 }

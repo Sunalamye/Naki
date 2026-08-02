@@ -196,6 +196,10 @@ enum NakiToolOutputSchemas {
             "afterSequence": any("送出後的 oplist sequence"),
             "verifyNote": string("opsAdvanced=false 不等於失敗的說明")
         ])
+        table["game_confirm_new_round"] = liqiSend()
+        table["game_vote_game_end"] = liqiSend(extra: [
+            "yes": boolean("是否投贊成票")
+        ])
 
         // ── JavaScript ───────────────────────────────────────
         table["execute_js"] = object(

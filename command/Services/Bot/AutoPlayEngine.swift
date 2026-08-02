@@ -95,6 +95,21 @@ nonisolated enum AutoPlayExecutionState: Equatable {
     case executing(id: UUID)
 }
 
+/// 局間確認一輪的結論（p2-5）
+///
+/// `nonisolated`：與 `AutoPlayCycleOutcome` 同理，測試端（沒開 MainActor 預設隔離）
+/// 拿它做 `XCTAssertEqual` 不該冒 isolation 告警。
+nonisolated enum AutoConfirmCycleResult: Equatable {
+    /// 這一輪沒有待確認的局間結算
+    case noPending
+    /// WebView 尚未就緒（保留 pending）
+    case notReady
+    /// 閘門擋下（`.off`/`.recommend` 非自動、或三麻 fail-closed）；pending 保留
+    case skipped(AutoPlayGate.Reason)
+    /// 真的走了送出流程，附 dispatcher 的結論
+    case dispatched(AutoConfirmOutcome)
+}
+
 // MARK: - Engine
 
 @MainActor
@@ -152,6 +167,23 @@ final class AutoPlayEngine {
         /// 送出前的模擬人類延遲；nil＝用 `ActionDelayModel`（正式路徑）
         var actionDelay: ((Recommendation.ActionType?) -> TimeInterval)?
 
+        // MARK: 局間確認（confirmNewRound）
+
+        /// 局結束到送出 confirmNewRound 之間的等待。
+        ///
+        /// 給終局一個緩衝：最後一局的 `end_kyoku` 之後緊接著會來 `NotifyGameEndResult`
+        /// （終局，不是進下一局）。等這段時間，若終局訊號先到並清掉 pending，這一輪的
+        /// dispatcher 開頭 `isSuperseded` 就會停手，不會對終局誤送 confirmNewRound。
+        /// 結算窗口有數十秒，多等這一下沒有代價。
+        var confirmGrace: TimeInterval = 0.8
+        /// confirmNewRound 的送出策略；nil＝`AutoConfirmDispatcher` 的預設
+        /// （型別在 app target 是 MainActor 隔離的，所以存 optional，用到時才取預設值）
+        var confirmPolicy: AutoConfirmDispatcher.RetryPolicy?
+        /// 送 confirmNewRound 並判斷伺服器是否受理；nil＝正式路徑
+        /// （`sender.sendAwaitingResponse(confirmNewRound)`）。做成 seam 是為了讓
+        /// 「成功清 pending／失敗保留」在單測裡不必碰 `LiqiResponseStore` 單例。
+        var confirmSend: (() async -> LiqiToolSendOutcome)?
+
         static let live = Timing()
     }
 
@@ -182,6 +214,12 @@ final class AutoPlayEngine {
 
     /// 待處理的手動觸發（MCP `bot_trigger` / 模式切到自動）
     private var pendingManual: TimeInterval?
+
+    /// 有一個局間結算等著送 confirmNewRound（`end_kyoku` 設、`ActionNewRound`／終局清）。
+    ///
+    /// 用一個 flag 而不是把確認塞進 oplist 路徑：局間結算沒有 oplist，它是「進下一局」
+    /// 的流程訊號，不是牌桌上的可用操作。
+    private(set) var confirmPending = false
 
     /// 本輪的診斷軌跡（每輪開頭清空）
     private var trace: [String] = []
@@ -229,6 +267,7 @@ final class AutoPlayEngine {
         nap?.cancel()
         nap = nil
         state = .idle
+        confirmPending = false
     }
 
     /// 提早結束這次輪詢間隔。
@@ -260,10 +299,38 @@ final class AutoPlayEngine {
         wake()
     }
 
+    // MARK: - 局間確認生命週期（p2-5）
+
+    /// 一局結束（`ActionHule` / `ActionNoTile` / `ActionLiuJu` → `end_kyoku`）。
+    ///
+    /// 只設 flag；要不要真的送 confirmNewRound 由 `runConfirmCycle` 的閘門決定。
+    /// 不 `wake()`：讓確認等到下一拍輪詢再處理，配合 `confirmGrace` 給終局訊號一個
+    /// 先到並取消的窗口（避免對最後一局誤送 confirmNewRound）。
+    func roundDidEnd() {
+        confirmPending = true
+    }
+
+    /// 下一局開始（`ActionNewRound` → `start_kyoku`）——權威推進，確認已生效。
+    func roundDidBegin() {
+        confirmPending = false
+    }
+
+    /// 對局結束（`NotifyGameEndResult` / `NotifyGameTerminate` → `end_game`）。
+    ///
+    /// 終局不進下一局：清掉待確認，避免對終局送 confirmNewRound。
+    /// 終局本身客戶端還會做什麼（協定層動作）需 live 觀察，未實作。
+    func gameDidEnd() {
+        confirmPending = false
+    }
+
     private func tick() async {
         if let delay = pendingManual {
             pendingManual = nil
             await runManualCycle(delay: delay)
+            return
+        }
+        if confirmPending {
+            await runConfirmCycle()
             return
         }
         await runCycle()
@@ -398,6 +465,64 @@ final class AutoPlayEngine {
                              snapshot: snapshot,
                              delay: delay,
                              gate: nil)
+    }
+
+    /// 局間確認的一輪：閘門（mode + 三麻）→（`confirmGrace`）→ 送 confirmNewRound。
+    ///
+    /// 只在 `confirmPending` 為 true 時做事。閘門用 `AutoPlayGate.allowsConfirm`
+    /// （與打牌同一組 Reason，收斂在 gate 一處）；送出與三層成功判準在
+    /// `AutoConfirmDispatcher`。成功（RESPONSE 無 error）或被下一局取代 → 清 pending；
+    /// 失敗 → 保留 pending，下一輪輪詢再試。
+    @discardableResult
+    func runConfirmCycle() async -> AutoConfirmCycleResult {
+        guard confirmPending else { return .noPending }
+
+        beginCycle()
+
+        let ctx = context()
+        guard ctx.isReady else {
+            // 保留 pending：頁面就緒後的下一輪會接手
+            return .notReady
+        }
+
+        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode == .auto, isSanma: ctx.isSanma) {
+        case .skip(let reason):
+            // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。
+            // 使用者在 `.off`/`.recommend`/三麻自己確認，ActionNewRound 到達會清 pending。
+            return .skipped(reason)
+
+        case .proceed, .forceHora, .sendPass:
+            // allowsConfirm 只會回 .proceed 或 .skip；其餘 case 不可能，但 switch 要窮舉。
+            let policy = timing.confirmPolicy ?? .default
+            note("🏁 局間結算：送出 confirmNewRound (\(policy.maxAttempts) 次上限)", to: .event)
+
+            let outcome = await occupy(delay: timing.confirmGrace) {
+                await AutoConfirmDispatcher.send(
+                    policy: policy,
+                    // 下一局已開始（roundDidBegin 清 pending）或迴圈被停掉 → 停手
+                    isSuperseded: { !self.confirmPending || Task.isCancelled },
+                    log: { self.note($0, to: .event) },
+                    send: self.confirmSend(awaitResponseMs: policy.awaitResponseMs))
+            }
+
+            switch outcome {
+            case .confirmed, .superseded:
+                confirmPending = false
+            case .failed:
+                break   // 保留 pending，下一輪重試
+            }
+            return .dispatched(outcome)
+        }
+    }
+
+    /// 送 confirmNewRound 的實際通道。正式路徑走 `sender.sendAwaitingResponse`
+    /// （送出 + 等同 msgId RESPONSE）；測試可用 `Timing.confirmSend` 注入。
+    private func confirmSend(awaitResponseMs: Int) -> () async -> LiqiToolSendOutcome {
+        if let injected = timing.confirmSend { return injected }
+        return {
+            await self.sender.sendAwaitingResponse(
+                LiqiRequestBuilder.confirmNewRound(), awaitResponseMs: awaitResponseMs)
+        }
     }
 
     // MARK: - 佔住執行位

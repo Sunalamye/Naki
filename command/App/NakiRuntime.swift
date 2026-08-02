@@ -323,4 +323,19 @@ extension NakiRuntime: BotResponseObserving {
     func botDidReset() {
         session.syncHighlight()
     }
+
+    /// 一局結束（`end_kyoku`）：讓引擎在自動模式下送 confirmNewRound 進下一局。
+    func roundDidEnd() {
+        autoPlayEngine?.roundDidEnd()
+    }
+
+    /// 下一局開始（`start_kyoku`）：權威推進，清掉待確認。
+    func roundDidBegin() {
+        autoPlayEngine?.roundDidBegin()
+    }
+
+    /// 整場對局結束（`end_game`）：終局取消任何待送的 confirmNewRound。
+    func gameDidEnd() {
+        autoPlayEngine?.gameDidEnd()
+    }
 }

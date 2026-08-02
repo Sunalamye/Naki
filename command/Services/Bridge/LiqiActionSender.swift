@@ -79,14 +79,22 @@ final class LiqiActionSender {
 
     /// 自動心跳計時器（防閒置；預設關閉）
     ///
-    /// 刻意不寫 `deinit` 來 invalidate：本專案設 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，
-    /// 為 MainActor class 加 deinit 會產生 isolated deinit，在同步 XCTest 釋放時會讓 host app abort。
-    /// 計時器 closure 以 weak self 捕獲，self 消失後會自行 invalidate。
+    /// 不在 deinit 裡 invalidate：計時器 closure 以 weak self 捕獲，self 消失後會自行 invalidate。
     private var antiIdleTimer: Timer?
 
     init(sendHandler: SendHandler? = nil) {
         self.sendHandler = sendHandler
     }
+
+    /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）。
+    ///
+    /// ⚠️ 「不寫 deinit 就沒有 isolated deinit」是**錯的**：`SWIFT_DEFAULT_ACTOR_ISOLATION
+    /// = MainActor` 下，即使不寫 deinit，編譯器仍會合成一個 **isolated** `__deallocating_deinit`。
+    /// 當本類別被 `AutoPlayEngine`（`nonisolated deinit`）之類的 owner 傳遞釋放時，
+    /// 那個 isolated deinit 會走 `swift_task_deinitOnExecutorImpl` → `pointer being freed
+    /// was not allocated` 打掉 test host（p2-5 的 confirmNewRound 單測第一次踩到，因為引擎
+    /// 成了 sender 的唯一 owner）。補一行 `nonisolated deinit {}` 換掉合成的 isolated 版本。
+    nonisolated deinit {}
 
     // MARK: - 核心送出
 

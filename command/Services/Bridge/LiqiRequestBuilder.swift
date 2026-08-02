@@ -123,6 +123,12 @@ enum LiqiRequestBuilder {
     static let loginBeatMethod = ".lq.Lobby.loginBeat"
     /// `.lq.FastTest.broadcastInGame`
     static let broadcastInGameMethod = ".lq.FastTest.broadcastInGame"
+    /// `.lq.FastTest.confirmNewRound`（局間結算 → 確認進下一局；payload 為 `ReqCommon`，零欄位）
+    static let confirmNewRoundMethod = ".lq.FastTest.confirmNewRound"
+    /// `.lq.FastTest.clearLeaving`（重連後清除「離開中」狀態；payload 為 `ReqCommon`，零欄位）
+    static let clearLeavingMethod = ".lq.FastTest.clearLeaving"
+    /// `.lq.FastTest.voteGameEnd`（投票提前結束對局；payload 為 `ReqVoteGameEnd`，非 `ReqCommon`）
+    static let voteGameEndMethod = ".lq.FastTest.voteGameEnd"
 
     // MARK: - ② 動作層
 
@@ -362,7 +368,46 @@ enum LiqiRequestBuilder {
         return LiqiRequestSpec(method: loginBeatMethod, fields: fields)
     }
 
-    // MARK: - ④ 對局內廣播（表情）
+    // MARK: - ④ 對局流程：局間確認 / 清除離開 / 投票結束
+    //
+    // 三個方法都走 FastTest（前綴 `.lq.FastTest.`），所以 `sendRaw` 的 gateway 選線
+    // 會自動把它們送到 game-gateway（naki-websocket.js 以 `.lq.FastTest.` 前綴判 isGameMethod）。
+    // 方法名與 request 型別逐一查核自 docs/protocol/liqi.json 的 `.lq.FastTest`：
+    // confirmNewRound → ReqCommon、clearLeaving → ReqCommon、voteGameEnd → ReqVoteGameEnd。
+
+    /// 局間結算 → 確認進下一局（`ReqCommon`，空 payload）。
+    ///
+    /// 局結束（`ActionHule` / `ActionNoTile` / `ActionLiuJu`）後伺服器停在結算窗口等這個確認；
+    /// 送出被接受後，下一局的權威 action 是 `ActionNewRound`。空 payload 的 envelope 仍會輸出
+    /// `12 00`（與 `heatbeat` / `startRoom` 等 `ReqCommon` 一致）。
+    static func confirmNewRound() -> LiqiRequestSpec {
+        LiqiRequestSpec(method: confirmNewRoundMethod, fields: [])
+    }
+
+    /// 清除「離開中」狀態（`ReqCommon`，空 payload）。
+    ///
+    /// 重連（syncGame）後若伺服器把本家標記為 leaving，需送這個把狀態清掉。
+    /// 目前只提供 builder，未接進任何自動路徑。
+    static func clearLeaving() -> LiqiRequestSpec {
+        LiqiRequestSpec(method: clearLeavingMethod, fields: [])
+    }
+
+    /// 投票提前結束對局（`ReqVoteGameEnd`：yes=1）。
+    ///
+    /// ⚠️ **破壞性**：這會發起「中途結束對局」的投票，不是唯讀查詢。
+    /// 只提供 builder 與 MCP 工具，**不接進任何自動路徑**。
+    ///
+    /// 注意：liqi.json 的 `voteGameEnd` 用 `ReqVoteGameEnd { bool yes = 1 }`，
+    /// **不是** p2-5 task 表寫的 `ReqCommon`——以協定為準。proto3 會省略 false，
+    /// 所以 `yes=false` 的 payload 是空的。
+    /// - Parameter yes: 是否投贊成票
+    static func voteGameEnd(yes: Bool = true) -> LiqiRequestSpec {
+        var fields: [LiqiField] = []
+        if yes { fields.append(.bool(field: 1, value: true)) }
+        return LiqiRequestSpec(method: voteGameEndMethod, fields: fields)
+    }
+
+    // MARK: - ⑤ 對局內廣播（表情）
 
     /// 對局內廣播（`ReqBroadcastInGame`：content=1, except_self=2）
     static func broadcastInGame(content: String, exceptSelf: Bool = false) -> LiqiRequestSpec {

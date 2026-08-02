@@ -1,0 +1,228 @@
+//
+//  AutoConfirmEngineTests.swift
+//  NakiTests
+//
+//  p2-5：`AutoPlayEngine` 局間確認的整合驗收。
+//
+//  驗收條件 #2（模式閘門）：`.off`/`.recommend` 不送、`.auto` 才送、三麻不送。
+//  驗收條件 #3（送出失敗保留 pending 並重試，成功才收工）：這裡驗引擎層的 pending
+//  生命週期（confirmPending 何時保留、何時清）；dispatcher 的重試細節在
+//  `AutoConfirmDispatcherTests`。
+//
+//  confirmNewRound 的實際送出通道用 `Timing.confirmSend` 注入，避免碰
+//  `LiqiResponseStore` 單例——與 `AutoPlayEngine` 把時間常數做成參數同一個理由。
+//
+
+import XCTest
+
+@testable import Naki
+
+@MainActor
+final class AutoConfirmEngineTests: XCTestCase {
+
+    // MARK: - 共用
+
+    private func confirmed() -> LiqiToolSendOutcome {
+        LiqiToolSendOutcome(
+            sent: LiqiSendResult(method: ".lq.FastTest.confirmNewRound",
+                                 msgId: 60001, byteCount: 20, success: true, detail: "socket=0"),
+            response: LiqiResponseRecord(msgId: 60001, method: ".lq.FastTest.confirmNewRound",
+                                         fields: [:], receivedAt: Date()))
+    }
+
+    private func sendFailure() -> LiqiToolSendOutcome {
+        LiqiToolSendOutcome(
+            sent: LiqiSendResult(method: ".lq.FastTest.confirmNewRound",
+                                 msgId: 60001, byteCount: 20, success: false,
+                                 detail: "no_game_gateway_connection"),
+            response: nil)
+    }
+
+    private func makeEngine(mode: AutoPlayMode,
+                            isSanma: Bool = false,
+                            isReady: Bool = true,
+                            confirmSend: @escaping () async -> LiqiToolSendOutcome)
+        -> AutoPlayEngine {
+        var timing = AutoPlayEngine.Timing()
+        timing.poll = 1.0
+        timing.confirmGrace = 0
+        timing.confirmPolicy = .init(maxAttempts: 3, delay: 0, awaitResponseMs: 0)
+        timing.confirmSend = confirmSend
+        return AutoPlayEngine(
+            store: LiqiOperationStore(),
+            sender: LiqiActionSender(),
+            timing: timing,
+            context: {
+                AutoPlayEngine.Context(mode: mode,
+                                       recommendations: [],
+                                       seat: 0,
+                                       isSanma: isSanma,
+                                       tsumoTile: nil,
+                                       isReady: isReady)
+            })
+    }
+
+    // MARK: - 模式閘門（驗收條件 #2）
+
+    /// `.auto`：局間結算後真的送 confirmNewRound
+    func testAutoModeSendsConfirm() async {
+        var calls = 0
+        let engine = makeEngine(mode: .auto,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        engine.roundDidEnd()
+        XCTAssertTrue(engine.confirmPending)
+
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .dispatched(.confirmed(attempts: 1)))
+        XCTAssertEqual(calls, 1)
+        XCTAssertFalse(engine.confirmPending, "確認成功後 pending 清掉")
+    }
+
+    /// `.off`：不送，pending 保留（使用者自己在遊戲內確認）
+    func testOffModeDoesNotSend() async {
+        var calls = 0
+        let engine = makeEngine(mode: .off,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        engine.roundDidEnd()
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .skipped(.notAutoMode))
+        XCTAssertEqual(calls, 0)
+        XCTAssertTrue(engine.confirmPending, "非自動模式不送，但 pending 不主動清")
+    }
+
+    /// `.recommend`：同樣不自動送
+    func testRecommendModeDoesNotSend() async {
+        var calls = 0
+        let engine = makeEngine(mode: .recommend,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        engine.roundDidEnd()
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .skipped(.notAutoMode))
+        XCTAssertEqual(calls, 0)
+    }
+
+    /// 三麻 fail-closed：即使 `.auto` 也不送
+    func testSanmaFailsClosed() async {
+        var calls = 0
+        let engine = makeEngine(mode: .auto, isSanma: true,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        engine.roundDidEnd()
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .skipped(.sanmaUnsupported))
+        XCTAssertEqual(calls, 0)
+    }
+
+    // MARK: - pending 生命週期（驗收條件 #3）
+
+    /// 送出失敗 → 用滿次數後 .failed，且 confirmPending 保留給下一輪
+    func testSendFailureKeepsPending() async {
+        var calls = 0
+        let engine = makeEngine(mode: .auto,
+                                confirmSend: { calls += 1; return self.sendFailure() })
+
+        engine.roundDidEnd()
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .dispatched(.failed(attempts: 3)))
+        XCTAssertEqual(calls, 3, "bounded retry 要用滿")
+        XCTAssertTrue(engine.confirmPending, "沒確認成功前不可以清 pending")
+    }
+
+    /// 通道恢復後的下一輪，對同一個待確認再送一次並成功
+    func testPendingCanBeRetriedByNextCycle() async {
+        var calls = 0
+        var succeed = false
+        let engine = makeEngine(mode: .auto,
+                                confirmSend: {
+                                    calls += 1
+                                    return succeed ? self.confirmed() : self.sendFailure()
+                                })
+
+        engine.roundDidEnd()
+        let first = await engine.runConfirmCycle()
+        XCTAssertEqual(first, .dispatched(.failed(attempts: 3)))
+        XCTAssertTrue(engine.confirmPending)
+
+        // 通道恢復
+        succeed = true
+        let second = await engine.runConfirmCycle()
+        XCTAssertEqual(second, .dispatched(.confirmed(attempts: 1)))
+        XCTAssertFalse(engine.confirmPending)
+    }
+
+    // MARK: - 生命週期訊號
+
+    /// 沒有 end_kyoku 就沒有待確認：runConfirmCycle 直接 .noPending，一次都不送
+    func testNoPendingDoesNothing() async {
+        var calls = 0
+        let engine = makeEngine(mode: .auto,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .noPending)
+        XCTAssertEqual(calls, 0)
+    }
+
+    /// 下一局開始（ActionNewRound → roundDidBegin）→ 清 pending，不再送
+    func testRoundDidBeginClearsPending() async {
+        var calls = 0
+        let engine = makeEngine(mode: .auto,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        engine.roundDidEnd()
+        engine.roundDidBegin()   // 權威 action 到達
+        XCTAssertFalse(engine.confirmPending)
+
+        let result = await engine.runConfirmCycle()
+        XCTAssertEqual(result, .noPending)
+        XCTAssertEqual(calls, 0)
+    }
+
+    /// 終局（NotifyGameEndResult → gameDidEnd）取消待確認：不對終局送 confirmNewRound
+    func testGameDidEndCancelsPendingConfirm() async {
+        var calls = 0
+        let engine = makeEngine(mode: .auto,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        engine.roundDidEnd()     // 最後一局的 end_kyoku
+        engine.gameDidEnd()      // 緊接著的終局訊號
+        XCTAssertFalse(engine.confirmPending, "終局不進下一局，取消待確認")
+
+        let result = await engine.runConfirmCycle()
+        XCTAssertEqual(result, .noPending)
+        XCTAssertEqual(calls, 0, "終局不得送 confirmNewRound")
+    }
+
+    /// WebView 尚未就緒：保留 pending，不送
+    func testNotReadyKeepsPending() async {
+        var calls = 0
+        let engine = makeEngine(mode: .auto, isReady: false,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        engine.roundDidEnd()
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .notReady)
+        XCTAssertEqual(calls, 0)
+        XCTAssertTrue(engine.confirmPending)
+    }
+
+    /// stop() 清掉待確認（App 收掉 / 測試結束）
+    func testStopClearsPending() {
+        let engine = makeEngine(mode: .auto, confirmSend: { self.confirmed() })
+
+        engine.roundDidEnd()
+        XCTAssertTrue(engine.confirmPending)
+        engine.stop()
+        XCTAssertFalse(engine.confirmPending)
+    }
+}

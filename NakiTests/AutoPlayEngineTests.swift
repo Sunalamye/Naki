@@ -342,7 +342,8 @@ final class AutoPlayEngineSourceTests: XCTestCase {
         let banned = ["AutoPlayGate.evaluate",
                       "AutoPlayDecisionResolver.resolve",
                       "AutoPlayActionExecutor.execute",
-                      "AutoPassDispatcher.send"]
+                      "AutoPassDispatcher.send",
+                      "AutoConfirmDispatcher.send"]
 
         let hits = try codeLines(in: file).filter { line in
             banned.contains { line.text.contains($0) }
@@ -364,7 +365,8 @@ final class AutoPlayEngineSourceTests: XCTestCase {
         let banned = ["AutoPlayGate.evaluate",
                       "AutoPlayDecisionResolver.resolve",
                       "AutoPlayActionExecutor.execute",
-                      "AutoPassDispatcher.send"]
+                      "AutoPassDispatcher.send",
+                      "AutoConfirmDispatcher.send"]
 
         guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
         else { return XCTFail("無法列舉 \(root.path)") }
