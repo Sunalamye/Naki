@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.6.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.7.0-green" alt="Version">
   <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
   <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-required-red" alt="Architecture">
@@ -71,7 +71,7 @@ AI 推論不呼叫外部推論服務，模型和運算都在本機；雀魂遊�
 
 ### Mac 和 iPhone 都能用
 
-- **macOS** — 支援自動送出；自摸整合仍有下方列出的 P0 缺口
+- **macOS** — 支援自動送出與局間自動確認；漏自摸的對抗性 live fixture 仍待驗
 - **iPhone / iPad** — 查看 AI 推薦
 - 深色模式、響應式排版
 
@@ -85,9 +85,11 @@ AI 推論不呼叫外部推論服務，模型和運算都在本機；雀魂遊�
 |:---:|-----|
 | **關閉** | 不自動送動作，也不顯示推薦（側欄顯示「推薦顯示已關閉」，遊戲內高亮清空）；AI 仍在背景計算，切回來立刻有結果 |
 | **推薦** | 顯示建議，你自己決定 |
-| **自動** | 依 AI／server oplist 自動送出；自摸整合仍有已知 P0 缺口 |
+| **自動** | 依 AI／server oplist 自動送出，並在局間結算自動確認進下一局（`confirmNewRound`），整局不需手動點 |
 
-模式會記住，重開 App 不會被重設。
+模式會記住，重開 App 不會被重設。工具列還有一個**延遲基準** stepper（0.5–3.0s）：
+它是擬人延遲隨機分布的縮放係數（1.0s＝現行行為，向上更慢、向下更快），
+不會把節奏變成固定值（固定節奏容易被偵測）。
 
 ### 其他
 
@@ -143,11 +145,18 @@ Naki 這邊如果某一格填錯東西，模型不會報錯，它會**照樣算�
 所以 MortalSwift 的 test target 用 libriichi v4 當 oracle：同一串固定對局事件同時餵給
 純 Swift encoder 與 Rust oracle，比對 observation 與 action mask。
 
-**目前內建兩套 fixtures 的所有 action-required snapshots 都是 1012 格零落差，
-動作遮罩也一致。** 這是有力的回歸證據，但不是所有可能牌局狀態的形式證明。
+**目前內建對拍劇本（2.7.0 起擴到 19 套）的所有 action-required snapshots 都是
+1012 格零落差，動作遮罩也一致。** 這是有力的回歸證據，但不是所有可能牌局狀態的形式證明。
 
-> 誠實補充：0.5.1 是 2026-08-02 查到的 MortalSwift 最新公開 tag，但它更新的是
-> encoder／計算與 parity，bundled 模型權重沒有換。
+2.7.0 綁定 MortalSwift **0.5.2**，修掉幾個 encoder／decoder 層的實際 bug：
+
+- **打紅五無法解碼成動作**——mask 開了打紅五（index 34–36）但 decoder 沒有對應分支，
+  導致「手上只剩紅五可打」時 bot 靜默不出手。已修，並補上會抓到它的對拍劇本。
+- **同巡振聽永不解除**、**食い替え未實作**、**拔北後未重算向聽**——都對照 libriichi
+  逐事件反推後修正。
+- observation 快取與 Core ML 輸入改 memcpy（去掉逐格裝箱）。
+
+> 誠實補充：0.5.2 修的是 encoder／decoder／parity，**bundled 模型權重沒有換**。
 > Naki 也還沒有千局級評測，所以不能把它稱為「最新最強模型」。
 
 ---
@@ -189,8 +198,12 @@ JavaScript 拿不到遊戲內部物件。所以 Naki 一律走**協定層**：
 
 **合法性應由伺服器決定，不由模型決定。** macOS／iOS 26+ 主路徑已有 resolver：
 缺 oplist 時 fail closed、和牌凌駕 AI、其餘動作必須存在於同一份 oplist。
-但目前仍有兩個整合缺口：空推薦可能讓自摸完全不進 resolver；hora send 失敗仍可能被
-標成 handled。Legacy iOS 17–25 已接上同一個 resolver，但兩者都缺 live 對局驗證，因此「漏自摸已完全消除」仍未驗證。
+先前兩個整合缺口（空推薦可能讓自摸不進 resolver、hora send 失敗被標成 handled）
+已在 source 層收斂——`AutoPlayGate` 在推薦為空但 oplist 有和牌時走 forceHora、
+送出成功才 markHandled，並有注入式 fixture 覆蓋。**但那個 CLAUDE.md 要求的對抗性
+live fixture（server `[1,7,8]` + AI 想 discard → resolver 覆蓋成 hora → RESPONSE →
+`ActionHule`）仍未 live 重現，所以不宣稱「漏自摸已完全消除」。** Legacy iOS 17–25
+已接上同一個 resolver，同樣缺實機驗證。
 
 技術細節：[`docs/majsoul-unity-protocol.md`](docs/majsoul-unity-protocol.md) ·
 [`AUDIT.md`](AUDIT.md)
@@ -225,8 +238,10 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 <summary><b>MCP Server（Claude Code 整合）</b></summary>
 
 內建 [Model Context Protocol](https://modelcontextprotocol.io/) server，
-與 Debug API 共用同一個 port。工具數請以 `tools/list` 或 `get_status.tools_count` 現查
-（2026-08-02 靜態註冊 38 個；2026-08-01 live 為 42，含 6 個已移除的高亮失敗樁）。
+與 Debug API 共用同一個 port。協定升級到 **2026-07-28（stateless）**，同時相容舊的
+`initialize` handshake：工具結果走 `structuredContent`（不再是「JSON 包在 JSON 字串裡」），
+非 loopback Origin 回 403。工具數請以 `tools/list` 或 `get_status.toolsCount` 現查
+（2.7.0 靜態註冊 40 個；6 個舊高亮失敗樁已移除）。
 
 ```bash
 claude mcp add --transport http naki http://localhost:8765/mcp
@@ -234,19 +249,17 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 
 | 類別 | 數量 | 範例 |
 |-----|:---:|------|
-| 系統 | 4 | `get_status` · `get_logs` |
+| 系統 | 6 | `get_status` · `get_logs` · `replay_game` |
 | Bot 控制 | 7 | `bot_status` · `bot_ops` · `bot_trigger` |
-| 遊戲狀態與動作 | 6 | `game_state` · `game_discard` · `game_action` |
+| 遊戲狀態與動作 | 8 | `game_state` · `game_action` · `game_confirm_new_round` |
 | 大廳 | 8 | `lobby_start_match` · `lobby_account_info` |
 | 友人房 | 7 | `room_create` · `room_add_robot` · `room_quick_test` |
 | 表情 | 2 | `game_emoji` · `game_emoji_listen` |
-| 其他 | 8 | JS 執行、防閒置、高亮 |
+| 其他 | 2 | `execute_js` · `lobby_anti_idle` |
 
 `room_quick_test` 一次跑完「建房 → 補人機 → 開局」，只負責建立測試局；
 客戶端重連、AI 動作、RESPONSE 與權威 action 仍要另行驗證。
-
-> MCP 的 6 個手動高亮工具目前是一律回明確失敗的相容樁；它們沒有接到新的
-> `__nakiHighlight`。這與 App 內建的自動 WebGL 高亮是兩條不同路徑。
+`game_vote_game_end`（投票中止對局）是破壞性操作，只提供手動呼叫，不接進任何自動路徑。
 
 </details>
 
@@ -277,9 +290,10 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 | AI encoder fixture parity | ✅ 兩套固定 fixtures 逐格一致 |
 | live AI 推薦資料 | ✅ `bot_status`／`game_hand` 有 runtime 證據 |
 | 原生側欄視覺呈現 | ⚠️ source binding 已確認；本次沒有 screenshot regression |
-| 全自動打牌 | ⚠️ discard／pon／riichi／ron 有 runtime 證據；自摸整合仍有 P0 缺口 |
+| 全自動打牌 | ⚠️ discard／pon／riichi／ron／自摸 live log 有觸發證據；對抗性漏自摸 fixture 仍未 live 重現 |
+| 局間自動確認（整局自動打完） | ⚠️ `confirmNewRound` 有三層成功判準＋watchdog；正常路徑已接，特定競態未 live 重現 |
 | WebGL 牌面／動作按鈕高亮 | ⚠️ hook 活性已確認；視覺命中尚未驗證 |
-| MCP Server | ✅ 2026-08-01 live registry 為 42 tools；移除 6 個高亮失敗樁後靜態計數 38（未 live 複查） |
+| MCP Server | ✅ 協定 2026-07-28（相容 legacy），靜態註冊 40 tools（未 live 複查） |
 | 表情協定收送 | ⚠️ 現行 tools／Liqi 路徑存在；本次未做 live 收送 round-trip |
 | iOS 17–25 相容路徑 | ⚠️ 只驗過編譯與單元測試，未實機跑過對局 |
 | 三麻 | ❌ 見下 |

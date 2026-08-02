@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Sunalamye/MortalSwift",
       "state" : {
-        "revision" : "78b048e808c09406fc440d7fe642e8e014c210f0",
-        "version" : "0.5.1"
+        "revision" : "6223548abb930fbd7ff70ae39436eedd6fee5615",
+        "version" : "0.5.2"
       }
     }
   ],

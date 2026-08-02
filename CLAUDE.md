@@ -41,12 +41,12 @@ curl -X POST http://127.0.0.1:8765/js \
 
 | Property | Current value |
 |----------|---------------|
-| App version | 2.6.0（`MARKETING_VERSION`；MCP `serverInfo.version`／`get_status.appVersion`／Debug 首頁都讀 `NakiAppVersion` 這一份） |
+| App version | 2.7.0（`MARKETING_VERSION`；MCP `serverInfo.version`／`get_status.appVersion`／Debug 首頁都讀 `NakiAppVersion` 這一份） |
 | macOS target | 26.0 |
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |
 | Web client | Unity WebGL `chs_t-WebGL-release-4.0.45(45)`（2026-08-01 live） |
-| AI package | MortalSwift 0.5.1／`78b048e…`（由已提交的 `Package.resolved` 釘住） |
+| AI package | MortalSwift 0.5.2／`6223548…`（由已提交的 `Package.resolved` 釘住；含紅五 decode／振聽／食い替え等修正） |
 | Debug／MCP | loopback port 8765，same process／same port |
 | MCP 協定 | 雙版本並存：帶 `_meta.io.modelcontextprotocol/protocolVersion` 走 2026-07-28（stateless、`server/discover`、`resultType`），`initialize` handshake 服務 2025-03-26～2025-11-25 |
 
