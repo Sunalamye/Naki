@@ -85,6 +85,7 @@ struct AutoPlayFailsafePipeline {
         timing.passPolicy = .init(maxAttempts: maxAttempts, delay: retryDelay)
         // fixture 不該真的等 1–3 秒的擬人延遲
         timing.actionDelay = { _, _ in 0 }
+        timing.actionAwaitResponseMs = 0   // fixture 只驗第 1 層（沒注入 RESPONSE）
 
         return AutoPlayEngine(
             store: store,

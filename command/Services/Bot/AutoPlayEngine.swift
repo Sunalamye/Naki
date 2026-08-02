@@ -172,6 +172,10 @@ final class AutoPlayEngine {
         /// 從 50（5 秒）降到 15（1.5 秒）：觸發點已經確認過 oplist 存在，
         /// 這裡要處理的只是短暫空窗，等 5 秒不會讓它比較可能消失。
         var maxAttempts: Int = 15
+        /// 打牌／副露／和牌送出後等同 msgId RESPONSE 的毫秒數（第 2 層驗證，見 p5-verify）。
+        /// 0＝只驗第 1 層（sendRaw）。正式路徑 800ms：實測 RESPONSE 約 100ms 到，800ms 有餘裕；
+        /// 「送成功但伺服器拒絕（error 1004/1023/…）」不再被靜默當成功、能自動重送。
+        var actionAwaitResponseMs: Int = 800
         /// 「過」最多送幾次（伺服器逾時會代打，不必跟和牌一樣拚）
         var passAttempts: Int = 5
         /// 閘門判定「模型判斷不做副露」時的送出策略；nil＝`AutoPassDispatcher` 的預設
@@ -742,6 +746,7 @@ final class AutoPlayEngine {
                 tsumoTile: ctx.tsumoTile,
                 sender: sender,
                 store: store,
+                awaitResponseMs: timing.actionAwaitResponseMs,
                 log: { self.note($0, to: .log) },
                 event: { self.note($0, to: .event) })
 

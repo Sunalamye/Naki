@@ -321,4 +321,59 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         XCTAssertEqual(store.pending?.sequence, snapshot.sequence,
                        "沒有指名快照就不可以順手消化現有的那批")
     }
+
+    // MARK: - 第 2 層驗證（RESPONSE）：送成功但伺服器拒絕 ≠ 打成（p5-verify）
+
+    /// 從送出的 base64 envelope 解出 msgId（[type][msgId LE][protobuf]），
+    /// 注入一筆 RESPONSE 到 shared store，讓 `sendAwaitingResponse` 的輪詢查得到。
+    @MainActor
+    private func injectResponseForSend(hasError: Bool) -> LiqiActionSender {
+        let sender = LiqiActionSender()
+        sender.sendHandler = { base64 in
+            if let data = Data(base64Encoded: base64), data.count >= 3 {
+                let msgId = Int(data[1]) | (Int(data[2]) << 8)
+                // field1 存在＝有 error（見 LiqiResponseRecord.hasError）
+                let fields: [String: Any] = hasError ? ["field1": Data([0x08, 0xEC, 0x07])] : [:]
+                LiqiResponseStore.shared.recordResponse(
+                    msgId: msgId, method: ".lq.FastTest.inputOperation", fields: fields)
+            }
+            return self.ok()
+        }
+        return sender
+    }
+
+    /// sendRaw 成功但 RESPONSE 帶 error（模擬 1004 靜默拒絕）→ 不算成功、**不**消化 oplist。
+    /// 這正是「東1莊家第一打送出去卻沒打成、要手動點」的根因。
+    @MainActor
+    func testServerRejectedDiscardIsNotConfirmedAndKeepsOplist() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test")
+        let sender = injectResponseForSend(hasError: true)
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
+            tsumoTile: "5m", sender: sender, store: store, awaitResponseMs: 500)
+
+        XCTAssertEqual(result?.success, false, "sendRaw 成功但伺服器拒絕，不能算打成")
+        XCTAssertNotNil(store.pending, "被拒絕就保留 oplist，交給重試框架再送")
+        LiqiResponseStore.shared.reset()
+    }
+
+    /// sendRaw 成功且 RESPONSE 無 error → 第 2 層達成 → 消化 oplist。
+    @MainActor
+    func testServerAcceptedDiscardIsConfirmedAndConsumesOplist() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test")
+        let sender = injectResponseForSend(hasError: false)
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
+            tsumoTile: "5m", sender: sender, store: store, awaitResponseMs: 500)
+
+        XCTAssertEqual(result?.success, true, "RESPONSE 無 error＝伺服器受理")
+        XCTAssertNil(store.pending, "受理才消化這批 oplist")
+        LiqiResponseStore.shared.reset()
+    }
 }

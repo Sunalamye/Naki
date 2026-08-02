@@ -53,6 +53,9 @@ enum AutoPlayActionExecutor {
     ///   - event: 「為什麼沒送出」這種必須留在 events.log 的關鍵事件
     /// - Returns: 送出結果；**`nil` 代表一個 request 都沒組出來**（牌字串轉不了、
     ///   找不到宣言牌、未知動作）。這與「送出失敗」不同，但兩者都不會消化 oplist。
+    /// - Parameter awaitResponseMs: > 0 時等同 msgId 的 RESPONSE 並驗第 2 層（伺服器有沒有
+    ///   受理，見 p5-verify）。0＝只驗第 1 層（`sendRaw` 送進 WebSocket）——測試預設值，
+    ///   保留舊語意。正式路徑傳 > 0，讓「送成功但伺服器拒絕」不再被靜默當成功。
     @discardableResult
     static func execute(
         action: Recommendation.ActionType,
@@ -62,23 +65,23 @@ enum AutoPlayActionExecutor {
         tsumoTile: String? = nil,
         sender: LiqiActionSender,
         store: LiqiOperationStore,
+        awaitResponseMs: Int = 0,
         log: (String) -> Void = { _ in },
         event: (String) -> Void = { _ in }
     ) async -> LiqiSendResult? {
 
-        let result: LiqiSendResult
+        // ① 把動作組成 request spec（組不出來的三種情況一律 return nil，不消化 oplist）
+        let spec: LiqiRequestSpec
 
         switch action {
         case .discard:
             guard let majsoulTile = LiqiTile.majsoul(fromMJAI: tile) else {
-                // 轉換失敗＝一個 request 都沒送出去。舊版在這裡照樣消化 oplist，
-                // 等於自己把這批機會吃掉，重試框架再也看不到它。
                 event("❌ 打牌: 無法轉換牌字串 \(tile)，未送出，保留 oplist")
                 return nil
             }
             let moqie = (tsumoTile == tile)
             log("執行: 打牌 \(tile) → \(majsoulTile) (moqie=\(moqie))")
-            result = await sender.discard(tile: majsoulTile, moqie: moqie)
+            spec = LiqiRequestBuilder.discard(tile: majsoulTile, moqie: moqie)
 
         case .riichi:
             // Mortal 把「立直宣言」與「捨牌」拆成兩個動作，但 ReqSelfOperation(type=7)
@@ -87,62 +90,104 @@ enum AutoPlayActionExecutor {
             guard let discardRec = recommendations.first(where: { $0.actionType == .discard }),
                   let majsoulTile = LiqiTile.majsoul(fromMJAI: discardRec.displayTile)
             else {
-                // 同上：沒有宣言牌就沒有 request，不能當成「這批 oplist 處理完了」。
                 event("❌ 立直: 找不到可宣言的捨牌，未送出，保留 oplist")
                 return nil
             }
             let moqie = (tsumoTile == discardRec.displayTile)
             log("執行: 立直 + 捨 \(discardRec.displayTile) → \(majsoulTile)")
-            result = await sender.riichi(tile: majsoulTile, moqie: moqie)
+            spec = LiqiRequestBuilder.riichi(tile: majsoulTile, moqie: moqie)
 
         case .chi:
-            // 從 tileName 解析 chi 變體（chi_0 / chi_1 / chi_2）
             var variant = 0
             if tile.hasPrefix("chi_"), let index = Int(String(tile.dropFirst(4))) {
                 variant = index
             }
-            // 舊實作靠 Laya UI 的組合順序反推索引；改用 oplist 的 combination
-            // 與被吃的牌直接對照，得到雀魂端的 combination 索引。
             let resolved = snapshot?.chiCombinationIndex(variant: variant)
             let index = UInt32(resolved ?? 0)
             let combos = snapshot?.operation(of: .chi)?.combination.joined(separator: ", ") ?? "-"
             log("執行: 吃 mortal=chi_\(variant) → index=\(index) [\(combos)]"
                 + (resolved == nil ? " ⚠️ 無法對照組合, 退回 0" : ""))
-            result = await sender.chi(index: index)
+            spec = LiqiRequestBuilder.chi(index: index)
 
         case .pon:
-            // combination 通常只有一組；含紅五時可能有兩組（取捨規則未驗證，先取第 0 組）
             log("執行: 碰...")
-            result = await sender.pon()
+            spec = LiqiRequestBuilder.pon()
 
         case .kan:
             let kanType = snapshot?.kanOperation ?? .ankan
             log("執行: 槓 (type=\(kanType.rawValue))")
-            result = await sender.kan(type: kanType)
+            spec = LiqiRequestBuilder.kan(type: kanType)
 
         case .hora:
-            // 和牌型由伺服器給的 oplist 決定，不是猜的
             let horaType = snapshot?.horaOperation ?? .tsumo
             log("執行: 和牌 (type=\(horaType.rawValue))")
-            result = horaType == .ron ? await sender.ron() : await sender.tsumo()
+            spec = horaType == .ron ? LiqiRequestBuilder.ron() : LiqiRequestBuilder.tsumo()
 
         case .none:
-            // 跳過：回應他家打牌走 inputChiPengGang，自家回合的選項走 inputOperation
             let channel: LiqiActionChannel =
                 (snapshot?.isCallOpportunity ?? true) ? .chiPengGang : .selfOperation
             log("執行: 過 (\(channel.method))")
-            result = await sender.pass(channel: channel)
+            spec = LiqiRequestBuilder.cancel(channel: channel)
 
         case .unknown:
             event("❌ 未知動作類型，未送出，保留 oplist")
             return nil
         }
 
-        // 送出成功才把這批 oplist 標記為已處理；失敗留給呼叫端的重試框架再送一次。
-        // 沒有 snapshot 時不標記——那代表沒有任何一批機會可以被消化。
+        // ② 送出，並依 awaitResponseMs 決定驗到第幾層
+        let result = await sendAndVerify(action: action, spec: spec,
+                                         sender: sender, awaitResponseMs: awaitResponseMs, event: event)
+
+        // ③ 只有**確認**才消化 oplist；失敗／拒絕／逾時都保留給重試框架
+        //    （重試迴圈開頭的 isStillValid 會在 oplist 換批時停手，所以逾時重試不會雙送）。
         if result.success, let sequence = snapshot?.sequence {
             store.markHandled(sequence)
         }
         return result
+    }
+
+    /// 送出並套用三層成功判準。`awaitResponseMs == 0` 時只看第 1 層（sendRaw）。
+    private static func sendAndVerify(
+        action: Recommendation.ActionType,
+        spec: LiqiRequestSpec,
+        sender: LiqiActionSender,
+        awaitResponseMs: Int,
+        event: (String) -> Void
+    ) async -> LiqiSendResult {
+
+        guard awaitResponseMs > 0 else {
+            return await sender.send(spec)   // 舊語意（測試預設）
+        }
+
+        let outcome = await sender.sendAwaitingResponse(spec, awaitResponseMs: awaitResponseMs)
+        guard let raw = outcome.sent else {
+            return LiqiSendResult(method: spec.method, msgId: 0, byteCount: 0,
+                                  success: false, detail: "no_send_handler")
+        }
+
+        // 第 1 層就沒送出去（sendRaw 失敗）
+        guard raw.success else { return raw }
+
+        if let response = outcome.response {
+            if response.hasError {
+                // 第 2 層：伺服器拒絕了——這正是「sendRaw 回 success 但其實沒打成」的靜默失敗
+                // （error 1004/1023/… 藏在 RESPONSE 裡）。不消化 oplist，交給重試框架。
+                event("❌ 伺服器拒絕 \(action.rawValue): "
+                      + (response.errorDescription ?? "error \(response.errorCode.map(String.init) ?? "?")")
+                      + " → 保留 oplist 重試")
+                return LiqiSendResult(method: raw.method, msgId: raw.msgId, byteCount: raw.byteCount,
+                                      success: false,
+                                      detail: "server_rejected:\(response.errorCode.map(String.init) ?? "?")")
+            }
+            // 第 2 層達成：伺服器受理
+            return LiqiSendResult(method: raw.method, msgId: raw.msgId, byteCount: raw.byteCount,
+                                  success: true, detail: "confirmed")
+        }
+
+        // 送出成功但沒等到 RESPONSE：不當成功。重試框架的 isStillValid 會判斷——
+        // 若其實已打成，oplist 會換批 → 停手（不雙送）；若真的沒送到 → 再送一次。
+        event("⚠️ \(action.rawValue) 已送出但 \(awaitResponseMs)ms 內沒有 RESPONSE → 保留 oplist")
+        return LiqiSendResult(method: raw.method, msgId: raw.msgId, byteCount: raw.byteCount,
+                              success: false, detail: "no_response")
     }
 }

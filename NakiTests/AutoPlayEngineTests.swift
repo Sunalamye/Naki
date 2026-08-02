@@ -33,6 +33,7 @@ final class AutoPlayEngineTests: XCTestCase {
         timing.passAttempts = maxAttempts
         timing.passPolicy = .init(maxAttempts: maxAttempts, delay: 0)
         timing.actionDelay = { _, _ in 0 }
+        timing.actionAwaitResponseMs = 0   // 這些測試只驗第 1 層（沒注入 RESPONSE）
         return timing
     }
 
