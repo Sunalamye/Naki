@@ -16,11 +16,20 @@ struct LogEntry: Identifiable {
     let level: LogLevel
     let message: String
 
-    var formattedTime: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter.string(from: timestamp)
-    }
+    /// `HH:mm:ss.SSS`。
+    ///
+    /// formatter 快取成 static：以前每讀一次就 `DateFormatter()` 建一個，
+    /// 而 `DateFormatter` 的建構要吃 locale／calendar，是這種每則訊息都會碰到的
+    /// 路徑上最貴的一項。`nonisolated(unsafe)`：Foundation 的 formatter 對
+    /// **只做格式化**是 thread-safe 的，這裡也從不改它的設定。
+    private nonisolated(unsafe) static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    var formattedTime: String { Self.timeFormatter.string(from: timestamp) }
 }
 
 /// 日誌等級
@@ -206,9 +215,30 @@ class LogManager {
         }
     }
 
+    /// 這一級現在還有沒有任何 sink 會消費？
+    ///
+    /// `.info` 以上永遠有（UI、console、all.log、類別檔至少一個）。
+    /// `.trace` 只會進類別檔，所以檔案日誌關掉、或 `traceToCategoryFiles` 關掉時，
+    /// 整級都是**純浪費**——訊息組出來只是為了立刻被丟掉。
+    ///
+    /// 這個判斷是 `log(_:category:level:)` 的 `@autoclosure` 閘門：回 false 時
+    /// 呼叫端的字串插值（hex preview、`\(data)`、`\(blocks.count)`…）根本不會求值。
+    /// p4-3 之前 `LiqiParser` 每解一個 protobuf 欄位就格式化一行字串，
+    /// 一局 `liqi.log` 191KB 全部是這種訊息，而每一行的組裝都在 MainActor 上。
+    func isEnabled(_ level: LogLevel) -> Bool {
+        if level >= .info { return true }
+        return fileLoggingEnabled && traceToCategoryFiles
+    }
+
     /// 添加日誌
-    func log(_ message: String, category: LogCategory = .system, level: LogLevel = .info) {
-        let entry = LogEntry(timestamp: Date(), category: category, level: level, message: message)
+    ///
+    /// `message` 是 `@autoclosure`：這一級沒有人要的時候，訊息不會被組出來。
+    func log(_ message: @autoclosure () -> String,
+             category: LogCategory = .system,
+             level: LogLevel = .info) {
+        guard isEnabled(level) else { return }
+
+        let entry = LogEntry(timestamp: Date(), category: category, level: level, message: message())
 
         // UI 只顯示 info 以上——trace 是給檔案看的
         if level >= .info {
@@ -227,7 +257,9 @@ class LogManager {
 
         // 控制台只印 info 以上，否則 Xcode console 也會被 trace 淹掉
         if level >= .info {
-            print("[\(entry.formattedTime)] \(level.tag) [\(category.rawValue)] \(message)")
+            // 讀 `entry.message`（已經求值過的那一份），不要再碰 autoclosure：
+            // 訊息只能被組一次。
+            print("[\(entry.formattedTime)] \(level.tag) [\(category.rawValue)] \(entry.message)")
         }
     }
 
@@ -270,33 +302,52 @@ class LogManager {
             }
     }
 
+    /// 檔案行的時間戳格式器（`ISO8601DateFormatter()` 的預設選項，維持既有行格式）。
+    ///
+    /// 只在 `fileWriteQueue` 這一條 serial queue 上使用，所以實務上是單執行緒。
+    private nonisolated(unsafe) static let fileTimestampFormatter = ISO8601DateFormatter()
+
     /// 寫入文件（透過 serial queue 序列化，避免多執行緒共用單一 FileHandle 造成資料競爭）
+    ///
+    /// p4-3：**格式化整段搬進 queue**。原本 `ISO8601DateFormatter()`（每次新建一個）、
+    /// 兩次字串插值與兩次 UTF-8 轉換都發生在呼叫端，也就是 MainActor 上——
+    /// 對 `.trace` 這種一則訊息數十行的等級，這才是主執行緒真正的開銷來源，
+    /// 「寫檔在背景」只是把最後那次 `write(2)` 挪走而已。
+    /// 現在 MainActor 只付一次 closure 排入的錢，字串在背景才組。
     private func writeToFile(_ entry: LogEntry) {
-        let ts = ISO8601DateFormatter().string(from: entry.timestamp)
-        let line = "[\(ts)] [\(entry.category.rawValue)] \(entry.message)\n"
-        guard let data = line.data(using: .utf8) else { return }
-
-        // 事件檔用簡短時間，因為那是要一行行讀的
-        let eventLine = "\(entry.formattedTime) [\(entry.category.rawValue)] \(entry.message)\n"
-        let eventData = eventLine.data(using: .utf8)
-
         let level = entry.level
         let category = entry.category
+        let message = entry.message
+        let timestamp = entry.timestamp
         let writeTrace = traceToCategoryFiles
+
+        // 事件檔用簡短時間，因為那是要一行行讀的；只有 `.event` 用得到，
+        // 其他等級不必先算（`formattedTime` 也是 formatter 呼叫）。
+        let eventTime = level == .event ? entry.formattedTime : nil
 
         fileWriteQueue.async { [weak self] in
             guard let self else { return }
 
+            let wantsMerged = level >= .info
+            let wantsCategory = level >= .info || writeTrace
+            guard wantsMerged || wantsCategory || level == .event else { return }
+
+            let ts = Self.fileTimestampFormatter.string(from: timestamp)
+            guard let data = "[\(ts)] [\(category.rawValue)] \(message)\n".data(using: .utf8) else {
+                return
+            }
+
             // 合併檔：排除 trace，否則事件會被解析細節淹沒
-            if level >= .info, let h = self.fileHandle {
+            if wantsMerged, let h = self.fileHandle {
                 h.seekToEndOfFile(); h.write(data)
             }
             // 事件時間軸
-            if level == .event, let d = eventData, let h = self.eventHandle {
+            if let eventTime, let h = self.eventHandle,
+               let d = "\(eventTime) [\(category.rawValue)] \(message)\n".data(using: .utf8) {
                 h.seekToEndOfFile(); h.write(d)
             }
             // 各類別檔案：完整保留
-            if level >= .info || writeTrace, let h = self.categoryHandles[category] {
+            if wantsCategory, let h = self.categoryHandles[category] {
                 h.seekToEndOfFile(); h.write(data)
             }
         }
@@ -304,38 +355,51 @@ class LogManager {
 }
 
 // MARK: - 全局日誌函數
+//
+// 全部收 `@autoclosure`：訊息在**確定有人要**之前不會被組出來。
+// 這件事只對 `.trace` 有實質差別（它可以整級關掉），但簽章一致比較不容易寫錯。
+//
+// 注意：`@autoclosure` 只擋得住寫在呼叫括號裡的東西。呼叫**之前**先算好的
+// `let preview = data.map { String(format: "%02x", $0) }...` 照樣會執行——
+// 那種要嘛搬進括號裡，要嘛用 `LogManager.shared.isEnabled(.trace)` 包起來。
 
 /// WebSocket 日誌
-func wsLog(_ message: String, level: LogLevel = .info) {
-    LogManager.shared.log(message, category: .ws, level: level)
+func wsLog(_ message: @autoclosure () -> String, level: LogLevel = .info) {
+    LogManager.shared.log(message(), category: .ws, level: level)
 }
 
 /// Liqi 協議日誌
-func liqiLog(_ message: String, level: LogLevel = .trace) {
-    LogManager.shared.log(message, category: .liqi, level: level)
+func liqiLog(_ message: @autoclosure () -> String, level: LogLevel = .trace) {
+    LogManager.shared.log(message(), category: .liqi, level: level)
 }
 
 /// MJAI 事件日誌
-func mjaiLog(_ message: String, level: LogLevel = .event) {
-    LogManager.shared.log(message, category: .mjai, level: level)
+func mjaiLog(_ message: @autoclosure () -> String, level: LogLevel = .event) {
+    LogManager.shared.log(message(), category: .mjai, level: level)
 }
 
 /// 橋接器日誌
-func bridgeLog(_ message: String, level: LogLevel = .info) {
-    LogManager.shared.log(message, category: .bridge, level: level)
+func bridgeLog(_ message: @autoclosure () -> String, level: LogLevel = .info) {
+    LogManager.shared.log(message(), category: .bridge, level: level)
 }
 
 /// Bot 日誌
-func botLog(_ message: String, level: LogLevel = .info) {
-    LogManager.shared.log(message, category: .bot, level: level)
+func botLog(_ message: @autoclosure () -> String, level: LogLevel = .info) {
+    LogManager.shared.log(message(), category: .bot, level: level)
 }
 
 /// 系統日誌
 /// 對局時間軸事件——會另外寫進當次 session 目錄的 events.log
-func eventLog(_ message: String, category: LogCategory = .bridge) {
-    LogManager.shared.log(message, category: category, level: .event)
+func eventLog(_ message: @autoclosure () -> String, category: LogCategory = .bridge) {
+    LogManager.shared.log(message(), category: category, level: .event)
 }
 
-func systemLog(_ message: String) {
-    LogManager.shared.log(message, category: .system)
+func systemLog(_ message: @autoclosure () -> String) {
+    LogManager.shared.log(message(), category: .system)
 }
+
+/// trace 這一級現在會不會被消費。
+///
+/// 只在「為了 log 而做的一整段工作」外面用（例如把每個 protobuf block 都印一行的迴圈）；
+/// 單一行 log 靠 `@autoclosure` 就夠了，不需要先問。
+var isTraceLogging: Bool { LogManager.shared.isEnabled(.trace) }

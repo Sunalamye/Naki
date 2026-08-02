@@ -189,6 +189,78 @@ final class WebSocketInjectionTests: XCTestCase {
         XCTAssertFalse(state.report.attempted)
     }
 
+    // MARK: - naki-core.js 熱路徑契約（p4-3）
+    //
+    // 這幾條鎖的是「每幀幾百次的那段程式碼裡不准有什麼」。真正的視覺效果只能 live 驗，
+    // 但「有沒有把同步狀態查詢加回 draw 迴圈」「基準線有沒有上限」是可以機械檢查的，
+    // 而這正是 p4-3 之前踩到的三個坑。
+
+    /// `drawElements` wrapper 內不得再出現任何 `gl.getParameter`。
+    ///
+    /// live 實測一幀約 356 個 draw call，舊版每一個都問兩次 GL 狀態
+    /// （`CURRENT_PROGRAM` + `TEXTURE_BINDING_2D`）。現在這兩個值由
+    /// `useProgram` / `bindTexture` / `activeTexture` 的 hook 維護，
+    /// `getParameter` 只在 `install()` 取初值時出現。
+    func testDrawElementsHookHasNoPerDrawStateQueries() throws {
+        let source = try WebSocketInterceptor.loadJavaScript(named: "naki-core")
+
+        let marker = "hookMethod(gl, 'drawElements'"
+        let parts = source.components(separatedBy: marker)
+        XCTAssertEqual(parts.count, 2, "找不到 drawElements hook（或裝了不只一份）")
+
+        XCTAssertFalse(parts[1].contains("getParameter"),
+                       "drawElements hook 之後不得再有 getParameter——那是每幀幾百次的同步狀態查詢")
+
+        // 狀態要有人維護，否則快取就是舊值
+        for method in ["useProgram", "activeTexture", "bindTexture"] {
+            XCTAssertTrue(source.contains("hookMethod(gl, '\(method)'"),
+                          "\(method) 沒被攔，快取的 GL 狀態會漂掉")
+        }
+    }
+
+    /// `baselineFrames` 必須在 rAF 回呼裡加，不能在 drawElements 裡加。
+    ///
+    /// 舊版加在 draw 上，數出來的是 draw call 數（live 實測 1,197 萬）而不是幀數
+    /// （3.4 萬）——於是「基準線 >120」在開頁後不到一幀就滿足，保護等於不存在。
+    func testBaselineFramesAreCountedPerFrameNotPerDraw() throws {
+        let source = try WebSocketInterceptor.loadJavaScript(named: "naki-core")
+
+        let increments = source.components(separatedBy: "baselineFrames++").count - 1
+        XCTAssertEqual(increments, 1, "幀計數只能有一處")
+
+        let rafIndex = try XCTUnwrap(source.range(of: "hookMethod(window, 'requestAnimationFrame'"))
+        let incIndex = try XCTUnwrap(source.range(of: "baselineFrames++"))
+        XCTAssertTrue(incIndex.lowerBound > rafIndex.lowerBound,
+                      "baselineFrames 必須在 requestAnimationFrame hook 裡加，否則數的是 draw call")
+    }
+
+    /// 基準線簽章要有上限（簽章含 objId，資源重建會一直產生新的），
+    /// 而且上限要在 `state()` 裡看得到——否則沒辦法從外面驗收「有沒有封頂」。
+    func testBaselineSignaturesAreBounded() throws {
+        let source = try WebSocketInterceptor.loadJavaScript(named: "naki-core")
+
+        XCTAssertTrue(source.contains("BASELINE_SIG_LIMIT"), "基準線簽章沒有上限")
+        XCTAssertTrue(source.contains("baselineSigLimit"), "state() 要回報上限，驗收才查得到")
+        XCTAssertFalse(source.contains("new Set()"), "簽章集合改用 Map 保插入序當 LRU")
+    }
+
+    /// hook 必須拆得掉：`install()` 以前是單向的，連「關掉之後跑得一樣快嗎」都驗不了。
+    func testHighlightHookIsReversible() throws {
+        let source = try WebSocketInterceptor.loadJavaScript(named: "naki-core")
+
+        XCTAssertTrue(source.contains("function uninstall()"))
+        XCTAssertTrue(source.contains("uninstall: function"), "__nakiHighlight 要對外暴露 uninstall")
+        XCTAssertTrue(source.contains("clear: function (full)"), "clear(true) 要能連 hook 一起拆")
+    }
+
+    /// Swift 端送的仍然是不帶參數的 `clear()`——那條路**不能**變成完全解除，
+    /// 否則每次切 `.off` 都要重新收 120 幀基準線才會恢復副露面板判斷。
+    @MainActor
+    func testSwiftClearScriptDoesNotUninstallTheHook() {
+        XCTAssertEqual(GameHighlightScript.clear, "window.__nakiHighlight?.clear();")
+        XCTAssertFalse(GameHighlightScript.clear.contains("true"))
+    }
+
     // MARK: - Helpers
 
     /// 建一個只含指定檔案的暫存 bundle（macOS `Contents/Resources` 佈局）

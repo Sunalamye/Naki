@@ -69,6 +69,79 @@ final class LogAndVersionSingleSourceTests: XCTestCase {
         XCTAssertTrue(line.contains(".123"), line)
     }
 
+    // MARK: - trace 的 lazy 化（p4-3）
+
+    /// `.trace` 只會進各類別檔案，所以那兩個開關關掉時整級都沒人要。
+    /// `.info` 以上永遠有人要（UI／console），不受檔案開關影響。
+    @MainActor
+    func testTraceIsOnlyEnabledWhenSomethingConsumesIt() {
+        let manager = LogManager.shared
+        let previousTrace = manager.traceToCategoryFiles
+        let previousFile = manager.fileLoggingEnabled
+        defer {
+            manager.traceToCategoryFiles = previousTrace
+            manager.fileLoggingEnabled = previousFile
+        }
+
+        manager.fileLoggingEnabled = true
+        manager.traceToCategoryFiles = true
+        XCTAssertTrue(manager.isEnabled(.trace))
+
+        manager.traceToCategoryFiles = false
+        XCTAssertFalse(manager.isEnabled(.trace), "沒有任何 sink 要 trace 了")
+        XCTAssertTrue(manager.isEnabled(.info), "info 進 UI 與 console，跟檔案開關無關")
+        XCTAssertTrue(manager.isEnabled(.event))
+
+        manager.traceToCategoryFiles = true
+        manager.fileLoggingEnabled = false
+        XCTAssertFalse(manager.isEnabled(.trace), "檔案日誌關掉時 trace 沒有去處")
+        XCTAssertTrue(manager.isEnabled(.info))
+    }
+
+    /// trace 關掉時，訊息**不會被組出來**。
+    ///
+    /// 這條鎖的是 `@autoclosure`：p4-3 之前每個 protobuf 欄位都會先做一次
+    /// `String(format:"%02x")` 的字串組裝，然後才發現這一級沒人要。
+    /// 一局 `liqi.log` 191KB 全是這種訊息，而組裝全在 MainActor 上。
+    @MainActor
+    func testTraceMessageIsNotEvaluatedWhenTraceIsOff() {
+        let manager = LogManager.shared
+        let previousTrace = manager.traceToCategoryFiles
+        defer { manager.traceToCategoryFiles = previousTrace }
+
+        var evaluations = 0
+        func expensiveMessage() -> String {
+            evaluations += 1
+            return "[test] p4-3 lazy trace"
+        }
+
+        manager.traceToCategoryFiles = false
+        liqiLog(expensiveMessage())
+        XCTAssertEqual(evaluations, 0, "trace 關掉時連字串都不該組")
+
+        manager.traceToCategoryFiles = true
+        liqiLog(expensiveMessage())
+        XCTAssertEqual(evaluations, 1, "trace 開著就要照常求值，否則訊息會消失")
+    }
+
+    /// `.info` 以上不受影響：關掉 trace 不能順手把真的要看的訊息也吃掉。
+    @MainActor
+    func testInfoMessagesAreStillEvaluatedWhenTraceIsOff() {
+        let manager = LogManager.shared
+        let previousTrace = manager.traceToCategoryFiles
+        defer { manager.traceToCategoryFiles = previousTrace }
+        manager.traceToCategoryFiles = false
+
+        var evaluations = 0
+        func message() -> String {
+            evaluations += 1
+            return "[test] p4-3 info still logged"
+        }
+
+        liqiLog(message(), level: .info)
+        XCTAssertEqual(evaluations, 1)
+    }
+
     // MARK: - 版本單一來源
 
     /// MCP `initialize` 回報的版本必須就是 App 版本（先前寫死 2.1.0，App 已是 2.6.0）

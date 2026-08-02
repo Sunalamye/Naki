@@ -18,14 +18,23 @@ import Foundation
 /// 雀魂 XOR 解碼密鑰
 private let xorKeys: [UInt8] = [0x84, 0x5e, 0x4e, 0x42, 0x39, 0xa2, 0x1f, 0x60, 0x1c]
 
+/// bytes 的 hex 前綴（診斷用）。
+///
+/// **一律寫在 log 呼叫的括號裡面**：`liqiLog` 收 `@autoclosure`，trace 關掉時
+/// 這個函式根本不會被呼叫。寫在呼叫之前先算好（p4-3 之前的寫法）就沒有這個保護——
+/// 每個 ActionPrototype 都會白做兩次 30 byte 的 `String(format:)` 迴圈。
+func liqiHexPreview(_ data: Data, limit: Int = 30, separator: String = " ") -> String {
+    let head = data.prefix(limit).map { String(format: "%02x", $0) }.joined(separator: separator)
+    return data.count > limit ? head + "…" : head
+}
+
 /// XOR 解碼函數（用於解碼 action data）
 func liqiDecode(_ data: Data) -> Data {
     var result = [UInt8](data)
     let len = result.count
 
-    // 調試：顯示原始數據
-    let rawPreview = data.prefix(min(30, data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-    liqiLog("[XOR] Input (\(len) bytes): \(rawPreview)")
+    // 調試：顯示原始數據（trace 關掉時不會格式化）
+    liqiLog("[XOR] Input (\(len) bytes): \(liqiHexPreview(data))")
 
     for i in 0..<len {
         let u = (23 ^ len) + 5 * i + Int(xorKeys[i % xorKeys.count])
@@ -33,8 +42,7 @@ func liqiDecode(_ data: Data) -> Data {
     }
 
     // 調試：顯示解碼後數據
-    let decodedPreview = result.prefix(min(30, result.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-    liqiLog("[XOR] Output (\(len) bytes): \(decodedPreview)")
+    liqiLog("[XOR] Output (\(len) bytes): \(liqiHexPreview(Data(result)))")
 
     return Data(result)
 }
@@ -99,8 +107,7 @@ class LiqiParser {
 
     /// bytes 的 hex 前綴（失敗訊息用；沒有這個就只知道「失敗」不知道「失敗在什麼上面」）
     private func hexPreview(_ data: Data, limit: Int = 16) -> String {
-        let head = data.prefix(limit).map { String(format: "%02x", $0) }.joined()
-        return data.count > limit ? head + "…" : head
+        liqiHexPreview(data, limit: limit, separator: "")
     }
 
     /// 最近一次 `parse` 解不開 envelope 的原因（帶得出 bytes 長度與訊息類型）。
@@ -123,8 +130,7 @@ class LiqiParser {
             envelope = decoded
         case .failure(let failure):
             lastEnvelopeFailure = failure
-            let preview = data.prefix(min(20, data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] envelope 解不開：\(failure)｜preview: \(preview)")
+            liqiLog("[LiqiParser] envelope 解不開：\(failure)｜preview: \(liqiHexPreview(data, limit: 20))")
             return nil
         }
 
@@ -200,8 +206,8 @@ class LiqiParser {
 
         // RESPONSE 的 envelope 不帶方法名，只能靠 msgId 對回 REQUEST；對不上就沒得解。
         guard let methodName = pendingRequests.removeValue(forKey: msgId) else {
-            let preview = payload.prefix(min(30, payload.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] parseResponse: no pending request for msgId=\(msgId)，payload preview: \(preview)")
+            liqiLog("[LiqiParser] parseResponse: no pending request for msgId=\(msgId)"
+                    + "，payload preview: \(liqiHexPreview(payload))")
             return nil
         }
 
@@ -233,22 +239,26 @@ class LiqiParser {
 
     private func parseInnerMessage(methodName: String, data: Data, isResponse: Bool = false) -> [String: Any]? {
         // 調試：顯示內部消息原始數據
-        let rawPreview = data.prefix(min(80, data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
         liqiLog("[LiqiParser] parseInnerMessage: method=\(methodName), dataSize=\(data.count)")
-        liqiLog("[LiqiParser] parseInnerMessage raw: \(rawPreview)")
+        liqiLog("[LiqiParser] parseInnerMessage raw: \(liqiHexPreview(data, limit: 80))")
 
         let innerBlocks = parseProtobufBlocks(data)
         liqiLog("[LiqiParser] parseInnerMessage: \(innerBlocks.count) inner blocks")
 
-        // 顯示每個內部塊
-        for (i, block) in innerBlocks.enumerated() {
-            let blockPreview = block.data.prefix(min(40, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] innerBlock[\(i)]: fieldId=\(block.fieldId), wireType=\(block.wireType), size=\(block.data.count)")
-            if block.wireType == 2 {
-                if let str = block.stringValue, str.count < 50 {
-                    liqiLog("[LiqiParser] innerBlock[\(i)] string: \(str)")
-                } else {
-                    liqiLog("[LiqiParser] innerBlock[\(i)] bytes: \(blockPreview)")
+        // 顯示每個內部塊。
+        //
+        // 這整個迴圈**只為了寫 log 而存在**：每個 block 兩行、`stringValue` 還會多做一次
+        // UTF-8 解碼。trace 關掉時連迴圈都不該進去——`@autoclosure` 只擋得住單一行訊息，
+        // 擋不住「跑一圈迴圈」。一局 liqi.log 191KB 裡絕大多數就是這裡產生的。
+        if isTraceLogging {
+            for (i, block) in innerBlocks.enumerated() {
+                liqiLog("[LiqiParser] innerBlock[\(i)]: fieldId=\(block.fieldId), wireType=\(block.wireType), size=\(block.data.count)")
+                if block.wireType == 2 {
+                    if let str = block.stringValue, str.count < 50 {
+                        liqiLog("[LiqiParser] innerBlock[\(i)] string: \(str)")
+                    } else {
+                        liqiLog("[LiqiParser] innerBlock[\(i)] bytes: \(liqiHexPreview(block.data, limit: 40))")
+                    }
                 }
             }
         }
@@ -322,8 +332,7 @@ class LiqiParser {
 
             case 3: // data
                 actionData = block.data
-                let rawPreview = block.data.prefix(min(40, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                liqiLog("[LiqiParser] ActionPrototype data (raw): \(rawPreview)")
+                liqiLog("[LiqiParser] ActionPrototype data (raw): \(liqiHexPreview(block.data, limit: 40))")
 
             default:
                 // 其他欄位只記錄。**不再拿它頂替 field 3**——
@@ -331,8 +340,8 @@ class LiqiParser {
                 // schema 一改（多一個字串欄位）就會安靜地把別的東西 XOR 解碼後
                 // 當成動作內容餵給 Bot，而 log 裡看起來一切正常。
                 if block.wireType == 2 {
-                    let rawPreview = block.data.prefix(min(40, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                    liqiLog("[LiqiParser] ActionPrototype 未知欄位 \(block.fieldId): \(rawPreview)")
+                    liqiLog("[LiqiParser] ActionPrototype 未知欄位 \(block.fieldId): "
+                            + "\(liqiHexPreview(block.data, limit: 40))")
                 }
             }
         }
@@ -368,12 +377,12 @@ class LiqiParser {
         let decodedData: Data
         if xorDecode {
             decodedData = liqiDecode(data)
-            let preview = decodedData.prefix(min(50, decodedData.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] ActionPrototype '\(actionName)' XOR decoded: \(preview)")
+            liqiLog("[LiqiParser] ActionPrototype '\(actionName)' XOR decoded: "
+                    + "\(liqiHexPreview(decodedData, limit: 50))")
         } else {
             decodedData = data
-            let preview = decodedData.prefix(min(50, decodedData.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] ActionPrototype '\(actionName)' raw (no XOR): \(preview)")
+            liqiLog("[LiqiParser] ActionPrototype '\(actionName)' raw (no XOR): "
+                    + "\(liqiHexPreview(decodedData, limit: 50))")
         }
 
         let actionBlocks = parseProtobufBlocks(decodedData)
@@ -452,8 +461,8 @@ class LiqiParser {
                 }
             case 6: // scores（liqi.json：`repeated int32`）
                 // 調試: 打印原始數據
-                let rawHex = block.data.map { String(format: "%02x", $0) }.joined(separator: " ")
-                liqiLog("[LiqiParser] NewRound field 6 (scores) raw bytes: \(rawHex)")
+                liqiLog("[LiqiParser] NewRound field 6 (scores) raw bytes: "
+                        + "\(liqiHexPreview(block.data, limit: block.data.count))")
                 liqiLog("[LiqiParser] NewRound field 6 wireType: \(block.wireType), size: \(block.data.count)")
 
                 // packed（wireType 2）與逐筆（wireType 0）兩種編碼都收；
@@ -531,8 +540,8 @@ class LiqiParser {
                     liqiLog("[LiqiParser] DealTile tile: \(tile)")
                 } else {
                     // 顯示原始數據用於調試
-                    let rawPreview = block.data.prefix(min(20, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                    liqiLog("[LiqiParser] DealTile tile field not a valid string, raw: \(rawPreview)")
+                    liqiLog("[LiqiParser] DealTile tile field not a valid string, raw: "
+                            + "\(liqiHexPreview(block.data, limit: 20))")
                 }
             case 3: // left_tile_count
                 if let (v, _) = parseVarint(block.data, offset: 0) {
@@ -559,8 +568,8 @@ class LiqiParser {
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["zhenting"] = v != 0 }
             default:
                 // 記錄未知字段
-                let rawPreview = block.data.prefix(min(20, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-                liqiLog("[LiqiParser] DealTile unknown field \(block.fieldId): \(rawPreview)")
+                liqiLog("[LiqiParser] DealTile unknown field \(block.fieldId): "
+                        + "\(liqiHexPreview(block.data, limit: 20))")
             }
         }
 
