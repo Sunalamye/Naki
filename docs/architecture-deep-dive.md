@@ -55,7 +55,7 @@ Swift 狀態同時提供給 SwiftUI、Debug HTTP 與 MCP。
 2. 建立 `WKUserContentController`，註冊 `websocketBridge`。
 3. 依序注入 2 個 Naki JavaScript modules（`naki-core.js` → `naki-websocket.js`）。
 4. 建立 `WebPage`。
-5. 建立 `NativeBotController` 與 `AutoPlayController`。
+5. 建立 `NativeBotController`，並從 `AutoPlayModeStore` 讀回上次選的自動打牌模式。
 6. 設定 `LiqiActionSender` 的 JS send handler。
 7. 啟動 loopback Debug／MCP server（預設 port 8765）。
 8. 觀察頁面導覽與遊戲事件。

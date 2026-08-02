@@ -45,8 +45,8 @@ class WebViewModel: WebViewModelProtocol {
   // 原生 Bot 控制器 (MortalSwift)
   private var nativeBotController: NativeBotController?
 
-  // 自動打牌控制器（UI 自動化）
-  private var autoPlayController: AutoPlayController?
+  /// 自動打牌模式（唯一有人讀的自動打牌設定；持久化見 `AutoPlayModeStore`）
+  private(set) var autoPlayMode: AutoPlayMode = AutoPlayModeStore.defaultMode
 
   /// Liqi 動作／大廳請求送出器（Unity 時代唯一有效的動作面）
   ///
@@ -145,12 +145,6 @@ class WebViewModel: WebViewModelProtocol {
     // 初始化原生 Bot 控制器
     nativeBotController = NativeBotController()
 
-    // 初始化自動打牌控制器
-    autoPlayController = AutoPlayController()
-
-    // 設定 AutoPlayController 的 WebPage
-    autoPlayController?.setWebPage(webPage)
-
     // 設定 Liqi 送出通道（protobuf → base64 → JS sendRaw）
     configureLiqiSender()
 
@@ -160,9 +154,8 @@ class WebViewModel: WebViewModelProtocol {
     // 沿用上次選的模式。
     // 舊行為是每次啟動都硬設 .auto，於是使用者選的「關閉」一重啟就被沖掉，
     // 看起來像「選了關閉還是會自動打牌」。
-    let savedMode = UserDefaults.standard.string(forKey: Self.autoPlayModeKey)
-      .flatMap(AutoPlayMode.init(rawValue:)) ?? .auto
-    autoPlayController?.setMode(savedMode)
+    autoPlayMode = AutoPlayModeStore.load()
+    bridgeLog("[WebViewModel] 自動打牌模式（沿用上次）: \(autoPlayMode.rawValue)")
 
     // 啟動定期檢查計時器（每 1 秒檢查一次）
     startAutoPlayCheckTimer()
@@ -283,7 +276,7 @@ class WebViewModel: WebViewModelProtocol {
 
     let snapshot = LiqiOperationStore.shared.pending
     let decision = AutoPlayGate.evaluate(.init(
-      isAutoMode: autoPlayController?.state.mode == .auto,
+      isAutoMode: autoPlayMode == .auto,
       hasActionInFlight: currentExecutionId != nil,
       snapshot: snapshot,
       recommendations: recommendations,
@@ -448,10 +441,9 @@ class WebViewModel: WebViewModelProtocol {
 
   /// 根據當前推薦觸發自動打牌
   private func triggerAutoPlayIfNeeded() {
-    let autoMode = autoPlayController?.state.mode
     let hasRecs = !recommendations.isEmpty
 
-    guard autoMode == .auto, hasRecs else { return }
+    guard autoPlayMode == .auto, hasRecs else { return }
 
     // 根據動作類型決定延遲時間
     guard let firstRec = recommendations.first else { return }
@@ -592,13 +584,10 @@ class WebViewModel: WebViewModelProtocol {
 
   // MARK: - Auto Play Methods
 
-  /// 自動打牌模式的持久化 key
-  static let autoPlayModeKey = "naki.autoPlayMode"
-
   /// 設定自動打牌模式
   func setAutoPlayMode(_ mode: AutoPlayMode) {
-    autoPlayController?.setMode(mode)
-    UserDefaults.standard.set(mode.rawValue, forKey: Self.autoPlayModeKey)
+    autoPlayMode = mode
+    AutoPlayModeStore.save(mode)
     bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
     debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
 
@@ -615,10 +604,9 @@ class WebViewModel: WebViewModelProtocol {
     }
   }
 
-  /// 設定自動打牌延遲
-  func setAutoPlayDelay(_ delay: TimeInterval) {
-    autoPlayController?.setActionDelay(delay)
-  }
+  // 註：`setAutoPlayDelay(_:)` 已移除。它唯一的寫入點是 toolbar 的 Stepper，
+  // 而寫進去的值沒有任何讀取者——真正的送出延遲由 `ActionDelayModel` 依動作
+  // 類型隨機決定（刻意設計，避免固定節奏）。UI 上的 Stepper 一併移除。
 
   /// 設定是否隱藏玩家名稱
   ///
@@ -683,10 +671,9 @@ class WebViewModel: WebViewModelProtocol {
     setHidePlayerNames(true)
   }
 
-  /// 取消待處理的自動打牌動作
-  func cancelAutoPlayAction() {
-    autoPlayController?.cancelPendingAction()
-  }
+  // 註：`cancelAutoPlayAction()` / `confirmAutoPlayAction()` 已移除。
+  // 這條路徑上沒有「先提示、等使用者確認」的流程：推薦一產生就依模式決定是否送出。
+  // 兩者要取消／確認的那個 pending action 容器（連同它的 Timer）從來沒被建立過。
 
   /// 手動觸發自動打牌（使用當前推薦）
   /// - Parameter forcedAction: 不看 AI 推薦、直接以這個動作進入決策流程。
@@ -834,7 +821,7 @@ class WebViewModel: WebViewModelProtocol {
     let decision = AutoPlayDecisionResolver.resolve(
       snapshot: snapshot,
       recommendations: recommendations,
-      mode: autoPlayController?.state.mode ?? .off,
+      mode: autoPlayMode,
       seat: gameState.playerId)
 
     let resolvedAction: Recommendation.ActionType
@@ -1103,10 +1090,11 @@ class WebViewModel: WebViewModelProtocol {
           "percentage": rec.percentageString,
         ] as [String: Any]
       },
+      // 註：`isMyTurn` / `hasPendingAction` 已移除——它們的來源欄位
+      // 從來沒有人寫過真值（恆 false / 恆 nil）。
+      // 要判斷「輪到誰」請看 `operations.pending`（server-authoritative）。
       "autoPlay": [
-        "mode": autoPlayController?.state.mode.rawValue ?? "unknown",
-        "isMyTurn": autoPlayController?.state.isMyTurn ?? false,
-        "hasPendingAction": autoPlayController?.state.pendingAction != nil,
+        "mode": autoPlayMode.rawValue
       ],
     ]
 
@@ -1241,10 +1229,9 @@ class WebViewModel: WebViewModelProtocol {
           "kyoku": self.gameStateManager.gameState.kyoku,
           "honba": self.gameStateManager.gameState.honba,
         ],
+        // `isMyTurn` / `hasPendingAction` 已移除（恆 false／恆 nil 的假欄位）
         "autoPlay": [
-          "mode": self.autoPlayController?.state.mode.rawValue ?? "unknown",
-          "isMyTurn": self.autoPlayController?.state.isMyTurn ?? false,
-          "hasPendingAction": self.autoPlayController?.state.pendingAction != nil,
+          "mode": self.autoPlayMode.rawValue
         ],
         "recommendations": recs,
         "tehaiCount": self.tehaiTiles.count,
@@ -1255,8 +1242,8 @@ class WebViewModel: WebViewModelProtocol {
     }
 
     // 設定手動觸發自動打牌回調
-    // 統一走 WebViewModel 主自動打牌路徑（以牌名經 findTileInHand 轉 UI index），
-    // 不再使用 AutoPlayController 的排序索引 discard 路徑
+    // 統一走 WebViewModel 主自動打牌路徑：推薦 → gate → resolver → LiqiActionSender，
+    // 沒有第二條「照手牌排序索引直接打」的捷徑
     debugServer?.triggerAutoPlay = { [weak self] in
       guard let self = self else { return }
       self.triggerAutoPlayNow()
@@ -1357,12 +1344,6 @@ class WebViewModel: WebViewModelProtocol {
     guard let page = webPage else { return nil }
     return try await page.callJavaScript(script)
   }
-
-  /// 確認待處理的自動打牌動作。
-  ///
-  /// 目前主路徑沒有「先提示、等確認」的流程——推薦一產生就依模式決定是否直接送出，
-  /// 所以這裡是空實作，只為滿足協定（Legacy 端同樣沒有這個流程）。
-  func confirmAutoPlayAction() {}
 
   // MARK: - Call JavaScript
 

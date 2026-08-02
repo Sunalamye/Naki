@@ -48,8 +48,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
     /// 所以這裡與主路徑一致，改為自行組 Liqi 封包送出。
     private(set) var liqiSender = LiqiActionSender()
 
-    /// 自動打牌控制器
-    private var autoPlayController: AutoPlayController?
+    /// 自動打牌模式（與主路徑共用同一個持久化 key，見 `AutoPlayModeStore`）
+    private(set) var autoPlayMode: AutoPlayMode = AutoPlayModeStore.defaultMode
 
     /// Debug Server (macOS only)
     #if os(macOS)
@@ -73,9 +73,6 @@ class LegacyWebViewModel: WebViewModelProtocol {
     init() {
         // 初始化原生 Bot 控制器
         nativeBotController = NativeBotController()
-
-        // 初始化自動打牌控制器
-        autoPlayController = AutoPlayController()
 
         // 動作送出改走協定層：Swift 端組好 Liqi envelope，JS 只負責把 base64 丟進 WebSocket
         liqiSender.logHandler = { [weak self] message in
@@ -107,10 +104,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
             }
         }
 
-        // 沿用上次選的模式（與主路徑一致，不再每次啟動硬設 .auto）
-        let savedMode = UserDefaults.standard.string(forKey: WebViewModel.autoPlayModeKey)
-            .flatMap(AutoPlayMode.init(rawValue:)) ?? .auto
-        autoPlayController?.setMode(savedMode)
+        // 沿用上次選的模式（與主路徑同一個 key，不再每次啟動硬設 .auto）
+        autoPlayMode = AutoPlayModeStore.load()
 
         statusMessage = "準備就緒 (Legacy 模式)"
     }
@@ -210,7 +205,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
         } else if LiqiOperationStore.shared.pending?.horaOperation != nil {
             // 伺服器提供和牌時，不因為模型沒意見就放過（與主路徑同一條規則）
             bridgeLog("[LegacyWebViewModel] 🎯 oplist 有和牌但模型無推薦 → 交給 resolver")
-            if autoPlayController?.state.mode == .auto {
+            if autoPlayMode == .auto {
                 triggerAutoPlayNow(delay: 0)
             }
         }
@@ -218,21 +213,19 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     // MARK: - Auto Play Methods
 
+    /// 設定自動打牌模式。
+    ///
+    /// 以前這裡只改記憶體、沒有寫進 UserDefaults——Legacy 路徑選的模式重啟就消失，
+    /// 而 UI picker 又另外存自己的 key，兩邊講的話可以不一樣。現在與主路徑共用
+    /// `AutoPlayModeStore`。
     func setAutoPlayMode(_ mode: AutoPlayMode) {
-        autoPlayController?.setMode(mode)
+        autoPlayMode = mode
+        AutoPlayModeStore.save(mode)
+        bridgeLog("[LegacyWebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
     }
 
-    func setAutoPlayDelay(_ delay: TimeInterval) {
-        // AutoPlayController 不直接支援 setDelay，使用 triggerAction 的 delay 參數
-    }
-
-    func confirmAutoPlayAction() {
-        // AutoPlayController 不直接支援 confirmAction
-    }
-
-    func cancelAutoPlayAction() {
-        autoPlayController?.cancelPendingAction()
-    }
+    // 註：`setAutoPlayDelay` / `confirmAutoPlayAction` / `cancelAutoPlayAction` 已移除，
+    // 三個都是沒有實作內容的空殼（延遲由 `ActionDelayModel` 決定，也沒有待確認動作可取消）。
 
     func triggerAutoPlayNow(delay: TimeInterval) {
         // 與主路徑共用同一個 resolver。
@@ -244,7 +237,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
         //
         // 沒有理由讓兩條路的安全性不同——合法性的權威在伺服器，跟走哪個 WebView 無關。
         let snapshot = LiqiOperationStore.shared.pending
-        let mode = autoPlayController?.state.mode ?? .off
+        let mode = autoPlayMode
         let seat = botStatus.playerId
 
         let decision = AutoPlayDecisionResolver.resolve(
@@ -342,7 +335,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
         lastAutoPlayActionType = recommendation.actionType
 
         // 檢查是否為自動模式
-        guard autoPlayController?.state.mode == .auto else { return }
+        guard autoPlayMode == .auto else { return }
 
         triggerAutoPlayNow(delay: 1.2)
     }
@@ -449,10 +442,9 @@ class LegacyWebViewModel: WebViewModelProtocol {
                     "kyoku": self.gameState.kyoku,
                     "honba": self.gameState.honba,
                 ],
+                // `isMyTurn` / `hasPendingAction` 已移除（來源恆 false／恆 nil 的假欄位）
                 "autoPlay": [
-                    "mode": self.autoPlayController?.state.mode.rawValue ?? "unknown",
-                    "isMyTurn": self.autoPlayController?.state.isMyTurn ?? false,
-                    "hasPendingAction": self.autoPlayController?.state.pendingAction != nil,
+                    "mode": self.autoPlayMode.rawValue
                 ],
                 "recommendations": recs,
                 "tehaiCount": self.tehaiTiles.count,

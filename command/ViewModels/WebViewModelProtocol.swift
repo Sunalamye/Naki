@@ -42,11 +42,15 @@ protocol WebViewModelProtocol: AnyObject, Observable {
 
     // MARK: - Auto Play Methods
 
+    /// 目前生效中的自動打牌模式（持久化見 `AutoPlayModeStore`）
+    var autoPlayMode: AutoPlayMode { get }
+
     func setAutoPlayMode(_ mode: AutoPlayMode)
-    func setAutoPlayDelay(_ delay: TimeInterval)
-    func confirmAutoPlayAction()
-    func cancelAutoPlayAction()
     func triggerAutoPlayNow(delay: TimeInterval)
+
+    // 註：`setAutoPlayDelay(_:)`、`confirmAutoPlayAction()`、`cancelAutoPlayAction()` 已移除。
+    // 三個都是空殼：延遲值沒有讀取者（真正的送出延遲由 `ActionDelayModel` 決定），
+    // 而「待確認／待取消的動作」這個狀態從來沒有被建立過。
 
     // MARK: - Settings
 

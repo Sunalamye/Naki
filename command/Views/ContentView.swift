@@ -23,8 +23,12 @@ struct ContentView: View {
     @State private var showLog = false
 
     // 自動打牌控制
-    @AppStorage("AutoPlayMode") private var autoPlayMode: AutoPlayMode = .auto
-    @State private var actionDelay: Double = 1.0
+    //
+    // key 與 ViewModel 共用（`AutoPlayModeStore.key`）：以前 UI 存 "AutoPlayMode"、
+    // ViewModel 存 "naki.autoPlayMode"，兩邊各記各的，picker 顯示的模式可以跟
+    // 實際驅動送出的模式不一致。舊 key 的一次性遷移在 `NakiApp.init()`。
+    @AppStorage(AutoPlayModeStore.key) private var autoPlayMode: AutoPlayMode = AutoPlayModeStore
+        .defaultMode
 
     var body: some View {
         Group {
@@ -96,27 +100,9 @@ struct ContentView: View {
             .accessibilityLabel("自動打牌模式")
         }
 
-        // 延遲調整
-        ToolbarItem(placement: .navigation) {
-            if autoPlayMode != .off {
-                HStack(spacing: 10) {
-                    Text("\(actionDelay, specifier: "%.1f")s")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.secondary)
-
-                    Stepper("", value: $actionDelay, in: 0.5...3.0, step: 0.5)
-                        .labelsHidden()
-                        .onChange(of: actionDelay) { _, newValue in
-                            viewModel.setAutoPlayDelay(newValue)
-                        }
-                        .accessibilityIdentifier("action-delay-stepper")
-                        .accessibilityLabel("動作延遲")
-                        .accessibilityValue(String(format: "%.1f 秒", actionDelay))
-                }
-                .frame(width: 80)
-                .help("動作延遲")
-            }
-        }
+        // 註：「延遲調整」Stepper 已移除。它寫進去的值沒有任何讀取者，
+        // 真正的送出延遲由 `ActionDelayModel` 依動作類型隨機決定（刻意設計，
+        // 避免固定節奏）。留著只是一個看得到、轉得動、但不會改變任何行為的假控制。
 
         // MCP Server
         ToolbarItem(placement: .navigation) {
