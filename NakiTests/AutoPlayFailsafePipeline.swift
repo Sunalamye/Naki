@@ -17,12 +17,15 @@
 //      WebViewModel.triggerAutoPlayNow(delay:forcedAction:)
 //                                                      → forceHora 用 pending 的 contextTile
 //      WebViewModel.executeAutoPlayActionWithRetry     → resolver + isStillValid + 和牌重試
-//      WebViewModel.executeAutoPlayAction              → LiqiActionSender ＋ 成功才 markHandled
+//      WebViewModel.executeAutoPlayAction              → AutoPlayActionExecutor（正式那一份）
 //
 //  ⚠️ 這是 harness，不是正式路徑。它證明的是
 //  「gate → resolver → sender → markHandled」這條**組合**的語意；
 //  它不證明 WebViewModel 的 asyncAfter 延遲、去抖、`currentExecutionId` 互斥，
 //  也不證明 live 對局真的會走到這裡（那需要 live fixture，仍未驗證）。
+//
+//  p2-1 之後「實際送出」那一格不再是抄來的第三份 switch，而是直接呼叫正式的
+//  `AutoPlayActionExecutor`——「成功才 markHandled」現在測到的是產品程式碼本身。
 //
 //  p3-2 抽出 `AutoPlayEngine` 之後，把 `run()` 的內容換成呼叫 engine 即可，
 //  三個 fixture（AutoPlayFailsafeFixtureTests）不必改——那正是它們存在的目的。
@@ -220,12 +223,20 @@ struct AutoPlayFailsafePipeline {
                            log: log, overrode: overrode)
             }
 
-            let result = await send(action: action, tile: tile, snapshot: snapshot)
+            // ④ 實際送出：走正式的 executor（markHandled 的語意也在它裡面，
+            //    成功才消化這批 oplist——失敗留給重試框架再送一次）
+            let result = await AutoPlayActionExecutor.execute(
+                action: action,
+                tile: tile,
+                snapshot: snapshot,
+                recommendations: recommendations,
+                sender: sender,
+                store: store,
+                log: { log.append($0) },
+                event: { log.append($0) })
             log.append(result?.logLine ?? "❌ 未送出（組不出 request）: \(action.rawValue)")
 
-            // ④ 送出成功才消化這批 oplist——失敗留給重試框架再送一次
             if result?.success == true {
-                store.markHandled(snapshot.sequence)
                 return Run(gate: gate,
                            outcome: .sent(action: action, tile: tile, attempts: attempt),
                            log: log, overrode: overrode)
@@ -252,48 +263,4 @@ struct AutoPlayFailsafePipeline {
                    log: log, overrode: overrode)
     }
 
-    // MARK: - 實際送出（對應 executeAutoPlayAction 的 7-case switch）
-
-    /// 回 nil 代表「一個 request 都沒送出去」——那不可以被當成處理完。
-    private func send(action: Recommendation.ActionType,
-                      tile: String,
-                      snapshot: LiqiOperationSnapshot) async -> LiqiSendResult? {
-        switch action {
-        case .hora:
-            // 型別由伺服器給的 oplist 決定，不是猜的
-            let horaType = snapshot.horaOperation ?? .tsumo
-            return horaType == .ron ? await sender.ron() : await sender.tsumo()
-
-        case .discard:
-            guard let majsoulTile = LiqiTileCode.majsoul(fromMJAI: tile) else { return nil }
-            return await sender.discard(tile: majsoulTile, moqie: false)
-
-        case .riichi:
-            guard let discardRec = recommendations.first(where: { $0.actionType == .discard }),
-                  let majsoulTile = LiqiTileCode.majsoul(fromMJAI: discardRec.displayTile)
-            else { return nil }
-            return await sender.riichi(tile: majsoulTile, moqie: false)
-
-        case .chi:
-            var variant = 0
-            if tile.hasPrefix("chi_"), let index = Int(String(tile.dropFirst(4))) {
-                variant = index
-            }
-            let resolved = snapshot.chiCombinationIndex(variant: variant) ?? 0
-            return await sender.chi(index: UInt32(resolved))
-
-        case .pon:
-            return await sender.pon()
-
-        case .kan:
-            return await sender.kan(type: snapshot.kanOperation ?? .ankan)
-
-        case .none:
-            return await sender.pass(
-                channel: snapshot.isCallOpportunity ? .chiPengGang : .selfOperation)
-
-        case .unknown:
-            return nil
-        }
-    }
 }

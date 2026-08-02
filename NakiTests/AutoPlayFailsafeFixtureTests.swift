@@ -23,8 +23,8 @@
 //  - resolver 的終局保護改成「只有推薦為空時才生效」
 //    → C、C'、E 轉紅（另外 3 個既有 resolver 測試也紅）
 //  - 把 `markHandled` 搬到送出之前 → B、B' 轉紅
-//    ⚠️ 這一條動的是**本 harness**，不是 `WebViewModel`：正式的「成功才 markHandled」
-//    寫在 `WebViewModel.executeAutoPlayAction` 裡，測試碰不到它（要等 p2-1 抽出 executor）。
+//    （p2-1 之後這一條動的是正式的 `AutoPlayActionExecutor`：7-case switch 與
+//    「成功才 markHandled」已經只剩一份，harness 直接呼叫它，不再自己抄一份。）
 //
 //  ⚠️ 走的是 `AutoPlayFailsafePipeline`（harness），不是 `WebViewModel` 本體，
 //  也不是 live 對局：CLAUDE.md 要求的 live fixture

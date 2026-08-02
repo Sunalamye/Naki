@@ -26,6 +26,37 @@ enum NakiWebSocketScript {
   /// `|| 0` 讓結果收斂成 0 而不是 undefined。
   static let forceReconnect = "return window.__nakiWebSocket?.forceReconnect() || 0"
 
+  /// 把一筆已編碼的 Liqi REQUEST（base64）丟進第一條 OPEN 的雀魂 WebSocket。
+  ///
+  /// base64 只含 `A-Za-z0-9+/=`，可安全放進單引號字串。
+  static func sendRaw(base64: String) -> String {
+    "return JSON.stringify(window.__nakiWebSocket.sendRaw('\(base64)'))"
+  }
+
+  /// 把 `sendRaw` 的 JS 回傳值解析成送出結果。
+  ///
+  /// JS 端回 `{success:true, bytes, socketId}` 或 `{success:false, reason}`，
+  /// 經 `JSON.stringify` 過橋。兩個 view model 的 `sendHandler` 原本各有一份幾乎相同的
+  /// 解析（p2-1 收斂）；分兩份的代價是「JS 回報的失敗原因有沒有被保留」這種細節
+  /// 可以在其中一份悄悄失傳。
+  ///
+  /// 失敗時的 detail 一律是可辨識的短碼，不是自由文字——它會被寫進 log 供事後對照。
+  static func sendResult(from result: Any?) -> LiqiRawSendResult {
+    guard let json = result as? String,
+      let data = json.data(using: .utf8),
+      let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return .failure("unparsable_js_result")
+    }
+
+    if dict["success"] as? Bool == true {
+      let bytes = dict["bytes"] as? Int ?? -1
+      let socketId = dict["socketId"].map { "\($0)" } ?? "?"
+      return LiqiRawSendResult(success: true, detail: "socket=\(socketId) bytes=\(bytes)")
+    }
+    return .failure(dict["reason"] as? String ?? "unknown_reason")
+  }
+
   /// 把 `forceReconnect` 的 JS 回傳值轉成關閉數。
   ///
   /// JS number 過橋後可能是 `Int`、`Double` 或 `NSNumber`（依 WebPage / WKWebView 而異），

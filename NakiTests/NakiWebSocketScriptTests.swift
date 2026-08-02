@@ -31,6 +31,57 @@ final class NakiWebSocketScriptTests: XCTestCase {
     XCTAssertTrue(script.contains("|| 0"), "undefined 要收斂成 0")
   }
 
+  // MARK: - sendRaw（p2-1：兩個 view model 共用同一份腳本與解析）
+
+  /// 同樣是函式體語意，缺 `return` 送出結果會恆為 nil → 全部變成 unparsable。
+  func testSendRawScriptStartsWithReturnAndEmbedsPayload() {
+    let script = NakiWebSocketScript.sendRaw(base64: "AAEC")
+
+    XCTAssertTrue(script.hasPrefix("return "), "缺 return 會讓送出結果恆為 nil")
+    XCTAssertTrue(script.contains("window.__nakiWebSocket.sendRaw('AAEC')"),
+                  "base64 只含 A-Za-z0-9+/=，直接放進單引號字串")
+    XCTAssertTrue(script.contains("JSON.stringify"), "物件要 stringify 才過得了橋")
+  }
+
+  /// 成功：detail 要保留 socketId 與 bytes（事後對照送出去幾個位元組的唯一線索）
+  @MainActor
+  func testSendResultSuccessKeepsSocketAndBytes() {
+    let result = NakiWebSocketScript.sendResult(
+      from: #"{"success":true,"bytes":26,"socketId":1}"#)
+
+    XCTAssertTrue(result.success)
+    XCTAssertEqual(result.detail, "socket=1 bytes=26")
+  }
+
+  /// JS 端拒絕（沒有 OPEN 的雀魂連線等）：reason 必須原樣保留
+  @MainActor
+  func testSendResultFailureKeepsReason() {
+    let result = NakiWebSocketScript.sendResult(
+      from: #"{"success":false,"reason":"no_open_majsoul_connection"}"#)
+
+    XCTAssertFalse(result.success)
+    XCTAssertEqual(result.detail, "no_open_majsoul_connection")
+  }
+
+  /// 失敗但沒給 reason：不可以變成空字串，否則 log 上看不出發生過什麼
+  @MainActor
+  func testSendResultFailureWithoutReasonHasFallback() {
+    let result = NakiWebSocketScript.sendResult(from: #"{"success":false}"#)
+
+    XCTAssertFalse(result.success)
+    XCTAssertEqual(result.detail, "unknown_reason")
+  }
+
+  /// nil（腳本沒 return）、非字串、非 JSON 一律是 unparsable——**不可以當成成功**
+  @MainActor
+  func testSendResultUnparsableIsNeverSuccess() {
+    for input: Any? in [nil, 42, "not json", #"["array"]"#] {
+      let result = NakiWebSocketScript.sendResult(from: input)
+      XCTAssertFalse(result.success, "無法解析的回傳值不可以被當成送出成功")
+      XCTAssertEqual(result.detail, "unparsable_js_result")
+    }
+  }
+
   // MARK: - 回傳值解析
 
   func testClosedCountFromInt() {

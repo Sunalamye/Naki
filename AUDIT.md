@@ -42,10 +42,10 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 
 原始差距：外層在呼叫 sender 後，只看 resolved action 是 `.hora` 就 `markHandled`，沒有拿到實際 `LiqiSendResult`；沒有 game-gateway、JS send 失敗或 server 拒絕時，pending opportunity 會被吃掉且不重試。
 
-現況：`executeAutoPlayAction` 回傳 `LiqiSendResult?`，只有 `success == true` 才 `markSnapshotHandled`；和牌失敗走 bounded retry（15 次 × 0.2 秒），用完仍不標記。
+現況：送出層收斂成 `AutoPlayActionExecutor`（p2-1），它回傳 `LiqiSendResult?`，只有 `success == true` 才 `markHandled`；和牌失敗由 `WebViewModel.executeAutoPlayActionWithRetry` 走 bounded retry（15 次 × 0.2 秒），用完仍不標記。
 
-機械驗收（2026-08-02）：fixture B（第 1 次 `no_open_majsoul_connection`、第 2 次成功）斷言重試期間看到的 oplist 序號沒變、成功後才 `pending == nil`；fixture B'（一路失敗）斷言 3 次用完後 `pending` 仍在，且通道恢復後同一批 oplist 還能送成功。實跑 mutation：把 `markHandled` 搬到送出之前 → B、B' 轉紅。
-**這個 mutation 動的是測試 harness，不是 `WebViewModel`**：正式的「成功才 `markHandled`」寫在 `WebViewModel.executeAutoPlayAction` 裡，測試建不出 `WebViewModel`，所以鎖住的是語意規格而不是那幾行 source（p2-1 抽出 executor 後才能直接鎖）。
+機械驗收（2026-08-02）：fixture B（第 1 次 `no_open_majsoul_connection`、第 2 次成功）斷言重試期間看到的 oplist 序號沒變、成功後才 `pending == nil`；fixture B'（一路失敗）斷言 3 次用完後 `pending` 仍在，且通道恢復後同一批 oplist 還能送成功。
+p2-1 之後 fixture 走的是**正式的** `AutoPlayActionExecutor`（不再是 harness 自己抄的第三份 switch），所以 mutation 直接動產品程式碼即可：把 `if result.success` 拿掉（不論成敗都 `markHandled`）→ B、B' 與 `AutoPlayActionExecutorTests.testFailedSendKeepsOplistPending` 三個測試轉紅（9 個 assertion）。
 **仍未驗證**：live 對局沒有出現過 send 失敗（§15.4：兩次都是第 1 次就成功）。
 
 ### P0：Legacy iOS 沒有 server-authoritative 保護

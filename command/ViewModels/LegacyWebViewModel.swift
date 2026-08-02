@@ -78,33 +78,16 @@ class LegacyWebViewModel: WebViewModelProtocol {
         // 同一條訊息只寫一次：`addLog` 內部已經進 LogManager（並更新狀態列）。
         // 先前 addLog 與 bridgeLog 都寫，`/logs` 會看到兩種前綴的同一件事。
         liqiSender.logHandler = { [weak self] message in
-            let line = "[LegacyWebViewModel] \(message)"
-            #if os(macOS)
-            if let server = self?.debugServer {
-                server.addLog(line)
-                return
-            }
-            #endif
-            bridgeLog(line)
+            self?.autoPlayLog(message)
         }
+        // 腳本字串與回傳值解析都在 `NakiWebSocketScript`（主路徑走同一份）。
+        // `executeJavaScript` 會把它包成 IIFE，所以同樣需要自帶 `return`。
         liqiSender.sendHandler = { [weak self] base64 in
             guard let self else { return .failure("viewmodel_deallocated") }
-            // base64 只含 A-Za-z0-9+/=，可安全放進單引號字串
-            let script = "return JSON.stringify(window.__nakiWebSocket.sendRaw('\(base64)'))"
             do {
-                let result = try await self.executeJavaScript(script)
-                guard let json = result as? String,
-                      let data = json.data(using: .utf8),
-                      let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                else {
-                    return .failure("unparsable_js_result")
-                }
-                if dict["success"] as? Bool == true {
-                    let bytes = dict["bytes"] as? Int ?? -1
-                    let socketId = dict["socketId"].map { "\($0)" } ?? "?"
-                    return LiqiRawSendResult(success: true, detail: "socket=\(socketId) bytes=\(bytes)")
-                }
-                return .failure(dict["reason"] as? String ?? "unknown_reason")
+                return NakiWebSocketScript.sendResult(
+                    from: try await self.executeJavaScript(
+                        NakiWebSocketScript.sendRaw(base64: base64)))
             } catch {
                 return .failure("js_error: \(error.localizedDescription)")
             }
@@ -287,54 +270,44 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     /// 依推薦組出對應的 Liqi 請求並送出。
     ///
-    /// 與主路徑 `WebViewModel.executeAutoPlayAction` 同一套語意，
-    /// 差別只在這裡沒有重試框架——Legacy 走的是舊 WKWebView，
-    /// 保持單純：送一次、記錄結果，失敗就等下一次推薦更新再送。
+    /// 7-case switch 與「成功才 markHandled」都在 `AutoPlayActionExecutor`（p2-1 收斂）——
+    /// 這條路以前是自己抄一份，抄的時候把所有診斷輸出與「吃的組合對照不到」的警告
+    /// 都漏掉了，於是 Legacy 送出去的是什麼、為什麼沒送，事後完全查不到。
+    ///
+    /// 與主路徑唯一剩下的差別是**沒有重試框架**：送一次、記錄結果，
+    /// 失敗就等下一次推薦更新再送（缺口清單與收斂決策見 p2-2）。
     private func sendAction(actionType: Recommendation.ActionType, tileName: String) async {
-        let snapshot = LiqiOperationStore.shared.pending
-        var result: LiqiSendResult?
+        await AutoPlayActionExecutor.execute(
+            action: actionType,
+            tile: tileName,
+            snapshot: LiqiOperationStore.shared.pending,
+            recommendations: recommendations,
+            tsumoTile: tsumoTile,
+            sender: liqiSender,
+            store: LiqiOperationStore.shared,
+            log: { self.autoPlayLog($0) },
+            event: { self.autoPlayLog($0, isEvent: true) })
+    }
 
-        switch actionType {
-        case .discard:
-            guard let majsoulTile = LiqiTileCode.majsoul(fromMJAI: tileName) else { return }
-            result = await liqiSender.discard(tile: majsoulTile, moqie: tsumoTile == tileName)
-
-        case .riichi:
-            guard let discardRec = recommendations.first(where: { $0.actionType == .discard }),
-                  let majsoulTile = LiqiTileCode.majsoul(fromMJAI: discardRec.displayTile)
-            else { return }
-            result = await liqiSender.riichi(tile: majsoulTile,
-                                             moqie: tsumoTile == discardRec.displayTile)
-
-        case .chi:
-            var variant = 0
-            if tileName.hasPrefix("chi_"), let idx = Int(String(tileName.dropFirst(4))) {
-                variant = idx
-            }
-            result = await liqiSender.chi(index: UInt32(snapshot?.chiCombinationIndex(variant: variant) ?? 0))
-
-        case .pon:
-            result = await liqiSender.pon()
-
-        case .kan:
-            result = await liqiSender.kan(type: snapshot?.kanOperation ?? .ankan)
-
-        case .hora:
-            let horaType = snapshot?.horaOperation ?? .tsumo
-            result = horaType == .ron ? await liqiSender.ron() : await liqiSender.tsumo()
-
-        case .none:
-            let channel: LiqiActionChannel =
-                (snapshot?.isCallOpportunity ?? true) ? .chiPengGang : .selfOperation
-            result = await liqiSender.pass(channel: channel)
-
-        case .unknown:
+    /// Legacy 路徑的診斷輸出路由（`liqiSender.logHandler` 與 executor 共用）。
+    ///
+    /// macOS 有 Debug Server 時走它的 buffer（`addLog` 內部就會寫進 LogManager），
+    /// 否則退回 `bridgeLog`；兩者都寫會讓同一件事在 `/logs` 出現兩次。
+    ///
+    /// - Parameter isEvent: 「為什麼沒送出」這類關鍵事件，額外寫進當次 session 的
+    ///   events.log（與主路徑 `logAutoPlayEvent` 同一條規則）。
+    private func autoPlayLog(_ message: String, isEvent: Bool = false) {
+        let line = "[LegacyWebViewModel] \(message)"
+        if isEvent {
+            eventLog(line)
+        }
+        #if os(macOS)
+        if let server = debugServer {
+            server.addLog(line)
             return
         }
-
-        if result?.success == true, let seq = snapshot?.sequence {
-            LiqiOperationStore.shared.markHandled(seq)
-        }
+        #endif
+        bridgeLog(line)
     }
 
     private func triggerAutoPlay(recommendation: Recommendation) {

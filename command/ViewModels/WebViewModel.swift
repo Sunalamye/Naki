@@ -230,28 +230,14 @@ class WebViewModel: WebViewModelProtocol {
       }
     }
 
+    // 腳本字串與回傳值解析都在 `NakiWebSocketScript`（Legacy 路徑走同一份）
     liqiSender.sendHandler = { [weak self] base64 in
       guard let self, let page = self.webPage else {
         return .failure("no_webpage")
       }
-
-      // base64 只含 A-Za-z0-9+/=，可安全放進單引號字串
-      let script = "return JSON.stringify(window.__nakiWebSocket.sendRaw('\(base64)'))"
       do {
-        let result = try await page.callJavaScript(script)
-        guard let json = result as? String,
-          let data = json.data(using: .utf8),
-          let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-          return .failure("unparsable_js_result")
-        }
-
-        if dict["success"] as? Bool == true {
-          let bytes = dict["bytes"] as? Int ?? -1
-          let socketId = dict["socketId"].map { "\($0)" } ?? "?"
-          return LiqiRawSendResult(success: true, detail: "socket=\(socketId) bytes=\(bytes)")
-        }
-        return .failure(dict["reason"] as? String ?? "unknown_reason")
+        return NakiWebSocketScript.sendResult(
+          from: try await page.callJavaScript(NakiWebSocketScript.sendRaw(base64: base64)))
       } catch {
         return .failure("js_error: \(error.localizedDescription)")
       }
@@ -911,93 +897,24 @@ class WebViewModel: WebViewModelProtocol {
   /// 那條路徑永遠靜默失敗。現在一律由 `LiqiActionSender` 組 Liqi REQUEST，
   /// 經 `window.__nakiWebSocket.sendRaw` 送出；需要 index／槓型／和牌型的動作
   /// 由協定層 oplist 快照推導。
+  ///
+  /// 7-case switch 與「成功才 markHandled」都在 `AutoPlayActionExecutor`（p2-1 收斂，
+  /// Legacy 路徑與測試 harness 走同一份）；這裡只負責把 view model 的上下文
+  /// （推薦、這一巡摸到的牌、兩條 log 通道）接上去。
   @discardableResult
   private func executeAutoPlayAction(
     actionType: Recommendation.ActionType, tileName: String
   ) async -> LiqiSendResult? {
-    let snapshot = LiqiOperationStore.shared.pending
-    var result: LiqiSendResult?
-
-    switch actionType {
-    case .discard:
-      guard let majsoulTile = LiqiTileCode.majsoul(fromMJAI: tileName) else {
-        // 轉換失敗＝一個 request 都沒送出去。以前這裡照樣 markSnapshotHandled，
-        // 等於自己把這批機會消化掉，重試框架再也看不到它。
-        // 保留 pending，讓下一輪（推薦可能已更新）還有機會送出。
-        logAutoPlayEvent("❌ 打牌: 無法轉換牌字串 \(tileName)，未送出，保留 oplist")
-        return nil
-      }
-      let moqie = (tsumoTile == tileName)
-      debugServer?.addLog("執行: 打牌 \(tileName) → \(majsoulTile) (moqie=\(moqie))")
-      result = await liqiSender.discard(tile: majsoulTile, moqie: moqie)
-
-    case .riichi:
-      // Mortal 把「立直宣言」與「捨牌」拆成兩個動作，但 ReqSelfOperation(type=7)
-      // 必須同時帶上捨牌，因此取同一批推薦中機率最高的打牌當宣言牌。
-      // ⚠️ 未驗證：此選法是否與 Mortal 立直後的第二次推論結果一致。
-      guard let discardRec = recommendations.first(where: { $0.actionType == .discard }),
-        let majsoulTile = LiqiTileCode.majsoul(fromMJAI: discardRec.displayTile)
-      else {
-        // 同上：沒有宣言牌就沒有 request，不能當成「這批 oplist 處理完了」。
-        logAutoPlayEvent("❌ 立直: 找不到可宣言的捨牌，未送出，保留 oplist")
-        return nil
-      }
-      let moqie = (tsumoTile == discardRec.displayTile)
-      debugServer?.addLog("執行: 立直 + 捨 \(discardRec.displayTile) → \(majsoulTile)")
-      result = await liqiSender.riichi(tile: majsoulTile, moqie: moqie)
-
-    case .chi:
-      // 從 tileName 解析 chi 變體 (chi_0 / chi_1 / chi_2)
-      var variant = 0
-      if tileName.hasPrefix("chi_"), let idx = Int(String(tileName.dropFirst(4))) {
-        variant = idx
-      }
-      // 舊實作靠 Laya UI 的組合順序反推索引；改用 oplist 的 combination
-      // 與被吃的牌直接對照，得到雀魂端的 combination 索引。
-      let resolved = snapshot?.chiCombinationIndex(variant: variant)
-      let index = UInt32(resolved ?? 0)
-      let combos = snapshot?.operation(of: .chi)?.combination.joined(separator: ", ") ?? "-"
-      debugServer?.addLog(
-        "執行: 吃 mortal=chi_\(variant) → index=\(index) [\(combos)]"
-          + (resolved == nil ? " ⚠️ 無法對照組合, 退回 0" : ""))
-      result = await liqiSender.chi(index: index)
-
-    case .pon:
-      // combination 通常只有一組；含紅五時可能有兩組（取捨規則未驗證，先取第 0 組）
-      debugServer?.addLog("執行: 碰...")
-      result = await liqiSender.pon()
-
-    case .kan:
-      let kanType = snapshot?.kanOperation ?? .ankan
-      debugServer?.addLog("執行: 槓 (type=\(kanType.rawValue))")
-      result = await liqiSender.kan(type: kanType)
-
-    case .hora:
-      let horaType = snapshot?.horaOperation ?? .tsumo
-      debugServer?.addLog("執行: 和牌 (type=\(horaType.rawValue))")
-      if horaType == .ron {
-        result = await liqiSender.ron()
-      } else {
-        result = await liqiSender.tsumo()
-      }
-
-    case .none:
-      // 跳過：回應他家打牌走 inputChiPengGang，自家回合的選項走 inputOperation
-      let channel: LiqiActionChannel =
-        (snapshot?.isCallOpportunity ?? true) ? .chiPengGang : .selfOperation
-      debugServer?.addLog("執行: 過 (\(channel.method))")
-      result = await liqiSender.pass(channel: channel)
-
-    case .unknown:
-      bridgeLog("[WebViewModel] 未知動作類型, 跳過")
-      return nil
-    }
-
-    // 送出成功才把這批 oplist 標記為已處理；失敗留給重試框架再送一次
-    if result?.success == true {
-      markSnapshotHandled(snapshot)
-    }
-    return result
+    await AutoPlayActionExecutor.execute(
+      action: actionType,
+      tile: tileName,
+      snapshot: LiqiOperationStore.shared.pending,
+      recommendations: recommendations,
+      tsumoTile: tsumoTile,
+      sender: liqiSender,
+      store: LiqiOperationStore.shared,
+      log: { self.debugServer?.addLog($0) },
+      event: { self.logAutoPlayEvent($0) })
   }
 
   // MARK: - 協定層狀態快照（MCP 狀態類工具的資料來源）
@@ -1076,12 +993,6 @@ class WebViewModel: WebViewModelProtocol {
     snapshot["operations"] = operations
 
     return snapshot
-  }
-
-  /// 標記某批 oplist 已處理（沒有快照時不做事，避免誤標剛到的新機會）
-  private func markSnapshotHandled(_ snapshot: LiqiOperationSnapshot?) {
-    guard let snapshot else { return }
-    LiqiOperationStore.shared.markHandled(snapshot.sequence)
   }
 
   // MARK: - MCP Server
