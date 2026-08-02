@@ -301,12 +301,28 @@ class WebViewModel: WebViewModelProtocol {
       // pass 要送 inputChiPengGang 還是 inputOperation，取決於這批機會的類型
       // （吃/碰/大明槓走前者，榮和等走後者），故從快照裡實際的機會操作取通道。
       logAutoPlayEvent("⏰ 副露機會無推薦(Mortal 判斷不做) → 自動送出過 (ops=\(snapshot.rawTypes))")
-      LiqiOperationStore.shared.markHandled(snapshot.sequence)
       let channel = callOp.channel
+      let sequence = snapshot.sequence
+
+      // 這裡曾經是「先 markHandled 再 await pass()」：送出失敗時這批機會
+      // 在沒有送出任何 request 的情況下就被消化，只能等伺服器逾時代打。
+      // 改成由 AutoPassDispatcher 在**送出成功之後**才 markHandled。
+      //
+      // 代價是「決定要送」到「真的送出去」之間多了一段空窗，而 1 秒輪詢
+      // 只看 currentExecutionId 有沒有東西；不佔住執行位的話下一拍會對同一批
+      // oplist 再送一次過。所以這裡沿用既有的 executionId 機制當互斥，
+      // 並保證每條結束路徑都會歸零（殘留會讓輪詢被永久停用）。
+      let executionId = UUID()
+      currentExecutionId = executionId
       Task { [weak self] in
         guard let self else { return }
-        let result = await self.liqiSender.pass(channel: channel)
-        self.debugServer?.addLog(result.logLine)
+        await AutoPassDispatcher.send(
+          sequence: sequence,
+          store: LiqiOperationStore.shared,
+          isCurrent: { self.currentExecutionId == executionId },
+          log: { self.logAutoPlayEvent($0) },
+          send: { await self.liqiSender.pass(channel: channel) })
+        self.clearExecutionIfCurrent(executionId)
       }
 
     case .proceed:
@@ -972,8 +988,10 @@ class WebViewModel: WebViewModelProtocol {
     switch actionType {
     case .discard:
       guard let majsoulTile = LiqiTileCode.majsoul(fromMJAI: tileName) else {
-        debugServer?.addLog("打牌: 無法轉換牌字串 \(tileName)")
-        markSnapshotHandled(snapshot)
+        // 轉換失敗＝一個 request 都沒送出去。以前這裡照樣 markSnapshotHandled，
+        // 等於自己把這批機會消化掉，重試框架再也看不到它。
+        // 保留 pending，讓下一輪（推薦可能已更新）還有機會送出。
+        logAutoPlayEvent("❌ 打牌: 無法轉換牌字串 \(tileName)，未送出，保留 oplist")
         return nil
       }
       let moqie = (tsumoTile == tileName)
@@ -987,8 +1005,8 @@ class WebViewModel: WebViewModelProtocol {
       guard let discardRec = recommendations.first(where: { $0.actionType == .discard }),
         let majsoulTile = LiqiTileCode.majsoul(fromMJAI: discardRec.displayTile)
       else {
-        debugServer?.addLog("立直: 找不到可宣言的捨牌, 跳過")
-        markSnapshotHandled(snapshot)
+        // 同上：沒有宣言牌就沒有 request，不能當成「這批 oplist 處理完了」。
+        logAutoPlayEvent("❌ 立直: 找不到可宣言的捨牌，未送出，保留 oplist")
         return nil
       }
       let moqie = (tsumoTile == discardRec.displayTile)

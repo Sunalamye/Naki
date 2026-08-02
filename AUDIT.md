@@ -49,9 +49,15 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 `.off` 會阻止自動 sender，但 AI 仍在背景計算；RecommendationView 與 WebGL highlighter 沒讀 `showRecommendation`，因此側欄／遊戲內標記仍可能更新。README 已改成描述 current behavior；若產品意圖是完全不顯示，仍需接上 mode gate 並清除現有 target。
 
-### P1：其他 failure path 也會過早消化 snapshot
+### 已處理：其他 failure path 不再過早消化 snapshot
 
-空推薦的副露 pass 在送出前先 `markHandled`；打牌字串轉換失敗或立直找不到捨牌時，也會在沒有 request 的情況下標記 snapshot。這些路徑不直接造成漏自摸，但同樣缺少可靠的失敗重試與 rollback 語意。
+`WebPage` 路徑（`WebViewModel`）三條路徑已改成「沒送出去就不消化 oplist」：
+
+- 空推薦的副露 pass 改由 `AutoPassDispatcher` 送出，只有 `LiqiSendResult.success == true` 才 `markHandled`；失敗保留 pending、bounded retry（5 次 × 0.2 秒），用完次數仍不標記，留給 1 秒輪詢的下一輪。送出期間佔用 `currentExecutionId` 當互斥，避免同一批 oplist 被送兩次過。
+- 打牌字串轉換失敗、立直找不到宣言牌：只 log，不 `markHandled`。
+
+機械驗收：`NakiTests/AutoPassDispatcherTests`（7 tests，含「先 mark 再送」的 mutation 會讓 4 個測試轉紅）。
+**仍未驗證**：live 對局的副露 pass 行為、以及送出失敗時實際的重試節奏。
 
 ### P1：模型版本宣稱過度
 

@@ -123,7 +123,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests �
 1. `WebViewModel` 仍要求 recommendations 非空才進主動作。空推薦 + type 8 可能完全不呼叫 resolver。
 2. hora sender 沒把 `LiqiSendResult` 回給外層；呼叫後可能不論失敗都 `markHandled`。
 
-其他 failure path 也有相同模式：空推薦副露 pass 在 send 前 mark handled；無效 discard／riichi 在沒有 request 時也會消化 snapshot。
+`WebViewModel` 的其他 failure path 已收斂成同一語意（`AutoPassDispatcher` + 轉換失敗不標記）：沒有送出成功就不消化 oplist。這只有單測，沒有 live 驗證。
 
 另外 `.off` 目前只可靠地禁止自動送出；AI、側欄推薦與 WebGL 高亮仍可能更新，因為 View／highlighter 沒讀 `showRecommendation`。
 

@@ -75,6 +75,7 @@
 				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
 				Services/Bot/ActionDelayModel.swift,
+				Services/Bot/AutoPassDispatcher.swift,
 				Services/Bot/AutoPlayController.swift,
 				Services/Bot/AutoPlayDecisionResolver.swift,
 				Services/Bot/AutoPlayGate.swift,
@@ -122,6 +123,7 @@
 			membershipExceptions = (
 				Models/GameModels.swift,
 				Services/Bot/ActionDelayModel.swift,
+				Services/Bot/AutoPassDispatcher.swift,
 				Services/Bot/AutoPlayController.swift,
 				Services/Bot/AutoPlayDecisionResolver.swift,
 				Services/Bot/AutoPlayGate.swift,
@@ -164,6 +166,7 @@
 				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
 				Services/Bot/ActionDelayModel.swift,
+				Services/Bot/AutoPassDispatcher.swift,
 				Services/Bot/AutoPlayController.swift,
 				Services/Bot/AutoPlayDecisionResolver.swift,
 				Services/Bot/AutoPlayGate.swift,
