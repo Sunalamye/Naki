@@ -158,9 +158,7 @@ final class GameStore {
     /// - Parameters:
     ///   - controller: 推論剛跑完的 Bot 控制器
     ///   - showRecommendation: 目前模式是否顯示推薦（`.off` 時不標記任何牌）
-    func apply(controller: NativeBotController,
-               oplistSequence: UInt64? = nil,
-               showRecommendation: Bool) {
+    func apply(controller: NativeBotController, showRecommendation: Bool) {
         gameState = controller.gameState
         // `botState` 的 `isActive` 是 `bot != nil`，`canXxx` 由協定層 oplist 導出。
         // 先前 `GameStateManager.syncFrom` 在這裡硬寫 `isActive = true`，
@@ -169,7 +167,8 @@ final class GameStore {
         tehaiTiles = controller.tehaiMjai
         tsumoTile = controller.lastTsumo
         recommendations = controller.lastRecommendations
-        recommendationsOplistSequence = oplistSequence
+        // provenance 由 controller 綁定（只在推薦真的刷新時更新），不是每個 event 都蓋（p5 #1）
+        recommendationsOplistSequence = controller.lastRecommendationsOplistSequence
         updateHighlight(showRecommendation: showRecommendation)
     }
 

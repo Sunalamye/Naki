@@ -96,23 +96,24 @@ final class AutoPlayEngineTests: XCTestCase {
     /// 此時用舊推薦（`.proceed` 唯一看推薦內容的路徑）回應新機會會送出不可逆錯誤動作。
     func testProceedRejectsRecommendationFromADifferentOplist() async {
         let store = LiqiOperationStore()
-        let snapshot = discardSnapshot(store)     // sequence = S
+        discardSnapshot(store)                    // 先墊一批，讓下一批 sequence >= 1
+        let snapshot = discardSnapshot(store)     // sequence = S (>= 1)
         var sends = 0
         let sender = LiqiActionSender()
         sender.sendHandler = { _ in sends += 1; return self.ok() }
 
-        // 推薦標的是「別批」oplist（S+1）——模擬舊推薦配上新到的 snapshot
+        // 推薦是為「更早的機會」（S-1）算的——比當前 snapshot 舊 → 明確 stale
         let stale = AutoPlayEngine(
             store: store, sender: sender, timing: timing(),
             context: {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: self.discardRecommendation,
                                        seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
-                                       recommendationsOplistSequence: snapshot.sequence &+ 1)
+                                       recommendationsOplistSequence: snapshot.sequence - 1)
             })
         let staleRun = await stale.runCycle()
         XCTAssertEqual(staleRun.outcome, .notSent(reason: "recommendations_stale"))
-        XCTAssertEqual(sends, 0, "推薦不是針對這批 oplist 算的，一個 byte 都不該送")
+        XCTAssertEqual(sends, 0, "推薦是為更早的機會算的，一個 byte 都不該送")
 
         // 對照：推薦標的正是這批 oplist → 正常送出（證明擋的是不對源，不是全擋）
         let fresh = AutoPlayEngine(
@@ -129,6 +130,31 @@ final class AutoPlayEngineTests: XCTestCase {
         }
         XCTAssertEqual(action, .discard)
         XCTAssertEqual(sends, 1)
+    }
+
+    /// provenance 未知（nil）時**放行**，不是全擋。strict 等號版本會在 nil 時擋掉，
+    /// 造成「整局不自動打」的 live regression——這條測試鎖住不再退回那個行為（p5 #1）。
+    func testProceedAllowsWhenRecommendationProvenanceIsUnknown() async {
+        let store = LiqiOperationStore()
+        let snapshot = discardSnapshot(store)
+        var sends = 0
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in sends += 1; return self.ok() }
+
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(),
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: self.discardRecommendation,
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: nil)   // provenance 未知
+            })
+        _ = snapshot
+        let run = await engine.runCycle()
+        guard case .sent = run.outcome else {
+            return XCTFail("provenance 未知不該擋，實際: \(run.outcome)")
+        }
+        XCTAssertEqual(sends, 1, "provenance 未知時放行，避免整局不自動打")
     }
 
     /// `.forceHora`／`.sendPass` 是不看推薦內容的 server-authoritative 防護，

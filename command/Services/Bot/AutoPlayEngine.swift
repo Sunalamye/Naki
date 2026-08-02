@@ -443,11 +443,15 @@ final class AutoPlayEngine {
             }
             // 推薦必須是針對「這一批 oplist」算出來的。推論是 async 的：新的決策機會
             // （新 snapshot）可能在舊推薦還沒被新推論取代前就到達，此時用舊推薦回應新
-            // 機會會送出不可逆的錯誤動作（p5 #1）。sequence 對不上就等下一輪——
-            // react 完成寫回新推薦後，sequence 自然會對上。
-            // 注意：這個閘門只擋 `.proceed`（用推薦內容決策的路徑）；`.forceHora`／
-            // `.sendPass` 是不看推薦內容的 server-authoritative 防護，不受此限。
-            guard ctx.recommendationsOplistSequence == snapshot.sequence else {
+            // 機會會送出不可逆的錯誤動作（p5 #1）。
+            //
+            // provenance（`recommendationsOplistSequence`）由 controller 在推薦真的刷新時綁定。
+            // **只在有正面證據時才擋**：provenance 已知且比當前機會**舊**（更小的 sequence）＝
+            // 這份推薦是為更早的機會算的，明確 stale → 不送。provenance 未知（nil）或已對上
+            // 當前機會就放行——寧可偶爾送一次舊推薦（罕見競態），也不要因為 provenance 判不準
+            // 就整局不自動打（strict 等號會這樣，實測會 0 觸發）。
+            // `.forceHora`／`.sendPass` 是不看推薦內容的 server-authoritative 防護，不受此限。
+            if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence {
                 return finish(gate: gate, outcome: .notSent(reason: "recommendations_stale"))
             }
             let delay = actionDelay(for: top.actionType, scale: ctx.actionDelayScale)

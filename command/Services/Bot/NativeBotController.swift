@@ -59,6 +59,14 @@ class NativeBotController {
     /// 最後一次的推薦列表
     private(set) var lastRecommendations: [Recommendation] = []
 
+    /// `lastRecommendations` 是針對哪一批 oplist（決策機會）算出來的
+    /// （`LiqiOperationSnapshot.sequence`，由 MJAI event 攜帶）。
+    ///
+    /// 只在推薦**真的刷新**時更新，推薦被保留（react 回 nil）時保持不動——這樣它證明的是
+    /// 「這份推薦由哪批 oplist 算出」而非「正在處理哪個 event」。自動打牌用它確認推薦與
+    /// 當前決策機會同源，避免用舊推薦回應新機會（p5 #1）。nil＝provenance 未知（不設限）。
+    private(set) var lastRecommendationsOplistSequence: UInt64?
+
     // 註：`lastCandidates` 已移除。它的唯一寫入點是同樣零呼叫的 `updateAvailableActions()`，
     //     而且從來沒有讀取者——實際永遠是 nil。
 
@@ -181,6 +189,9 @@ class NativeBotController {
 
         // 記錄事件類型，用於判斷是否需要更新推薦
         let eventType = event["type"] as? String ?? ""
+        // 這個 event 是針對哪一批 oplist 產生的（MajsoulBridge 在 parse 時標的）。
+        // 只有在推薦真的刷新時才拿它更新 provenance（p5 #1）。
+        let eventOplistSeq = event[MJAIEventKey.oplistSequence] as? UInt64
         let eventActor = event["actor"] as? Int ?? -1
         let isMyMeld = (eventType == "chi" || eventType == "pon" || eventType == "daiminkan") && eventActor == Int(playerId)
         let isMyDahai = eventType == "dahai" && eventActor == Int(playerId)
@@ -194,6 +205,7 @@ class NativeBotController {
         // 當自己打牌後，清空推薦（用戶已經做了決定）
         if isMyDahai {
             lastRecommendations = []
+            lastRecommendationsOplistSequence = nil
             botLog("[NativeBotController] 自己打牌後，清空推薦")
         }
 
@@ -237,9 +249,10 @@ class NativeBotController {
                 // 碰/吃後 Bot 內部狀態已更新，mask 應該包含可打的牌
                 // 使用當前 mask 來更新推薦
                 await updateRecommendationsFromCurrentMask()
+                lastRecommendationsOplistSequence = eventOplistSeq   // 推薦刷新 → 綁定 provenance
             }
             // 注意：不再清空 lastRecommendations
-            // 讓推薦保持到下一次需要做決定時
+            // 讓推薦保持到下一次需要做決定時（provenance 也一起保持不動）
             // 只有在新的推薦產生時才會更新
             return nil
         }
@@ -251,11 +264,13 @@ class NativeBotController {
               let response = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
             botLog("[NativeBotController] ERROR: Failed to parse response JSON")
             lastRecommendations = []
+            lastRecommendationsOplistSequence = nil
             return nil
         }
 
         // 更新推薦列表（Bot 已選擇動作，顯示所有可用選項及其機率）
         await updateRecommendations()
+        lastRecommendationsOplistSequence = eventOplistSeq   // 推薦刷新 → 綁定 provenance
         // 只記筆數不足以事後判斷「Mortal 為什麼沒選和牌」——必須看得到它到底有哪些選項，
         // 以及協定層同時給了哪些可用操作。兩者不一致就是 Mortal 的狀態與實際牌局脫節。
         let recSummary = lastRecommendations.prefix(6)
@@ -756,6 +771,7 @@ class NativeBotController {
         tehai = []
         tsumo = nil
         lastRecommendations = []
+        lastRecommendationsOplistSequence = nil
         kyoku = 0
         honba = 0
         kyotaku = 0
