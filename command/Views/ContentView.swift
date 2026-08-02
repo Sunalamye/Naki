@@ -81,14 +81,23 @@ struct ContentView: View {
     /// 在支援的 path 上不隨當前模式隱藏——它是「未來切到自動時」的設定，不是即時動作，
     /// 跟著模式閃現反而干擾。
     private var actionDelayStepper: some View {
-        Stepper(value: Binding(get: { naki.settings.actionDelaySeconds },
-                               set: { naki.settings.actionDelaySeconds = $0 }),
-                in: SettingsStore.actionDelayRange,
-                step: SettingsStore.actionDelayStep) {
+        // 數字自己畫，Stepper 只出上下箭頭（`.labelsHidden`）。
+        // macOS 的 `Stepper(value:) { label }` 在 toolbar 這種水平緊湊容器裡
+        // 會把 trailing-closure label 吃掉、只剩箭頭（實測畫面上「1.0s」不見了），
+        // 所以改成 HStack 把值文字明確擺在箭頭左邊。
+        HStack(spacing: 4) {
             Text(String(format: "%.1fs", naki.settings.actionDelaySeconds))
                 .font(.system(.caption, design: .monospaced))
                 .monospacedDigit()
+                .frame(minWidth: 32, alignment: .trailing)
+            Stepper("自動打牌基準延遲",
+                    value: Binding(get: { naki.settings.actionDelaySeconds },
+                                   set: { naki.settings.actionDelaySeconds = $0 }),
+                    in: SettingsStore.actionDelayRange,
+                    step: SettingsStore.actionDelayStep)
+                .labelsHidden()
         }
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("autoplay-delay-stepper")
         .accessibilityLabel("自動打牌基準延遲")
         .accessibilityValue(String(format: "%.1f 秒", naki.settings.actionDelaySeconds))
