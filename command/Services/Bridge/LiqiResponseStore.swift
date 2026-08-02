@@ -46,10 +46,13 @@ nonisolated struct LiqiResponseRecord {
 
     /// 伺服器回的錯誤碼（`Error.code`，field 1 的 varint）
     ///
-    /// 通用解析把巢狀 message 轉成 base64，所以這裡自己解一層。
+    /// 通用解析把巢狀 message 轉成 base64，所以這裡要自己解一層。
     /// 不解的話，每次排查都要人工 base64 → hex → varint——2026-08-01 那輪
     /// 為了找出四個錯誤碼手工解了四次，而每一次都是「`sendRaw` 回 success:true
     /// 但伺服器其實拒絕了」，肉眼完全看不出來。
+    ///
+    /// p4-2：varint 的解法走 `LiqiWire.decodeVarint`（全專案唯一一份）。
+    /// 這裡本來自己重寫了一份迴圈，溢位上限還跟主實作不一樣（35 vs 63 bits）。
     var errorCode: Int? {
         guard let b64 = fields["field1"] as? String,
               let data = Data(base64Encoded: b64),
@@ -57,15 +60,7 @@ nonisolated struct LiqiResponseRecord {
               data[0] == 0x08                      // field 1, wire type 0 (varint)
         else { return nil }
 
-        var value = 0
-        var shift = 0
-        for byte in data.dropFirst() {
-            value |= Int(byte & 0x7f) << shift
-            if byte & 0x80 == 0 { return value }
-            shift += 7
-            if shift > 35 { return nil }
-        }
-        return nil
+        return LiqiWire.decodeVarint(data, offset: 1)?.value
     }
 
     /// 已知錯誤碼的語意

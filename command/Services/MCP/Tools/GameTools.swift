@@ -39,9 +39,9 @@ enum NakiGameAction {
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
         // 先當 MJAI 解（5mr → 0m、E → 1z）
-        if let converted = LiqiTileCode.majsoul(fromMJAI: trimmed) { return converted }
+        if let converted = LiqiTile.majsoul(fromMJAI: trimmed) { return converted }
         // 再確認是不是本來就是合法的雀魂牌字串
-        if LiqiTileCode.mjai(fromMajsoul: trimmed) != nil { return trimmed }
+        if LiqiTile.mjai(fromMajsoul: trimmed) != nil { return trimmed }
         return nil
     }
 

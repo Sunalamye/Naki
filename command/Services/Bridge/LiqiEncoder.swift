@@ -4,11 +4,8 @@
 //
 //  雀魂 Liqi Request 編碼器 - 純 Swift 實現（LiqiParser 的對稱寫入端）
 //
-//  Envelope 格式（實測封包驗證，Unity WebGL 與舊 Laya 客戶端一致）：
-//
-//      [type: 1 byte][msgId: 2 bytes little-endian][protobuf]
-//      protobuf: field 1 = method 字串（明文），field 2 = payload bytes
-//      type: 1 = NOTIFY, 2 = REQUEST, 3 = RESPONSE
+//  Envelope 格式的**定義**在 `LiqiEnvelope.swift`（parse 與 encode 共用同一份）；
+//  本檔只負責 protobuf 欄位層的編碼與 request 的組裝便利函式。
 //
 //  Ground truth（.lq.Route.heartbeat，msgId = 141）：
 //      028d000a132e6c712e526f7574652e686561727462656174120808001000180b200f
@@ -18,14 +15,6 @@
 //
 
 import Foundation
-
-// MARK: - Protobuf Wire Type
-
-/// Protobuf wire type（本編碼器目前只需要 varint 與 length-delimited）
-enum LiqiWireType: UInt8 {
-    case varint = 0
-    case lengthDelimited = 2
-}
 
 // MARK: - Payload 欄位描述
 
@@ -81,20 +70,12 @@ enum LiqiEncoder {
 
     // MARK: - Varint
 
-    /// 編碼 protobuf varint（base-128，little-endian groups）
+    /// 編碼 protobuf varint（實作在 `LiqiWire.encodeVarint`，與解碼端同一個檔案）
     ///
     /// - 0 → `[0x00]`、127 → `[0x7f]`、128 → `[0x80, 0x01]`、300 → `[0xac, 0x02]`
     /// - `UInt64.max` → 10 bytes
     static func encodeVarint(_ value: UInt64) -> [UInt8] {
-        var remaining = value
-        var out: [UInt8] = []
-        repeat {
-            var byte = UInt8(remaining & 0x7F)
-            remaining >>= 7
-            if remaining != 0 { byte |= 0x80 }
-            out.append(byte)
-        } while remaining != 0
-        return out
+        LiqiWire.encodeVarint(value)
     }
 
     /// 編碼 tag（`field << 3 | wireType`）
@@ -156,26 +137,22 @@ enum LiqiEncoder {
 
     // MARK: - Envelope
 
-    /// 組裝 Liqi envelope
+    /// 組裝 Liqi envelope（格式定義在 `LiqiEnvelope`，與 `LiqiParser` 共用同一份）
     ///
     /// - Parameters:
     ///   - type: 1 = notify / 2 = request / 3 = response
-    ///   - msgId: 2 bytes little-endian（notify 實際上不使用，但格式相同）
+    ///   - msgId: 2 bytes little-endian。**NOTIFY 沒有 msgId**，這個參數會被忽略
+    ///     ——舊版無條件寫進去，導致自己編出來的 notify 自己解不開（見 LiqiEnvelope 檔頭）。
     ///   - method: 明文方法名，例如 `.lq.Route.heartbeat`
     ///   - payload: 已編好的 protobuf payload bytes（可為空，仍會輸出 `12 00`）
     static func encodeEnvelope(type: LiqiMsgType,
                               msgId: UInt16,
                               method: String,
                               payload: [UInt8]) -> [UInt8] {
-        var out: [UInt8] = []
-        out.reserveCapacity(3 + method.utf8.count + payload.count + 6)
-        out.append(type.rawValue)
-        // msgId: little-endian（實測 141 → 8d 00）
-        out.append(UInt8(msgId & 0x00FF))
-        out.append(UInt8((msgId >> 8) & 0x00FF))
-        out += encodeStringField(field: 1, value: method)
-        out += encodeLengthDelimited(field: 2, bytes: payload)
-        return out
+        LiqiEnvelope(type: type,
+                     msgId: type == .notify ? nil : msgId,
+                     method: method,
+                     payload: Data(payload)).encoded
     }
 
     /// 組裝 REQUEST envelope（type = 2）

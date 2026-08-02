@@ -12,19 +12,11 @@ import MortalSwift
 
 // 使用 LogManager 的 bridgeLog 函數
 
-// MARK: - Constants (Legacy - for dictionary API)
+// MARK: - Constants
 
-/// 雀魂牌面到 MJAI 牌面的映射
-private let MS_TILE_TO_MJAI: [String: String] = [
-    "0m": "5mr", "1m": "1m", "2m": "2m", "3m": "3m", "4m": "4m",
-    "5m": "5m", "6m": "6m", "7m": "7m", "8m": "8m", "9m": "9m",
-    "0p": "5pr", "1p": "1p", "2p": "2p", "3p": "3p", "4p": "4p",
-    "5p": "5p", "6p": "6p", "7p": "7p", "8p": "8p", "9p": "9p",
-    "0s": "5sr", "1s": "1s", "2s": "2s", "3s": "3s", "4s": "4s",
-    "5s": "5s", "6s": "6s", "7s": "7s", "8s": "8s", "9s": "9s",
-    "1z": "E", "2z": "S", "3z": "W", "4z": "N",
-    "5z": "P", "6z": "F", "7z": "C"
-]
+// 牌碼轉換（雀魂 ⇄ MJAI）與牌序都在 `LiqiTile`。
+// p4-2 之前這裡有一張 37 項的 `MS_TILE_TO_MJAI` 查表，與 `LiqiTileCode` 的規則式
+// 轉換是同一份知識的兩種寫法；沒有任何測試證明兩者一致。
 
 /// 風牌名稱
 private let BAKAZE_NAMES = ["E", "S", "W", "N"]
@@ -120,9 +112,22 @@ class MajsoulBridge {
         accountId = id
     }
 
+    /// 最近一次 `parse` / `parseRaw` 的**原始**解析結果（轉不成 MJAI 事件時仍然有值）。
+    ///
+    /// p4-2：`WebSocketInterceptor` 以前在 `parse` 回 nil 時 `let parser = LiqiParser()`
+    /// 再解一次，純粹為了 log 一行方法名。那個新實例沒有 `pendingRequests`，
+    /// 所以每一則 RESPONSE 都必然配不上——為了寫 log 而製造一份**錯的**解析結果，
+    /// 同一個 frame 也被解了三次（send 面一次、receive 面一次、失敗重解一次）。
+    /// 現在呼叫端讀這個欄位就好。
+    private(set) var lastParsed: [String: Any]?
+
+    /// 最近一次連 envelope 都解不開的原因（`lastParsed == nil` 時才有意義）
+    var lastEnvelopeFailure: LiqiEnvelopeDecodeFailure? { liqiParser.lastEnvelopeFailure }
+
     /// 解析雀魂消息並返回原始解析結果（用於調試和請求跟蹤）
     func parseRaw(_ data: Data) -> [String: Any]? {
         let parsed = liqiParser.parse(data)
+        lastParsed = parsed
         drainParserFaults()
         return parsed
     }
@@ -154,6 +159,7 @@ class MajsoulBridge {
     /// 解析雀魂消息並返回 MJAI 事件 (字典格式，保持兼容性)
     func parse(_ data: Data) -> [[String: Any]]? {
         let parsedOrNil = liqiParser.parse(data)
+        lastParsed = parsedOrNil
         drainParserFaults()
 
         guard let parsed = parsedOrNil else {
@@ -403,7 +409,7 @@ class MajsoulBridge {
         // 處理寶牌
         if let doraList = data["doras"] as? [String], doraList.count > doras.count {
             if let newDora = doraList.last,
-               let mjaiTile = MS_TILE_TO_MJAI[newDora] {
+               let mjaiTile = LiqiTile.mjai(fromMajsoul: newDora) {
                 results.append([
                     "type": "dora",
                     "dora_marker": mjaiTile
@@ -513,7 +519,7 @@ class MajsoulBridge {
         var doraMarker = "?"
         if let doraList = data["doras"] as? [String],
            let firstDora = doraList.first,
-           let mjaiDora = MS_TILE_TO_MJAI[firstDora] {
+           let mjaiDora = LiqiTile.mjai(fromMajsoul: firstDora) {
             doras = doraList
             doraMarker = mjaiDora
         }
@@ -522,9 +528,9 @@ class MajsoulBridge {
         let playerCount = is3P ? 3 : 4
         var tehais = [[String]](repeating: [String](repeating: "?", count: 13), count: playerCount)
 
-        let myTehais = tiles.prefix(13).compactMap { MS_TILE_TO_MJAI[$0] }
+        let myTehais = tiles.prefix(13).compactMap { LiqiTile.mjai(fromMajsoul: $0) }
         if seat >= 0 && seat < playerCount {
-            tehais[seat] = myTehais.sorted(by: comparePai)
+            tehais[seat] = myTehais.sorted(by: LiqiTile.compare)
         }
 
         results.append([
@@ -548,7 +554,7 @@ class MajsoulBridge {
         bridgeLog("[MajsoulBridge] parseNewRound: tiles=\(tiles)")
         if tiles.count >= 14 {
             if let tsumoTile = tiles.last,
-               let mjaiTile = MS_TILE_TO_MJAI[tsumoTile] {
+               let mjaiTile = LiqiTile.mjai(fromMajsoul: tsumoTile) {
                 bridgeLog("[MajsoulBridge] parseNewRound: 為親家添加合成摸牌, tile=\(tsumoTile) -> \(mjaiTile)")
                 results.append([
                     "type": "tsumo",
@@ -570,7 +576,7 @@ class MajsoulBridge {
         guard let actor = data["seat"] as? Int else { return nil }
 
         let tile = data["tile"] as? String ?? ""
-        let mjaiTile = tile.isEmpty ? "?" : (MS_TILE_TO_MJAI[tile] ?? "?")
+        let mjaiTile = tile.isEmpty ? "?" : (LiqiTile.mjai(fromMajsoul: tile) ?? "?")
 
         // 如果是自己的摸牌但 tile 為空，這是一個解析錯誤
         // 不應該發送給 Bot，否則會導致狀態損壞
@@ -596,7 +602,7 @@ class MajsoulBridge {
 
         guard let actor = data["seat"] as? Int,
               let tile = data["tile"] as? String,
-              let mjaiTile = MS_TILE_TO_MJAI[tile] else {
+              let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) else {
             return nil
         }
 
@@ -666,7 +672,7 @@ class MajsoulBridge {
             for (idx, fromSeat) in froms.enumerated() {
                 if idx < tiles.count {
                     let tile = tiles[idx]
-                    let mjaiTile = MS_TILE_TO_MJAI[tile] ?? tile
+                    let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) ?? tile
                     if fromSeat != actor {
                         // 這張牌來自其他玩家
                         target = fromSeat
@@ -682,7 +688,7 @@ class MajsoulBridge {
             // 備用邏輯：沒有 froms 或長度不匹配
             bridgeLog("[MajsoulBridge] parseChiPengGang: froms 缺失或不匹配, 使用備用方案")
             if let firstTile = tiles.first {
-                pai = MS_TILE_TO_MJAI[firstTile] ?? firstTile
+                pai = LiqiTile.mjai(fromMajsoul: firstTile) ?? firstTile
             }
             // 對於碰，consumed 是 2 張相同的牌
             if opType == 1 && !pai.isEmpty {
@@ -696,7 +702,7 @@ class MajsoulBridge {
         if consumed.isEmpty && tiles.count > 0 {
             if opType == 0 { // Chi - 排除 pai，其餘 2 張是 consumed
                 for tile in tiles {
-                    let mjaiTile = MS_TILE_TO_MJAI[tile] ?? tile
+                    let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) ?? tile
                     if mjaiTile != pai || consumed.count >= 2 {
                         if consumed.count < 2 {
                             consumed.append(mjaiTile)
@@ -706,7 +712,7 @@ class MajsoulBridge {
                 // 如果還是不夠，添加所有非 pai 的牌
                 if consumed.count < 2 {
                     for tile in tiles {
-                        let mjaiTile = MS_TILE_TO_MJAI[tile] ?? tile
+                        let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) ?? tile
                         if !consumed.contains(mjaiTile) && consumed.count < 2 {
                             consumed.append(mjaiTile)
                         }
@@ -762,7 +768,7 @@ class MajsoulBridge {
             return nil
         }
 
-        let mjaiTile = MS_TILE_TO_MJAI[tile] ?? tile
+        let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) ?? tile
         let baseTile = mjaiTile.replacingOccurrences(of: "r", with: "")
 
         switch opType {
@@ -792,19 +798,6 @@ class MajsoulBridge {
         default:
             return nil
         }
-    }
-
-    /// 牌的比較函數
-    private func comparePai(_ a: String, _ b: String) -> Bool {
-        let order = [
-            "1m", "2m", "3m", "4m", "5mr", "5m", "6m", "7m", "8m", "9m",
-            "1p", "2p", "3p", "4p", "5pr", "5p", "6p", "7p", "8p", "9p",
-            "1s", "2s", "3s", "4s", "5sr", "5s", "6s", "7s", "8s", "9s",
-            "E", "S", "W", "N", "P", "F", "C", "?"
-        ]
-        let idxA = order.firstIndex(of: a) ?? order.count
-        let idxB = order.firstIndex(of: b) ?? order.count
-        return idxA < idxB
     }
 
     // MARK: - Sync Game Restore
@@ -881,9 +874,9 @@ class MajsoulBridge {
         var tehais = [[String]](repeating: [String](repeating: "?", count: 13), count: playerCount)
 
         if let myTiles = gameState["tiles"] as? [String] {
-            let myTehais = myTiles.prefix(13).compactMap { MS_TILE_TO_MJAI[$0] }
+            let myTehais = myTiles.prefix(13).compactMap { LiqiTile.mjai(fromMajsoul: $0) }
             if seat >= 0 && seat < playerCount {
-                tehais[seat] = myTehais.sorted(by: comparePai)
+                tehais[seat] = myTehais.sorted(by: LiqiTile.compare)
             }
         }
 
@@ -891,7 +884,7 @@ class MajsoulBridge {
         var doraMarker = "?"
         if let doraList = gameState["doras"] as? [String] {
             if let firstDora = doraList.first,
-               let mjaiDora = MS_TILE_TO_MJAI[firstDora] {
+               let mjaiDora = LiqiTile.mjai(fromMajsoul: firstDora) {
                 doraMarker = mjaiDora
             }
             doras = doraList
@@ -917,7 +910,7 @@ class MajsoulBridge {
         // 讓 bot 正確計算寶牌。本路徑與 actions 重放互斥（見 parseSyncGameRestore #9/#18 註解），不會重複。
         if let doraList = gameState["doras"] as? [String], doraList.count > 1 {
             for extraDora in doraList.dropFirst() {
-                if let mjaiExtra = MS_TILE_TO_MJAI[extraDora] {
+                if let mjaiExtra = LiqiTile.mjai(fromMajsoul: extraDora) {
                     results.append([
                         "type": "dora",
                         "dora_marker": mjaiExtra

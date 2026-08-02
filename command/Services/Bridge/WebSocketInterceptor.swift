@@ -504,22 +504,30 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
                 }
                 onMJAIEvent?(event)
             }
-        } else {
-            // 調試：顯示解析結果
-            let parser = LiqiParser()
-            if let parsed = parser.parse(binaryData),
-               let method = parsed["method"] as? String {
-                wsLog("[Liqi] \(method)")
+            return
+        }
 
-                // 調試 ActionPrototype
-                if method == ".lq.ActionPrototype",
-                   let data = parsed["data"] as? [String: Any] {
-                    if let actionName = data["name"] as? String {
-                        wsLog("[Action] \(actionName): \(data)")
-                    } else {
-                        wsLog("[Action] No name found in data: \(data)")
-                    }
-                }
+        // 轉不成 MJAI 事件（心跳、大廳 RPC、未知 notify…）：用**剛才那一次**解析的結果
+        // 寫診斷 log。p4-2 之前這裡 `let parser = LiqiParser()` 把同一個 frame 再解一次，
+        // 而新實例沒有 pendingRequests，所有 RESPONSE 必然回 nil——那份「為了 log」
+        // 的第二次解析從來沒解出過任何 response，只是白解一次順便產生一份錯的結果。
+        guard let parsed = majsoulBridge.lastParsed else {
+            if let failure = majsoulBridge.lastEnvelopeFailure {
+                wsLog("[Liqi] envelope 解不開：\(failure)")
+            }
+            return
+        }
+        guard let method = parsed["method"] as? String else { return }
+
+        wsLog("[Liqi] \(method)")
+
+        // 調試 ActionPrototype
+        if method == ".lq.ActionPrototype",
+           let data = parsed["data"] as? [String: Any] {
+            if let actionName = data["name"] as? String {
+                wsLog("[Action] \(actionName): \(data)")
+            } else {
+                wsLog("[Action] No name found in data: \(data)")
             }
         }
     }

@@ -9,15 +9,9 @@
 import Foundation
 
 // 使用 LogManager 的 liqiLog 函數
-
-// MARK: - Message Types
-
-/// 消息類型枚舉
-enum LiqiMsgType: UInt8 {
-    case notify = 1
-    case request = 2
-    case response = 3
-}
+//
+// wire 格式（varint / protobuf block / envelope）在 `LiqiEnvelope.swift`；
+// 本檔只負責「這則訊息在說什麼」——欄位語意與 liqi.json 的對照。
 
 // MARK: - XOR Decode Keys
 
@@ -45,132 +39,6 @@ func liqiDecode(_ data: Data) -> Data {
     return Data(result)
 }
 
-// MARK: - Varint Parsing
-
-/// 解析 Protobuf Varint
-func parseVarint(_ data: Data, offset: Int) -> (value: Int, newOffset: Int)? {
-    var result = 0
-    var shift = 0
-    var pos = offset
-
-    while pos < data.count {
-        let byte = data[pos]
-        result |= Int(byte & 0x7F) << shift
-        shift += 7
-        pos += 1
-
-        if byte & 0x80 == 0 {
-            return (result, pos)
-        }
-
-        // 防止溢出
-        if shift > 63 {
-            return nil
-        }
-    }
-
-    return nil
-}
-
-// MARK: - Protobuf Block
-
-/// Protobuf 數據塊
-struct ProtobufBlock {
-    let fieldId: Int
-    let wireType: Int
-    let data: Data
-
-    var stringValue: String? {
-        return String(data: data, encoding: .utf8)
-    }
-
-    var varintValue: Int? {
-        guard wireType == 0, let (value, _) = parseVarint(data, offset: 0) else {
-            return nil
-        }
-        return value
-    }
-}
-
-/// 從 Protobuf 二進制數據解析出塊列表
-func parseProtobufBlocks(_ data: Data) -> [ProtobufBlock] {
-    var blocks: [ProtobufBlock] = []
-    var offset = 0
-
-    while offset < data.count {
-        // tag 本身是 varint：field >= 16 要兩個 bytes（19 → 0x98 0x01）。
-        // 舊版只讀一個 byte 就當成 tag，於是 field >= 16 之後整條訊息**錯位**：
-        // 值的 bytes 會被當成下一個 tag，解出一堆 fieldId 與 wireType 都是假的 block
-        // ——其中任何一個假 fieldId 撞到真欄位（例如 6 = scores）就會覆蓋掉正確的值。
-        // liqi.json 裡 field >= 16 很常見（ActionNewRound 16/17/19/20/21/26、
-        // HuleInfo 15…27），所以這不是理論問題。
-        guard let (tag, tagEnd) = parseVarint(data, offset: offset) else {
-            liqiLog("[LiqiParser] parseProtobufBlocks: tag 解不出來 at offset \(offset)，停止（保留 \(blocks.count) blocks）")
-            return blocks
-        }
-        let wireType = tag & 0x07
-        let fieldId = tag >> 3
-        offset = tagEnd
-
-        // field 0 不是合法欄位編號；出現它代表這段 bytes 不是我們以為的 protobuf
-        guard fieldId >= 1 else {
-            liqiLog("[LiqiParser] parseProtobufBlocks: 非法 field 0（tag=\(tag)），停止（保留 \(blocks.count) blocks）")
-            return blocks
-        }
-
-        switch wireType {
-        case 0: // Varint
-            guard let (_, newOffset) = parseVarint(data, offset: offset) else {
-                return blocks
-            }
-            // 存儲原始 varint 字節（包含正確的編碼）
-            let varintData = data.subdata(in: offset..<newOffset)
-            blocks.append(ProtobufBlock(fieldId: fieldId, wireType: wireType, data: varintData))
-            offset = newOffset
-
-        case 1: // 64-bit (fixed64 / sfixed64 / double) — 正確跳過 8 bytes
-            guard offset + 8 <= data.count else {
-                liqiLog("[LiqiParser] parseProtobufBlocks: fixed64 field \(fieldId) truncated at offset \(offset), stopping (kept \(blocks.count) blocks)")
-                return blocks
-            }
-            offset += 8
-
-        case 2: // Length-delimited (string, bytes, embedded message)
-            guard let (length, newOffset) = parseVarint(data, offset: offset) else {
-                return blocks
-            }
-            offset = newOffset
-
-            // 防護：length 必須非負，且不超過剩餘資料長度。
-            // 先比較 length 與 (data.count - offset)（此時 offset <= data.count），
-            // 避免直接算 offset + length 時被超大 varint 造成整數溢位/越界。
-            guard length >= 0, length <= data.count - offset else {
-                liqiLog("[LiqiParser] parseProtobufBlocks: length-delimited field \(fieldId) invalid length \(length) (remaining \(data.count - offset)), stopping (kept \(blocks.count) blocks)")
-                return blocks
-            }
-
-            let blockData = data.subdata(in: offset..<(offset + length))
-            blocks.append(ProtobufBlock(fieldId: fieldId, wireType: wireType, data: blockData))
-            offset += length
-
-        case 5: // 32-bit (fixed32 / sfixed32 / float) — 正確跳過 4 bytes
-            guard offset + 4 <= data.count else {
-                liqiLog("[LiqiParser] parseProtobufBlocks: fixed32 field \(fieldId) truncated at offset \(offset), stopping (kept \(blocks.count) blocks)")
-                return blocks
-            }
-            offset += 4
-
-        default:
-            // wireType 3/4 為已棄用的 group start/end；長度未知無法安全跳過，
-            // 安全中止並記錄，但保留已解析出的 blocks（不因單一未知欄位丟掉整條訊息）。
-            liqiLog("[LiqiParser] parseProtobufBlocks: unsupported wireType \(wireType) at field \(fieldId), stopping (kept \(blocks.count) blocks)")
-            return blocks
-        }
-    }
-
-    return blocks
-}
-
 // MARK: - Liqi Parser
 
 /// 雀魂協議解析器
@@ -185,7 +53,14 @@ func parseProtobufBlocks(_ data: Data) -> [ProtobufBlock] {
 /// 欄位編號一律來自 `docs/protocol/liqi.json`（見各 case 的註解），不憑記憶。
 class LiqiParser {
 
-    /// 請求 ID 到方法名的映射
+    /// msgId → 方法名。**全 Swift 只有這一份。**
+    ///
+    /// RESPONSE 的 envelope 不帶方法名，只能靠 msgId 對回當初的 REQUEST。
+    /// 送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.parseRaw`，
+    /// 所以遊戲自己送的與 Naki 自己送的（msgId 60000+）都會登記在這裡；
+    /// `LiqiResponseStore` 拿得到方法名正是因為如此。
+    /// p4-2 之前 `LiqiActionSender` 另存一份 `pendingMethods`，沒有任何配對路徑
+    /// 讀它——只是第二份會漂的事實，已刪除。
     private var pendingRequests: [Int: String] = [:]
 
     /// 當前消息 ID
@@ -206,6 +81,7 @@ class LiqiParser {
         pendingRequests.removeAll()
         currentMsgId = 1
         faults.removeAll()
+        lastEnvelopeFailure = nil
     }
 
     /// 記一筆解析失敗（嚴重度先一律 degraded，由呼叫端升級）
@@ -227,115 +103,80 @@ class LiqiParser {
         return data.count > limit ? head + "…" : head
     }
 
+    /// 最近一次 `parse` 解不開 envelope 的原因（帶得出 bytes 長度與訊息類型）。
+    ///
+    /// 存下來是為了讓呼叫端**不必再解一次**就寫得出診斷 log。
+    private(set) var lastEnvelopeFailure: LiqiEnvelopeDecodeFailure?
+
     /// 解析雀魂消息
     /// - Parameter data: 原始二進制消息
     /// - Returns: 解析後的消息字典，包含 type, method, data 等字段
     func parse(_ data: Data) -> [String: Any]? {
         // 每則訊息各自結帳：呼叫端讀到的 faults 只屬於剛剛那一則
         faults.removeAll()
+        lastEnvelopeFailure = nil
 
-        guard data.count >= 3 else {
-            liqiLog("[LiqiParser] Message too short: \(data.count) bytes")
-            return nil
-        }
-
-        let firstByte = data[0]
-        liqiLog("[LiqiParser] First byte: \(firstByte), data size: \(data.count)")
-
-        guard let msgType = LiqiMsgType(rawValue: firstByte) else {
-            liqiLog("[LiqiParser] Unknown message type: \(firstByte)")
-            // 嘗試顯示前幾個字節用於調試
+        // envelope 的形狀只有 `LiqiEnvelope` 知道（編碼端走同一份定義）
+        let envelope: LiqiEnvelope
+        switch LiqiEnvelope.decode(data) {
+        case .success(let decoded):
+            envelope = decoded
+        case .failure(let failure):
+            lastEnvelopeFailure = failure
             let preview = data.prefix(min(20, data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] Data preview: \(preview)")
+            liqiLog("[LiqiParser] envelope 解不開：\(failure)｜preview: \(preview)")
             return nil
         }
 
-        liqiLog("[LiqiParser] Message type: \(msgType)")
+        liqiLog("[LiqiParser] Message type: \(envelope.type), size: \(data.count)")
 
-        switch msgType {
+        switch envelope.type {
         case .notify:
-            return parseNotify(data.subdata(in: 1..<data.count))
+            return parseNotify(method: envelope.method ?? "", payload: envelope.payload)
 
         case .request:
-            let msgId = Int(data[1]) | (Int(data[2]) << 8)
-            return parseRequest(msgId: msgId, data: data.subdata(in: 3..<data.count))
+            return parseRequest(msgId: Int(envelope.msgId ?? 0),
+                                method: envelope.method ?? "",
+                                payload: envelope.payload)
 
         case .response:
-            let msgId = Int(data[1]) | (Int(data[2]) << 8)
-            return parseResponse(msgId: msgId, data: data.subdata(in: 3..<data.count))
+            return parseResponse(msgId: Int(envelope.msgId ?? 0), payload: envelope.payload)
         }
     }
 
     // MARK: - Private Methods
 
-    private func parseNotify(_ data: Data) -> [String: Any]? {
-        // 顯示原始通知數據
-        let rawPreview = data.prefix(min(60, data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-        liqiLog("[LiqiParser] parseNotify raw data (\(data.count) bytes): \(rawPreview)")
-
-        let blocks = parseProtobufBlocks(data)
-        liqiLog("[LiqiParser] parseNotify: \(blocks.count) blocks")
-
-        for (i, block) in blocks.enumerated() {
-            let blockPreview = block.data.prefix(min(30, block.data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] parseNotify block[\(i)]: fieldId=\(block.fieldId), wireType=\(block.wireType), size=\(block.data.count), data=\(blockPreview)")
-        }
-
-        guard blocks.count >= 2 else {
-            liqiLog("[LiqiParser] parseNotify: Not enough blocks")
-            return nil
-        }
-
-        guard let methodName = blocks[0].stringValue else {
-            liqiLog("[LiqiParser] parseNotify: First block is not a string")
-            let preview = blocks[0].data.prefix(min(20, blocks[0].data.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
-            liqiLog("[LiqiParser] First block data: \(preview)")
-            return nil
-        }
-
-        liqiLog("[LiqiParser] parseNotify method: \(methodName)")
-
-        let innerData = blocks[1].data
+    private func parseNotify(method: String, payload: Data) -> [String: Any]? {
+        liqiLog("[LiqiParser] parseNotify method: \(method)，payload \(payload.count) bytes")
 
         // 解析內部數據
         var result: [String: Any] = [
             "id": -1,
             "type": "notify",
-            "method": methodName
+            "method": method
         ]
 
         // 嘗試解析內部 protobuf
-        if let parsedData = parseInnerMessage(methodName: methodName, data: innerData) {
+        if let parsedData = parseInnerMessage(methodName: method, data: payload) {
             result["data"] = parsedData
         } else {
             // 返回原始數據
-            result["rawData"] = innerData.base64EncodedString()
+            result["rawData"] = payload.base64EncodedString()
         }
 
         return result
     }
 
-    private func parseRequest(msgId: Int, data: Data) -> [String: Any]? {
-        let blocks = parseProtobufBlocks(data)
-        liqiLog("[LiqiParser] parseRequest msgId=\(msgId), \(blocks.count) blocks")
-
-        guard blocks.count >= 2,
-              let methodName = blocks[0].stringValue else {
-            liqiLog("[LiqiParser] parseRequest: not enough blocks or no method name")
-            return nil
-        }
-
-        liqiLog("[LiqiParser] parseRequest method: \(methodName)")
+    private func parseRequest(msgId: Int, method: String, payload: Data) -> [String: Any]? {
+        liqiLog("[LiqiParser] parseRequest msgId=\(msgId), method: \(method)")
 
         // 記錄請求以便匹配響應
-        pendingRequests[msgId] = methodName
+        pendingRequests[msgId] = method
         currentMsgId = msgId
 
-        let innerData = blocks[1].data
-
         // 從遊戲自己的流量學 match_mode。寫死的對照表是錯的（見 ObservedMatchModes）。
-        if methodName == ".lq.Lobby.fetchCurrentMatchInfo" {
-            let modes = parseRepeatedVarint(innerData, field: 1)
+        if method == ".lq.Lobby.fetchCurrentMatchInfo" {
+            let modes = parseRepeatedVarint(payload, field: 1)
             if !modes.isEmpty {
                 Task { @MainActor in ObservedMatchModes.shared.record(modes: modes) }
             }
@@ -344,34 +185,25 @@ class LiqiParser {
         var result: [String: Any] = [
             "id": msgId,
             "type": "request",
-            "method": methodName
+            "method": method
         ]
 
-        if let parsedData = parseInnerMessage(methodName: methodName, data: innerData) {
+        if let parsedData = parseInnerMessage(methodName: method, data: payload) {
             result["data"] = parsedData
         }
 
         return result
     }
 
-    private func parseResponse(msgId: Int, data: Data) -> [String: Any]? {
-        let blocks = parseProtobufBlocks(data)
-        liqiLog("[LiqiParser] parseResponse msgId=\(msgId), \(blocks.count) blocks, pending=\(pendingRequests.keys.sorted())")
+    private func parseResponse(msgId: Int, payload: Data) -> [String: Any]? {
+        liqiLog("[LiqiParser] parseResponse msgId=\(msgId), pending=\(pendingRequests.keys.sorted())")
 
+        // RESPONSE 的 envelope 不帶方法名，只能靠 msgId 對回 REQUEST；對不上就沒得解。
         guard let methodName = pendingRequests.removeValue(forKey: msgId) else {
-            liqiLog("[LiqiParser] parseResponse: no pending request for msgId=\(msgId)")
-            // 嘗試解析響應數據以查看內容
-            if !blocks.isEmpty && blocks[0].data.count > 0 {
-                let previewData = blocks[0].data
-                let previewCount = min(30, previewData.count)
-                let preview = previewData.prefix(previewCount).map { String(format: "%02x", $0) }.joined(separator: " ")
-                liqiLog("[LiqiParser] Response block[0] preview: \(preview)")
-            }
+            let preview = payload.prefix(min(30, payload.count)).map { String(format: "%02x", $0) }.joined(separator: " ")
+            liqiLog("[LiqiParser] parseResponse: no pending request for msgId=\(msgId)，payload preview: \(preview)")
             return nil
         }
-
-        // 響應的第一個塊通常是空的
-        let innerData = blocks.count >= 2 ? blocks[1].data : Data()
 
         var result: [String: Any] = [
             "id": msgId,
@@ -379,7 +211,7 @@ class LiqiParser {
             "method": methodName
         ]
 
-        if let parsedData = parseInnerMessage(methodName: methodName, data: innerData, isResponse: true) {
+        if let parsedData = parseInnerMessage(methodName: methodName, data: payload, isResponse: true) {
             result["data"] = parsedData
         }
 

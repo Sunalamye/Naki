@@ -188,25 +188,25 @@ final class LiqiActionSenderTests: XCTestCase {
     // MARK: - 牌字串轉換
 
     func testMJAIToMajsoulTileConversion() {
-        XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: "5m"), "5m")
-        XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: "5mr"), "0m")
-        XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: "5pr"), "0p")
-        XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: "5sr"), "0s")
-        XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: "E"), "1z")
-        XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: "N"), "4z")
-        XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: "C"), "7z")
+        XCTAssertEqual(LiqiTile.majsoul(fromMJAI: "5m"), "5m")
+        XCTAssertEqual(LiqiTile.majsoul(fromMJAI: "5mr"), "0m")
+        XCTAssertEqual(LiqiTile.majsoul(fromMJAI: "5pr"), "0p")
+        XCTAssertEqual(LiqiTile.majsoul(fromMJAI: "5sr"), "0s")
+        XCTAssertEqual(LiqiTile.majsoul(fromMJAI: "E"), "1z")
+        XCTAssertEqual(LiqiTile.majsoul(fromMJAI: "N"), "4z")
+        XCTAssertEqual(LiqiTile.majsoul(fromMJAI: "C"), "7z")
 
-        XCTAssertNil(LiqiTileCode.majsoul(fromMJAI: "?"))
-        XCTAssertNil(LiqiTileCode.majsoul(fromMJAI: "0m"), "MJAI 沒有 0m 這種寫法")
-        XCTAssertNil(LiqiTileCode.majsoul(fromMJAI: "3mr"), "只有 5 有紅寶牌")
-        XCTAssertNil(LiqiTileCode.majsoul(fromMJAI: "1zz"))
+        XCTAssertNil(LiqiTile.majsoul(fromMJAI: "?"))
+        XCTAssertNil(LiqiTile.majsoul(fromMJAI: "0m"), "MJAI 沒有 0m 這種寫法")
+        XCTAssertNil(LiqiTile.majsoul(fromMJAI: "3mr"), "只有 5 有紅寶牌")
+        XCTAssertNil(LiqiTile.majsoul(fromMJAI: "1zz"))
     }
 
     func testMajsoulToMJAITileConversion() {
-        XCTAssertEqual(LiqiTileCode.mjai(fromMajsoul: "0m"), "5mr")
-        XCTAssertEqual(LiqiTileCode.mjai(fromMajsoul: "5m"), "5m")
-        XCTAssertEqual(LiqiTileCode.mjai(fromMajsoul: "1z"), "E")
-        XCTAssertNil(LiqiTileCode.mjai(fromMajsoul: "zz"))
+        XCTAssertEqual(LiqiTile.mjai(fromMajsoul: "0m"), "5mr")
+        XCTAssertEqual(LiqiTile.mjai(fromMajsoul: "5m"), "5m")
+        XCTAssertEqual(LiqiTile.mjai(fromMajsoul: "1z"), "E")
+        XCTAssertNil(LiqiTile.mjai(fromMajsoul: "zz"))
     }
 
     /// 兩個方向必須互為反函數（紅五也要 round-trip）
@@ -214,18 +214,18 @@ final class LiqiActionSenderTests: XCTestCase {
         for suit in ["m", "p", "s"] {
             for number in 1...9 {
                 let mjai = "\(number)\(suit)"
-                let majsoul = LiqiTileCode.majsoul(fromMJAI: mjai)
+                let majsoul = LiqiTile.majsoul(fromMJAI: mjai)
                 XCTAssertEqual(majsoul, mjai)
-                XCTAssertEqual(LiqiTileCode.mjai(fromMajsoul: majsoul!), mjai)
+                XCTAssertEqual(LiqiTile.mjai(fromMajsoul: majsoul!), mjai)
             }
             let red = "5\(suit)r"
-            XCTAssertEqual(LiqiTileCode.majsoul(fromMJAI: red), "0\(suit)")
-            XCTAssertEqual(LiqiTileCode.mjai(fromMajsoul: "0\(suit)"), red)
+            XCTAssertEqual(LiqiTile.majsoul(fromMJAI: red), "0\(suit)")
+            XCTAssertEqual(LiqiTile.mjai(fromMajsoul: "0\(suit)"), red)
         }
         for honor in ["E", "S", "W", "N", "P", "F", "C"] {
-            let majsoul = LiqiTileCode.majsoul(fromMJAI: honor)
+            let majsoul = LiqiTile.majsoul(fromMJAI: honor)
             XCTAssertNotNil(majsoul)
-            XCTAssertEqual(LiqiTileCode.mjai(fromMajsoul: majsoul!), honor)
+            XCTAssertEqual(LiqiTile.mjai(fromMajsoul: majsoul!), honor)
         }
     }
 
@@ -380,7 +380,18 @@ final class LiqiActionSenderTests: XCTestCase {
         XCTAssertEqual(bytes[2], UInt8((result.msgId >> 8) & 0x00FF))
         XCTAssertEqual(LiqiEncoder.hexString(Array(bytes.dropFirst(3))),
                        "0a132e6c712e4c6f6262792e7374617274526f6f6d1200")
-        XCTAssertEqual(sender.method(forMsgId: result.msgId), ".lq.Lobby.startRoom")
+
+        // p4-2：msgId→method 的對照表全 Swift 只有 `LiqiParser.pendingRequests` 一份。
+        // sender 不再自己記一份——送出面的 frame 經過 JS `ws.send` hook 回到 parser，
+        // RESPONSE 才配得回方法名。這裡直接演一次那條路徑當回歸鎖。
+        let parser = LiqiParser()
+        XCTAssertEqual(parser.parse(Data(bytes))?["method"] as? String, ".lq.Lobby.startRoom")
+        let response = parser.parse(Data(LiqiEncoder.encodeEnvelope(type: .response,
+                                                                    msgId: result.msgId,
+                                                                    method: "",
+                                                                    payload: [])))
+        XCTAssertEqual(response?["method"] as? String, ".lq.Lobby.startRoom",
+                       "RESPONSE 只帶 msgId；方法名要由 parser 那一份對照表配回來")
     }
 
     /// 打牌送出的完整 base64 必須等於「envelope(msgId) 的 base64」

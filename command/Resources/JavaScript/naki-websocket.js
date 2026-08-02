@@ -1,6 +1,16 @@
 /**
  * Naki WebSocket - WebSocket 攔截模組
  * 攔截 WebSocket 連接，將訊息轉發到 Swift
+ *
+ * ⚠️ 協定知識的 canonical 在 Swift，不在這裡（p4-2）：
+ *   - envelope 格式（[type][msgId LE][protobuf{1=method,2=payload}]）
+ *     → command/Services/Bridge/LiqiEnvelope.swift
+ *   - msgId → method 對照表 → LiqiParser.pendingRequests
+ *
+ * 本檔的 `parseEnvelopeBody` / `attributeSend` / `sendRaw` / `nakiNicknameMask.pendingMethods`
+ * 各自留著一份**刻意的**重複：它們必須在遊戲解析封包之前、在頁面裡同步跑完
+ * （改暱稱 bytes、選連線），繞去 Swift 再回來就來不及了。跨語言邊界的同步成本
+ * 高於重複成本，所以保留——但格式一改，改的是 Swift 那份，這裡跟著對齊。
  */
 (function() {
     'use strict';

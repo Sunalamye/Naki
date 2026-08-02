@@ -71,7 +71,7 @@ nonisolated enum GameHighlightScript {
                 }()
                 let combo = liqiType.flatMap { snapshot?.operation(of: $0) }?.combination.first
                 for tile in (combo?.split(separator: "|") ?? []).compactMap({
-                    LiqiTileCode.mjai(fromMajsoul: String($0))
+                    LiqiTile.mjai(fromMajsoul: String($0))
                 }) {
                     marks.append(["tile": tile, "color": [1.0, 0.75, 0.4]])
                 }

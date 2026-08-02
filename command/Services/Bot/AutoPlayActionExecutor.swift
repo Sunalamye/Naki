@@ -70,7 +70,7 @@ enum AutoPlayActionExecutor {
 
         switch action {
         case .discard:
-            guard let majsoulTile = LiqiTileCode.majsoul(fromMJAI: tile) else {
+            guard let majsoulTile = LiqiTile.majsoul(fromMJAI: tile) else {
                 // 轉換失敗＝一個 request 都沒送出去。舊版在這裡照樣消化 oplist，
                 // 等於自己把這批機會吃掉，重試框架再也看不到它。
                 event("❌ 打牌: 無法轉換牌字串 \(tile)，未送出，保留 oplist")
@@ -85,7 +85,7 @@ enum AutoPlayActionExecutor {
             // 必須同時帶上捨牌，因此取同一批推薦中機率最高的打牌當宣言牌。
             // ⚠️ 未驗證：此選法是否與 Mortal 立直後的第二次推論結果一致。
             guard let discardRec = recommendations.first(where: { $0.actionType == .discard }),
-                  let majsoulTile = LiqiTileCode.majsoul(fromMJAI: discardRec.displayTile)
+                  let majsoulTile = LiqiTile.majsoul(fromMJAI: discardRec.displayTile)
             else {
                 // 同上：沒有宣言牌就沒有 request，不能當成「這批 oplist 處理完了」。
                 event("❌ 立直: 找不到可宣言的捨牌，未送出，保留 oplist")
