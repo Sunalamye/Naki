@@ -15,7 +15,20 @@ import MortalSwift
 
 /// 遊戲狀態管理器
 /// 集中管理遊戲狀態、AI 推薦和 Bot 狀態，提供 UI 響應式更新
+///
+/// #p0-3: 整個 class 標 `@MainActor`，所有 mutator 都是同步直接賦值。
+///
+/// 之前每個 mutator 各自包一層 `DispatchQueue.main.async`：呼叫端（`WebViewModel`、
+/// `LegacyWebViewModel`，兩者皆 `@MainActor`）明明已經在 main 上，寫入卻要延到下一個
+/// runloop 才生效。後果是 SwiftUI 讀 WebViewModel 的鏡像屬性是「立即值」、MCP 的
+/// `/bot/status` 與 `/game/state` 讀本 class 是「上一幀值」——同一時刻兩邊講不同的話。
+/// 直接賦值後兩邊在同一個 main runloop turn 內一致。
+///
+/// 注意：app target 有 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，本 class 其實早就
+/// 被隱式隔離在 MainActor；顯式標註是為了讓隔離不依賴 build setting，也讓非 app target
+/// （測試、未來的 package 化）看到同一份語意。
 @Observable
+@MainActor
 final class GameStateManager {
 
     // MARK: - Observable Properties
@@ -100,128 +113,114 @@ final class GameStateManager {
         bridgeLog("\(logTag) 已初始化")
     }
 
+    /// deinit 標 `nonisolated`——**沒有它，任何碰到本 class 的單元測試都會讓 test host 崩掉**。
+    ///
+    /// app target 是 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，所以 MainActor 隔離的
+    /// class 連隱含的 deinit 都會走 `swift_task_deinitOnExecutor`。在 NakiTests 的 host
+    /// 進程裡釋放這種物件會在 `TaskLocal::StopLookupScope::~StopLookupScope()` 觸發
+    /// `pointer being freed was not allocated` 而 SIGABRT——測試不是 fail 而是整個
+    /// host 掛掉重啟，看起來像「測試莫名其妙不跑」。
+    ///
+    /// 已用最小重現確認：`@MainActor final class`（有沒有 `@Observable` 都一樣）→ 崩；
+    /// 同一個 class 改 `nonisolated deinit` → 過；`nonisolated final class` → 過。
+    /// 本 class 的 deinit 不需要碰 MainActor 狀態（只是釋放值型別欄位），
+    /// 所以 nonisolated 沒有語意代價。
+    nonisolated deinit { }
+
     // MARK: - State Updates
 
     /// 更新遊戲狀態
     /// - Parameter state: 新的遊戲狀態
     func updateGameState(_ state: GameState) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.gameState = state
-            self.lastUpdateTime = Date()
-            bridgeLog("\(self.logTag) 遊戲狀態已更新: \(state.kyokuDisplayName)")
-        }
+        gameState = state
+        lastUpdateTime = Date()
+        bridgeLog("\(logTag) 遊戲狀態已更新: \(state.kyokuDisplayName)")
     }
 
     /// 更新 Bot 狀態
     /// - Parameter status: 新的 Bot 狀態
     func updateBotStatus(_ status: BotStatus) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.botStatus = status
-            bridgeLog("\(self.logTag) Bot 狀態已更新: active=\(status.isActive)")
-        }
+        botStatus = status
+        bridgeLog("\(logTag) Bot 狀態已更新: active=\(status.isActive)")
     }
 
     /// 更新 AI 推薦
     /// - Parameter recs: 新的推薦列表
     func updateRecommendations(_ recs: [Recommendation]) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.recommendations = recs
-            self.recommendationCount = recs.count
-            self.isCalculating = false
-            self.lastUpdateTime = Date()
+        recommendations = recs
+        recommendationCount = recs.count
+        isCalculating = false
+        lastUpdateTime = Date()
 
-            if let first = recs.first {
-                bridgeLog("\(self.logTag) \(recs.count) 個推薦, 最佳: \(first.displayLabel) (\(first.percentageString))")
-            } else {
-                bridgeLog("\(self.logTag) 無推薦")
-            }
+        if let first = recs.first {
+            bridgeLog("\(logTag) \(recs.count) 個推薦, 最佳: \(first.displayLabel) (\(first.percentageString))")
+        } else {
+            bridgeLog("\(logTag) 無推薦")
         }
     }
 
     /// 清除推薦
     func clearRecommendations() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.recommendations = []
-            self.recommendationCount = 0
-        }
+        recommendations = []
+        recommendationCount = 0
     }
 
     /// 標記正在計算
     func setCalculating(_ calculating: Bool) {
-        DispatchQueue.main.async { [weak self] in
-            self?.isCalculating = calculating
-        }
+        isCalculating = calculating
     }
 
     /// 設置錯誤訊息
     func setError(_ message: String?) {
-        DispatchQueue.main.async { [weak self] in
-            self?.errorMessage = message
-        }
+        errorMessage = message
     }
 
     // MARK: - From Bot Controller
 
     /// 從 NativeBotController 同步狀態
     /// - Parameter controller: Bot 控制器
-    /// #15: controller 已 @MainActor 隔離，故本方法標為 @MainActor，於一致的 isolation 下
-    ///      同步讀取 controller 屬性（呼叫端 WebViewModel 亦為 @MainActor，安全）。
-    @MainActor
+    ///
+    /// #15: controller 已 @MainActor 隔離，與本 class 同一 isolation，直接同步讀取。
+    /// #p0-3: 原本讀完 controller 之後還丟一次 `DispatchQueue.main.async` 才寫回，
+    ///        等於在已經是 MainActor 的路徑上多繞一個 runloop。現在讀完就寫，
+    ///        呼叫端 return 後立刻讀得到新值（`syncFromLeavesStateReadableImmediately` 鎖住）。
     func syncFrom(controller: NativeBotController) {
         // controller 為 @MainActor，這裡在 MainActor 上同步取得所有需要的值（值型別快照）
         let state = controller.gameState
         let recs = controller.lastRecommendations
-        let is3P = controller.is3P
-        let canDiscard = controller.canDiscard
-        let canRiichi = controller.canRiichi
-        let canChi = controller.canChi
-        let canPon = controller.canPon
-        let canKan = controller.canKan
-        let canAgari = controller.canAgari
 
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
+        gameState = state
+        recommendations = recs
+        recommendationCount = recs.count
+        lastUpdateTime = Date()
 
-            self.gameState = state
-            self.recommendations = recs
-            self.recommendationCount = recs.count
-            self.lastUpdateTime = Date()
-
-            // 更新 Bot 狀態
-            var status = BotStatus()
-            status.isActive = true
-            status.modelName = "mortal"   // 同上：只有四麻模型，標籤不得造假
-            status.playerId = state.playerId
-            status.is3P = state.is3P
-            status.canDiscard = canDiscard
-            status.canRiichi = canRiichi
-            status.canChi = canChi
-            status.canPon = canPon
-            status.canKan = canKan
-            status.canAgari = canAgari
-            self.botStatus = status
-        }
+        // 更新 Bot 狀態
+        var status = BotStatus()
+        status.isActive = true
+        status.modelName = "mortal"   // 同上：只有四麻模型，標籤不得造假
+        status.playerId = state.playerId
+        status.is3P = state.is3P
+        status.canDiscard = controller.canDiscard
+        status.canRiichi = controller.canRiichi
+        status.canChi = controller.canChi
+        status.canPon = controller.canPon
+        status.canKan = controller.canKan
+        status.canAgari = controller.canAgari
+        botStatus = status
     }
 
     // MARK: - Reset
 
     /// 重置所有狀態（對局結束時調用）
     func reset() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.gameState = GameState()
-            self.botStatus = BotStatus()
-            self.recommendations = []
-            self.recommendationCount = 0
-            self.isCalculating = false
-            self.errorMessage = nil
-            self.lastUpdateTime = nil
-            bridgeLog("\(self.logTag) 狀態已重置")
-        }
+        gameState = GameState()
+        botStatus = BotStatus()
+        recommendations = []
+        recommendationCount = 0
+        isCalculating = false
+        errorMessage = nil
+        lastUpdateTime = nil
+        bridgeLog("\(logTag) 狀態已重置")
     }
 
     // MARK: - Utility
