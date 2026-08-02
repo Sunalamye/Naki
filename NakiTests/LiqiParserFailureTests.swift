@@ -404,6 +404,30 @@ final class LiqiParserFailureTests: XCTestCase {
         XCTAssertNil(state.blocking, "對應前提的清除才生效")
     }
 
+    /// p5 #4（Codex 復核）：A（authGame）失敗 → B（scores）也失敗 → B 恢復，
+    /// A 的前提從未恢復，橫幅不能消失。單一 slot 會被 B 蓋掉再被清空 → 漏掉 A。
+    func testMultiplePrerequisitesTrackedIndependently() {
+        let state = LiqiParseFaultState()
+
+        // A：座位缺（Bot 沒建）
+        state.record(LiqiParseFault(site: "ResAuthGame.seat_list", byteCount: 0,
+                                    reason: "沒有 seatList", severity: .blocking))
+        // B：接著 scores 也壞
+        state.record(LiqiParseFault(site: "ActionNewRound.scores", byteCount: 2,
+                                    reason: "解不出來", severity: .blocking))
+        XCTAssertNotNil(state.blocking, "兩個前提都失敗，當然 blocking")
+
+        // B 恢復（健康 NewRound）→ 只清 round domain
+        state.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
+        XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list",
+                       "B 恢復不代表 A（座位／Bot）恢復——橫幅必須留著 A")
+        XCTAssertEqual(state.statusPayload["liqiParseBlocked"] as? Bool, true)
+
+        // A 也恢復 → 這時才真的沒有 blocking
+        state.clearBlocking(matchingSitePrefixes: ["ResAuthGame"])
+        XCTAssertNil(state.blocking)
+    }
+
     // MARK: - D. 保留的 heuristic 必須標記信心
 
     /// 沒有 seat_list 時可以用 players 的順序頂替，但**必須標成 heuristic**。

@@ -110,6 +110,8 @@ nonisolated enum AutoConfirmCycleResult: Equatable {
     case dispatched(AutoConfirmOutcome)
     /// 已被伺服器受理（第 2 層），正在等權威 `ActionNewRound`（第 3 層）；這一輪不重送（p5 #3）
     case awaitingRound
+    /// watchdog 重送用完仍等不到 `ActionNewRound`，放掉待確認避免自動打牌餓死（p5 #3）
+    case abandoned
 }
 
 // MARK: - Engine
@@ -196,6 +198,15 @@ final class AutoPlayEngine {
         /// ——RESPONSE 可能假成功、或 hook 漏了那個 frame，沒有這道 watchdog 會整局卡在
         /// 結算畫面、不重試也不 resync（p5 #3）。結算窗口有數十秒，這個上限給得寬。
         var confirmAckWatchdog: TimeInterval = 6.0
+        /// watchdog 重送的次數上限（p5 #3 Codex 復核）。用完仍等不到 `ActionNewRound`
+        /// 就放掉 `confirmPending`——若瀏覽器其實已進下一局（我們漏收了 frame），繼續無限
+        /// 重送會讓正常自動打牌被 confirm 永久餓死；放掉後自動打牌能對「實際正在進行的那局」
+        /// 恢復。若真的卡在結算，退回 p2-5 之前的基準（使用者自己點），不會更糟。
+        var confirmMaxWatchdogResends: Int = 3
+        /// 時鐘 seam（p5 #3 Codex 復核）：watchdog 的起算與比對都用它，測試可注入可控時鐘。
+        /// 用它而不是 runConfirmCycle 的入口時間——ack 實際發生在 grace + 送出 + 等 RESPONSE
+        /// 之後，用入口時間當起算點會讓後段 attempt 成功時 watchdog 立刻誤判逾時。
+        var clock: () -> Date = Date.init
         /// confirmNewRound 的送出策略；nil＝`AutoConfirmDispatcher` 的預設
         /// （型別在 app target 是 MainActor 隔離的，所以存 optional，用到時才取預設值）
         var confirmPolicy: AutoConfirmDispatcher.RetryPolicy?
@@ -246,6 +257,9 @@ final class AutoPlayEngine {
     /// 代表「已確認、等下一局」——這一段先前不存在，confirmed 就直接清 pending（p5 #3）。
     private(set) var confirmAckedAt: Date?
 
+    /// 已 watchdog 重送幾次（p5 #3 Codex 復核）。到上限就放掉 pending，避免自動打牌餓死。
+    private var confirmWatchdogResends = 0
+
     /// 本輪的診斷軌跡（每輪開頭清空）
     private var trace: [String] = []
     private var overrode: (requested: Recommendation.ActionType,
@@ -294,6 +308,7 @@ final class AutoPlayEngine {
         state = .idle
         confirmPending = false
         confirmAckedAt = nil
+        confirmWatchdogResends = 0
     }
 
     /// 提早結束這次輪詢間隔。
@@ -335,12 +350,14 @@ final class AutoPlayEngine {
     func roundDidEnd() {
         confirmPending = true
         confirmAckedAt = nil   // 新一局結束，重新開始「送出 → 受理 → 等下一局」
+        confirmWatchdogResends = 0
     }
 
     /// 下一局開始（`ActionNewRound` → `start_kyoku`）——權威推進（第 3 層），確認已生效。
     func roundDidBegin() {
         confirmPending = false
         confirmAckedAt = nil
+        confirmWatchdogResends = 0
     }
 
     /// 對局結束（`NotifyGameEndResult` / `NotifyGameTerminate` → `end_game`）。
@@ -350,6 +367,7 @@ final class AutoPlayEngine {
     func gameDidEnd() {
         confirmPending = false
         confirmAckedAt = nil
+        confirmWatchdogResends = 0
     }
 
     private func tick() async {
@@ -521,17 +539,30 @@ final class AutoPlayEngine {
     /// `ActionNewRound` 仍沒到，重送 confirmNewRound（RESPONSE 可能假成功、或漏了 frame）——
     /// 沒有這道 watchdog 會整局卡在結算畫面（p5 #3）。
     @discardableResult
-    func runConfirmCycle(now: Date = Date()) async -> AutoConfirmCycleResult {
+    func runConfirmCycle() async -> AutoConfirmCycleResult {
         guard confirmPending else { return .noPending }
 
         beginCycle()
 
         // 已受理、正在等 ActionNewRound：watchdog 內就安靜等，逾時才重送。
         if let ackedAt = confirmAckedAt {
-            if now.timeIntervalSince(ackedAt) < timing.confirmAckWatchdog {
+            if timing.clock().timeIntervalSince(ackedAt) < timing.confirmAckWatchdog {
                 return .awaitingRound
             }
-            note("⏱️ confirmNewRound 已受理但 ActionNewRound 逾時未到 → 重送", to: .event)
+            // 逾時：ActionNewRound 沒到。有上限的重送——用完仍沒進下一局就放掉 pending，
+            // 避免「瀏覽器其實已進下一局、我們漏收 frame」時 confirm 無限重送把自動打牌餓死
+            // （p5 #3 Codex 復核）。
+            confirmWatchdogResends += 1
+            if confirmWatchdogResends > timing.confirmMaxWatchdogResends {
+                note("⚠️ confirmNewRound 重送 \(timing.confirmMaxWatchdogResends) 次仍等不到 "
+                     + "ActionNewRound → 放掉待確認，讓自動打牌對實際進行中的那局恢復", to: .event)
+                confirmPending = false
+                confirmAckedAt = nil
+                confirmWatchdogResends = 0
+                return .abandoned
+            }
+            note("⏱️ confirmNewRound 已受理但 ActionNewRound 逾時未到 → 重送 "
+                 + "(\(confirmWatchdogResends)/\(timing.confirmMaxWatchdogResends))", to: .event)
             confirmAckedAt = nil
         }
 
@@ -563,8 +594,10 @@ final class AutoPlayEngine {
 
             switch outcome {
             case .confirmed:
-                // 第 2 層達成，但還沒進下一局：保留 pending、記時間，交給 watchdog 等第 3 層。
-                confirmAckedAt = now
+                // 第 2 層達成，但還沒進下一局：保留 pending、記**實際 ack 時間**（clock() 在
+                // occupy/grace/送出/等 RESPONSE 之後才讀，不是 cycle 入口時間），交給 watchdog
+                // 等第 3 層。用入口時間當起算點會讓後段 attempt 成功時 watchdog 立刻誤判逾時。
+                confirmAckedAt = timing.clock()
             case .superseded:
                 confirmPending = false
                 confirmAckedAt = nil

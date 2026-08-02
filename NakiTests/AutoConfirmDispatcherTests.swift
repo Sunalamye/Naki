@@ -135,6 +135,25 @@ final class AutoConfirmDispatcherTests: XCTestCase {
         XCTAssertEqual(sends, 1, "送過一次後被下一局取代，就不再送")
     }
 
+    /// p5 #5（Codex 復核）：`send()` 的 await 期間對局結束（superseded 變 true），
+    /// 即使回來的 RESPONSE 無 error，也不能記成 `.confirmed`——那會讓狀態機誤認為
+    /// 「我這次確認推進了下一局」。在途的 bytes 收不回（grace 已把機率壓低），但至少不誤認。
+    @MainActor
+    func testCleanResponseArrivingAfterSupersessionIsNotConfirmed() async {
+        var superseded = false
+        let result = await AutoConfirmDispatcher.send(
+            policy: noDelay,
+            isSuperseded: { superseded },
+            send: {
+                // 送出的 await 期間對局結束了（gameDidEnd/roundDidBegin 清了 pending）
+                superseded = true
+                return self.outcome(success: true, response: self.response(hasError: false))
+            })
+
+        XCTAssertEqual(result, .superseded,
+                       "RESPONSE 雖無 error，但送出期間對局已結束，不能當成推進下一局的確認")
+    }
+
     // MARK: - 不靜默
 
     /// 失敗時要留下可追的 log（拒絕原因 + 保留 pending）

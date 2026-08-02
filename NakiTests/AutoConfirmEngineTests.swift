@@ -17,6 +17,12 @@ import XCTest
 
 @testable import Naki
 
+/// 可控時鐘：測試推進 `now` 來驅動 watchdog（取代注入 runConfirmCycle 的時間參數）。
+private final class ClockBox {
+    var now: Date
+    init(_ start: Date) { now = start }
+}
+
 @MainActor
 final class AutoConfirmEngineTests: XCTestCase {
 
@@ -42,12 +48,16 @@ final class AutoConfirmEngineTests: XCTestCase {
                             isSanma: Bool = false,
                             isReady: Bool = true,
                             confirmAckWatchdog: TimeInterval = 6.0,
+                            maxWatchdogResends: Int = 3,
+                            clock: (() -> Date)? = nil,
                             confirmSend: @escaping () async -> LiqiToolSendOutcome)
         -> AutoPlayEngine {
         var timing = AutoPlayEngine.Timing()
         timing.poll = 1.0
         timing.confirmGrace = 0
         timing.confirmAckWatchdog = confirmAckWatchdog
+        timing.confirmMaxWatchdogResends = maxWatchdogResends
+        if let clock { timing.clock = clock }
         timing.confirmPolicy = .init(maxAttempts: 3, delay: 0, awaitResponseMs: 0)
         timing.confirmSend = confirmSend
         return AutoPlayEngine(
@@ -93,27 +103,60 @@ final class AutoConfirmEngineTests: XCTestCase {
     /// p5 #3：受理後在 watchdog 內安靜等 ActionNewRound（不重送）；逾時才重送。
     func testConfirmWaitsForActionNewRoundThenResendsOnWatchdogTimeout() async {
         var calls = 0
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        let clockBox = ClockBox(t0)
         // watchdog 設 2 秒好測：受理後 2 秒沒進下一局就重送
         let engine = makeEngine(mode: .auto,
                                 confirmAckWatchdog: 2.0,
+                                clock: { clockBox.now },
                                 confirmSend: { calls += 1; return self.confirmed() })
-
-        let t0 = Date(timeIntervalSince1970: 1_000_000)
         engine.roundDidEnd()
 
-        // 第一次：送出並受理
-        _ = await engine.runConfirmCycle(now: t0)
+        // 第一次：送出並受理（ack 記在 clock 當下 = t0）
+        _ = await engine.runConfirmCycle()
         XCTAssertEqual(calls, 1)
         XCTAssertTrue(engine.confirmPending)
 
-        // watchdog 內：安靜等，不重送
-        let waiting = await engine.runConfirmCycle(now: t0.addingTimeInterval(1.0))
+        // watchdog 內（+1s）：安靜等，不重送
+        clockBox.now = t0.addingTimeInterval(1.0)
+        let waiting = await engine.runConfirmCycle()
         XCTAssertEqual(waiting, .awaitingRound)
         XCTAssertEqual(calls, 1, "watchdog 內不該重送")
 
-        // 逾時：ActionNewRound 遲遲不到 → 重送
-        _ = await engine.runConfirmCycle(now: t0.addingTimeInterval(2.5))
+        // 逾時（+2.5s）：ActionNewRound 遲遲不到 → 重送
+        clockBox.now = t0.addingTimeInterval(2.5)
+        _ = await engine.runConfirmCycle()
         XCTAssertEqual(calls, 2, "逾時未進下一局要重送，否則整局卡在結算畫面")
+    }
+
+    /// p5 #3（Codex 復核）：watchdog 重送用完仍等不到 ActionNewRound → 放掉 pending，
+    /// 避免「瀏覽器已進下一局、我們漏收 frame」時 confirm 無限重送把自動打牌餓死。
+    func testWatchdogAbandonsAfterMaxResendsToAvoidStarvation() async {
+        var calls = 0
+        let t0 = Date(timeIntervalSince1970: 2_000_000)
+        let clockBox = ClockBox(t0)
+        let engine = makeEngine(mode: .auto,
+                                confirmAckWatchdog: 1.0,
+                                maxWatchdogResends: 2,
+                                clock: { clockBox.now },
+                                confirmSend: { calls += 1; return self.confirmed() })
+        engine.roundDidEnd()
+
+        _ = await engine.runConfirmCycle()           // 送出並受理
+        var elapsed = 1.0
+        // 每次把時鐘推過 watchdog → 重送，直到用完上限
+        for _ in 0..<2 {
+            elapsed += 1.5
+            clockBox.now = t0.addingTimeInterval(elapsed)
+            let r = await engine.runConfirmCycle()
+            XCTAssertEqual(r, .dispatched(.confirmed(attempts: 1)))
+        }
+        // 超過上限這一次：放掉 pending
+        elapsed += 1.5
+        clockBox.now = t0.addingTimeInterval(elapsed)
+        let abandoned = await engine.runConfirmCycle()
+        XCTAssertEqual(abandoned, .abandoned)
+        XCTAssertFalse(engine.confirmPending, "放掉待確認，自動打牌才不會被永久餓死")
     }
 
     /// `.off`：不送，pending 保留（使用者自己在遊戲內確認）

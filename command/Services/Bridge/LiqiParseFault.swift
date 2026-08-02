@@ -130,8 +130,34 @@ final class LiqiParseFaultState {
     /// 單元測試釋放它會 SIGABRT（見 CLAUDE.md「專案結構的坑」）。
     nonisolated deinit { }
 
-    /// 目前那個「這局不會運作」的失敗；nil = 沒有
-    private(set) var blocking: LiqiParseFault?
+    /// 各前提 domain 目前未解決的 blocking 失敗（p5 #4）。
+    ///
+    /// 不同前提是各自獨立的：`ResAuthGame.seat_list`（座位／start_game／Bot 沒建）與
+    /// `ActionNewRound.scores`（分數／start_kyoku）是兩回事。用單一 slot 時，A 失敗後
+    /// B 也失敗會蓋掉 A，之後 B 恢復把 slot 清空，但 A 的前提從未恢復——橫幅消失卻
+    /// Bot 仍不存在。改成按 domain keyed，每個前提各留一格，只有對應前提恢復才移除它。
+    private(set) var blockingByDomain: [String: LiqiParseFault] = [:]
+
+    /// domain 顯示優先序：authGame（Bot 沒建）最根本，排最前。
+    private static let domainPriority = ["authGame", "round"]
+
+    /// 由 site 推出前提 domain。
+    private static func domain(for site: String) -> String {
+        if site.hasPrefix("ResAuthGame") { return "authGame" }
+        if site.hasPrefix("ActionNewRound") || site.hasPrefix("GameSnapshot") { return "round" }
+        return site
+    }
+
+    /// 目前那個「這局不會運作」的失敗（多個前提時取優先序最高的）；nil = 沒有
+    var blocking: LiqiParseFault? {
+        for domain in Self.domainPriority {
+            if let fault = blockingByDomain[domain] { return fault }
+        }
+        // 其餘 domain 取 site 字典序最小的，保證決定性（不用 dict.values.first）
+        return blockingByDomain
+            .filter { !Self.domainPriority.contains($0.key) }
+            .min { $0.key < $1.key }?.value
+    }
 
     /// 近期失敗（新的在後），最多 `historyLimit` 筆
     private(set) var recent: [LiqiParseFault] = []
@@ -150,35 +176,32 @@ final class LiqiParseFaultState {
             recent.removeFirst(recent.count - Self.historyLimit)
         }
         if fault.severity == .blocking {
-            blocking = fault
+            blockingByDomain[Self.domain(for: fault.site)] = fault
         }
     }
 
-    /// 事情恢復正常了（成功發出 `start_game` / `start_kyoku`）→ 收掉常駐錯誤。
+    /// 事情恢復正常了→ 收掉所有常駐錯誤。
     ///
     /// 只清 blocking，不清 `recent`：橫幅該消失，但「這局中間曾經解錯過」
     /// 仍然要查得到。
     func clearBlocking() {
-        blocking = nil
+        blockingByDomain.removeAll()
     }
 
     /// 只清「由指定前提失敗造成」的 blocking（p5 #4）。
     ///
-    /// blocking 只有一個 slot，但失敗有不同前提：`ResAuthGame.seat_list`（座位／
-    /// start_game）與 `ActionNewRound.scores`（分數／start_kyoku）是兩回事。
-    /// 若 authGame 失敗（座位缺、Bot 沒建）留下 blocking，之後一個 scores 合法的
-    /// `ActionNewRound` 不該把它清掉——那會讓橫幅消失、宣告恢復，但 Bot 根本不存在，
-    /// 整局仍不工作。所以恢復某個里程碑時，只清「site 屬於這個里程碑」的 blocking。
+    /// 恢復某個里程碑時，只移除 site 屬於這個里程碑的 domain。若 authGame 失敗
+    /// （座位缺、Bot 沒建）留下 blocking，一個 scores 合法的 `ActionNewRound` 只清
+    /// round domain，不會清掉 authGame domain——橫幅正確保留（Bot 仍不存在）。
     func clearBlocking(matchingSitePrefixes prefixes: [String]) {
-        guard let current = blocking else { return }
-        if prefixes.contains(where: { current.site.hasPrefix($0) }) {
-            blocking = nil
+        blockingByDomain = blockingByDomain.filter { _, fault in
+            !prefixes.contains(where: { fault.site.hasPrefix($0) })
         }
     }
 
     /// 全部歸零（頁面重新載入、測試）
     func reset() {
-        blocking = nil
+        blockingByDomain.removeAll()
         recent = []
         totalCount = 0
     }
