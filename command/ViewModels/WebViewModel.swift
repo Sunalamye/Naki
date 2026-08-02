@@ -396,10 +396,10 @@ class WebViewModel: WebViewModelProtocol {
     bridgeLog("[WebViewModel] 強制重連 WebSocket...")
     statusMessage = "正在強制重連..."
 
-    let script = "window.__nakiWebSocket?.forceReconnect() || 0"
     do {
-      let result = try await page.callJavaScript(script)
-      let closedCount = (result as? Int) ?? 0
+      // callJavaScript 是函式體語意：腳本必須自帶 return，否則恆回 nil（見 NakiWebSocketScript）
+      let result = try await page.callJavaScript(NakiWebSocketScript.forceReconnect)
+      let closedCount = NakiWebSocketScript.closedCount(from: result)
       bridgeLog("[WebViewModel] 強制重連: 關閉了 \(closedCount) 個連線")
       statusMessage = closedCount > 0 ? "已關閉 \(closedCount) 個連接，等待重連..." : "沒有活躍的連接"
     } catch {

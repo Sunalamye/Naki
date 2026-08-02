@@ -397,8 +397,8 @@ struct RoomQuickTestTool: MCPTool {
             "playerCount": playerCount,
             "steps": steps,
             "reconnect_hint": "客戶端尚未進入對局。請執行 execute_js: "
-                + "return window.__nakiWebSocket.forceReconnect() "
-                + "讓客戶端以斷線重連路徑進入該局，之後 bot_status 才會有手牌與推薦。"
+                + NakiWebSocketScript.forceReconnect
+                + " 讓客戶端以斷線重連路徑進入該局，之後 bot_status 才會有手牌與推薦。"
         ]
     }
 }

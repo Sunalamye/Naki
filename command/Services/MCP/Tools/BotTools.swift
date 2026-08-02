@@ -241,10 +241,9 @@ struct BotSyncTool: MCPTool {
     func execute(arguments: [String: Any]) async throws -> Any {
         context.log("MCP: Force reconnecting to rebuild Bot state")
 
-        let script = "return window.__nakiWebSocket?.forceReconnect() || 0"
-        let result = try await context.executeJavaScript(script)
+        let result = try await context.executeJavaScript(NakiWebSocketScript.forceReconnect)
 
-        let closedCount = (result as? Int) ?? 0
+        let closedCount = NakiWebSocketScript.closedCount(from: result)
         let success = closedCount > 0
 
         context.log("MCP: forceReconnect result: closed \(closedCount) connections")
