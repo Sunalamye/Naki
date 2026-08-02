@@ -30,6 +30,37 @@ struct ContentView: View {
     @AppStorage(AutoPlayModeStore.key) private var autoPlayMode: AutoPlayMode = AutoPlayModeStore
         .defaultMode
 
+    /// 這條 WebView 路徑真的能執行的模式（Legacy 沒有「自動」，見 `AutoPlayAvailability`）
+    private var availableAutoPlayModes: [AutoPlayMode] {
+        AutoPlayAvailability.modes(autoPlaySupported: viewModel.supportsAutoPlay)
+    }
+
+    /// 模式 picker 本體：**刻意放在 `#if` 之外**，兩個平台的 toolbar 共用同一份。
+    ///
+    /// 這條路徑的選項與行為只有 iOS 17–25 會走到，而本機（macOS 26）連編譯都碰不到
+    /// `#if os(iOS)` 區塊——寫兩份的話，iOS 那份的錯字要到實機上才會被發現。
+    /// 共用之後 macOS build 至少會替它做型別檢查。
+    private func autoPlayModePicker(width: CGFloat) -> some View {
+        Picker("模式", selection: $autoPlayMode) {
+            // 選項來自 `AutoPlayAvailability`：不支援自動送出的路徑上，
+            // 「自動」不是灰掉的按鈕而是根本不存在——灰掉的控制照樣要解釋，
+            // 而解釋放在進階設定裡（`autoPlayAvailabilityBox`）。
+            ForEach(availableAutoPlayModes, id: \.self) { mode in
+                Text(mode.pickerLabel).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        // a11y: fixed width for segmented control; kept to preserve toolbar layout
+        .frame(width: width)
+        .onChange(of: autoPlayMode) { _, newValue in
+            viewModel.setAutoPlayMode(newValue)
+        }
+        .accessibilityIdentifier("autoplay-mode-picker")
+        .accessibilityLabel("自動打牌模式")
+        .accessibilityHint(viewModel.supportsAutoPlay
+                           ? "" : AutoPlayAvailability.autoUnavailableReason)
+    }
+
     var body: some View {
         Group {
 #if os(macOS)
@@ -39,6 +70,17 @@ struct ContentView: View {
 #endif
         }
         .environment(\.webViewModel, viewModel)
+        .task {
+            // 存檔可能是在支援自動送出的裝置上寫下的 `.auto`。Picker 上沒有那個選項時，
+            // 選取值對不到任何 tag，segmented control 會顯示成「沒有任何一段被選中」；
+            // ViewModel 那邊也已經降級成推薦，兩邊必須講同一句話。
+            let clamped = AutoPlayAvailability.clamp(
+                autoPlayMode, autoPlaySupported: viewModel.supportsAutoPlay)
+            if clamped != autoPlayMode {
+                autoPlayMode = clamped
+                viewModel.setAutoPlayMode(clamped)
+            }
+        }
     }
 
     // MARK: - macOS Layout
@@ -85,19 +127,10 @@ struct ContentView: View {
 
         // 左側：自動打牌模式
         ToolbarItem(placement: .navigation) {
-            Picker("", selection: $autoPlayMode) {
-                Text("關").tag(AutoPlayMode.off)
-                Text("推薦").tag(AutoPlayMode.recommend)
-                Text("自動").tag(AutoPlayMode.auto)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 160) // a11y: fixed width for segmented control; kept to preserve toolbar layout
-            .onChange(of: autoPlayMode) { _, newValue in
-                viewModel.setAutoPlayMode(newValue)
-            }
-            .help("AI 推薦模式")
-            .accessibilityIdentifier("autoplay-mode-picker")
-            .accessibilityLabel("自動打牌模式")
+            autoPlayModePicker(width: 160)
+                .help(viewModel.supportsAutoPlay
+                      ? "AI 推薦模式"
+                      : "AI 推薦模式（此裝置不提供自動送出）")
         }
 
         // 註：「延遲調整」Stepper 已移除。它寫進去的值沒有任何讀取者，
@@ -253,18 +286,9 @@ struct ContentView: View {
         }
 
         ToolbarItem(placement: .automatic) {
-            Picker("模式", selection: $autoPlayMode) {
-                Text("關").tag(AutoPlayMode.off)
-                Text("推薦").tag(AutoPlayMode.recommend)
-                Text("自動").tag(AutoPlayMode.auto)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 150)
-            .onChange(of: autoPlayMode) { _, newValue in
-                viewModel.setAutoPlayMode(newValue)
-            }
-            .accessibilityIdentifier("autoplay-mode-picker")
-            .accessibilityLabel("自動打牌模式")
+            // iOS 17–25 走 Legacy WebView，那條路不提供自動送出：
+            // picker 只會列出「關 / 推薦」，理由在進階設定裡說明。
+            autoPlayModePicker(width: 150)
         }
 
         // 右側：遊戲面板
@@ -463,6 +487,9 @@ struct AdvancedSettingsSheet: View {
     private var settingsForm: some View {
         VStack(alignment: .leading, spacing: 20) {
 
+            // 自動打牌可用性（只有在這條路徑不支援時才出現）
+            autoPlayAvailabilityBox
+
             // 畫面
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
@@ -557,6 +584,36 @@ struct AdvancedSettingsSheet: View {
             #endif
         }
         .padding()
+    }
+
+    /// 「為什麼沒有自動模式」的說明。
+    ///
+    /// 選項直接不出現在 picker 上，所以一定要有一個地方講清楚那不是壞掉、也不是漏做，
+    /// 而是這條 WebView 路徑沒有經過任何實機對局驗證（見 `AutoPlayAvailability`）。
+    @ViewBuilder
+    private var autoPlayAvailabilityBox: some View {
+        if viewModel?.supportsAutoPlay == false {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("自動送出：不可用")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                    Text(AutoPlayAvailability.autoUnavailableReason)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("模式選單只提供「關 / 推薦」。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } label: {
+                Label("自動打牌", systemImage: "hand.raised")
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("autoplay-unavailable-note")
+            .accessibilityLabel("自動送出不可用")
+            .accessibilityValue(AutoPlayAvailability.autoUnavailableReason)
+        }
     }
 }
 

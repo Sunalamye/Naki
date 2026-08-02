@@ -118,13 +118,15 @@ class NakiWebCoordinator {
     /// #6: 事件序列化入口（intake）。過去每則 WS MJAI 事件各包一個獨立 `Task { @MainActor }`，
     /// 獨立 Task 間無順序保證、各自內部 await 會亂序；且 `start_game` 在 `await createNativeBot`
     /// 期間，後續事件的 Task 可能先跑 → 事件亂序 / 早於 bot 建立。
-    /// 改為單一 buffered AsyncStream + 單一 consumer task 依序 `await handleMJAIEvent`，保證：
+    /// 改為單一 buffered AsyncStream + 單一 consumer 依序 `await handleMJAIEvent`，保證：
     ///   (1) FIFO：單一 stream / 單一 consumer，事件依到達順序處理；
     ///   (2) bot-ready-before-consume：start_game 的 handleMJAIEvent 會 `await createNativeBot`
     ///       並啟動 eventStream consumer 後才返回，consumer 迴圈才取下一個事件，
     ///       後續事件不會在 bot 建立完成前被 handle / emit 進 eventStream。
-    private var intakeContinuation: AsyncStream<[String: Any]>.Continuation?
-    private var intakeTask: Task<Void, Never>?
+    ///
+    /// p2-2：這個模式抽成 `SerialEventIntake`，與 Legacy 路徑共用同一份實作
+    /// （Legacy 先前還停在每則一個 Task 的舊寫法）。
+    private var intake: SerialEventIntake?
 
     init(viewModel: WebViewModel?) {
         self.viewModel = viewModel
@@ -132,26 +134,20 @@ class NakiWebCoordinator {
         setupWebSocketCallbacks()
     }
 
-    /// #6: 建立事件序列化入口 —— 單一 buffered AsyncStream + 單一 consumer task
-    /// consumer 迴圈以 `await` 逐一消費 handleMJAIEvent，故一個事件（含 start_game 的
-    /// createNativeBot）完全處理完，才會取下一個事件 → FIFO 且 bot-ready-before-consume。
+    /// #6: 建立事件序列化入口（單一 stream / 單一 consumer，見 `SerialEventIntake`）
     /// 註：coordinator 為 WebViewModel 持有、與 App 同生命週期，故不另做 teardown（沿用既有設計）。
     private func setupEventIntake() {
-        let (stream, continuation) = AsyncStream<[String: Any]>.makeStream()
-        self.intakeContinuation = continuation
-        self.intakeTask = Task { @MainActor [weak self] in
-            for await event in stream {
-                await self?.handleMJAIEvent(event)
-            }
+        intake = SerialEventIntake { [weak self] event in
+            await self?.handleMJAIEvent(event)
         }
     }
 
     /// 設定 WebSocket 回調
     private func setupWebSocketCallbacks() {
         // #6: 不再每則事件各開一個 Task（亂序 + 可能早於 bot 建立）。改為 yield 進序列化入口，
-        //     由單一 consumer 依序 await handleMJAIEvent。Continuation 為 Sendable，可安全從
-        //     WKScriptMessageHandler 回調（主執行緒）呼叫；捕獲值型別副本，不需觸及 self。
-        let intake = self.intakeContinuation
+        //     由單一 consumer 依序 await handleMJAIEvent。intake 是 nonisolated，可安全從
+        //     WKScriptMessageHandler 回調（主執行緒）呼叫；捕獲參考本身，不需觸及 self。
+        let intake = self.intake
         websocketHandler.onMJAIEvent = { event in
             intake?.yield(event)
         }

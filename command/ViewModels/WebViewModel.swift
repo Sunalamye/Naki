@@ -528,19 +528,20 @@ class WebViewModel: WebViewModelProtocol {
 
   /// 設定自動打牌模式
   func setAutoPlayMode(_ mode: AutoPlayMode) {
-    autoPlayMode = mode
-    AutoPlayModeStore.save(mode)
-    bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
-    debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
+    // 收斂＋持久化走與 Legacy 同一個入口（這條路 `supportsAutoPlay` 為 true，
+    // 所以 clamp 是恆等式；共用是為了讓「選了什麼／記住什麼」只有一份定義）。
+    autoPlayMode = AutoPlayAvailability.commit(mode, autoPlaySupported: supportsAutoPlay)
+    bridgeLog("[WebViewModel] 自動打牌模式設定為: \(autoPlayMode.rawValue)")
+    debugServer?.addLog("模式已變更: \(autoPlayMode.rawValue), 推薦數: \(recommendations.count)")
 
     // 模式一改就要立刻反映在畫面上，不能等下一次 Bot 回應：
     // 切到 `.off` 時把遊戲內標記清掉，切回 `.recommend` / `.auto` 時重新染上。
     // （側欄是 SwiftUI 綁定，讀 `autoPlayMode` 會自己重畫。）
-    highlightedTile = mode.showRecommendation ? recommendations.first?.displayTile : nil
+    highlightedTile = autoPlayMode.showRecommendation ? recommendations.first?.displayTile : nil
     syncGameHighlight()
 
-    // 只有全自動模式才觸發自動打牌
-    if mode.isFullAuto, !recommendations.isEmpty {
+    // 只有全自動模式才觸發自動打牌（用生效值，不是要求值）
+    if autoPlayMode.isFullAuto, !recommendations.isEmpty {
       let firstAction = recommendations.first?.actionType
       let delay = ActionDelayModel.delay(for: firstAction)
       debugServer?.addLog(
@@ -777,7 +778,8 @@ class WebViewModel: WebViewModelProtocol {
       snapshot: snapshot,
       recommendations: recommendations,
       mode: autoPlayMode,
-      seat: gameState.playerId,
+      // 座位來源在 `WebViewModelProtocol.autoPlaySeat` 一份定義（Legacy 走同一個）
+      seat: autoPlaySeat,
       isSanma: gameState.is3P)
 
     let resolvedAction: Recommendation.ActionType

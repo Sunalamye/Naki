@@ -173,22 +173,36 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// MJAI 事件流管理器
     let eventStream = MJAIEventStream()
 
+    /// 事件序列化入口（與主路徑共用 `SerialEventIntake`）。
+    ///
+    /// 這條路先前是每則事件各開一個 `Task { @MainActor }`：獨立 Task 之間沒有順序保證，
+    /// 而 `start_game` 會在 `await createNativeBot` 期間暫停——後面的 tsumo / dahai
+    /// 可以先跑完，等於在 bot 還沒建立時就被消費掉。主路徑早已改成單一 stream + 單一
+    /// consumer，這裡補上同一份（p2-2 缺口 1）。
+    private var intake: SerialEventIntake?
+
     init(viewModel: (any WebViewModelProtocol)?) {
         self.viewModel = viewModel
         super.init()
+        setupEventIntake()          // 先建立序列化入口，供 onMJAIEvent 使用
         setupWebSocketCallbacks()
     }
 
     // MARK: - WebSocket Callbacks Setup
 
+    /// 建立事件序列化入口（單一 stream / 單一 consumer，見 `SerialEventIntake`）
+    private func setupEventIntake() {
+        intake = SerialEventIntake { [weak self] event in
+            await self?.handleMJAIEvent(event)
+        }
+    }
+
     /// 設定 WebSocket 回調
     private func setupWebSocketCallbacks() {
-        websocketHandler.onMJAIEvent = { [weak self] event in
-            guard let self = self else { return }
-
-            Task { @MainActor in
-                await self.handleMJAIEvent(event)
-            }
+        // 不再每則事件各開一個 Task（亂序 + 可能早於 bot 建立）：改為 yield 進序列化入口。
+        let intake = self.intake
+        websocketHandler.onMJAIEvent = { event in
+            intake?.yield(event)
         }
 
         websocketHandler.onWebSocketStatusChanged = { [weak self] connected in

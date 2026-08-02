@@ -49,7 +49,19 @@ class LegacyWebViewModel: WebViewModelProtocol {
     private(set) var liqiSender = LiqiActionSender()
 
     /// 自動打牌模式（與主路徑共用同一個持久化 key，見 `AutoPlayModeStore`）
+    ///
+    /// **不變式：這條路徑上它永遠不會是 `.auto`。** 兩個寫入點（init、`setAutoPlayMode`）
+    /// 都先過 `AutoPlayAvailability.clamp`，理由見 `supportsAutoPlay`。
     private(set) var autoPlayMode: AutoPlayMode = AutoPlayModeStore.defaultMode
+
+    /// Legacy 路徑不提供自動送出（p2-2 路線 A）。
+    ///
+    /// 這條路缺主路徑的整層保護：沒有 1 秒輪詢的 `AutoPlayGate`（forceHora／sendPass 寬限）、
+    /// 沒有 executionId 去抖、沒有送出重試；而且 macOS deployment target 是 26，
+    /// 本機根本跑不到它——沒有 iOS 17–25 實機就沒有任何對局證據。
+    /// 在那個證據出現以前，讓它自動送牌等於拿使用者的帳號賭一條沒驗過的路。
+    /// 推薦顯示保留（`.recommend`），送出交回使用者。
+    let supportsAutoPlay = false
 
     /// Debug Server (macOS only)
     #if os(macOS)
@@ -60,10 +72,6 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     /// WKWebView 引用（由 LegacyNakiWebView 設置）
     weak var webView: WKWebView?
-
-    /// 防止重複觸發自動打牌
-    private var lastAutoPlayTriggerTime: Date = .distantPast
-    private var lastAutoPlayActionType: Recommendation.ActionType?
 
     /// 是否已經套用過隱藏名稱設定
     private var hasAppliedHideNamesSettings = false
@@ -93,10 +101,17 @@ class LegacyWebViewModel: WebViewModelProtocol {
             }
         }
 
-        // 沿用上次選的模式（與主路徑同一個 key，不再每次啟動硬設 .auto）
-        autoPlayMode = AutoPlayModeStore.load()
+        // 沿用上次選的模式（與主路徑同一個 key，不再每次啟動硬設 .auto），
+        // 但存檔可能是在支援自動送出的裝置上寫下的 `.auto`——這條路不執行它。
+        // `commit` 會把收斂後的值寫回存檔：不寫的話 UI 的 @AppStorage 與這裡讀到的模式
+        // 會不一致，picker 顯示「自動」而實際跑「推薦」正是先前要修掉的那種說謊介面。
+        let stored = AutoPlayModeStore.load()
+        autoPlayMode = AutoPlayAvailability.commit(stored, autoPlaySupported: supportsAutoPlay)
+        if autoPlayMode != stored {
+            bridgeLog("[LegacyWebViewModel] 存檔為自動模式，本路徑不支援 → 降級為推薦")
+        }
 
-        statusMessage = "準備就緒 (Legacy 模式)"
+        statusMessage = "準備就緒 (Legacy 模式，僅推薦不自動送出)"
     }
 
     // MARK: - WebView Setup
@@ -159,6 +174,10 @@ class LegacyWebViewModel: WebViewModelProtocol {
         recommendations = []
         tehaiTiles = []
         tsumoTile = nil
+        highlightedTile = nil
+        // 與主路徑同一條清理規則：`GameStateManager` 才是 SwiftUI 面板的資料來源，
+        // 不一併重置的話對局結束後畫面會停在上一局的手牌與推薦。
+        gameStateManager.reset()
         statusMessage = "Bot 已清除"
         bridgeLog("[LegacyWebViewModel] Bot 已刪除")
     }
@@ -187,19 +206,16 @@ class LegacyWebViewModel: WebViewModelProtocol {
         // 同步到 GameStateManager（供 UI 回應式更新）
         gameStateManager.syncFrom(controller: controller)
 
-        // 更新推薦顯示並觸發自動打牌
-        if let firstRec = recommendations.first {
-            // `.off` 不顯示推薦：`highlightedTile` 必須跟著空，否則它會宣稱
-            // 畫面上標了一張其實沒有標的牌（側欄的閘門在 `RecommendationView`）。
-            highlightedTile = autoPlayMode.showRecommendation ? firstRec.displayTile : nil
-            triggerAutoPlay(recommendation: firstRec)
-        } else if LiqiOperationStore.shared.pending?.horaOperation != nil {
-            // 伺服器提供和牌時，不因為模型沒意見就放過（與主路徑同一條規則）
-            bridgeLog("[LegacyWebViewModel] 🎯 oplist 有和牌但模型無推薦 → 交給 resolver")
-            if autoPlayMode == .auto {
-                triggerAutoPlayNow(delay: 0)
-            }
-        }
+        // 更新推薦顯示（這條路徑不自動送出，見 `supportsAutoPlay`）
+        //
+        // `.off` 不顯示推薦：`highlightedTile` 必須跟著空，否則它會宣稱
+        // 畫面上標了一張其實沒有標的牌（側欄的閘門在 `RecommendationView`）。
+        highlightedTile = autoPlayMode.showRecommendation
+            ? recommendations.first?.displayTile : nil
+
+        // 註：「oplist 有和牌但模型無推薦 → 強制交給 resolver」的 fail-safe 只存在於主路徑
+        // （`AutoPlayGate.forceHora`）。這裡不再抄一份殘缺版：它以前也只在 `.auto` 才動作，
+        // 而這條路的模式永遠不是 `.auto`，留著只是一段永遠不會執行的程式碼。
     }
 
     // MARK: - Auto Play Methods
@@ -209,14 +225,24 @@ class LegacyWebViewModel: WebViewModelProtocol {
     /// 以前這裡只改記憶體、沒有寫進 UserDefaults——Legacy 路徑選的模式重啟就消失，
     /// 而 UI picker 又另外存自己的 key，兩邊講的話可以不一樣。現在與主路徑共用
     /// `AutoPlayModeStore`。
+    ///
+    /// `.auto` 在這條路徑上一律降級成 `.recommend`（見 `supportsAutoPlay`）。
+    /// UI 的 picker 本來就不會列出「自動」，這裡是最後一道閘門：MCP、舊存檔或
+    /// 之後任何呼叫端都不該有辦法在沒驗過的路徑上打開自動送出。
     func setAutoPlayMode(_ mode: AutoPlayMode) {
-        autoPlayMode = mode
-        AutoPlayModeStore.save(mode)
+        let effective = AutoPlayAvailability.commit(mode, autoPlaySupported: supportsAutoPlay)
+        autoPlayMode = effective
         // 切到 `.off` 時把「現在標了哪一張」收掉；切回來時由下一次 Bot 回應填上。
-        if !mode.showRecommendation {
+        if !effective.showRecommendation {
             highlightedTile = nil
         }
-        bridgeLog("[LegacyWebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
+        if effective != mode {
+            statusMessage = "此裝置不支援自動送出，已改為推薦模式"
+            bridgeLog("[LegacyWebViewModel] 要求 \(mode.rawValue) → 降級為 \(effective.rawValue)："
+                + AutoPlayAvailability.autoUnavailableReason)
+        } else {
+            bridgeLog("[LegacyWebViewModel] 自動打牌模式設定為: \(effective.rawValue)")
+        }
     }
 
     // 註：`setAutoPlayDelay` / `confirmAutoPlayAction` / `cancelAutoPlayAction` 已移除，
@@ -231,9 +257,17 @@ class LegacyWebViewModel: WebViewModelProtocol {
         // 而那正是主路徑用 resolver 防住的問題。
         //
         // 沒有理由讓兩條路的安全性不同——合法性的權威在伺服器，跟走哪個 WebView 無關。
+        //
+        // 又：這條路的 `autoPlayMode` 永遠不是 `.auto`（見 `supportsAutoPlay`），
+        // 所以 resolver 對每一批 oplist 的結論一定是 `.surfaceOnly` 或 `.none`，
+        // 底下的送出分支在目前的路線 A 下不會被走到。刻意不改成「直接 return」：
+        // 收斂的權威是模式閘門一處，不是散在各呼叫端的第二道 if。
         let snapshot = LiqiOperationStore.shared.pending
         let mode = autoPlayMode
-        let seat = botStatus.playerId
+        // 座位來源與主路徑同一份定義（`WebViewModelProtocol.autoPlaySeat`）。
+        // 先前這裡讀 `botStatus.playerId`，`deleteNativeBot()` 之後會變 0 而 gameState 不會，
+        // 於是同一個局面在兩條路上可以得到不同的 seat 判定。
+        let seat = autoPlaySeat
 
         let decision = AutoPlayDecisionResolver.resolve(
             snapshot: snapshot, recommendations: recommendations, mode: mode, seat: seat,
@@ -241,8 +275,14 @@ class LegacyWebViewModel: WebViewModelProtocol {
             isSanma: gameState.is3P)
 
         guard case .send(let action, let tile) = decision else {
-            if case .none(let reason) = decision {
+            switch decision {
+            case .none(let reason):
                 bridgeLog("[LegacyWebViewModel] 不送出: \(reason)")
+            case .surfaceOnly(let action, let tile):
+                // 「為什麼沒送」必須看得到，否則推薦模式下的每一次不動作都無從查證
+                bridgeLog("[LegacyWebViewModel] 僅顯示不送出: \(action.rawValue) \(tile)")
+            case .send:
+                break   // guard 已排除
             }
             return
         }
@@ -310,22 +350,10 @@ class LegacyWebViewModel: WebViewModelProtocol {
         bridgeLog(line)
     }
 
-    private func triggerAutoPlay(recommendation: Recommendation) {
-        // 防抖動檢查
-        let now = Date()
-        if now.timeIntervalSince(lastAutoPlayTriggerTime) < 0.5,
-           lastAutoPlayActionType == recommendation.actionType {
-            return
-        }
-
-        lastAutoPlayTriggerTime = now
-        lastAutoPlayActionType = recommendation.actionType
-
-        // 檢查是否為自動模式
-        guard autoPlayMode == .auto else { return }
-
-        triggerAutoPlayNow(delay: 1.2)
-    }
+    // 註：`triggerAutoPlay(recommendation:)`（0.5 秒防抖 + `guard autoPlayMode == .auto`）
+    // 已移除。這條路徑的模式永遠不是 `.auto`，那個 guard 之後的程式碼沒有任何執行路徑；
+    // 留著會讓人以為 Legacy 仍會自己送牌。唯一的送出入口是 `triggerAutoPlayNow`
+    // （協定要求的手動觸發點），而它照樣要過 resolver 的模式閘門。
 
     // MARK: - Settings
 

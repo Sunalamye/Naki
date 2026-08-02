@@ -45,6 +45,13 @@ protocol WebViewModelProtocol: AnyObject, Observable {
     /// 目前生效中的自動打牌模式（持久化見 `AutoPlayModeStore`）
     var autoPlayMode: AutoPlayMode { get }
 
+    /// 這條 WebView 路徑是否提供自動送出。
+    ///
+    /// WebPage 路徑（macOS/iOS 26+）是 true；Legacy 路徑（iOS 17–25 的 WKWebView）是 false
+    /// ——那條路缺輪詢閘門與重試保護，而且沒有任何實機對局驗證（見 `AutoPlayAvailability`）。
+    /// UI 依它決定 picker 上有沒有「自動」，ViewModel 依它收斂模式。
+    var supportsAutoPlay: Bool { get }
+
     func setAutoPlayMode(_ mode: AutoPlayMode)
     func triggerAutoPlayNow(delay: TimeInterval)
 
@@ -86,6 +93,17 @@ protocol WebViewModelProtocol: AnyObject, Observable {
 // MARK: - Default Implementations
 
 extension WebViewModelProtocol {
+    /// 預設提供自動送出；只有 `LegacyWebViewModel` 覆寫成 false。
+    var supportsAutoPlay: Bool { true }
+
+    /// 送給 `AutoPlayDecisionResolver` 的自家座位，**兩條 path 唯一的定義點**。
+    ///
+    /// 先前 Legacy 讀 `botStatus.playerId`、主路徑讀 `gameState.playerId`。兩者雖然都源自
+    /// `NativeBotController.playerId`，但重置時機不同（`deleteNativeBot()` 只把 `botStatus`
+    /// 打回預設值），所以「座位對不對」在兩條路上可以得到不同答案，而 resolver 的
+    /// `seat_mismatch` 是 fail-closed——判錯就整批 oplist 不動作。收斂成一份（p2-2 缺口 3）。
+    var autoPlaySeat: Int { gameState.playerId }
+
     func createNativeBot(playerId: Int) async throws {
         try await createNativeBot(playerId: playerId, is3P: false)
     }
