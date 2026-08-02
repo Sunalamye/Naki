@@ -41,11 +41,13 @@ final class AutoConfirmEngineTests: XCTestCase {
     private func makeEngine(mode: AutoPlayMode,
                             isSanma: Bool = false,
                             isReady: Bool = true,
+                            confirmAckWatchdog: TimeInterval = 6.0,
                             confirmSend: @escaping () async -> LiqiToolSendOutcome)
         -> AutoPlayEngine {
         var timing = AutoPlayEngine.Timing()
         timing.poll = 1.0
         timing.confirmGrace = 0
+        timing.confirmAckWatchdog = confirmAckWatchdog
         timing.confirmPolicy = .init(maxAttempts: 3, delay: 0, awaitResponseMs: 0)
         timing.confirmSend = confirmSend
         return AutoPlayEngine(
@@ -77,7 +79,41 @@ final class AutoConfirmEngineTests: XCTestCase {
 
         XCTAssertEqual(result, .dispatched(.confirmed(attempts: 1)))
         XCTAssertEqual(calls, 1)
-        XCTAssertFalse(engine.confirmPending, "確認成功後 pending 清掉")
+        // p5 #3：第 2 層（RESPONSE 無 error）達成後不立即清 pending——要等權威
+        // ActionNewRound（第 3 層）。pending 保留、進入「已受理等下一局」狀態。
+        XCTAssertTrue(engine.confirmPending, "受理後仍要等 ActionNewRound，pending 不能立刻清")
+        XCTAssertNotNil(engine.confirmAckedAt, "已受理，記下時間交給 watchdog")
+
+        // ActionNewRound 到達 → 這時才真的清
+        engine.roundDidBegin()
+        XCTAssertFalse(engine.confirmPending)
+        XCTAssertNil(engine.confirmAckedAt)
+    }
+
+    /// p5 #3：受理後在 watchdog 內安靜等 ActionNewRound（不重送）；逾時才重送。
+    func testConfirmWaitsForActionNewRoundThenResendsOnWatchdogTimeout() async {
+        var calls = 0
+        // watchdog 設 2 秒好測：受理後 2 秒沒進下一局就重送
+        let engine = makeEngine(mode: .auto,
+                                confirmAckWatchdog: 2.0,
+                                confirmSend: { calls += 1; return self.confirmed() })
+
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        engine.roundDidEnd()
+
+        // 第一次：送出並受理
+        _ = await engine.runConfirmCycle(now: t0)
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(engine.confirmPending)
+
+        // watchdog 內：安靜等，不重送
+        let waiting = await engine.runConfirmCycle(now: t0.addingTimeInterval(1.0))
+        XCTAssertEqual(waiting, .awaitingRound)
+        XCTAssertEqual(calls, 1, "watchdog 內不該重送")
+
+        // 逾時：ActionNewRound 遲遲不到 → 重送
+        _ = await engine.runConfirmCycle(now: t0.addingTimeInterval(2.5))
+        XCTAssertEqual(calls, 2, "逾時未進下一局要重送，否則整局卡在結算畫面")
     }
 
     /// `.off`：不送，pending 保留（使用者自己在遊戲內確認）
@@ -155,6 +191,9 @@ final class AutoConfirmEngineTests: XCTestCase {
         succeed = true
         let second = await engine.runConfirmCycle()
         XCTAssertEqual(second, .dispatched(.confirmed(attempts: 1)))
+        // p5 #3：受理後等 ActionNewRound，pending 保留到下一局開始
+        XCTAssertTrue(engine.confirmPending)
+        engine.roundDidBegin()
         XCTAssertFalse(engine.confirmPending)
     }
 

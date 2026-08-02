@@ -367,6 +367,43 @@ final class LiqiParserFailureTests: XCTestCase {
         XCTAssertFalse(state.recent.isEmpty, "但曾經失敗過要查得到")
     }
 
+    /// p5 #4：authGame 失敗（座位缺、Bot 沒建）留下的 blocking，**不該**被一個
+    /// 分數合法的 ActionNewRound 清掉——否則橫幅消失、宣告恢復，但 Bot 根本不存在。
+    func testAuthGameBlockingSurvivesAHealthyNewRound() {
+        let (bridge, state) = makeBridge()
+
+        // authGame 拿不到座位 → blocking（Bot 沒建）
+        _ = bridge.parse(authGameRequest(msgId: 71))
+        _ = bridge.parse(authGameResponse(msgId: 71, fields: [.bool(field: 4, value: true)]))
+        XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list")
+
+        // 之後來一個分數完全正常的 ActionNewRound
+        _ = bridge.parse(actionPrototypeFrame(name: "ActionNewRound",
+                                              data: newRoundPayload(scores: .bytes(field: 6,
+                                                                                   value: packed([25000, 25000, 25000, 25000])))))
+
+        // 座位那個前提還沒解決，橫幅必須留著
+        XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list",
+                       "start_kyoku 的成功不代表 authGame／座位好了；Bot 仍不存在，橫幅不能消失")
+    }
+
+    /// 對照：scores 造成的 blocking 由後續健康的 NewRound 清掉（同前提才清）。
+    func testScoresBlockingIsClearedByHealthyNewRound() {
+        let state = LiqiParseFaultState()
+        state.record(LiqiParseFault(site: "ActionNewRound.scores", byteCount: 2,
+                                    reason: "packed int32 解不出來", severity: .blocking))
+        state.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
+        XCTAssertNil(state.blocking, "同前提（start_kyoku）恢復就該清")
+
+        // 但 authGame 前綴的清除指令不會動到它（若它是 authGame 造成的）
+        state.record(LiqiParseFault(site: "ResAuthGame.seat_list", byteCount: 0,
+                                    reason: "沒有 seatList", severity: .blocking))
+        state.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
+        XCTAssertNotNil(state.blocking, "不同前提的清除指令不該動到它")
+        state.clearBlocking(matchingSitePrefixes: ["ResAuthGame"])
+        XCTAssertNil(state.blocking, "對應前提的清除才生效")
+    }
+
     // MARK: - D. 保留的 heuristic 必須標記信心
 
     /// 沒有 seat_list 時可以用 players 的順序頂替，但**必須標成 heuristic**。

@@ -96,7 +96,9 @@ struct AutoPlayFailsafePipeline {
                                        seat: seat,
                                        isSanma: false,
                                        tsumoTile: nil,
-                                       isReady: true)
+                                       isReady: true,
+                                       // 推薦對應當前 oplist（p5 #1）——fixture 走正常同源路徑
+                                       recommendationsOplistSequence: store.pending?.sequence)
             })
     }
 }

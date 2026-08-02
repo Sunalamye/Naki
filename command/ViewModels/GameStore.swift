@@ -55,6 +55,11 @@ final class GameStore {
     /// AI 推薦（機率由高到低）
     var recommendations: [Recommendation] = []
 
+    /// `recommendations` 是針對哪一批 oplist 算出來的（`LiqiOperationSnapshot.sequence`）。
+    /// 自動打牌的 `.proceed` 路徑用它確認「推薦」與「當前決策機會」同源——
+    /// 推論是 async 的，新 oplist 可能在舊推薦還沒被新推論取代前就到達（p5 #1）。
+    var recommendationsOplistSequence: UInt64?
+
     /// 自家手牌（MJAI 表記）
     var tehaiTiles: [String] = []
 
@@ -153,7 +158,9 @@ final class GameStore {
     /// - Parameters:
     ///   - controller: 推論剛跑完的 Bot 控制器
     ///   - showRecommendation: 目前模式是否顯示推薦（`.off` 時不標記任何牌）
-    func apply(controller: NativeBotController, showRecommendation: Bool) {
+    func apply(controller: NativeBotController,
+               oplistSequence: UInt64? = nil,
+               showRecommendation: Bool) {
         gameState = controller.gameState
         // `botState` 的 `isActive` 是 `bot != nil`，`canXxx` 由協定層 oplist 導出。
         // 先前 `GameStateManager.syncFrom` 在這裡硬寫 `isActive = true`，
@@ -162,6 +169,7 @@ final class GameStore {
         tehaiTiles = controller.tehaiMjai
         tsumoTile = controller.lastTsumo
         recommendations = controller.lastRecommendations
+        recommendationsOplistSequence = oplistSequence
         updateHighlight(showRecommendation: showRecommendation)
     }
 
@@ -181,6 +189,7 @@ final class GameStore {
     func clearAfterBotDeleted() {
         botStatus = BotStatus()
         recommendations = []
+        recommendationsOplistSequence = nil
         tehaiTiles = []
         tsumoTile = nil
         highlightedTile = nil

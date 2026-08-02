@@ -178,7 +178,9 @@ final class NakiRuntime {
                     tsumoTile: self.store.tsumoTile,
                     isReady: self.session.isReady,
                     // 延遲 stepper 的讀取端：每輪重取，調一下下一手就生效（p2-6）
-                    actionDelayScale: self.settings.actionDelayScale)
+                    actionDelayScale: self.settings.actionDelayScale,
+                    // 推薦綁定的 oplist sequence：讓 .proceed 確認推薦與機會同源（p5 #1）
+                    recommendationsOplistSequence: self.store.recommendationsOplistSequence)
             },
             log: { [weak self] message in self?.debugServer?.addLog(message) },
             event: { [weak self] message in self?.logAutoPlayEvent(message) })

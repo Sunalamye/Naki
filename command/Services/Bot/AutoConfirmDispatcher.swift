@@ -86,6 +86,15 @@ enum AutoConfirmDispatcher {
             if let sent = outcome.sent, sent.success {
                 if let response = outcome.response {
                     if !response.hasError {
+                        // p5 #5：`send()` 的 await 期間對局可能已結束（`gameDidEnd` 清了
+                        // pending）或下一局已由別的路徑開始。此時 RESPONSE 雖然無 error，
+                        // 也不能當成「我這次確認推進了下一局」——那會讓狀態機基於誤判收工。
+                        // 在途的 bytes 收不回（grace 已把機率壓到很低），但至少不誤認。
+                        guard !isSuperseded() else {
+                            log("⏭️ confirmNewRound RESPONSE 到達時對局已結束/推進，不計為確認"
+                                + " msgId=\(sent.msgId) (第 \(attempts) 次)")
+                            return .superseded
+                        }
                         log("✅ confirmNewRound 已被伺服器受理 msgId=\(sent.msgId) (第 \(attempts) 次)")
                         return .confirmed(attempts: attempts)
                     }

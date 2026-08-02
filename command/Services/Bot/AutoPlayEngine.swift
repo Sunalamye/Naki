@@ -108,6 +108,8 @@ nonisolated enum AutoConfirmCycleResult: Equatable {
     case skipped(AutoPlayGate.Reason)
     /// 真的走了送出流程，附 dispatcher 的結論
     case dispatched(AutoConfirmOutcome)
+    /// 已被伺服器受理（第 2 層），正在等權威 `ActionNewRound`（第 3 層）；這一輪不重送（p5 #3）
+    case awaitingRound
 }
 
 // MARK: - Engine
@@ -137,6 +139,9 @@ final class AutoPlayEngine {
         /// 1.0＝現行行為；乘進 `ActionDelayModel.delay(for:scale:)`。做進 context 而不是
         /// 讓引擎持有 settings：引擎不認得 UI／設定物件，這是它能被單測的前提。
         var actionDelayScale: Double = 1.0
+        /// `recommendations` 是針對哪一批 oplist 算的（`GameStore.recommendationsOplistSequence`）。
+        /// `.proceed` 用它確認推薦與當前決策機會同源；nil 代表推薦不綁任何 oplist（p5 #1）。
+        var recommendationsOplistSequence: UInt64?
     }
 
     /// 所有時間常數與次數上限。
@@ -186,6 +191,11 @@ final class AutoPlayEngine {
         /// dispatcher 開頭 `isSuperseded` 就會停手，不會對終局誤送 confirmNewRound。
         /// 結算窗口有數十秒，多等這一下沒有代價。
         var confirmGrace: TimeInterval = 0.8
+        /// confirmNewRound 被伺服器受理（RESPONSE 無 error，第 2 層）之後，等權威
+        /// `ActionNewRound`（第 3 層）到達的上限。逾時仍沒進下一局，就重送 confirmNewRound
+        /// ——RESPONSE 可能假成功、或 hook 漏了那個 frame，沒有這道 watchdog 會整局卡在
+        /// 結算畫面、不重試也不 resync（p5 #3）。結算窗口有數十秒，這個上限給得寬。
+        var confirmAckWatchdog: TimeInterval = 6.0
         /// confirmNewRound 的送出策略；nil＝`AutoConfirmDispatcher` 的預設
         /// （型別在 app target 是 MainActor 隔離的，所以存 optional，用到時才取預設值）
         var confirmPolicy: AutoConfirmDispatcher.RetryPolicy?
@@ -230,6 +240,11 @@ final class AutoPlayEngine {
     /// 用一個 flag 而不是把確認塞進 oplist 路徑：局間結算沒有 oplist，它是「進下一局」
     /// 的流程訊號，不是牌桌上的可用操作。
     private(set) var confirmPending = false
+
+    /// confirmNewRound 已被伺服器受理（第 2 層）的時間；`ActionNewRound`（第 3 層）到達或
+    /// 逾時前一直保留。nil＝尚未送出成功或已進下一局。`confirmPending && confirmAckedAt != nil`
+    /// 代表「已確認、等下一局」——這一段先前不存在，confirmed 就直接清 pending（p5 #3）。
+    private(set) var confirmAckedAt: Date?
 
     /// 本輪的診斷軌跡（每輪開頭清空）
     private var trace: [String] = []
@@ -278,6 +293,7 @@ final class AutoPlayEngine {
         nap = nil
         state = .idle
         confirmPending = false
+        confirmAckedAt = nil
     }
 
     /// 提早結束這次輪詢間隔。
@@ -318,11 +334,13 @@ final class AutoPlayEngine {
     /// 先到並取消的窗口（避免對最後一局誤送 confirmNewRound）。
     func roundDidEnd() {
         confirmPending = true
+        confirmAckedAt = nil   // 新一局結束，重新開始「送出 → 受理 → 等下一局」
     }
 
-    /// 下一局開始（`ActionNewRound` → `start_kyoku`）——權威推進，確認已生效。
+    /// 下一局開始（`ActionNewRound` → `start_kyoku`）——權威推進（第 3 層），確認已生效。
     func roundDidBegin() {
         confirmPending = false
+        confirmAckedAt = nil
     }
 
     /// 對局結束（`NotifyGameEndResult` / `NotifyGameTerminate` → `end_game`）。
@@ -331,6 +349,7 @@ final class AutoPlayEngine {
     /// 終局本身客戶端還會做什麼（協定層動作）需 live 觀察，未實作。
     func gameDidEnd() {
         confirmPending = false
+        confirmAckedAt = nil
     }
 
     private func tick() async {
@@ -422,6 +441,15 @@ final class AutoPlayEngine {
             guard let snapshot, let top = ctx.recommendations.first else {
                 return finish(gate: gate, outcome: .notSent(reason: "no_recommendation"))
             }
+            // 推薦必須是針對「這一批 oplist」算出來的。推論是 async 的：新的決策機會
+            // （新 snapshot）可能在舊推薦還沒被新推論取代前就到達，此時用舊推薦回應新
+            // 機會會送出不可逆的錯誤動作（p5 #1）。sequence 對不上就等下一輪——
+            // react 完成寫回新推薦後，sequence 自然會對上。
+            // 注意：這個閘門只擋 `.proceed`（用推薦內容決策的路徑）；`.forceHora`／
+            // `.sendPass` 是不看推薦內容的 server-authoritative 防護，不受此限。
+            guard ctx.recommendationsOplistSequence == snapshot.sequence else {
+                return finish(gate: gate, outcome: .notSent(reason: "recommendations_stale"))
+            }
             let delay = actionDelay(for: top.actionType, scale: ctx.actionDelayScale)
             guard debounce.allows(key: "\(top.actionType.rawValue)-\(top.displayTile)",
                                   isPass: top.actionType == .none,
@@ -481,13 +509,27 @@ final class AutoPlayEngine {
     ///
     /// 只在 `confirmPending` 為 true 時做事。閘門用 `AutoPlayGate.allowsConfirm`
     /// （與打牌同一組 Reason，收斂在 gate 一處）；送出與三層成功判準在
-    /// `AutoConfirmDispatcher`。成功（RESPONSE 無 error）或被下一局取代 → 清 pending；
-    /// 失敗 → 保留 pending，下一輪輪詢再試。
+    /// `AutoConfirmDispatcher`。
+    ///
+    /// 三層成功判準的第 3 層（權威 `ActionNewRound`）在這裡才收尾：dispatcher 回
+    /// `.confirmed`（第 2 層 RESPONSE 無 error）**不**清 pending，而是記 `confirmAckedAt`
+    /// 進入「等下一局」狀態；`roundDidBegin` 到才真的清。若 `confirmAckWatchdog` 內
+    /// `ActionNewRound` 仍沒到，重送 confirmNewRound（RESPONSE 可能假成功、或漏了 frame）——
+    /// 沒有這道 watchdog 會整局卡在結算畫面（p5 #3）。
     @discardableResult
-    func runConfirmCycle() async -> AutoConfirmCycleResult {
+    func runConfirmCycle(now: Date = Date()) async -> AutoConfirmCycleResult {
         guard confirmPending else { return .noPending }
 
         beginCycle()
+
+        // 已受理、正在等 ActionNewRound：watchdog 內就安靜等，逾時才重送。
+        if let ackedAt = confirmAckedAt {
+            if now.timeIntervalSince(ackedAt) < timing.confirmAckWatchdog {
+                return .awaitingRound
+            }
+            note("⏱️ confirmNewRound 已受理但 ActionNewRound 逾時未到 → 重送", to: .event)
+            confirmAckedAt = nil
+        }
 
         let ctx = context()
         guard ctx.isReady else {
@@ -516,8 +558,12 @@ final class AutoPlayEngine {
             }
 
             switch outcome {
-            case .confirmed, .superseded:
+            case .confirmed:
+                // 第 2 層達成，但還沒進下一局：保留 pending、記時間，交給 watchdog 等第 3 層。
+                confirmAckedAt = now
+            case .superseded:
                 confirmPending = false
+                confirmAckedAt = nil
             case .failed:
                 break   // 保留 pending，下一輪重試
             }

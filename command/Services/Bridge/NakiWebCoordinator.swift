@@ -151,13 +151,20 @@ final class NakiWebCoordinator {
     /// 處理單一 MJAI 事件，並把推論結果寫進 store。
     @discardableResult
     func process(event: [String: Any]) async throws -> [String: Any]? {
+        // 這個 event 是針對哪一批 oplist 產生的（MajsoulBridge 在 parse 時標的）。
+        // await react 期間 LiqiOperationStore 可能被下一批 frame 覆蓋，所以推薦對應的
+        // sequence 只能從 event 帶下來，不能在 react 之後回頭讀 store（p5 #1）。
+        let oplistSequence = event[MJAIEventKey.oplistSequence] as? UInt64
+
         let response = try await bot.react(event: event)
 
         // 一次寫完整份快照（`GameStore.apply` 是牌局資料唯一的寫入點）。
         // 側欄的顯示閘門在 `RecommendationView`（讀 `autoPlayMode.showRecommendation`）：
         // 資料層保持真實，`/bot/status` 仍看得到模型實際算出什麼；只有
         // `highlightedTile`（現在標了哪一張）在 `.off` 時必須是 nil。
-        store.apply(controller: bot, showRecommendation: store.autoPlayMode.showRecommendation)
+        store.apply(controller: bot,
+                    oplistSequence: oplistSequence,
+                    showRecommendation: store.autoPlayMode.showRecommendation)
 
         // 高亮同步 + 通知自動打牌引擎「有新推薦了，不必等下一拍輪詢」。
         observer?.botDidRespond()

@@ -21,6 +21,13 @@ import MortalSwift
 /// 風牌名稱
 private let BAKAZE_NAMES = ["E", "S", "W", "N"]
 
+/// MJAI event 字典裡 Naki 自己附加的 key（非 MJAI 協定欄位）。
+enum MJAIEventKey {
+    /// 產生這個 event 的那批 oplist 的 sequence（`UInt64`）。
+    /// 讓「推薦」能綁定「它所根據的那批決策機會」，避免用舊推薦回應新 oplist（p5 #1）。
+    static let oplistSequence = "__nakiOplistSequence"
+}
+
 // MARK: - MajsoulBridge
 
 /// 雀魂協議橋接器
@@ -274,8 +281,8 @@ class MajsoulBridge {
                         "names": names
                     ])
 
-                    // 這一局的前提（座位）拿到了 → 收掉之前掛著的常駐錯誤
-                    faultState.clearBlocking()
+                    // 這一局的前提（座位）拿到了 → 只收掉座位系列的常駐錯誤（p5 #4）
+                    faultState.clearBlocking(matchingSitePrefixes: ["ResAuthGame"])
                 } else {
                     // #10: 找不到 accountId → 不發 start_game（不再靜默預設座位 0），
                     // 避免上層以錯誤座位建立 bot。記錄 accountId 與 seatList 供診斷。
@@ -337,7 +344,8 @@ class MajsoulBridge {
 
         // Unity 客戶端已無 `DesktopMgr.Inst.oplist`，改由協定層保存最近一次可用操作，
         // 供 WebViewModel 的自動打牌重試框架與 LiqiActionSender 判斷。
-        recordOperationSnapshot(name: name, data: data)
+        // sequence 會標記到這批 events 上（見 return 前的 stamp）。
+        let oplistSequence = recordOperationSnapshot(name: name, data: data)
 
         // #13: 處理待處理的立直接受消息
         // 若立直宣言牌立即被榮和（下個 action 為 ActionHule），立直棒實際未放置，
@@ -418,6 +426,14 @@ class MajsoulBridge {
             }
         }
 
+        // 把這批 action 的 oplist sequence 標到每個 event 上（見 recordOperationSnapshot）。
+        // 消費端（NakiWebCoordinator.process）用它讓推薦綁定它所根據的那批 oplist。
+        if let oplistSequence {
+            for i in results.indices {
+                results[i][MJAIEventKey.oplistSequence] = oplistSequence
+            }
+        }
+
         return results.isEmpty ? nil : results
     }
 
@@ -426,10 +442,14 @@ class MajsoulBridge {
     /// 動作帶 operation → 記錄成新快照（供送出端判斷可做什麼）；
     /// 動作不帶 operation → 代表上一批機會已經過期，直接清掉，
     /// 避免自動打牌拿著舊 oplist 送出遲到的動作。
-    private func recordOperationSnapshot(name: String, data: [String: Any]) {
+    /// 回傳這批 action 建立的 oplist 快照 sequence（沒有可做的操作時回 nil）。
+    /// 呼叫端把它標記到同一批 MJAI events 上，讓「推薦」能綁定「產生它的那批 oplist」——
+    /// 否則自動打牌可能拿上一個機會的推薦，去回應這一個機會的 oplist（見 p5 #1）。
+    @discardableResult
+    private func recordOperationSnapshot(name: String, data: [String: Any]) -> UInt64? {
         guard let operation = data["operation"] as? [String: Any] else {
             LiqiOperationStore.shared.clear()
-            return
+            return nil
         }
 
         let contextTile = data["tile"] as? String
@@ -459,7 +479,7 @@ class MajsoulBridge {
                              + "keys=\(operation.keys.sorted())")
                 }
                 LiqiOperationStore.shared.clear()
-                return
+                return nil
             }
 
             eventLog("[MajsoulBridge] ⚠️ \(name) 帶了 operation 但無法建立快照: "
@@ -469,11 +489,12 @@ class MajsoulBridge {
                      + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
                      + "list3=\(String(describing: list.prefix(3)))")
             LiqiOperationStore.shared.clear()
-            return
+            return nil
         }
 
         eventLog("[MajsoulBridge] oplist 更新: \(name) seat=\(snapshot.seat) "
                   + "types=\(snapshot.rawTypes) tile=\(contextTile ?? "-") seq=\(snapshot.sequence)")
+        return snapshot.sequence
     }
 
     /// 解析新一局開始
@@ -545,8 +566,9 @@ class MajsoulBridge {
             "tehais": tehais
         ])
 
-        // 這一局開起來了 → 收掉上一局留下的常駐錯誤
-        faultState.clearBlocking()
+        // 這一局開起來了 → 只收掉 start_kyoku 系列的常駐錯誤（p5 #4：authGame／座位
+        // 若仍未解決，那個 blocking 要留著——Bot 根本沒建，橫幅不能消失）
+        faultState.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
 
         // 如果配牌有 14 張（親家），添加自摸事件
         let isOya = (seat == ju)
@@ -902,8 +924,8 @@ class MajsoulBridge {
             "tehais": tehais
         ])
 
-        // 重連的局面接起來了 → 收掉常駐錯誤
-        faultState.clearBlocking()
+        // 重連的局面接起來了 → 只收掉 start_kyoku 系列的常駐錯誤（p5 #4）
+        faultState.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
 
         // #18: 後備路徑（無 actions 重連）補發已翻的 kan-dora。
         // start_kyoku 僅帶第一個 dora_marker，doraList 第 2 個(index 1)以後需逐一以 dora 事件補上，

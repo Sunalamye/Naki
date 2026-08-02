@@ -247,6 +247,57 @@ final class MCPProtocolSpecTests: XCTestCase {
         guard case .result = plan.outcome else { return XCTFail("2025-06-18 必須照常服務") }
     }
 
+    // MARK: - p5 #2：era 由版本值決定，且 header 也算一個來源
+
+    /// header-only 的 modern 請求（版本放 `MCP-Protocol-Version` header、body 無 `_meta`）
+    /// 是官方 Streamable HTTP 的合法形式——必須拿到 modern response（帶 `resultType`），
+    /// 不能因為「body 沒有 `_meta`」就被當 legacy（修正前正是如此）。
+    func testHeaderOnlyCurrentVersionGetsModernResponse() {
+        let plan = NakiMCPRouter.plan(
+            body: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}",
+            headers: ["MCP-Protocol-Version: \(NakiMCPProtocol.current)"],
+            toolDefinitions: [])
+
+        guard case .result(let result) = plan.outcome else { return XCTFail("預期 result") }
+        XCTAssertEqual(result["resultType"] as? String, "complete",
+                       "header 宣告的 current 版本就是 modern，result 必須帶 resultType")
+        XCTAssertEqual(result["cacheScope"] as? String, "public")
+    }
+
+    /// era 由**版本值**決定，不是「有沒有宣告」：帶著舊版值的 `_meta`
+    /// （雙棧 client 回退到 2025-11-25）走 legacy——不能因為「有這個 key」就塞成 modern。
+    func testMetaWithLegacyVersionValueStaysLegacy() {
+        let body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":"
+            + "{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2025-11-25\"}}}"
+        let plan = NakiMCPRouter.plan(body: body, headers: [], toolDefinitions: [])
+
+        guard case .result(let result) = plan.outcome else { return XCTFail("預期 result") }
+        XCTAssertNil(result["resultType"],
+                     "帶舊版值的 _meta 是 legacy，不該被塞 resultType")
+    }
+
+    /// `Mcp-Method` header 鏡射 JSON-RPC method 供中介層路由；不一致代表請求在傳輸途中
+    /// 被改寫，拒絕（與 `Mcp-Name` 同語意——修正前只驗了 Mcp-Name）。
+    func testMcpMethodHeaderMismatchIsRejected() {
+        let plan = NakiMCPRouter.plan(
+            body: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}",
+            headers: ["Mcp-Method: tools/call"],
+            toolDefinitions: [])
+
+        guard case .failure(let failure) = plan.outcome else { return XCTFail("預期 failure") }
+        XCTAssertEqual(failure.httpStatus, 400)
+    }
+
+    /// 一致的 `Mcp-Method` 不受影響（證明擋的是不一致，不是全擋）。
+    func testMatchingMcpMethodHeaderPasses() {
+        let plan = NakiMCPRouter.plan(
+            body: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}",
+            headers: ["Mcp-Method: tools/list"],
+            toolDefinitions: [])
+
+        guard case .result = plan.outcome else { return XCTFail("一致的 Mcp-Method 必須照常服務") }
+    }
+
     /// header 與 body 不一致：中介層依 header 路由、server 依 body 執行，
     /// 兩邊看法不同就是安全問題
     func testProtocolVersionHeaderBodyMismatchIsRejected() {

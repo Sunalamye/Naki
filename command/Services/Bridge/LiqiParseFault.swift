@@ -162,6 +162,20 @@ final class LiqiParseFaultState {
         blocking = nil
     }
 
+    /// 只清「由指定前提失敗造成」的 blocking（p5 #4）。
+    ///
+    /// blocking 只有一個 slot，但失敗有不同前提：`ResAuthGame.seat_list`（座位／
+    /// start_game）與 `ActionNewRound.scores`（分數／start_kyoku）是兩回事。
+    /// 若 authGame 失敗（座位缺、Bot 沒建）留下 blocking，之後一個 scores 合法的
+    /// `ActionNewRound` 不該把它清掉——那會讓橫幅消失、宣告恢復，但 Bot 根本不存在，
+    /// 整局仍不工作。所以恢復某個里程碑時，只清「site 屬於這個里程碑」的 blocking。
+    func clearBlocking(matchingSitePrefixes prefixes: [String]) {
+        guard let current = blocking else { return }
+        if prefixes.contains(where: { current.site.hasPrefix($0) }) {
+            blocking = nil
+        }
+    }
+
     /// 全部歸零（頁面重新載入、測試）
     func reset() {
         blocking = nil

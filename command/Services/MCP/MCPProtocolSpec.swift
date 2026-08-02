@@ -122,12 +122,23 @@ enum NakiMCPProtocol {
 
     /// 依規格的 dual-era 規則判斷 era。
     ///
-    /// - 帶 modern `_meta.protocolVersion` → modern
+    /// era 由**宣告的版本值**決定，不是「有沒有宣告」——因為 2025-06-18 起
+    /// 的 legacy client 也會帶 `MCP-Protocol-Version` header，而 2026-07-28 的
+    /// modern client 可以只把版本放在 header（官方 Streamable HTTP 範例即如此）。
+    /// 只看「有無宣告」會把合法的 header-only modern 請求誤判成 legacy，
+    /// 也會把帶舊版值的 `_meta` 誤判成 modern。
+    ///
+    /// - 宣告版本（body `_meta` 優先，其次 header）== `current` → modern
     /// - `server/discover` → modern（它本來就是 modern-only 的方法，
     ///   而且客戶端正是用它來問「你是哪個世代」，要求它先自報版本沒有意義）
-    /// - 其餘（含 `initialize`） → legacy
-    nonisolated static func era(method: String, params: [String: Any]) -> Era {
-        if requestedVersion(params: params) != nil { return .modern }
+    /// - 其餘（含 `initialize` 與所有 legacy 版本值） → legacy
+    nonisolated static func era(method: String,
+                                params: [String: Any],
+                                headerVersion: String? = nil) -> Era {
+        if let declared = requestedVersion(params: params) ?? headerVersion,
+           declared == current {
+            return .modern
+        }
         if method == Method.discover { return .modern }
         return .legacy
     }
@@ -434,9 +445,10 @@ enum NakiMCPRouter {
 
         let id = object["id"]
         let params = object["params"] as? [String: Any] ?? [:]
-        let era = NakiMCPProtocol.era(method: method, params: params)
         let headerVersion = NakiHTTPHeaderReader.value(NakiMCPProtocol.protocolVersionHeader, in: headers)
         let bodyVersion = NakiMCPProtocol.requestedVersion(params: params)
+        // era 要看 header 宣告的版本，否則 header-only 的 modern 請求會被誤判成 legacy
+        let era = NakiMCPProtocol.era(method: method, params: params, headerVersion: headerVersion)
 
         // header 與 body 都宣告版本時必須一致
         if let bodyVersion, let headerVersion, bodyVersion != headerVersion {
@@ -450,6 +462,16 @@ enum NakiMCPRouter {
         if let declared = bodyVersion ?? headerVersion, !NakiMCPProtocol.isSupported(version: declared) {
             return Plan(id: id, era: era, outcome: .failure(
                 NakiMCPProtocol.unsupportedVersionFailure(requested: declared)))
+        }
+
+        // Streamable HTTP 把 JSON-RPC method 鏡射到 Mcp-Method header 供中介層路由；
+        // 帶了但與 body 的 method 不一致代表請求在傳輸途中被改寫，拒絕（與 Mcp-Name 同語意）
+        if let headerMethod = NakiHTTPHeaderReader.value(NakiMCPProtocol.methodHeader, in: headers),
+           headerMethod != method {
+            return Plan(id: id, era: era, outcome: .failure(
+                NakiMCPProtocol.headerMismatchFailure(header: "Mcp-Method",
+                                                      headerValue: headerMethod,
+                                                      bodyValue: method)))
         }
 
         switch method {

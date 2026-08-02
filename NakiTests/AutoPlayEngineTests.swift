@@ -54,7 +54,11 @@ final class AutoPlayEngineTests: XCTestCase {
                                        seat: 0,
                                        isSanma: isSanma,
                                        tsumoTile: nil,
-                                       isReady: isReady)
+                                       isReady: isReady,
+                                       // 預設「推薦對應當前 oplist」＝ production 常態
+                                       // （推薦就是針對當前決策機會算的）。p5 #1 的 stale 情境
+                                       // 由專屬測試故意設成不一致。
+                                       recommendationsOplistSequence: store.pending?.sequence)
             })
     }
 
@@ -74,6 +78,79 @@ final class AutoPlayEngineTests: XCTestCase {
     private let discardRecommendation = [
         Recommendation(tile: "1m", probability: 0.87, actionType: .discard)
     ]
+
+    /// 打牌機會的 oplist（走 `.proceed`，用推薦內容決策），與 tsumo（走 `.forceHora`）不同。
+    @discardableResult
+    private func discardSnapshot(_ store: LiqiOperationStore) -> LiqiOperationSnapshot {
+        store.record(seat: 0,
+                     operations: [LiqiOperation(type: .discard)],
+                     timeFixed: 300,
+                     contextTile: "5p",
+                     source: "ActionDealTile")
+    }
+
+    // MARK: - p5 #1：推薦必須綁定它所根據的那批 oplist
+
+    /// 舊 TOCTOU 測試防「決策後 oplist 換批」；這條防「決策**當下**就是新 oplist 配舊推薦」。
+    /// 推論是 async 的：新決策機會（新 snapshot）可能在舊推薦被新推論取代前就到達，
+    /// 此時用舊推薦（`.proceed` 唯一看推薦內容的路徑）回應新機會會送出不可逆錯誤動作。
+    func testProceedRejectsRecommendationFromADifferentOplist() async {
+        let store = LiqiOperationStore()
+        let snapshot = discardSnapshot(store)     // sequence = S
+        var sends = 0
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in sends += 1; return self.ok() }
+
+        // 推薦標的是「別批」oplist（S+1）——模擬舊推薦配上新到的 snapshot
+        let stale = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(),
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: self.discardRecommendation,
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: snapshot.sequence &+ 1)
+            })
+        let staleRun = await stale.runCycle()
+        XCTAssertEqual(staleRun.outcome, .notSent(reason: "recommendations_stale"))
+        XCTAssertEqual(sends, 0, "推薦不是針對這批 oplist 算的，一個 byte 都不該送")
+
+        // 對照：推薦標的正是這批 oplist → 正常送出（證明擋的是不對源，不是全擋）
+        let fresh = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(),
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: self.discardRecommendation,
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: snapshot.sequence)
+            })
+        let freshRun = await fresh.runCycle()
+        guard case .sent(let action, _, _) = freshRun.outcome else {
+            return XCTFail("sequence 對上就該送出，實際: \(freshRun.outcome)")
+        }
+        XCTAssertEqual(action, .discard)
+        XCTAssertEqual(sends, 1)
+    }
+
+    /// `.forceHora`／`.sendPass` 是不看推薦內容的 server-authoritative 防護，
+    /// **不受** sequence 閘門限制——否則漏自摸防護會被這個閘門一起關掉。
+    func testForceHoraIgnoresRecommendationSequence() async {
+        let store = LiqiOperationStore()
+        tsumoSnapshot(store)                        // oplist 有和牌、推薦為空
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in self.ok() }
+        // 推薦為空、sequence 也不對（極端情況）——forceHora 仍必須送
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(),
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: [],
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: 999_999)
+            })
+        let run = await engine.runCycle()
+        XCTAssertEqual(run.outcome, .sent(action: .hora, tile: "5p", attempts: 1),
+                       "forceHora 是漏自摸防護，不能被 recommendation sequence 閘門擋掉")
+    }
 
     // MARK: - 執行位：一定歸零
 
@@ -225,7 +302,8 @@ final class AutoPlayEngineTests: XCTestCase {
                                        isSanma: false,
                                        tsumoTile: nil,
                                        isReady: true,
-                                       actionDelayScale: 2.5)
+                                       actionDelayScale: 2.5,
+                                       recommendationsOplistSequence: store.pending?.sequence)
             })
 
         let run = await engine.runCycle()
