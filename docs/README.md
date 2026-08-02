@@ -26,7 +26,7 @@ Repo 根目錄另有：
 
 - 雀魂 live client：Unity WebGL `chs_t-WebGL-release-4.0.45(45)`。
 - 狀態與動作：Liqi protobuf；Laya globals 不存在。
-- AI：本機目前 resolve MortalSwift 0.5.0，但 bundled 權重未更新，沒有「最強」benchmark。
+- AI：MortalSwift 釘在 0.5.1／`78b048e`（lockfile 已提交），但 bundled 權重未更新，沒有「最強」benchmark。
 - 四麻：有固定 parity fixtures；三麻沒有專用模型。
 - 自摸：resolver 單測已通過，但 integration 仍有 recommendation gate 與 send-result 兩個 P0。
 - MCP：live `tools/list` 為 42。

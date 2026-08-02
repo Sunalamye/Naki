@@ -72,11 +72,11 @@ iOS 17–25 的 `LegacyWebViewModel`（p3-4 已刪除）直接使用 AI 第一�
 
 ### P1：模型版本宣稱過度
 
-- 本機 resolve 到 MortalSwift 0.5.0，但 package requirement 是 `[0.5.0,0.6.0)`，lockfile 又未提交。
-- 0.5.0 修的是 encoder／計算與 parity；bundled model blobs 沒換。
+- 已釘住 MortalSwift 0.5.1／`78b048e`：requirement `[0.5.1,0.6.0)` + 已提交的 `Package.resolved`（2026-08-02）。版本可重現這一半已解決。
+- 但 0.5.x 修的是 encoder／計算與 parity；bundled model blobs 沒換。
 - 沒有大規模實戰 benchmark。
 
-正確說法是「目前使用 MortalSwift 0.5.0 的 encoder/parity 修正版」；不能說「已換最新最強權重」。
+正確說法是「目前使用 MortalSwift 0.5.1 的 encoder/parity 修正版」；不能說「已換最新最強權重」。
 
 ### P1：三麻沒有專用模型（2026-08-02 改為 fail-closed）
 

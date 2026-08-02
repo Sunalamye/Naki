@@ -20,9 +20,9 @@
 | 雀魂客戶端 | Unity WebGL `chs_t-WebGL-release-4.0.45(45)`，不是 Laya |
 | Naki 狀態來源 | WebSocket → Liqi protobuf → Swift 狀態；不是 JS 遊戲物件 |
 | Naki 動作來源 | Swift 組 Liqi request，再由 `window.__nakiWebSocket.sendRaw` 送出 |
-| AI package | 本機目前 resolve 到 MortalSwift `0.5.0`，revision `802dc3d…` |
-| AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.0 並不是新訓練模型 |
-| 「最新最強」 | **不能這樣宣稱**。0.5.0 是當日最新公開 package tag，但權重未更新，也沒有牌力 benchmark |
+| AI package | MortalSwift `0.5.1`／revision `78b048e…`，由已提交的 `Package.resolved` 釘住 |
+| AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.x 並不是新訓練模型 |
+| 「最新最強」 | **不能這樣宣稱**。0.5.1 是當日最新公開 package tag，但權重未更新，也沒有牌力 benchmark |
 | 四麻 | 唯一有正確模型形狀與 parity 證據的模式 |
 | 三麻 | 沒有三麻模型；仍把三麻狀態送進四麻模型。2026-08-02 起自動打牌在三麻 fail-closed，UI 明示「三麻不支援」 |
 | 自摸保護 | resolver 純邏輯已存在且單測通過，但整合仍有漏觸發與錯誤完成兩個漏洞 |
@@ -205,19 +205,23 @@ Mode 語意（2026-08-02 收斂）：`.off` 同時關掉自動送出與顯示—
 
 ### 真正的版本狀態
 
-Xcode package requirement 是 `upToNextMinorVersion`、minimum `0.5.0`，即允許 `[0.5.0, 0.6.0)`，不是 exact pin。本機 `Package.resolved` 目前是：
+Xcode package requirement 是 `upToNextMinorVersion`、minimum `0.5.1`，即允許 `[0.5.1, 0.6.0)`，不是 exact pin。下界不能再低：`NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API，解到 0.5.0 會編不過。
+
+真正決定 revision 的是已提交的 `Package.resolved`（2026-08-02 起不再被 `.gitignore` 排除）：
 
 ```text
-MortalSwift 0.5.0
-revision 802dc3d030da6573094d413e18af34e776eb091d
+MortalSwift 0.5.1
+revision 78b048e808c09406fc440d7fe642e8e014c210f0
 ```
 
-2026-08-01 直接查[官方 MortalSwift remote](https://github.com/Sunalamye/MortalSwift) tags，最高 tag 是 `v0.5.0`，其 dereferenced
-commit 正是 `802dc3d…`。所以 Naki 目前解析到最新公開 package tag；這仍不代表模型權重最新或最強。
+2026-08-02 直接查[官方 MortalSwift remote](https://github.com/Sunalamye/MortalSwift) tags，最高 tag 是 `v0.5.1`，其 dereferenced
+commit 正是 `78b048e…`。所以 Naki 目前解析到最新公開 package tag；這仍不代表模型權重最新或最強。
 
-但 `Package.resolved` 被 `.gitignore` 排除，新 clone 不保證固定在同一 revision。若要求可重現，應把 resolved lockfile 納入版本控制或改成 exact dependency。
+lockfile 進版控後，clean clone 會固定在同一 revision（本地 clone → `-resolvePackageDependencies` → `build` 已機械驗過，checkout 是 `78b048e`）。代價是**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**。
 
-### 0.5.0 驗證了什麼
+上游本機另有 v0.5.2 但 **tag 未 push**（remote 最高 v0.5.1，該 commit 也不在任何 remote branch）。在 push 之前把 minimum 改成 `0.5.2` 會在 resolve 階段就失敗：`no versions of 'mortalswift' match the requirement 0.5.2..<0.6.0`。
+
+### 0.5.x 驗證了什麼
 
 MortalSwift test target 用 libriichi v4 當 oracle。兩套固定 MJAI 劇本會把每個需要決策的 snapshot 同時餵給兩邊，逐格比對：
 
@@ -230,12 +234,12 @@ MortalSwift test target 用 libriichi v4 當 oracle。兩套固定 MJAI 劇本�
 
 ### 為什麼不能叫「最新最強模型」
 
-- MortalSwift 0.5.0 更新的是 encoder、和牌／期望值相關邏輯與 parity，不是重新訓練權重。
-- bundled `mortal.mlmodelc` 在 0.3.0、0.4.0、0.5.0 的 blobs 相同。
+- MortalSwift 0.5.0 更新的是 encoder、和牌／期望值相關邏輯與 parity，不是重新訓練權重；0.5.1 只多了 `inferCurrentState` 與 parity 測試（`git diff v0.5.0 v0.5.1` 僅動 README、版本常數、`NativeMortalBot.swift`、`ObsParityTests.swift`）。
+- bundled `mortal.mlmodelc` 在 0.3.0、0.4.0、0.5.0、0.5.1 的 blobs 相同。
 - Naki 沒有千局級牌力、順位、和率、放銃率或相對基準 benchmark。
 - 現有 obvious-discard sanity test 不能代表實戰強度。
 
-所以能說的是：「Naki 目前使用已完成這批 encoder parity 修正的 MortalSwift 0.5.0」；不能說「模型已升成最新最強」。
+所以能說的是：「Naki 目前使用已完成這批 encoder parity 修正的 MortalSwift 0.5.1」；不能說「模型已升成最新最強」。
 
 ### 三麻
 
@@ -322,7 +326,7 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-08-02 靜態
 | 已處理 | off mode 的顯示閘門（RecommendationView + GameHighlightScript） | source 與單測已確認；畫面未 live 驗證 |
 | P1 | pass／無效 discard／riichi failure path 會過早 mark handled | source code 已確認；尚缺 failure-path integration tests |
 | P1 | 三麻使用四麻模型 | source code 已確認 |
-| P1 | Package.resolved 未納入版本控制 | git ignore 與 project 設定已確認 |
+| 已處理 | Package.resolved 已納入版本控制、requirement 下界升到 0.5.1 | clean clone → resolve → build 已機械驗過（`78b048e`）|
 | 已處理 | 3 組無效設定已從 UI 移除；隱藏玩家名稱改以協定層重做（AUDIT §15.3） | source 已確認；協定層改寫只有合成 frame 測試，未 live 驗證 |
 | P1 | WebGL highlighter 可能誤染／重複染 | hook 執行已確認；視覺正確性未驗證 |
 | P2 | Liqi generic protobuf tag 只讀一 byte，field > 31 會錯 | source code 已確認 |

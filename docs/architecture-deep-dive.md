@@ -112,7 +112,7 @@ sync／reconnect 會重放 restore actions 或 snapshot 以恢復狀態；不應
 
 `NativeBotController` 建立 `MortalBot(playerId:version:4,useBundledModel:true)`。MortalBot 是 actor，Core ML 推論非同步執行。
 
-目前本機 package resolve 為 MortalSwift 0.5.0，但 package requirement 是 `[0.5.0,0.6.0)` 且 lockfile 未提交。模型是固定四麻 1012×34 observation／46 action；`is3P` 只改 Naki 自己的狀態與標籤，不會換成三麻模型。
+package requirement 是 `[0.5.1,0.6.0)`（0.5.0 缺 `inferCurrentState` 會編不過），實際 revision 由已提交的 `Package.resolved` 釘在 MortalSwift 0.5.1／`78b048e`。模型是固定四麻 1012×34 observation／46 action；`is3P` 只改 Naki 自己的狀態與標籤，不會換成三麻模型。
 
 ## 自動打牌主路徑
 
