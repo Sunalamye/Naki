@@ -10,7 +10,7 @@
 | Unity、Liqi、Mortal、自動打牌、自摸與高亮的 current truth | [majsoul-unity-protocol.md](majsoul-unity-protocol.md) |
 | Naki Swift／JS 元件與資料流 | [architecture-deep-dive.md](architecture-deep-dive.md) |
 | 當前 `lqc.lqbin` 下載、hash 與解析結果 | [majsoul-config-tables.md](majsoul-config-tables.md) |
-| MCP 42 tools 與安全用法 | [mcp-server-guide.md](mcp-server-guide.md) |
+| MCP 工具清單與安全用法 | [mcp-server-guide.md](mcp-server-guide.md) |
 | HTTP Debug API | [debug-api-help-endpoint.md](debug-api-help-endpoint.md) |
 | Liqi field schema | [protocol/liqi.json](protocol/liqi.json) |
 | Shell 工具約定 | [shell-tools-guide.md](shell-tools-guide.md) |

@@ -76,9 +76,12 @@ This is the 2026-08-01 source snapshot. Before runtime work, call live `tools/li
 | Anti-idle | 1 | `lobby_anti_idle` |
 | Friend room | 7 | `room_create`, `room_add_robot`, `room_start`, `room_info`, `room_join`, `room_leave`, `room_quick_test` |
 | Emoji | 2 | `game_emoji`, `game_emoji_listen` |
-| Highlight compatibility stubs | 6 | `highlight_tile`, `reset_tile_color`, `highlight_status`, `highlight_settings`, `show_recommendations`, `hide_highlight` |
 
-The six highlight tools are registered contracts that currently return explicit unavailable results. Naki's built-in WebGL recommendation highlighter is a separate Swift-to-JavaScript path; do not implement or document the MCP stubs as successful UI controls without wiring and testing a new contract.
+The six highlight stubs (`highlight_tile`, `reset_tile_color`, `highlight_status`,
+`highlight_settings`, `show_recommendations`, `hide_highlight`) were removed on 2026-08-02;
+calling them returns `Unknown tool`. Naki's built-in WebGL recommendation highlighter is a
+separate Swift-to-JavaScript path (`WebViewModel.syncGameHighlight()`), and there is no MCP
+contract for manual highlighting. Do not re-add a stub that cannot do what its name says.
 
 ## Before writing a tool
 

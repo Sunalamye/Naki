@@ -34,7 +34,7 @@ curl -X POST http://127.0.0.1:8765/js \
 `/game/*`／`/bot/*` 回傳的是 Naki 從 WebSocket 累積的 Swift state，不是 server 即時完整 snapshot。沒有 live App 或沒有對局時要明確標「未做 runtime 驗證」。
 
 <IMPORTANT>
-所有 Naki MCP 操作使用 `.claude/skills/naki-mcp-proxy/SKILL.md`；live registry 目前是 42 tools。先 `tools/list`，不要依記憶呼叫舊 Laya 工具。
+所有 Naki MCP 操作使用 `.claude/skills/naki-mcp-proxy/SKILL.md`；工具數一律先 `tools/list` 或 `get_status` 現查（2026-08-01 live 是 42，2026-08-02 移除 6 個 highlight 失敗樁後靜態計數 38），不要依記憶呼叫舊 Laya 工具。
 </IMPORTANT>
 
 ## 專案基準
@@ -125,7 +125,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests �
 
 `WebViewModel` 的其他 failure path 已收斂成同一語意（`AutoPassDispatcher` + 轉換失敗不標記）：沒有送出成功就不消化 oplist。這只有單測，沒有 live 驗證。
 
-另外 `.off` 目前只可靠地禁止自動送出；AI、側欄推薦與 WebGL 高亮仍可能更新，因為 View／highlighter 沒讀 `showRecommendation`。
+`.off` 現在同時關掉顯示：`RecommendationView` 與 `GameHighlightScript.make()` 都讀 `showRecommendation`，關閉時側欄顯示「推薦顯示已關閉」、遊戲內送 `__nakiHighlight.clear()`。AI 仍在背景計算（否則切回來會一片空白），`/bot/status` 的 recommendations 也照舊為真。腳本內容有單測，**畫面實際效果未 live 驗證**。
 
 正確修法：由 oplist arrival 驅動、先處理 hora；sender 回傳結果，收到成功 send／最好同 msgId RESPONSE 或 `ActionHule` 後才 handled；失敗保留 pending、bounded retry；Legacy 收斂到同一 resolver。
 
@@ -145,7 +145,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests �
 
 live tinted counter 證明 hook 有執行，不證明每次染對。已知限制：同名牌全染、只攔特定 WebGL2 draw、popup 是 frequency heuristic、沒有 screenshot regression。
 
-MCP 的 6 個 `highlight_*` 是未接新 hook 的相容失敗樁；不可用它們否定 App 內建自動 highlighter。
+MCP 已沒有手動高亮工具（6 個 `highlight_*` 失敗樁於 2026-08-02 移除，呼叫回 `Unknown tool`）；App 內建自動 highlighter 由 `syncGameHighlight()` 驅動，與 MCP 無關。
 
 ## 假功能不得留在 UI／文件
 

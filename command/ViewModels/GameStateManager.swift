@@ -200,12 +200,9 @@ final class GameStateManager {
         status.modelName = "mortal"   // 同上：只有四麻模型，標籤不得造假
         status.playerId = state.playerId
         status.is3P = state.is3P
-        status.canDiscard = controller.canDiscard
-        status.canRiichi = controller.canRiichi
-        status.canChi = controller.canChi
-        status.canPon = controller.canPon
-        status.canKan = controller.canKan
-        status.canAgari = controller.canAgari
+        // 六個可用動作旗標由協定層 oplist 導出（`BotAvailableActions`）。
+        // 以前它們來自零呼叫的 `updateAvailableActions()`，永遠是 false。
+        status.applyAvailableActions(controller.availableActions)
         botStatus = status
     }
 

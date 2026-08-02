@@ -47,10 +47,22 @@ nonisolated struct AutoPlayDecisionResolver {
     ///   - recommendations: Mortal 的評分結果（可為空）
     ///   - mode: 使用者選的模式
     ///   - seat: 自家座位，用來確認這批 oplist 確實是給我們的
+    ///   - isSanma: 這局是不是三麻。true 時**一律不自動送出**（見下方 fail-closed 說明）。
+    ///     預設 false 只是為了不動舊測試，正式路徑必須明確傳 `gameState.is3P`。
     static func resolve(snapshot: LiqiOperationSnapshot?,
                         recommendations: [Recommendation],
                         mode: AutoPlayMode,
-                        seat: Int) -> AutoPlayDecision {
+                        seat: Int,
+                        isSanma: Bool = false) -> AutoPlayDecision {
+
+        // 三麻 fail-closed：自動模式降級成「只顯示、不送出」。
+        //
+        // bundled 模型只有四麻一份，三麻的 observation 佈局與動作空間都不同
+        // （MortalSwift p3-1：無三麻權重、無 775×34 encoder、無拔北槽位）。
+        // 推薦本身已經是無效輸出，讓它自動送出等於用亂數打牌。
+        // 這裡刻意不整條 return `.none`：伺服器授權仍然要看得見，
+        // 使用者可以自己決定要不要照做。
+        let effectiveMode: AutoPlayMode = (isSanma && mode == .auto) ? .recommend : mode
 
         // 缺少權威資料一律 fail closed。
         // 舊行為是「沒有 snapshot 時預設當自摸送出」，那等於在沒有伺服器授權的
@@ -71,7 +83,7 @@ nonisolated struct AutoPlayDecisionResolver {
         // 模型只該決定「和的價值」，不該決定「能不能和」。
         if let hora = snapshot.horaOperation {
             let tile = snapshot.contextTile ?? ""
-            switch mode {
+            switch effectiveMode {
             case .auto:
                 return .send(action: .hora, tile: tile)
             case .recommend:
@@ -85,9 +97,9 @@ nonisolated struct AutoPlayDecisionResolver {
         guard let top = recommendations.first else {
             // 有副露機會但模型沒有意見 → 送「過」，否則對局會停在那裡等我們回應
             if snapshot.isCallOpportunity {
-                return mode == .auto
+                return effectiveMode == .auto
                     ? .send(action: .none, tile: "")
-                    : .none(reason: "no_recommendation_mode_\(mode.rawValue)")
+                    : .none(reason: "no_recommendation_mode_\(mode.rawValue)\(isSanma ? "_sanma" : "")")
             }
             return .none(reason: "no_recommendation")
         }
@@ -97,7 +109,7 @@ nonisolated struct AutoPlayDecisionResolver {
             return .none(reason: "action_\(top.actionType.rawValue)_not_in_oplist\(snapshot.rawTypes)")
         }
 
-        switch mode {
+        switch effectiveMode {
         case .auto:
             return .send(action: top.actionType, tile: top.displayTile)
         case .recommend:

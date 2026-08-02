@@ -14,7 +14,11 @@ claude mcp add --transport http naki http://127.0.0.1:8765/mcp
 
 Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做 `tools/list` 再選工具，不可依舊 catalog 猜名稱。
 
-## 42 個現行工具
+## 現行工具
+
+工具數以 live `tools/list` 或 `get_status.tools_count` 為準；
+`MCPToolRegistry.registerBuiltInTools()` 是程式端唯一真實來源（2026-08-02 靜態計數 38）。
+2026-08-01 的 live snapshot 是 42，其中含 6 個已於 2026-08-02 移除的 highlight 失敗樁。
 
 ### 系統（4）
 
@@ -92,18 +96,15 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 | `game_emoji` | 送表情 |
 | `game_emoji_listen` | 讀取／清除已捕獲的表情廣播 |
 
-### 高亮相容失敗樁（6）
+### 高亮：沒有 MCP 工具（2026-08-02 移除 6 個失敗樁）
 
-| Tool | 現況 |
-|------|------|
-| `highlight_tile` | 固定回 unavailable |
-| `reset_tile_color` | 固定回 unavailable |
-| `highlight_status` | `available=false` |
-| `highlight_settings` | 固定回 unavailable |
-| `show_recommendations` | 固定回 unavailable |
-| `hide_highlight` | 固定回 unavailable |
+`highlight_tile`／`reset_tile_color`／`highlight_status`／`highlight_settings`／
+`show_recommendations`／`hide_highlight` 已移除，呼叫會得到 `Unknown tool: <name>`。
 
-這 6 個工具尚未接到新的 `window.__nakiHighlight`。App 內建自動 WebGL 高亮是另一條活路徑；MCP stub 失敗不代表內建 hook 不存在。
+它們的參數契約源自 Laya 牌物件，從來沒接到現行的 `window.__nakiHighlight` WebGL hook，
+也不打算接：App 內建的自動推薦高亮由 Swift 的 `WebViewModel.syncGameHighlight()` 直接驅動
+（模式 = 關閉時送 `clear()`），MCP 不需要第二個入口。要程式化取得推薦請用
+`bot_status` / `game_hand`。
 
 ## 已移除，不可再呼叫
 

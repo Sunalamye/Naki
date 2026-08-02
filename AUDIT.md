@@ -18,7 +18,7 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 |------|------|------|
 | 客戶端 | live Naki `/js` 唯讀 probe | Unity WebGL 4.0.45；Laya／DesktopMgr／uiscript 不存在 |
 | Debug API | live `/status`、`/bot/status`、`/game/*` | loopback server 與 Swift protocol state 可用 |
-| MCP registry | live `tools/list` | 42 tools |
+| MCP registry | live `tools/list`（2026-08-01） | 42 tools；含 6 個已於 2026-08-02 移除的 highlight 失敗樁，移除後靜態計數 38，**未 live 複查** |
 | Liqi schema | live manifest fresh download + byte compare | repo `liqi.json` 與 CDN 完全相同 |
 | config | live manifest fresh download + repo parser | 41 tables／263 sheets／119,289 rows |
 | Mortal parity | fresh Debug／Release tests | 各 47 tests 通過；固定 fixtures obs／mask 零落差 |
@@ -54,9 +54,11 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 手動 MCP／HTTP `game_action(action=hora)` 另有相同類型的缺口：沒有 oplist snapshot 時目前會猜 tsumo，應改成 fail closed。
 
-### P1：off mode 的顯示語意未落實
+### 已處理：off mode 的顯示語意（2026-08-02）
 
-`.off` 會阻止自動 sender，但 AI 仍在背景計算；RecommendationView 與 WebGL highlighter 沒讀 `showRecommendation`，因此側欄／遊戲內標記仍可能更新。README 已改成描述 current behavior；若產品意圖是完全不顯示，仍需接上 mode gate 並清除現有 target。
+`.off` 現在同時關掉顯示：`RecommendationView` 讀 `autoPlayMode.showRecommendation`，關閉時顯示「推薦顯示已關閉」；`GameHighlightScript.make()` 在 `.off` 一律回 `__nakiHighlight.clear()`，切回 `.recommend`／`.auto` 恢復染色。`setAutoPlayMode` 會立刻重推一次，不必等下一個 Bot 回應。AI 仍在背景計算（刻意：否則切回來是空白）。
+
+腳本內容有 7 條單測（`GameHighlightScriptTests`）。**畫面上真的清空／恢復未 live 驗證**——WebGL hook 沒有 screenshot regression。
 
 ### 已處理：其他 failure path 不再過早消化 snapshot
 
@@ -76,9 +78,41 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 正確說法是「目前使用 MortalSwift 0.5.0 的 encoder/parity 修正版」；不能說「已換最新最強權重」。
 
-### P1：三麻沒有專用模型
+### P1：三麻沒有專用模型（2026-08-02 改為 fail-closed）
 
 `is3P` 只改 Naki 狀態與標籤；推論仍建立同一個 Mortal v4 四麻 model。三麻不應宣稱支援。
+
+2026-08-02 起（MortalSwift p3-1「不做」路線的驗收項）：
+
+- **自動送出在三麻一律停用**，三層 fail-closed：`AutoPlayGate`（1 秒輪詢，含**繞過 resolver 的
+  `.sendPass`** 那條路）、`AutoPlayDecisionResolver`（`.auto` 降級成 `.recommend`）、
+  `WebViewModel.triggerAutoPlayNow`（手動／MCP `bot_trigger` 入口）。
+- **UI 明示**：`BotStatusView` 的 `SanmaUnsupportedNotice` 顯示
+  「三麻不支援：內建只有四麻模型，推薦結果無效；自動打牌已停用。」
+  模型標籤仍是 `Mortal (4P) ⚠️ 三麻無專用模型`。
+
+單元測試覆蓋三層 fail-closed（gate 4 條、resolver 4 條）。**沒有 live 三麻對局驗證**。
+
+### 已處理：可用動作六欄不再恆 false（2026-08-02）
+
+`canDiscard/canRiichi/canChi/canPon/canKan/canAgari` 的唯一寫入點曾是零呼叫的
+`NativeBotController.updateAvailableActions()`（`updateInternalState` 尾巴只留了
+「移到 react() 後處理」的註解），所以 `BotStatusView` 六個徽章與 `/bot/status` 六個欄位永遠 false。
+
+現在改為協定層 oplist 的投影（`BotAvailableActions(snapshot:)` 讀 `LiqiOperationStore.pending`）：
+權威與送出端（`AutoPlayGate` / resolver / sender）一致，不會出現「徽章亮著但送不出去」。
+`updateAvailableActions()` 與同樣無人讀的 `lastCandidates` 一併移除。
+
+單元測試 10 條（`BotAvailableActionsTests`，含 controller 與 `GameStateManager` 兩層）。
+**沒有 live `/bot/status` 複查**——需要對局中的 oplist。
+
+### 已處理：MCP 6 個 highlight 失敗樁已移除（2026-08-02）
+
+`highlight_tile` / `reset_tile_color` / `highlight_status` / `highlight_settings` /
+`show_recommendations` / `hide_highlight` 直接移除（呼叫回 `Unknown tool`）。
+它們的參數契約源自 Laya 牌物件、從未接到 `__nakiHighlight`，且有明確替代面
+（`bot_status` / `game_hand` 讀推薦；內建高亮由 `syncGameHighlight()` 驅動）。
+靜態註冊數 44 → 38。**live `tools/list` 未複查**。
 
 ### 已處理：無效 UI 控制已移除
 
@@ -105,7 +139,11 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 - server reject（送出成功但伺服器不接受）／中斷 cleanup；send failure 只有 fixture B／B' 的注入版本。
 - Legacy iOS 17–25 實機完整對局。
 - chi variants、赤五 combination、ankan／minkan／kakan。
-- WebGL 高亮與 action popup 的視覺正確性。
+- WebGL 高亮與 action popup 的視覺正確性（含 `.off` 是否真的在畫面上清空、切回是否恢復）。
+- 三麻對局的 fail-closed 行為（只有單測）。
+- 移除 6 個 highlight 工具後的 live `tools/list` 數量。
+- `/bot/status` 六個 canXxx 在 live 對局中的真值。
+- 持紅五（mask 34–36）時能否正常打出。
 - AI 相對其他模型的實戰強度。
 
 ## 驗證環境與副作用

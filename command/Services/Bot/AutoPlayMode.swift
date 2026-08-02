@@ -22,11 +22,18 @@ import Foundation
 
 /// 自動打牌模式
 enum AutoPlayMode: String, CaseIterable {
-    case off = "關閉"            // 不自動打牌；目前 AI、側欄與 WebGL 高亮仍可能更新
+    case off = "關閉"            // 不自動打牌，也不顯示推薦（側欄與遊戲內高亮都清空）
     case recommend = "推薦"      // 顯示推薦，需要手動打牌
     case auto = "自動"           // 顯示推薦，自動執行推薦動作
 
-    /// 產品意圖上的顯示旗標；目前 View／WebGL highlighter 尚未讀取它（見 p1-4）。
+    /// 是否顯示推薦（側欄 `RecommendationView` 與遊戲內 `__nakiHighlight` 共用同一個閘門）
+    ///
+    /// 這個旗標曾經**沒有任何讀取者**：`.off` 只擋得住自動送出，側欄照列推薦、
+    /// WebGL 高亮照染，於是「關閉」在畫面上跟「推薦」看起來一樣。
+    /// 現在兩個顯示面都讀它（`RecommendationView`、`WebViewModel.syncGameHighlight`）。
+    ///
+    /// 注意語意邊界：`.off` 關的是**顯示與送出**，不是推論——
+    /// Bot 仍在背景跟著牌局更新狀態，否則切回 `.recommend` 會是一片空白。
     var showRecommendation: Bool {
         return self != .off
     }

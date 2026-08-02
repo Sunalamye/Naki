@@ -200,7 +200,9 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
         // 更新推薦顯示並觸發自動打牌
         if let firstRec = recommendations.first {
-            highlightedTile = firstRec.displayTile
+            // `.off` 不顯示推薦：`highlightedTile` 必須跟著空，否則它會宣稱
+            // 畫面上標了一張其實沒有標的牌（側欄的閘門在 `RecommendationView`）。
+            highlightedTile = autoPlayMode.showRecommendation ? firstRec.displayTile : nil
             triggerAutoPlay(recommendation: firstRec)
         } else if LiqiOperationStore.shared.pending?.horaOperation != nil {
             // 伺服器提供和牌時，不因為模型沒意見就放過（與主路徑同一條規則）
@@ -221,6 +223,10 @@ class LegacyWebViewModel: WebViewModelProtocol {
     func setAutoPlayMode(_ mode: AutoPlayMode) {
         autoPlayMode = mode
         AutoPlayModeStore.save(mode)
+        // 切到 `.off` 時把「現在標了哪一張」收掉；切回來時由下一次 Bot 回應填上。
+        if !mode.showRecommendation {
+            highlightedTile = nil
+        }
         bridgeLog("[LegacyWebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
     }
 
@@ -241,7 +247,9 @@ class LegacyWebViewModel: WebViewModelProtocol {
         let seat = botStatus.playerId
 
         let decision = AutoPlayDecisionResolver.resolve(
-            snapshot: snapshot, recommendations: recommendations, mode: mode, seat: seat)
+            snapshot: snapshot, recommendations: recommendations, mode: mode, seat: seat,
+            // 三麻 fail-closed 與主路徑同一條規則：只有四麻模型，不自動送出。
+            isSanma: gameState.is3P)
 
         guard case .send(let action, let tile) = decision else {
             if case .none(let reason) = decision {

@@ -4,7 +4,7 @@
 
 **Default endpoint:** `http://127.0.0.1:8765/mcp`
 
-**Snapshot count:** 42 tools
+**Snapshot count:** 42 tools at the 2026-08-01 live check. Six highlight stubs were removed on 2026-08-02, so the current static registration count is 38 — always trust live `tools/list` over either number.
 
 This file is a routing snapshot, not a data source. For every Naki request, connect to the running Naki process, call live `tools/list`, and use the name and `inputSchema` returned by that call. If live Naki is unavailable, report the query as unverified; do not answer from this catalog.
 
@@ -103,18 +103,17 @@ Room mutation tools require explicit user authorization. `room_quick_test` is ne
 | `game_emoji` | `emo_id` required; `count?`, `except_self?`, `awaitResponseMs?` | Sends a Liqi game broadcast |
 | `game_emoji_listen` | `clear?` | Reads captured broadcasts; `clear=true` also clears the local store |
 
-## Highlight compatibility stubs (6)
+## Highlight: no MCP tools (six stubs removed 2026-08-02)
 
-| Tool | Parameters | Current result |
-|---|---|---|
-| `highlight_tile` | legacy `tileIndex?`, `color?` | unavailable |
-| `reset_tile_color` | legacy `tileIndex?` | unavailable |
-| `highlight_status` | none | `available=false` |
-| `highlight_settings` | legacy booleans | unavailable |
-| `show_recommendations` | legacy `recommendations?` | unavailable |
-| `hide_highlight` | none | unavailable |
+`highlight_tile`, `reset_tile_color`, `highlight_status`, `highlight_settings`,
+`show_recommendations` and `hide_highlight` were removed. Calling them now returns
+`Unknown tool: <name>`.
 
-These six names remain only as explicit compatibility failures. Naki's built-in `window.__nakiHighlight` WebGL hook is separate and does not make these MCP tools functional.
+Their parameter contracts came from Laya tile objects and were never wired to the current
+`window.__nakiHighlight` WebGL hook. Naki's built-in recommendation highlighting is driven
+directly from Swift (`WebViewModel.syncGameHighlight()`, which sends `clear()` when the mode
+is off); MCP does not need a second entry point. Read recommendations via `bot_status` /
+`game_hand`.
 
 ## Removed tools
 

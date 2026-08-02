@@ -225,4 +225,64 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       }
     }
   }
+
+  // MARK: - 三麻 fail-closed（MortalSwift p3-1「不做」路線的驗收）
+
+  /// 三麻對局：自動模式降級成「只顯示、不送出」。
+  ///
+  /// 內建 Core ML 只有四麻一份（obs 1012×34、action 46）。三麻的牌山、規則與
+  /// observation 佈局都不同，拿四麻模型推三麻**結構上無效**——讓它自動送出
+  /// 等於用亂數打牌。
+  func testSanmaDowngradesAutoToSurfaceOnly() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard]),
+      recommendations: [rec(.discard, "9s")],
+      mode: .auto,
+      seat: 0,
+      isSanma: true)
+
+    XCTAssertEqual(decision, .surfaceOnly(action: .discard, tile: "9s"),
+                   "三麻不得自動送出，但仍應讓 UI 看得到推薦")
+  }
+
+  /// 三麻連伺服器提供的和牌也不自動送——不自動送出**任何**動作
+  func testSanmaDoesNotAutoSendHora() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard, .riichi, .tsumo]),
+      recommendations: [rec(.discard, "9s")],
+      mode: .auto,
+      seat: 0,
+      isSanma: true)
+
+    if case .send = decision {
+      XCTFail("三麻不得自動送出和牌，實際: \(decision)")
+    }
+    XCTAssertEqual(decision, .surfaceOnly(action: .hora, tile: "9s"))
+  }
+
+  /// 三麻的副露機會也不會自動送「過」
+  func testSanmaDoesNotAutoPass() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.chi]),
+      recommendations: [],
+      mode: .auto,
+      seat: 0,
+      isSanma: true)
+
+    if case .send = decision {
+      XCTFail("三麻不得自動送出過，實際: \(decision)")
+    }
+  }
+
+  /// 四麻不受影響——確認上面三條不是「把所有人都關掉」的假綠燈
+  func testFourPlayerStillAutoSends() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard]),
+      recommendations: [rec(.discard, "9s")],
+      mode: .auto,
+      seat: 0,
+      isSanma: false)
+
+    XCTAssertEqual(decision, .send(action: .discard, tile: "9s"))
+  }
 }

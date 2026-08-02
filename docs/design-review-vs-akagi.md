@@ -166,7 +166,7 @@
 |------|------|-------|
 | 安裝門檻 | 開 App 就好 | 要信任 CA（MITM）或裝 Chromium profile |
 | 推論硬體 | Apple Neural Engine | CPU（candle）|
-| AI 助理整合 | MCP server，42 個工具 | 無 |
+| AI 助理整合 | MCP server（數十個工具，以 live `tools/list` 為準） | 無 |
 | 遊戲動作可靠性 | 協定層，有 RESPONSE 可查證 | CDP 點擊 |
 | 隱藏玩家名稱 | 協定層等長改寫 | 無 |
 | 平台原生度 | SwiftUI，macOS/iOS | Tauri webview |

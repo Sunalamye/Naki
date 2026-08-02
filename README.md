@@ -83,7 +83,7 @@ AI 推論不呼叫外部推論服務，模型和運算都在本機；雀魂遊�
 
 | 模式 | 行為 |
 |:---:|-----|
-| **關閉** | 不自動送動作；目前 AI 仍在背景計算，側欄／WebGL 高亮可能繼續更新 |
+| **關閉** | 不自動送動作，也不顯示推薦（側欄顯示「推薦顯示已關閉」，遊戲內高亮清空）；AI 仍在背景計算，切回來立刻有結果 |
 | **推薦** | 顯示建議，你自己決定 |
 | **自動** | 依 AI／server oplist 自動送出；自摸整合仍有已知 P0 缺口 |
 
@@ -224,7 +224,8 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 <summary><b>MCP Server（Claude Code 整合）</b></summary>
 
 內建 [Model Context Protocol](https://modelcontextprotocol.io/) server，
-**42 個工具**，與 Debug API 共用同一個 port。
+與 Debug API 共用同一個 port。工具數請以 `tools/list` 或 `get_status.tools_count` 現查
+（2026-08-02 靜態註冊 38 個；2026-08-01 live 為 42，含 6 個已移除的高亮失敗樁）。
 
 ```bash
 claude mcp add --transport http naki http://localhost:8765/mcp
@@ -277,7 +278,7 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 | 原生側欄視覺呈現 | ⚠️ source binding 已確認；本次沒有 screenshot regression |
 | 全自動打牌 | ⚠️ discard／pon／riichi／ron 有 runtime 證據；自摸整合仍有 P0 缺口 |
 | WebGL 牌面／動作按鈕高亮 | ⚠️ hook 活性已確認；視覺命中尚未驗證 |
-| MCP Server | ✅ live registry 為 42 tools |
+| MCP Server | ✅ 2026-08-01 live registry 為 42 tools；移除 6 個高亮失敗樁後靜態計數 38（未 live 複查） |
 | 表情協定收送 | ⚠️ 現行 tools／Liqi 路徑存在；本次未做 live 收送 round-trip |
 | iOS 17–25 相容路徑 | ⚠️ 只驗過編譯與單元測試，未實機跑過對局 |
 | 三麻 | ❌ 見下 |
@@ -287,8 +288,14 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 
 Naki repo 目前沒有三麻 constructor、encoder 或 bundled 權重。
 三麻對局時仍會建立同一個 Mortal v4 四麻模型——輸入結構根本不同，
-輸出不是「稍微偏差」而是**結構上無效**。因此 UI 會明確標示
-`Mortal (4P) ⚠️ 三麻無專用模型`，不會假裝有支援。
+輸出不是「稍微偏差」而是**結構上無效**。因此：
+
+- UI 明確標示 `Mortal (4P) ⚠️ 三麻無專用模型`，並在 Bot 狀態面板顯示
+  「三麻不支援：內建只有四麻模型，推薦結果無效；自動打牌已停用。」
+- **三麻對局的自動送出一律停用（fail-closed）**，選「自動」也不會送出任何動作；
+  推薦仍會顯示，但那只是四麻模型的輸出，不該照做。
+
+這條路徑只有單元測試，**沒有 live 三麻對局驗證**。
 
 ---
 

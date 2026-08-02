@@ -45,12 +45,14 @@ final class AutoPlayGateTests: XCTestCase {
     }
 
     private func input(auto: Bool = true,
+                       sanma: Bool = false,
                        inFlight: Bool = false,
                        snapshot: LiqiOperationSnapshot?,
                        recs: [Recommendation] = [],
                        now: Date = Date(),
                        grace: TimeInterval = 2.0) -> AutoPlayGate.Input {
         .init(isAutoMode: auto,
+              isSanma: sanma,
               hasActionInFlight: inFlight,
               snapshot: snapshot,
               recommendations: recs,
@@ -160,12 +162,48 @@ final class AutoPlayGateTests: XCTestCase {
         XCTAssertEqual(d, .proceed)
     }
 
+    // MARK: - 三麻 fail-closed
+
+    /// 三麻對局一律不自動送出：內建只有四麻模型，推薦是結構上無效的輸出。
+    ///
+    /// 擋在閘門而不是只擋在 resolver，是因為 `.sendPass` 那條路
+    /// **不經過 resolver**（`checkAndRetriggerAutoPlay` 直接呼叫 `liqiSender.pass`）。
+    func testSkipsEverythingInSanma() {
+        let s = snapshot(types: [1])
+        let d = AutoPlayGate.evaluate(input(sanma: true, snapshot: s, recs: [rec(.discard)]))
+        XCTAssertEqual(d, .skip(.sanmaUnsupported))
+    }
+
+    /// 連「伺服器提供和牌」這條最高優先的路也不放行——fail-closed 的意思是全部關掉
+    func testSanmaBlocksForceHora() {
+        let now = Date()
+        let s = snapshot(types: [9], capturedAt: now.addingTimeInterval(-30))
+        let d = AutoPlayGate.evaluate(input(sanma: true, snapshot: s, recs: [], now: now))
+        XCTAssertEqual(d, .skip(.sanmaUnsupported))
+    }
+
+    /// 三麻也不會自動送「過」——那同樣是送出遊戲動作
+    func testSanmaBlocksAutoPass() {
+        let now = Date()
+        let s = snapshot(types: [3], capturedAt: now.addingTimeInterval(-30))
+        let d = AutoPlayGate.evaluate(input(sanma: true, snapshot: s, recs: [], now: now))
+        XCTAssertEqual(d, .skip(.sanmaUnsupported))
+    }
+
+    /// 四麻不受影響（確認上面那條不是把所有人都關掉的假綠燈）
+    func testFourPlayerIsUnaffected() {
+        let s = snapshot(types: [1])
+        let d = AutoPlayGate.evaluate(input(sanma: false, snapshot: s, recs: [rec(.discard)]))
+        XCTAssertEqual(d, .proceed)
+    }
+
     // MARK: - 閘門互不打架
 
     /// 所有 skip 都必須帶原因——沒有原因的 skip 就是查不出來的死結
     func testEverySkipCarriesAReason() {
         let cases: [AutoPlayGate.Input] = [
             input(auto: false, snapshot: snapshot(types: [1])),
+            input(sanma: true, snapshot: snapshot(types: [1]), recs: [rec(.discard)]),
             input(inFlight: true, snapshot: snapshot(types: [1])),
             input(snapshot: nil),
             input(snapshot: snapshot(types: [3], capturedAt: Date()), recs: []),

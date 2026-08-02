@@ -24,10 +24,10 @@
 | AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.0 並不是新訓練模型 |
 | 「最新最強」 | **不能這樣宣稱**。0.5.0 是當日最新公開 package tag，但權重未更新，也沒有牌力 benchmark |
 | 四麻 | 唯一有正確模型形狀與 parity 證據的模式 |
-| 三麻 | 沒有三麻模型；目前仍把三麻狀態送進四麻模型，不應宣稱支援 |
+| 三麻 | 沒有三麻模型；仍把三麻狀態送進四麻模型。2026-08-02 起自動打牌在三麻 fail-closed，UI 明示「三麻不支援」 |
 | 自摸保護 | resolver 純邏輯已存在且單測通過，但整合仍有漏觸發與錯誤完成兩個漏洞 |
 | 遊戲內高亮 | 現行 WebGL hook 會執行；尚未證明每次都染到正確牌／按鈕 |
-| MCP | live `tools/list` 為 42 個；6 個 MCP 高亮工具仍只是明確失敗的相容樁 |
+| MCP | 2026-08-01 live `tools/list` 為 42 個；2026-08-02 移除 6 個高亮失敗樁，靜態計數 38（未 live 複查） |
 
 ## 現場唯讀查詢
 
@@ -39,7 +39,7 @@
 - loader、framework、wasm、data 都來自 `chs_t-WebGL-release-4.0.45(45)`。
 - `unityInstance` 是 script-scope 的裸識別字；`window.unityInstance` 不存在。
 - `window.__nakiWebSocket` 與 `window.__nakiHighlight` 存在；highlighter 的 `tinted` counter 持續增加。
-- live `POST /mcp` 的 `tools/list` 回傳 42 個工具。
+- live `POST /mcp` 的 `tools/list` 回傳 42 個工具（此後移除 6 個高亮失敗樁，數字以下次 live 查詢為準）。
 
 這些 probe 是讀取狀態，不會送遊戲動作。最後重查時，running Naki 的 `/help` 已回 version 3.1 與 42 tools；這只證明部署中的 help／registry 版本，因為架構段落本身是程式內的靜態字串。Unity 客戶端由 `/js` probe 證明，Liqi 動作由 source 與實際 trace 證明；任何一項都不能替尚未走到的自摸、失敗重試或視覺流程背書。running build 未附可識別 commit，因此 source help／Debug 首頁的未提交後續調整仍視為 working-tree candidate。
 
@@ -186,8 +186,10 @@ Legacy iOS 17–25 的第三個漏洞（完全沒走 resolver）已修，見 AUD
 另有一條手動工具風險：MCP／HTTP `game_action` 使用 `action=hora` 且沒有 oplist snapshot 時，
 `NakiGameAction` 目前會 fallback 成 tsumo，而不是 fail closed。這不是自動 resolver 路徑，但同樣應改成缺權威資料就拒絕。
 
-Mode 也有一個 current 語意差距：`.off` 能阻止自動 sender，但 AI 仍在背景推論，
-RecommendationView 與 `syncGameHighlight()` 沒有讀 `showRecommendation`，所以側欄／遊戲內高亮仍可能更新。「關閉 = AI 不算也不顯示」不是目前程式事實。
+Mode 語意（2026-08-02 收斂）：`.off` 同時關掉自動送出與顯示——`RecommendationView` 顯示「推薦顯示已關閉」，
+`GameHighlightScript.make()` 回 `__nakiHighlight.clear()`。AI 仍在背景推論（刻意保留：否則切回 `.recommend` 是一片空白），
+`/bot/status` 的 recommendations 也照舊為真。「關閉 = 不顯示、不送出」是目前程式事實；
+「關閉 = AI 也不算」**不是**。畫面上真的清空未 live 驗證。
 
 ### 正確調整方向
 
@@ -261,7 +263,8 @@ live `state()` 的 tinted counter 持續增加，能證明 hook 與染色分支�
 - 帶 alpha 的「其餘手牌調淡」與字牌 UV 修正仍是未提交、未做視覺回歸的工作樹變更。
 - 沒有 JS 自動測試或 screenshot-based 驗收。
 
-MCP 的 6 個 `highlight_*` 工具是另一條舊 API，目前仍固定回 unavailable；這不代表 Naki 內建自動 WebGL 高亮不存在。
+MCP 已沒有手動高亮工具：6 個 `highlight_*` 舊 API 於 2026-08-02 移除（呼叫回 `Unknown tool`）。
+內建自動 WebGL 高亮不受影響，它由 Swift 的 `syncGameHighlight()` 直接驅動。
 
 ## 客戶端資源與配置表
 
@@ -293,11 +296,11 @@ res/config/lqc.lqbin prefix     v0.11.252.w
 
 ## Debug／MCP 現況
 
-Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。live registry 為 42 個工具：
+Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-08-02 靜態註冊 38 個工具（live 數字請現查 `tools/list`）：
 
 | 類別 | 數量 |
 |------|-----:|
-| 系統 | 4 |
+| 系統 | 6 |
 | Bot | 7 |
 | 遊戲狀態／動作 | 6 |
 | JavaScript | 1 |
@@ -305,7 +308,6 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。live registry 為
 | 防閒置 | 1 |
 | 友人房 | 7 |
 | 表情 | 2 |
-| 高亮相容失敗樁 | 6 |
 
 `detect`、`explore`、座標 click／calibrate、`ui_names_*`、`lobby_navigate` 等舊工具不存在。完整列表見 [mcp-server-guide.md](mcp-server-guide.md)。
 
@@ -317,7 +319,7 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。live registry 為
 | P0 | hora send 失敗仍被 mark handled | source code 已確認；尚缺 live failure fixture |
 | 已處理 | Legacy iOS 已接上 resolver（AUDIT §15.2） | source 已確認；未 live 驗證 |
 | P1 | 手動 `game_action(hora)` 無 snapshot 時會猜 tsumo | source code 已確認；應改 fail closed |
-| P1 | off mode 仍可能顯示推薦／高亮 | source code 已確認；sender mode gate 仍有效 |
+| 已處理 | off mode 的顯示閘門（RecommendationView + GameHighlightScript） | source 與單測已確認；畫面未 live 驗證 |
 | P1 | pass／無效 discard／riichi failure path 會過早 mark handled | source code 已確認；尚缺 failure-path integration tests |
 | P1 | 三麻使用四麻模型 | source code 已確認 |
 | P1 | Package.resolved 未納入版本控制 | git ignore 與 project 設定已確認 |

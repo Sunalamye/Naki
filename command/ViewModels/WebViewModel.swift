@@ -277,6 +277,7 @@ class WebViewModel: WebViewModelProtocol {
     let snapshot = LiqiOperationStore.shared.pending
     let decision = AutoPlayGate.evaluate(.init(
       isAutoMode: autoPlayMode == .auto,
+      isSanma: gameState.is3P,
       hasActionInFlight: currentExecutionId != nil,
       snapshot: snapshot,
       recommendations: recommendations,
@@ -428,8 +429,12 @@ class WebViewModel: WebViewModelProtocol {
 
     // 推薦一律由原生 SwiftUI 面板呈現：ContentView 直接綁 `recommendations` /
     // `botStatus`（RecommendationView、BotStatusView），@Observable 會自動刷新。
-    // 註：`AutoPlayMode.showRecommendation` 目前沒有 View 讀取（原本只用來開關遊戲內高亮）。
-    highlightedTile = recommendations.first?.displayTile
+    // 側欄的顯示閘門在 `RecommendationView` 內（讀 `autoPlayMode.showRecommendation`）：
+    // 資料層保持真實，`/bot/status` 仍看得到模型實際算出什麼。
+    //
+    // `highlightedTile` 是「現在標了哪一張」的對外欄位，`.off` 時必須是 nil，
+    // 否則它會宣稱畫面上有一個其實已經被 clear() 掉的標記。
+    highlightedTile = autoPlayMode.showRecommendation ? recommendations.first?.displayTile : nil
 
     // 遊戲畫面內高亮：Unity 下由 naki-core.js 的 __nakiHighlight 攔 WebGL draw，
     // 依 atlas UV 暫時改 _Tint / _Color，draw 後立刻還原。
@@ -488,73 +493,17 @@ class WebViewModel: WebViewModelProtocol {
   ///
   /// Unity WebGL 沒有 JS per-tile object；JS 從 `_MainTex_ST` atlas UV 辨識牌名。
   /// Swift 只傳牌 identity 與顏色，不推算螢幕位置或手牌 index。
+  ///
+  /// 腳本內容由純函式 `GameHighlightScript.make` 決定（見該處：唯一能對
+  /// 「`.off` 是不是真的清空」寫機械測試的地方）。
   private func syncGameHighlight() {
     guard let page = webPage else { return }
 
-    // 標記的是「哪一張牌」而不是「第幾張」。
-    // JS 端從遊戲畫牌時的圖集 UV 認出牌面，所以這裡只要給牌名，
-    // 不必知道它排在第幾個——手牌張數變動、立直抬牌、畫面邊緣混入別的牌
-    // 都不再影響。
-    var marks: [[String: Any]] = []
-
-    if let top = recommendations.first {
-      switch top.actionType {
-      case .discard, .riichi:
-        // 綠：建議打出的牌。顏色是乘在牌面貼圖上的，太深會看不見牌面，
-        // 所以只壓非主色通道。
-        marks.append(["tile": top.displayTile, "color": [0.45, 1.0, 0.5]])
-
-        // 其餘手牌調淡，讓推薦那張自己浮出來。
-        //
-        // 只染推薦牌的話，在花色鮮豔的牌面皮膚上對比度不夠——
-        // 把其他牌壓下去比把一張牌拉上來更有效，也比較不吵。
-        // 第 4 個分量是 alpha 倍率，會乘在遊戲原本的 alpha 上。
-        let recommended = top.displayTile
-        for tile in Set(tehaiTiles) where tile != recommended {
-          marks.append(["tile": tile, "color": [0.62, 0.62, 0.68, 0.55]])
-        }
-      case .chi, .pon, .kan:
-        // 橙：副露會用掉的手牌（組合取自協定層的 oplist，不是推測）
-        let snapshot = LiqiOperationStore.shared.latest
-        let liqiType: LiqiOperationType? = {
-          switch top.actionType {
-          case .chi: return .chi
-          case .pon: return .pon
-          case .kan: return snapshot?.kanOperation
-          default: return nil
-          }
-        }()
-        let combo = liqiType.flatMap { snapshot?.operation(of: $0) }?.combination.first
-        for tile in (combo?.split(separator: "|") ?? []).compactMap({
-          LiqiTileCode.mjai(fromMajsoul: String($0))
-        }) {
-          marks.append(["tile": tile, "color": [1.0, 0.75, 0.4]])
-        }
-      default:
-        break   // 和了 / 過：沒有對應的手牌可標
-      }
-    }
-
-    // 副露彈出面板（吃／碰／跳過按鈕）：位置不在 uniform 裡，JS 端靠「只在有機會時
-    // 才出現」自行辨識，這裡只負責告訴它「現在有機會、用什麼顏色」。
-    //
-    // **只在 Mortal 建議副露時才染色**。建議「過」時不要動它——
-    // 把整個面板調暗會讓按鈕看起來像壞掉或被停用（實測畫面確認過），
-    // 而且「沒有標記」本身就已經表達「這個機會不值得」。
-    var popup = "null"
-    if let top = recommendations.first,
-       LiqiOperationStore.shared.latest?.isCallOpportunity == true {
-      switch top.actionType {
-      case .chi, .pon, .kan, .hora: popup = "[0.45,1.0,0.5]"
-      default: break
-      }
-    }
-
-    let payload = (try? JSONSerialization.data(withJSONObject: marks))
-      .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-    let script = (marks.isEmpty && popup == "null")
-      ? "window.__nakiHighlight?.clear();"
-      : "window.__nakiHighlight?.set(\(payload), \(popup));"
+    let script = GameHighlightScript.make(
+      mode: autoPlayMode,
+      recommendations: recommendations,
+      tehaiTiles: tehaiTiles,
+      snapshot: LiqiOperationStore.shared.latest)
 
     Task { _ = try? await page.callJavaScript(script) }
   }
@@ -591,8 +540,11 @@ class WebViewModel: WebViewModelProtocol {
     bridgeLog("[WebViewModel] 自動打牌模式設定為: \(mode.rawValue)")
     debugServer?.addLog("模式已變更: \(mode.rawValue), 推薦數: \(recommendations.count)")
 
-    // ⚠️ 目前 mode 只可靠地控制「是否自動送出」。View 與 syncGameHighlight() 沒讀
-    // showRecommendation，所以 off 模式仍可能顯示側欄／遊戲內高亮，需後續收斂語意。
+    // 模式一改就要立刻反映在畫面上，不能等下一次 Bot 回應：
+    // 切到 `.off` 時把遊戲內標記清掉，切回 `.recommend` / `.auto` 時重新染上。
+    // （側欄是 SwiftUI 綁定，讀 `autoPlayMode` 會自己重畫。）
+    highlightedTile = mode.showRecommendation ? recommendations.first?.displayTile : nil
+    syncGameHighlight()
 
     // 只有全自動模式才觸發自動打牌
     if mode.isFullAuto, !recommendations.isEmpty {
@@ -686,6 +638,16 @@ class WebViewModel: WebViewModelProtocol {
                           forcedAction: Recommendation.ActionType?) {
     guard webPage != nil else {
       bridgeLog("[WebViewModel] 無法觸發: 無 WebPage")
+      return
+    }
+
+    // 三麻 fail-closed（與 `AutoPlayGate` / `AutoPlayDecisionResolver` 同一條規則）。
+    //
+    // 這裡是手動觸發（含 MCP `bot_trigger`）的入口，不經過 1 秒輪詢的閘門，
+    // 所以要自己擋一次。內建模型只有四麻一份，三麻的推薦不該被自動送出。
+    if gameState.is3P {
+      bridgeLog("[WebViewModel] 略過觸發: 三麻不支援自動送出（只有四麻模型）")
+      debugServer?.addLog("⏭️ 三麻對局：自動送出已停用（僅支援四麻）")
       return
     }
 
@@ -822,7 +784,8 @@ class WebViewModel: WebViewModelProtocol {
       snapshot: snapshot,
       recommendations: recommendations,
       mode: autoPlayMode,
-      seat: gameState.playerId)
+      seat: gameState.playerId,
+      isSanma: gameState.is3P)
 
     let resolvedAction: Recommendation.ActionType
     let resolvedTile: String
@@ -1396,3 +1359,96 @@ class WebViewModel: WebViewModelProtocol {
 // 這樣 View 才能同時吃新版（WebPage）與 Legacy（WKWebView）兩種實作。
 // 這裡不再另外定義具體型別版本，否則兩個同名 extension 會讓 View 端的
 // `@Environment(\.webViewModel)` 產生 ambiguous use 編譯錯誤。
+
+// MARK: - 遊戲畫面內高亮腳本（純函式）
+
+/// 由「模式 + 推薦 + 手牌 + oplist」算出要送給 `window.__nakiHighlight` 的一行 JS。
+///
+/// 抽成 `nonisolated` 純函式的唯一理由是**可驗收**：p1-4 的驗收條件之一是
+/// 「`.off` 時遊戲內高亮清空、切回 auto 恢復」。原本這段邏輯埋在需要 `WebPage`
+/// 的 `syncGameHighlight()` 裡，除了真的開一局之外沒有任何辦法確認它有沒有做到；
+/// 現在至少「送出去的腳本是什麼」可以逐條鎖住（真的染對顏色仍需 live 驗證）。
+nonisolated enum GameHighlightScript {
+
+    /// 清空所有標記
+    static let clear = "window.__nakiHighlight?.clear();"
+
+    /// - Parameters:
+    ///   - mode: `.off` 一律回 `clear`——「關閉」關的就是顯示
+    ///   - recommendations: 目前推薦（只看第一名）
+    ///   - tehaiTiles: 自家手牌（MJAI），用來把非推薦牌調淡
+    ///   - snapshot: 協定層 oplist（副露組合與彈出面板判斷都取自它，不用推測）
+    static func make(mode: AutoPlayMode,
+                     recommendations: [Recommendation],
+                     tehaiTiles: [String],
+                     snapshot: LiqiOperationSnapshot?) -> String {
+
+        // `.off` 的語意是「不顯示推薦」。以前這裡沒讀 mode，於是關閉模式下遊戲畫面
+        // 仍然照常染色——使用者關掉的東西還在動，是 AUDIT §13 那類「介面與行為不符」。
+        // 回 clear 而不是「什麼都不送」：上一輪留在畫面上的標記也要收掉。
+        guard mode.showRecommendation else { return clear }
+
+        // 標記的是「哪一張牌」而不是「第幾張」。
+        // JS 端從遊戲畫牌時的圖集 UV 認出牌面，所以這裡只要給牌名，
+        // 不必知道它排在第幾個——手牌張數變動、立直抬牌、畫面邊緣混入別的牌
+        // 都不再影響。
+        var marks: [[String: Any]] = []
+
+        if let top = recommendations.first {
+            switch top.actionType {
+            case .discard, .riichi:
+                // 綠：建議打出的牌。顏色是乘在牌面貼圖上的，太深會看不見牌面，
+                // 所以只壓非主色通道。
+                marks.append(["tile": top.displayTile, "color": [0.45, 1.0, 0.5]])
+
+                // 其餘手牌調淡，讓推薦那張自己浮出來。
+                //
+                // 只染推薦牌的話，在花色鮮豔的牌面皮膚上對比度不夠——
+                // 把其他牌壓下去比把一張牌拉上來更有效，也比較不吵。
+                // 第 4 個分量是 alpha 倍率，會乘在遊戲原本的 alpha 上。
+                let recommended = top.displayTile
+                for tile in Set(tehaiTiles).sorted() where tile != recommended {
+                    marks.append(["tile": tile, "color": [0.62, 0.62, 0.68, 0.55]])
+                }
+            case .chi, .pon, .kan:
+                // 橙：副露會用掉的手牌（組合取自協定層的 oplist，不是推測）
+                let liqiType: LiqiOperationType? = {
+                    switch top.actionType {
+                    case .chi: return .chi
+                    case .pon: return .pon
+                    case .kan: return snapshot?.kanOperation
+                    default: return nil
+                    }
+                }()
+                let combo = liqiType.flatMap { snapshot?.operation(of: $0) }?.combination.first
+                for tile in (combo?.split(separator: "|") ?? []).compactMap({
+                    LiqiTileCode.mjai(fromMajsoul: String($0))
+                }) {
+                    marks.append(["tile": tile, "color": [1.0, 0.75, 0.4]])
+                }
+            default:
+                break   // 和了 / 過：沒有對應的手牌可標
+            }
+        }
+
+        // 副露彈出面板（吃／碰／跳過按鈕）：位置不在 uniform 裡，JS 端靠「只在有機會時
+        // 才出現」自行辨識，這裡只負責告訴它「現在有機會、用什麼顏色」。
+        //
+        // **只在 Mortal 建議副露時才染色**。建議「過」時不要動它——
+        // 把整個面板調暗會讓按鈕看起來像壞掉或被停用（實測畫面確認過），
+        // 而且「沒有標記」本身就已經表達「這個機會不值得」。
+        var popup = "null"
+        if let top = recommendations.first, snapshot?.isCallOpportunity == true {
+            switch top.actionType {
+            case .chi, .pon, .kan, .hora: popup = "[0.45,1.0,0.5]"
+            default: break
+            }
+        }
+
+        guard !marks.isEmpty || popup != "null" else { return clear }
+
+        let payload = (try? JSONSerialization.data(withJSONObject: marks))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        return "window.__nakiHighlight?.set(\(payload), \(popup));"
+    }
+}

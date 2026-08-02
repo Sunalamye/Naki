@@ -143,7 +143,10 @@ final class MCPToolRegistry {
 extension MCPToolRegistry {
     /// 註冊所有內建工具
     ///
-    /// 2026-08-01 由 live `tools/list` 與下方 registration 交叉確認：共 **42** 個。
+    /// 下方 registration 是工具數的**唯一真實來源**（本次靜態計數 38 個）；
+    /// `get_status` 的 `tools_count` 直接數 `registeredToolNames`，不會跟註解漂移，
+    /// 要確認 live 數字請看 `tools/list` 或 `get_status`。
+    /// 2026-08-02 移除 6 個 highlight 失敗樁（見下）。
     ///
     /// 移除的舊工具（呼叫會得到 `Unknown tool: <name>`）與理由：
     /// - `detect` / `explore` / `test_indicators` / `click` / `calibrate`：Laya DOM 座標探測，
@@ -155,12 +158,15 @@ extension MCPToolRegistry {
     /// - `lobby_idle_status`：讀 `GameMgr._last_heatbeat_time`，改由 `lobby_anti_idle` 回報
     /// - `game_emoji_list`：registry 沒有提供 catalog tool；需要時應 fresh parse 公開配置資源
     /// - `game_emoji_auto_reply`：需要 `DesktopMgr.seat` + NetAgent，兩者皆無
-    ///
-    /// 保留但回明確失敗的：`highlight_*` / `show_recommendations` / `hide_highlight` /
-    /// `reset_tile_color`。它們尚未接到 App 現行的 `__nakiHighlight` WebGL hook；推薦資料可讀
-    /// `bot_status` / `game_hand`，App 內建自動高亮則走另一條 Swift → JS 路徑。
+    /// - `highlight_tile` / `reset_tile_color` / `highlight_status` / `highlight_settings` /
+    ///   `show_recommendations` / `hide_highlight`（2026-08-02 移除）：
+    ///   6 個固定回 unavailable 的相容失敗樁。它們的參數契約源自 Laya 牌物件，
+    ///   從來沒有接到現行的 `window.__nakiHighlight` WebGL hook，也不打算接——
+    ///   App 內建的自動推薦高亮由 `WebViewModel.syncGameHighlight()` 直接驅動，
+    ///   MCP 不需要第二個入口。留著只是讓 `tools/list` 多 6 個永遠失敗的工具，
+    ///   還會讓人誤以為「Unity 下高亮不可能」。推薦資料請讀 `bot_status` / `game_hand`。
     func registerBuiltInTools() {
-        // 系統類（4）— 不碰遊戲物件
+        // 系統類（6）— 不碰遊戲物件
         register(GetStatusTool.self)
         register(GetHelpTool.self)
         register(GetLogsTool.self)
@@ -213,14 +219,6 @@ extension MCPToolRegistry {
         // 表情類（2）— 送出走 broadcastInGame、接收走 NotifyGameBroadcast
         register(SendEmojiTool.self)
         register(EmojiListenTool.self)
-
-        // 高亮相容樁（6）— 尚未接到 App 的 __nakiHighlight WebGL hook，固定回明確 unavailable
-        register(HighlightTileTool.self)
-        register(ResetTileColorTool.self)
-        register(HighlightStatusTool.self)
-        register(HighlightSettingsTool.self)
-        register(ShowRecommendationsTool.self)
-        register(HideHighlightTool.self)
     }
 }
 

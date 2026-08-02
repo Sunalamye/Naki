@@ -36,6 +36,7 @@ enum AutoPlayGate {
 
     enum Reason: String, Equatable {
         case notAutoMode = "非自動模式"
+        case sanmaUnsupported = "三麻不支援自動打牌（只有四麻模型）"
         case actionInFlight = "已有動作執行中"
         case noOplist = "尚無 oplist"
         case awaitingInference = "推論尚未完成（寬限期內）"
@@ -48,6 +49,10 @@ enum AutoPlayGate {
     /// 全部是值，不含任何 UI 或網路物件——這是能單測的前提。
     struct Input {
         let isAutoMode: Bool
+        /// 這局是不是三麻（`GameState.is3P`）
+        ///
+        /// 預設 false：舊的呼叫點與測試不必逐一改，但**正式路徑必須明確傳入**。
+        var isSanma: Bool = false
         /// 是否已有動作在執行（`currentExecutionId != nil`）
         let hasActionInFlight: Bool
         let snapshot: LiqiOperationSnapshot?
@@ -60,6 +65,16 @@ enum AutoPlayGate {
 
     static func evaluate(_ input: Input) -> Decision {
         guard input.isAutoMode else { return .skip(.notAutoMode) }
+
+        // 三麻 fail-closed。
+        //
+        // bundled Core ML 只有四麻一份（obs 1012×34、action 46），三麻的牌山、
+        // 規則與 observation 佈局都不同（沒有 2m–8m、北是拔北寶牌、只有三家的分數與河）。
+        // 拿四麻模型推三麻不是「稍微偏差」而是**結構上無效**（MortalSwift p3-1），
+        // 而這條閘門下游的 `.sendPass` 會**繞過 resolver 直接送出**，
+        // 所以擋必須擋在這裡，不能只擋在 resolver。
+        guard !input.isSanma else { return .skip(.sanmaUnsupported) }
+
         guard !input.hasActionInFlight else { return .skip(.actionInFlight) }
 
         // 合法性的權威在 oplist。沒有它就沒有伺服器授權，一律不動。

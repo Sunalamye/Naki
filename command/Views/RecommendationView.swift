@@ -142,11 +142,21 @@ struct RecommendationRow: View {
 // MARK: - Recommendation List View
 
 struct RecommendationView: View {
-    
+
     @Environment(\.webViewModel) private var viewModel
 
     var recommendations: [Recommendation]
     var maxDisplay: Int = 5
+
+    /// `.off` 模式下不顯示推薦。
+    ///
+    /// `AutoPlayMode.showRecommendation` 以前沒有任何讀取者：選了「關閉」，側欄照樣
+    /// 一列一列列出推薦，只有送出被擋掉。介面因此在說謊——關掉的功能還在畫面上動。
+    ///
+    /// 沒有 viewModel（SwiftUI Preview）時當作要顯示，否則 Preview 全是空白。
+    private var showsRecommendations: Bool {
+        viewModel?.autoPlayMode.showRecommendation ?? true
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -161,7 +171,12 @@ struct RecommendationView: View {
 
                 Spacer()
 
-                if recommendations.isEmpty {
+                if !showsRecommendations {
+                    Text("已關閉")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .accessibilityIdentifier("recommendation-off-badge")
+                } else if recommendations.isEmpty {
                     Button(action: {
                         Task {
                             await viewModel?.forceReconnect()
@@ -185,7 +200,9 @@ struct RecommendationView: View {
             Divider()
 
             // 推薦列表
-            if recommendations.isEmpty {
+            if !showsRecommendations {
+                RecommendationsDisabledView()
+            } else if recommendations.isEmpty {
                 EmptyRecommendationView()
             } else {
                 ScrollView {
@@ -226,6 +243,35 @@ struct EmptyRecommendationView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
+    }
+}
+
+// MARK: - Disabled State（模式 = 關閉）
+
+/// 「關閉」模式的空狀態。
+///
+/// 刻意跟 `EmptyRecommendationView`（等待資料）分開：兩者都是空白，但成因完全不同，
+/// 用同一個畫面會讓「我關掉了」跟「Bot 還沒算出來」看不出差別。
+struct RecommendationsDisabledView: View {
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "eye.slash")
+                .font(.body)
+                .foregroundColor(.secondary)
+            Text("推薦顯示已關閉")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            Text("切換到「推薦」或「自動」可恢復")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("recommendation-disabled-state")
+        .accessibilityLabel("AI 推薦")
+        .accessibilityValue("推薦顯示已關閉")
     }
 }
 

@@ -74,6 +74,11 @@ struct BotStatusView: View {
                         .cornerRadius(4)
                 }
 
+                // 三麻：明講不支援，而不是讓使用者以為 AI 正常運作
+                if botStatus.is3P {
+                    SanmaUnsupportedNotice()
+                }
+
                 Divider()
 
                 // 遊戲信息
@@ -95,6 +100,44 @@ struct BotStatusView: View {
         .background(Color.windowBackground)
         .cornerRadius(8)
         .shadow(color: .black.opacity(0.1), radius: 4)
+    }
+}
+
+// MARK: - Sanma Notice
+
+/// 三麻對局的能力聲明。
+///
+/// 內建 Core ML 只有四麻一份（obs 1012×34、action 46）。三麻的牌山、規則與
+/// observation 佈局都不同（沒有 2m–8m、北是拔北寶牌、只有三家的分數與河），
+/// 拿四麻模型推三麻不是「稍微偏差」而是**結構上無效**（MortalSwift p3-1）。
+///
+/// 因此自動送出在三麻一律停用（`AutoPlayGate` / `AutoPlayDecisionResolver` /
+/// `WebViewModel.triggerAutoPlayNow` 三層 fail-closed），這裡負責把這件事說出來——
+/// 「不能運作又不說」正是 AUDIT §13 要防的。
+struct SanmaUnsupportedNotice: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundColor(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("三麻不支援")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text("內建只有四麻模型，推薦結果無效；自動打牌已停用。")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(6)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("sanma-unsupported-notice")
+        .accessibilityLabel("三麻不支援")
+        .accessibilityValue("內建只有四麻模型，推薦結果無效；自動打牌已停用")
     }
 }
 
@@ -338,6 +381,15 @@ struct CompactBotStatusView: View {
             playerId: 0,
             doraMarkers: [.man(5), .pin(3)]
         )
+    )
+    .frame(width: 320)
+    .padding()
+}
+
+#Preview("BotStatusView - 三麻") {
+    BotStatusView(
+        botStatus: BotStatus(isActive: true, modelName: "mortal", playerId: 0, is3P: true),
+        gameState: GameState(kyoku: 1, jikaze: .south, is3P: true)
     )
     .frame(width: 320)
     .padding()

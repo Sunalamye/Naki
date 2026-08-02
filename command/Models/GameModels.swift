@@ -84,6 +84,48 @@ struct GameState: Equatable {
     }
 }
 
+// MARK: - Available Actions
+
+/// 「現在能做什麼」——由伺服器推來的 `OptionalOperationList` 導出。
+///
+/// 權威刻意選 oplist 而不是模型 mask：mask 是 Mortal 對**自己認為的狀態**算出的合法動作，
+/// oplist 是伺服器實際授權的動作。送出端（`AutoPlayGate` / `AutoPlayDecisionResolver` /
+/// `LiqiActionSender`）本來就只認 oplist；UI 與 `/bot/status` 跟著同一個來源，
+/// 才不會出現「徽章亮著但送不出去」或反過來的分歧。
+///
+/// 純值型別、不碰任何 singleton，因此可以對「這批 oplist → 這六個旗標」直接單測。
+nonisolated struct BotAvailableActions: Equatable {
+    var canDiscard: Bool = false
+    var canRiichi: Bool = false
+    var canChi: Bool = false
+    var canPon: Bool = false
+    var canKan: Bool = false
+    var canAgari: Bool = false
+
+    /// 沒有任何授權（沒有 oplist ＝ 什麼都不能做，不是「未知」）
+    static let none = BotAvailableActions()
+
+    init() {}
+
+    /// - Parameter snapshot: 協定層快照；nil 代表沒有伺服器授權 → 全部 false
+    init(snapshot: LiqiOperationSnapshot?) {
+        guard let snapshot else { return }
+        canDiscard = snapshot.contains(.discard)
+        canRiichi = snapshot.contains(.riichi)
+        canChi = snapshot.contains(.chi)
+        canPon = snapshot.contains(.pon)
+        // 槓有三種（暗槓 / 加槓 / 大明槓），任一種都算「可以槓」
+        canKan = snapshot.kanOperation != nil
+        // 和了兩種（自摸 / 榮和）
+        canAgari = snapshot.horaOperation != nil
+    }
+
+    /// 是否有任何可用動作
+    var hasAny: Bool {
+        canDiscard || canRiichi || canChi || canPon || canKan || canAgari
+    }
+}
+
 // MARK: - Bot Status
 
 /// Bot 狀態
@@ -98,6 +140,10 @@ struct BotStatus: Equatable {
     var is3P: Bool = false
 
     // MARK: - Available Actions
+    //
+    // 這六個欄位的唯一真實來源是協定層 oplist（見 `BotAvailableActions`）。
+    // 曾經有一段時間它們的寫入點是零呼叫的 `NativeBotController.updateAvailableActions()`，
+    // 於是 UI 徽章與 `/bot/status` 恆為 false——不要再從別的地方寫進來。
 
     /// 可打牌
     var canDiscard: Bool = false
@@ -133,6 +179,18 @@ struct BotStatus: Equatable {
     /// 是否有任何可用動作
     var hasAvailableAction: Bool {
         canDiscard || canRiichi || canChi || canPon || canKan || canAgari
+    }
+
+    // MARK: - Mutators
+
+    /// 套用一組由 oplist 導出的可用動作
+    mutating func applyAvailableActions(_ actions: BotAvailableActions) {
+        canDiscard = actions.canDiscard
+        canRiichi = actions.canRiichi
+        canChi = actions.canChi
+        canPon = actions.canPon
+        canKan = actions.canKan
+        canAgari = actions.canAgari
     }
 }
 

@@ -20,7 +20,7 @@ Base directory: {baseDir}
 ## Current contract
 
 - Default endpoint: `http://127.0.0.1:8765/mcp`.
-- 2026-08-01 的 live registry 基準為 42 tools；數字、名稱與參數仍以每次 live `tools/list` 為準。
+- 2026-08-01 的 live registry 基準為 42 tools；2026-08-02 移除 6 個 highlight 失敗樁後靜態計數 38。數字、名稱與參數一律以每次 live `tools/list` 為準。
 - 雀魂頁面是 Unity WebGL，不是 Laya。`window.Laya`、`GameMgr`、`uiscript`、`view.DesktopMgr`、`cfg`、`app.NetAgent` 都不是可用查詢面。
 - 遊戲狀態由 Naki 攔截 WebSocket、解析 Liqi protobuf 後累積在 Swift state；動作由 Naki 組 Liqi REQUEST 並送到正確 gateway。
 - `execute_js` 只用於 Unity/page/WebSocket/WebGL 的唯讀 probe。遊戲狀態走 `game_*`，動作走 `game_action_verify`；禁止用 JS 重造遊戲物件、raw request 或座標點擊。

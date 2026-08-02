@@ -142,7 +142,7 @@ Legacy path 走同一個 resolver 與同一組檢查，差別是失敗不重試�
 
 ## 遊戲內高亮
 
-`WebViewModel.syncGameHighlight()` 把推薦牌名傳給 `window.__nakiHighlight`。`naki-core.js` 從 WebGL `_MainTex_ST` UV 辨識牌 identity，在單次 draw 前暫改 `_Tint`／`_Color` 並還原。
+`WebViewModel.syncGameHighlight()` 把推薦牌名傳給 `window.__nakiHighlight`。腳本內容由純函式 `GameHighlightScript.make(mode:recommendations:tehaiTiles:snapshot:)` 產生——模式 `.off` 一律回 `clear()`，這是「關閉真的關掉顯示」唯一可機械驗收的地方。`naki-core.js` 從 WebGL `_MainTex_ST` UV 辨識牌 identity，在單次 draw 前暫改 `_Tint`／`_Color` 並還原。
 
 這條路徑不依賴 Laya 或螢幕座標。它目前只有 hook 活性證據，沒有視覺正確性測試；同名牌全染與 popup heuristic 是已知限制。
 
@@ -160,7 +160,7 @@ Legacy path 走同一個 resolver 與同一組檢查，差別是失敗不重試�
 
 `/js` 的 code 是 function body，要取得值必須顯式 `return`。遊戲動作、強制重連、建房、匹配與外觀變更都不是唯讀操作，只能在測試帳號與明確授權下執行。
 
-live MCP registry 是 42 個工具；工具表見 [mcp-server-guide.md](mcp-server-guide.md)。
+MCP registry 的靜態註冊是 38 個工具（2026-08-02 移除 6 個高亮失敗樁後；2026-08-01 live 為 42）。live 數字請以 `tools/list` 或 `get_status.tools_count` 為準；工具表見 [mcp-server-guide.md](mcp-server-guide.md)。
 
 ## 測試分層
 

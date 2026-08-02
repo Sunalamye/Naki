@@ -90,8 +90,10 @@ enum NakiHelpContent {
                     + "WebSocket 攔截 → LiqiParser → MajsoulBridge → NativeBotController / LiqiOperationStore",
                 "action": "動作類工具（game_action / game_discard / bot_chi / bot_pon / room_* / lobby_*）"
                     + "組 Liqi REQUEST 經 window.__nakiWebSocket.sendRaw 送出（msgId 使用 60000+ 號段）",
-                "highlight": "App 內建 __nakiHighlight 會攔截 WebGL draw 做自動推薦染色；"
-                    + "6 個 MCP 手動 highlight_* 工具尚未接到這個新 hook，仍回明確 unavailable"
+                "highlight": "App 內建 __nakiHighlight 會攔截 WebGL draw 做自動推薦染色，"
+                    + "由 Swift 的 syncGameHighlight() 直接驅動（模式 = 關閉時會 clear）；"
+                    + "MCP 沒有手動高亮工具（舊的 6 個 highlight_* 失敗樁已於 2026-08-02 移除），"
+                    + "推薦資料請讀 bot_status / game_hand"
             ],
             "workflows": [
                 "友人房一條龍": ["room_create（time_fixed=300, time_add=0）", "room_add_robot ×3", "room_start"],

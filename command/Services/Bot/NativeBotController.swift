@@ -59,8 +59,8 @@ class NativeBotController {
     /// 最後一次的推薦列表
     private(set) var lastRecommendations: [Recommendation] = []
 
-    /// 最後一次的可用動作
-    private(set) var lastCandidates: String?
+    // 註：`lastCandidates` 已移除。它的唯一寫入點是同樣零呼叫的 `updateAvailableActions()`，
+    //     而且從來沒有讀取者——實際永遠是 nil。
 
     // 遊戲狀態追蹤
     private(set) var kyoku: Int = 0
@@ -79,13 +79,32 @@ class NativeBotController {
     /// 寶牌指示牌 (MJAI 字串格式，保持兼容性)
     var doraIndicators: [String] { doraMarkers.map { $0.mjaiString } }
 
-    // 可用動作
-    private(set) var canDiscard: Bool = false
-    private(set) var canRiichi: Bool = false
-    private(set) var canChi: Bool = false
-    private(set) var canPon: Bool = false
-    private(set) var canKan: Bool = false
-    private(set) var canAgari: Bool = false
+    // MARK: - 可用動作（來源：協定層 oplist）
+
+    /// 現在能做什麼，一律由伺服器推來的 `OptionalOperationList` 導出。
+    ///
+    /// 以前這六個是 stored property，唯一的寫入點 `updateAvailableActions()` 是 private
+    /// 而且**零呼叫**（`updateInternalState` 尾巴只留了一行「移到 react() 後處理」的註解，
+    /// 沒有人接上）。結果 `BotStatusView` 的六個徽章與 `/bot/status` 的 canXxx 恆為 false，
+    /// 是 AUDIT §13「不能運作又不說」的同一類問題。
+    ///
+    /// 改成從 oplist 導出而不是把 mask 掃描接回來，理由是**權威不同**：
+    /// mask 是模型對「自己認為的狀態」算出來的合法動作，oplist 是伺服器實際授權的動作。
+    /// 動作層（`AutoPlayGate` / `AutoPlayDecisionResolver` / `LiqiActionSender`）本來就
+    /// 只認 oplist，UI 顯示的「可用動作」跟著同一個來源才不會出現「徽章亮著但送不出去」。
+    ///
+    /// 用 `pending` 而不是 `latest`：動作送出並 `markHandled` 之後這批機會就消化掉了，
+    /// 徽章應該跟著熄滅。
+    var availableActions: BotAvailableActions {
+        BotAvailableActions(snapshot: LiqiOperationStore.shared.pending)
+    }
+
+    var canDiscard: Bool { availableActions.canDiscard }
+    var canRiichi: Bool { availableActions.canRiichi }
+    var canChi: Bool { availableActions.canChi }
+    var canPon: Bool { availableActions.canPon }
+    var canKan: Bool { availableActions.canKan }
+    var canAgari: Bool { availableActions.canAgari }
 
     // MARK: - Initialization
 
@@ -268,12 +287,9 @@ class NativeBotController {
         botLog("[NativeBotController] handleEndKyoku (typed)")
         tehai = []
         tsumo = nil
-        canDiscard = false
-        canRiichi = false
-        canChi = false
-        canPon = false
-        canKan = false
-        canAgari = false
+        // 可用動作不再是本 class 的狀態：它由 oplist 導出。
+        // 不帶 operation 的動作（和了／流局／別家動作）抵達時
+        // `MajsoulBridge.recordOperationSnapshot` 會 `clear()`，六個旗標自然歸零。
     }
 
     private func handleEndGame() {
@@ -316,8 +332,6 @@ class NativeBotController {
         default:
             break
         }
-
-        // 注意：updateAvailableActions 需要 async，移到 react() 後處理
     }
 
     private func handleStartGameDict(_ event: [String: Any]) {
@@ -405,7 +419,6 @@ class NativeBotController {
         }
 
         tsumo = tile
-        canDiscard = true
         botLog("[NativeBotController] handleTsumo: my tsumo pai=\(pai)")
     }
 
@@ -427,8 +440,6 @@ class NativeBotController {
                 tsumo = nil
             }
         }
-
-        canDiscard = false
     }
 
     private func handleMeldDict(_ event: [String: Any]) {
@@ -447,31 +458,20 @@ class NativeBotController {
         }
     }
 
-    /// 更新可用動作 (async 因為 MortalBot 是 actor)
-    private func updateAvailableActions() async {
-        guard let bot = bot else { return }
-
-        // ⭐ 獲取可用動作的 mask (await 因為是 actor)
-        let mask = await bot.getMask()
-
-        // 使用 PlayerState.ActionIndex 常量
-        typealias AI = PlayerState.ActionIndex
-
-        // 解析 mask 來判斷可用動作
-        canDiscard = mask.prefix(AI.discardEnd + 1).contains(where: { $0 == 1 })
-        canRiichi = mask.count > AI.riichi && mask[AI.riichi] == 1
-        canChi = [AI.chiLow, AI.chiMid, AI.chiHigh].contains(where: { mask.count > $0 && mask[$0] == 1 })
-        canPon = mask.count > AI.pon && mask[AI.pon] == 1
-        canKan = mask.count > AI.kan && mask[AI.kan] == 1
-        canAgari = mask.count > AI.hora && mask[AI.hora] == 1
-
-        // ⭐ 儲存候選動作 (await 因為是 actor) - v0.3.0 使用 getCandidateActions()
-        let candidates = await bot.getCandidateActions()
-        if let jsonData = try? JSONEncoder().encode(candidates),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            lastCandidates = jsonString
-        }
-    }
+    // 註：`updateAvailableActions()` 已移除。
+    //
+    // 它是 private 而且**零呼叫**——唯一的呼叫點在 `updateInternalState` 尾巴被換成
+    // 一行「移到 react() 後處理」的註解，而 react() 從來沒有接上去。於是它寫的六個
+    // canXxx 旗標永遠停在 false，`BotStatusView` 的徽章與 `/bot/status` 的四個欄位
+    // 也就永遠是假的。
+    //
+    // 它掃 mask 的方式本身也有事實錯誤：`mask.prefix(AI.discardEnd + 1)` 就是
+    // `prefix(34)`，看不到索引 34–36。上游 MortalSwift 把 34–36 註解成「保留 (3麻用)」
+    // 是錯的——`ObsEncoder` 會在「手上只有紅五」時把 34–36 設 1、把 4/13/22 設 0
+    // （見 MortalSwift p0-1）。照 prefix(34) 掃，那一手會被判成「沒有牌可打」。
+    //
+    // 現在可用動作改由協定層 oplist 導出（見上方 `availableActions`），
+    // 掃 mask 的路徑只剩 `actionIndexToRecommendation`，該處已含 34–36。
 
     /// 更新推薦列表 (async 因為 MortalBot 是 actor)
     private func updateRecommendations() async {
@@ -595,9 +595,28 @@ class NativeBotController {
         eventLog("[Bot] 副露後推論: \(lastRecommendations.count) items [\(summary)]")
     }
 
+    /// MortalSwift action space 中「打出紅五」的三個索引。
+    ///
+    /// 上游 `PlayerState.ActionIndex` 在 0.5.1 仍把它們命名為 `reserved34/35/36`
+    /// 並註解成「保留 (3麻用)」——那是事實錯誤，`ObsEncoder` 一直都在用它們表示
+    /// 打出紅五萬／紅五筒／紅五索（`applyAkaToCandidates`：手上只有紅五時，
+    /// 普通五的格子是 0、紅五的格子才是 1）。上游 p0-1 已改名為
+    /// `akaDiscardMan5/Pin5/Sou5`，但本專案 pin 的是 0.5.1，還沒有那組符號，
+    /// 所以在這裡自己定名，不再讓 34–36 被當成不存在的格子。
+    private enum AkaDiscardIndex {
+        static let man5 = 34
+        static let pin5 = 35
+        static let sou5 = 36
+    }
+
     /// 將 Tile 轉換為對應的打牌動作索引
     private func tileToDiscardActionIndex(_ tile: Tile) -> Int? {
         switch tile {
+        // 紅五走專屬索引：普通五與紅五在 mask 裡是**兩個不同的動作**，
+        // 都塞回 4/13/22 會讓「手上只有紅五」與「兩張都有」看起來一樣。
+        case .man(5, true): return AkaDiscardIndex.man5
+        case .pin(5, true): return AkaDiscardIndex.pin5
+        case .sou(5, true): return AkaDiscardIndex.sou5
         case .man(let num, _): return num - 1           // 0-8 for 1m-9m
         case .pin(let num, _): return 9 + (num - 1)     // 9-17 for 1p-9p
         case .sou(let num, _): return 18 + (num - 1)    // 18-26 for 1s-9s
@@ -615,6 +634,11 @@ class NativeBotController {
     /// 判斷丟 5 牌時是否應該丟紅寶牌
     /// 邏輯：如果手牌中只有紅寶牌（沒有普通的 5），才丟紅寶牌
     /// 如果有普通的 5，優先丟普通的（保留紅寶牌的價值）
+    ///
+    /// 註（2026-08-02）：接上 34–36 之後，這個判斷在**正常 mask 下應該永遠回 false**——
+    /// 「手上只有紅五」時 encoder 會關掉普通五的格子（4/13/22）、只留 34–36，
+    /// 走不到這裡。保留它是為了 mask 與手牌不一致時仍給得出合理答案，
+    /// 不是因為它還在承擔紅五的判斷。（這個推論來自 encoder 原始碼，**未 live 驗證**。）
     private func shouldDiscardRedDora(suit: String) -> Bool {
         // 收集手牌 + 自摸牌中所有指定花色的 5
         var allTiles = tehai
@@ -640,8 +664,29 @@ class NativeBotController {
         return hasRed && !hasNormal
     }
 
-    private func actionIndexToRecommendation(_ index: Int, probability: Double) -> Recommendation? {
+    /// mask 索引 → 推薦。
+    ///
+    /// 刻意不是 `private`：34–36（打紅五）是 live 才會遇到、又剛好靜默失敗的一組索引，
+    /// 必須能直接對它寫回歸測試，不然只能等下一次「持紅五時 bot 停手」再重現一次。
+    func actionIndexToRecommendation(_ index: Int, probability: Double) -> Recommendation? {
         typealias AI = PlayerState.ActionIndex
+
+        // 打出紅五（34/35/36）。
+        //
+        // 這三格以前落到最後的 `default: return nil`，於是「唯一合法的打牌是紅五」
+        // （立直後摸進紅五、手上沒有普通五）那一手會產生**空推薦**：側欄什麼都不顯示，
+        // 自動打牌因為 `recommendations.isEmpty` 而不動，一路等到伺服器逾時代打。
+        // 見 MortalSwift p0-1：mask 一直都會設 34–36，是下游沒有接。
+        switch index {
+        case AkaDiscardIndex.man5:
+            return Recommendation(tile: "5mr", probability: probability, actionType: .discard)
+        case AkaDiscardIndex.pin5:
+            return Recommendation(tile: "5pr", probability: probability, actionType: .discard)
+        case AkaDiscardIndex.sou5:
+            return Recommendation(tile: "5sr", probability: probability, actionType: .discard)
+        default:
+            break
+        }
 
         // 打牌動作 (0-33)
         if index >= AI.discardStart && index <= AI.discardEnd {
@@ -711,7 +756,6 @@ class NativeBotController {
         tehai = []
         tsumo = nil
         lastRecommendations = []
-        lastCandidates = nil
         kyoku = 0
         honba = 0
         kyotaku = 0
@@ -719,12 +763,7 @@ class NativeBotController {
         jikazeWind = .east
         scores = [25000, 25000, 25000, 25000]
         doraMarkers = []
-        canDiscard = false
-        canRiichi = false
-        canChi = false
-        canPon = false
-        canKan = false
-        canAgari = false
+        // 可用動作是 oplist 的投影，不在本 class 持有，因此沒有東西要重置。
     }
 
     // MARK: - State Export
@@ -746,20 +785,16 @@ class NativeBotController {
 
     /// 獲取當前 Bot 狀態
     var botState: BotStatus {
-        BotStatus(
+        var status = BotStatus(
             isActive: isInitialized,
             // 內建模型只有四麻一份，modelName 必須反映**實際載入的是哪個**，
             // 不能因為對局是三麻就標成 mortal3p——那會讓 UI 宣稱有三麻模型
             modelName: "mortal",
             playerId: Int(playerId),
-            is3P: is3P,
-            canDiscard: canDiscard,
-            canRiichi: canRiichi,
-            canChi: canChi,
-            canPon: canPon,
-            canKan: canKan,
-            canAgari: canAgari
+            is3P: is3P
         )
+        status.applyAvailableActions(availableActions)
+        return status
     }
 
     // MARK: - 測試注入（只在 DEBUG build 存在）
