@@ -14,20 +14,18 @@ import WebKit
 /// WebViewModel 的共同接口
 @MainActor
 protocol WebViewModelProtocol: AnyObject, Observable {
-    // MARK: - State Properties
+    // MARK: - State
 
-    var statusMessage: String { get set }
-    var isConnected: Bool { get set }
-    var recommendationCount: Int { get set }
+    /// 牌局、連線與狀態列的**唯一真實來源**（p3-1）。
+    ///
+    /// 先前這裡列了 9 個 `{ get set }` 鏡像屬性（`gameState`／`botStatus`／
+    /// `recommendations`／…），另外還有一個 `gameStateManager` 持有第二份同樣的資料：
+    /// SwiftUI 讀鏡像、MCP 讀 `GameStateManager`，兩份各自被寫，內容可以不一致
+    /// （細節見 `GameStore` 的檔頭）。現在兩個消費面讀同一個 `GameStore` 物件。
+    ///
+    /// `{ get }` 而不是 `{ get set }`：ViewModel 不換 store，只改它的欄位。
+    var store: GameStore { get }
 
-    var gameState: GameState { get set }
-    var botStatus: BotStatus { get set }
-    var recommendations: [Recommendation] { get set }
-    var tehaiTiles: [String] { get set }
-    var tsumoTile: String? { get set }
-    var highlightedTile: String? { get set }
-
-    var gameStateManager: GameStateManager { get }
     var isDebugServerRunning: Bool { get set }
     var debugServerPort: UInt16 { get set }
 
@@ -116,7 +114,7 @@ extension WebViewModelProtocol {
     /// `NativeBotController.playerId`，但重置時機不同（`deleteNativeBot()` 只把 `botStatus`
     /// 打回預設值），所以「座位對不對」在兩條路上可以得到不同答案，而 resolver 的
     /// `seat_mismatch` 是 fail-closed——判錯就整批 oplist 不動作。收斂成一份（p2-2 缺口 3）。
-    var autoPlaySeat: Int { gameState.playerId }
+    var autoPlaySeat: Int { store.gameState.playerId }
 
     func createNativeBot(playerId: Int) async throws {
         try await createNativeBot(playerId: playerId, is3P: false)

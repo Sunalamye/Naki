@@ -51,7 +51,7 @@ struct LegacyNakiWebView: NSViewRepresentable {
         if webView.url == nil {
             if let url = URL(string: "https://game.maj-soul.com/1/") {
                 webView.load(URLRequest(url: url))
-                viewModel?.statusMessage = "正在加載雀魂麻將..."
+                viewModel?.store.statusMessage = "正在加載雀魂麻將..."
             }
         }
     }
@@ -70,7 +70,7 @@ struct LegacyNakiWebView: NSViewRepresentable {
             // 「Modifying state during view update」；延到下一個 runloop。
             let vm = viewModel
             DispatchQueue.main.async {
-                vm?.statusMessage = "錯誤：JavaScript 注入失敗，Naki 無法讀牌局也無法送出動作"
+                vm?.store.statusMessage = "錯誤：JavaScript 注入失敗，Naki 無法讀牌局也無法送出動作"
             }
         }
 
@@ -122,7 +122,7 @@ struct LegacyNakiWebView: UIViewRepresentable {
         if webView.url == nil {
             if let url = URL(string: "https://game.maj-soul.com/1/") {
                 webView.load(URLRequest(url: url))
-                viewModel?.statusMessage = "正在加載雀魂麻將..."
+                viewModel?.store.statusMessage = "正在加載雀魂麻將..."
             }
         }
     }
@@ -141,7 +141,7 @@ struct LegacyNakiWebView: UIViewRepresentable {
             // 「Modifying state during view update」；延到下一個 runloop。
             let vm = viewModel
             DispatchQueue.main.async {
-                vm?.statusMessage = "錯誤：JavaScript 注入失敗，Naki 無法讀牌局也無法送出動作"
+                vm?.store.statusMessage = "錯誤：JavaScript 注入失敗，Naki 無法讀牌局也無法送出動作"
             }
         }
 
@@ -209,8 +209,8 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
             guard let self = self else { return }
 
             Task { @MainActor in
-                self.viewModel?.isConnected = connected
-                self.viewModel?.statusMessage = connected
+                self.viewModel?.store.isConnected = connected
+                self.viewModel?.store.statusMessage = connected
                     ? "已連線到雀魂服务器"
                     : "已斷開連線"
 
@@ -221,10 +221,8 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
                         print("[Legacy 協調器] WebSocket 已重連, 嘗試重新同步 Bot...")
                         await self.resyncBot()
                     } else {
+                        // `deleteNativeBot()` 已經清空本局資料（同一個 store）
                         self.viewModel?.deleteNativeBot()
-                        self.viewModel?.recommendations = []
-                        self.viewModel?.tehaiTiles = []
-                        self.viewModel?.tsumoTile = nil
                         print("[Legacy 協調器] WebSocket 連線時重置狀態 (無進行中的遊戲)")
                     }
                 } else {
@@ -260,7 +258,7 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
                 // 檢查是否為三麻 (names 陣列長度為 3)
                 let is3P = (event["names"] as? [String])?.count == 3
                 try await viewModel?.createNativeBot(playerId: playerId, is3P: is3P)
-                viewModel?.statusMessage = "Bot 已建立 (Player \(playerId))"
+                viewModel?.store.statusMessage = "Bot 已建立 (Player \(playerId))"
                 bridgeLog("[Legacy 協調器] 已為玩家 \(playerId) 建立 Bot (is3P: \(is3P))")
                 startEventConsumer()
             } catch {
@@ -271,11 +269,8 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
             bridgeLog("[Legacy 協調器] end_game: 清理中")
             eventStream.emit(event)
             eventStream.endGame()
-            viewModel?.deleteNativeBot()
-            viewModel?.recommendations = []
-            viewModel?.tehaiTiles = []
-            viewModel?.tsumoTile = nil
-            viewModel?.statusMessage = "遊戲結束"
+            viewModel?.deleteNativeBot()   // 手牌／推薦／botStatus 一併清空
+            viewModel?.store.statusMessage = "遊戲結束"
 
         default:
             eventStream.emit(event)
@@ -319,7 +314,7 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
             // 不再由 Legacy 端自行推斷；API 也隨之從 is3PlayerGame() 改名為 getIs3P()）
             let is3P = eventStream.getIs3P()
             try await viewModel?.createNativeBot(playerId: playerId, is3P: is3P)
-            viewModel?.statusMessage = "Bot 已重新同步 (Player \(playerId))"
+            viewModel?.store.statusMessage = "Bot 已重新同步 (Player \(playerId))"
             startEventConsumer()
             bridgeLog("[Legacy 協調器] Bot 重新同步成功")
         } catch {
@@ -333,31 +328,28 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         // 頁面開始載入時完整重置
         websocketHandler.fullReset()
         eventStream.endGame()
-        viewModel?.deleteNativeBot()
-        viewModel?.recommendations = []
-        viewModel?.tehaiTiles = []
-        viewModel?.tsumoTile = nil
-        viewModel?.isConnected = false
-        viewModel?.statusMessage = "正在加載雀魂..."
+        viewModel?.deleteNativeBot()   // 手牌／推薦／botStatus 一併清空
+        viewModel?.store.isConnected = false
+        viewModel?.store.statusMessage = "正在加載雀魂..."
         viewModel?.resetHideNamesSettings()
         print("[Legacy 協調器] 導覽開始時完整重置")
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        viewModel?.statusMessage = "雀魂已加載，等待連接..."
+        viewModel?.store.statusMessage = "雀魂已加載，等待連接..."
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         print("[LegacyWebView] 頁面載入成功")
         viewModel?.applyHideNamesSettingsIfNeeded()
-        if viewModel?.isConnected == false {
-            viewModel?.statusMessage = "已載入，等待 WebSocket 連接..."
+        if viewModel?.store.isConnected == false {
+            viewModel?.store.statusMessage = "已載入，等待 WebSocket 連接..."
         }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         print("[LegacyWebView] 導覽錯誤: \(error)")
-        viewModel?.statusMessage = "加載失敗: \(error.localizedDescription)"
+        viewModel?.store.statusMessage = "加載失敗: \(error.localizedDescription)"
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {

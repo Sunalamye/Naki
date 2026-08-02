@@ -81,7 +81,9 @@ naki-websocket.js
 
 ### UI state
 
-`NativeBotController` 維護手牌、摸牌、局況與推薦；`WebViewModel` 把 snapshot 同步進 `GameStateManager`。SwiftUI、`bot_status` 與 `game_state` 都讀這份 Naki 本機狀態，不是向雀魂重新查詢完整局面。
+`NativeBotController` 維護手牌、摸牌、局況與推薦；ViewModel 用 `GameStore.apply(controller:showRecommendation:)` 把 snapshot 寫進 `GameStore`（`@Observable @MainActor`）。SwiftUI、`bot_status` 與 `game_state` 讀的是**同一個** `GameStore` 物件，不是向雀魂重新查詢完整局面。
+
+p3-1 之前這裡有兩份鏡像（ViewModel 的 9 個屬性給 SwiftUI、`GameStateManager` 給 MCP），寫入內容還會分歧（`botStatus.isActive` 一邊抄 `controller.botState`、一邊硬寫 `true`；`deleteNativeBot()` 只重置其中一份的 `gameState`）。現在只剩 `GameStore` 與 `LiqiOperationStore`（oplist 權威）兩份狀態。
 
 ## Game lifecycle
 
@@ -179,6 +181,7 @@ MCP registry 的靜態註冊是 38 個工具（2026-08-02 移除 6 個高亮失�
 |------|------|
 | 平台 factory | `command/ViewModels/WebViewModelProtocol.swift` |
 | 新／舊 view model | `command/ViewModels/WebViewModel.swift`、`LegacyWebViewModel.swift` |
+| 牌局狀態單一來源 | `command/ViewModels/GameStore.swift` |
 | Web coordinator | `command/Views/WebViewController.swift` |
 | WS injection | `command/Services/Bridge/WebSocketInterceptor.swift` |
 | Liqi parsing | `command/Services/Bridge/LiqiParser.swift` |

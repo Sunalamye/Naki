@@ -19,20 +19,15 @@ import WebKit
 @Observable
 @MainActor
 class LegacyWebViewModel: WebViewModelProtocol {
-    // MARK: - State Properties
+    // MARK: - State
 
-    var statusMessage: String = "舊版模式"
-    var isConnected: Bool = false
-    var recommendationCount: Int = 0
+    /// 牌局、連線與狀態列的唯一真實來源（p3-1；與主路徑同一個型別）。
+    ///
+    /// 這裡先前也是「9 個鏡像屬性 + 一個 `GameStateManager`」的雙份結構，
+    /// 而且 `/bot/status` 在這條路上讀的是鏡像、主路徑讀的是 `GameStateManager`
+    /// ——同一個 MCP 端點的資料面取決於走哪條 WebView path。現在兩條路都讀 `GameStore`。
+    let store = GameStore()
 
-    var gameState: GameState = GameState()
-    var botStatus: BotStatus = BotStatus()
-    var recommendations: [Recommendation] = []
-    var tehaiTiles: [String] = []
-    var tsumoTile: String?
-    var highlightedTile: String?
-
-    private(set) var gameStateManager: GameStateManager = GameStateManager()
     var isDebugServerRunning: Bool = false
     var debugServerPort: UInt16 = 8765
 
@@ -109,7 +104,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
             bridgeLog("[LegacyWebViewModel] 存檔為自動模式，本路徑不支援 → 降級為推薦")
         }
 
-        statusMessage = "準備就緒 (Legacy 模式，僅推薦不自動送出)"
+        store.statusMessage = "準備就緒 (Legacy 模式，僅推薦不自動送出)"
     }
 
     // MARK: - WebView Setup
@@ -134,8 +129,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
         try controller.createBot(playerId: UInt8(playerId), is3P: is3P)
 
         // 更新狀態
-        botStatus = controller.botState
-        statusMessage = "Bot 已建立 (Player \(playerId))"
+        store.botStatus = controller.botState
+        store.statusMessage = "Bot 已建立 (Player \(playerId))"
 
         bridgeLog("[LegacyWebViewModel] Bot 已為玩家 \(playerId) 建立 (is3P: \(is3P))")
     }
@@ -168,48 +163,32 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     func deleteNativeBot() {
         nativeBotController?.deleteBot()
-        botStatus = BotStatus()
-        recommendations = []
-        tehaiTiles = []
-        tsumoTile = nil
-        highlightedTile = nil
-        // 與主路徑同一條清理規則：`GameStateManager` 才是 SwiftUI 面板的資料來源，
-        // 不一併重置的話對局結束後畫面會停在上一局的手牌與推薦。
-        gameStateManager.reset()
-        statusMessage = "Bot 已清除"
+        // 與主路徑同一條清理規則（同一個 `GameStore` 方法）：不清的話對局結束後
+        // 側欄與 `/bot/status` 都會停在上一局的手牌與推薦。
+        store.clearAfterBotDeleted()
+        store.statusMessage = "Bot 已清除"
         bridgeLog("[LegacyWebViewModel] Bot 已刪除")
     }
 
     func resyncBot() async {
         // 由 LegacyWebViewCoordinator 處理
-        statusMessage = "重新同步 Bot..."
+        store.statusMessage = "重新同步 Bot..."
     }
 
     func forceReconnect() async {
         webView?.reload()
-        statusMessage = "正在重新連接..."
+        store.statusMessage = "正在重新連接..."
     }
 
     // MARK: - UI Update After Bot Response
 
     private func updateUIAfterBotResponse(from controller: NativeBotController) {
-        // 更新遊戲狀態
-        gameState = controller.gameState
-        botStatus = controller.botState
-        tehaiTiles = controller.tehaiMjai
-        tsumoTile = controller.lastTsumo
-        recommendations = controller.lastRecommendations
-        recommendationCount = recommendations.count
-
-        // 同步到 GameStateManager（供 UI 回應式更新）
-        gameStateManager.syncFrom(controller: controller)
-
-        // 更新推薦顯示（這條路徑不自動送出，見 `supportsAutoPlay`）
+        // 與主路徑同一個寫入點（`GameStore.apply`）：一次寫完整份快照。
         //
         // `.off` 不顯示推薦：`highlightedTile` 必須跟著空，否則它會宣稱
         // 畫面上標了一張其實沒有標的牌（側欄的閘門在 `RecommendationView`）。
-        highlightedTile = autoPlayMode.showRecommendation
-            ? recommendations.first?.displayTile : nil
+        store.apply(controller: controller,
+                    showRecommendation: autoPlayMode.showRecommendation)
 
         // 註：「oplist 有和牌但模型無推薦 → 強制交給 resolver」的 fail-safe 只存在於主路徑
         // （`AutoPlayGate.forceHora`）。這裡不再抄一份殘缺版：它以前也只在 `.auto` 才動作，
@@ -230,12 +209,11 @@ class LegacyWebViewModel: WebViewModelProtocol {
     func setAutoPlayMode(_ mode: AutoPlayMode) {
         let effective = AutoPlayAvailability.commit(mode, autoPlaySupported: supportsAutoPlay)
         autoPlayMode = effective
-        // 切到 `.off` 時把「現在標了哪一張」收掉；切回來時由下一次 Bot 回應填上。
-        if !effective.showRecommendation {
-            highlightedTile = nil
-        }
+        // 切到 `.off` 時把「現在標了哪一張」收掉，切回來時立刻標回目前的第一推薦
+        // （與主路徑同一個方法；先前這裡只清、不補，要等下一次 Bot 回應才會標回來）。
+        store.updateHighlight(showRecommendation: effective.showRecommendation)
         if effective != mode {
-            statusMessage = "此裝置不支援自動送出，已改為推薦模式"
+            store.statusMessage = "此裝置不支援自動送出，已改為推薦模式"
             bridgeLog("[LegacyWebViewModel] 要求 \(mode.rawValue) → 降級為 \(effective.rawValue)："
                 + AutoPlayAvailability.autoUnavailableReason)
         } else {
@@ -268,9 +246,9 @@ class LegacyWebViewModel: WebViewModelProtocol {
         let seat = autoPlaySeat
 
         let decision = AutoPlayDecisionResolver.resolve(
-            snapshot: snapshot, recommendations: recommendations, mode: mode, seat: seat,
+            snapshot: snapshot, recommendations: store.recommendations, mode: mode, seat: seat,
             // 三麻 fail-closed 與主路徑同一條規則：只有四麻模型，不自動送出。
-            isSanma: gameState.is3P)
+            isSanma: store.gameState.is3P)
 
         guard case .send(let action, let tile) = decision else {
             switch decision {
@@ -285,7 +263,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
             return
         }
 
-        if let top = recommendations.first, action != top.actionType {
+        if let top = store.recommendations.first, action != top.actionType {
             bridgeLog("[LegacyWebViewModel] ⚠️ 決策覆蓋: AI 建議 \(top.actionType.rawValue) → 送出 \(action.rawValue)")
         }
 
@@ -319,8 +297,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
             action: actionType,
             tile: tileName,
             snapshot: LiqiOperationStore.shared.pending,
-            recommendations: recommendations,
-            tsumoTile: tsumoTile,
+            recommendations: store.recommendations,
+            tsumoTile: store.tsumoTile,
             sender: liqiSender,
             store: LiqiOperationStore.shared,
             log: { self.autoPlayLog($0) },
@@ -390,7 +368,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     func startDebugServer() {
         guard debugServer == nil else {
-            statusMessage = "Debug Server 已在運行"
+            store.statusMessage = "Debug Server 已在運行"
             return
         }
 
@@ -423,7 +401,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
         // 狀態列回調——只更新 UI（log 由 DebugServer.log() 單一寫入 LogManager）
         debugServer?.onStatusMessage = { [weak self] message in
             Task { @MainActor in
-                self?.statusMessage = message
+                self?.store.statusMessage = message
             }
         }
 
@@ -431,7 +409,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
         debugServer?.getBotStatus = { [weak self] in
             guard let self = self else { return [:] }
 
-            let recs: [[String: Any]] = self.recommendations.map { rec in
+            let recs: [[String: Any]] = self.store.recommendations.map { rec in
                 [
                     "tile": rec.displayTile,
                     "action": rec.actionType.rawValue,
@@ -443,27 +421,27 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
             return [
                 "botStatus": [
-                    "isActive": self.botStatus.isActive,
-                    "playerId": self.botStatus.playerId,
+                    "isActive": self.store.botStatus.isActive,
+                    "playerId": self.store.botStatus.playerId,
                 ],
                 "gameState": [
-                    "bakaze": self.gameState.bakazeDisplay,
-                    "kyoku": self.gameState.kyoku,
-                    "honba": self.gameState.honba,
+                    "bakaze": self.store.gameState.bakazeDisplay,
+                    "kyoku": self.store.gameState.kyoku,
+                    "honba": self.store.gameState.honba,
                 ],
                 // `isMyTurn` / `hasPendingAction` 已移除（來源恆 false／恆 nil 的假欄位）
                 "autoPlay": [
                     "mode": self.autoPlayMode.rawValue
                 ],
                 "recommendations": recs,
-                "tehaiCount": self.tehaiTiles.count,
-                "tsumoTile": self.tsumoTile as Any,
+                "tehaiCount": self.store.tehaiTiles.count,
+                "tsumoTile": self.store.tsumoTile as Any,
             ]
         }
 
         debugServer?.start()
         isDebugServerRunning = true
-        statusMessage = "Debug Server 已啟動 (port \(debugServerPort))"
+        store.statusMessage = "Debug Server 已啟動 (port \(debugServerPort))"
         bridgeLog("[LegacyWebViewModel] Debug Server 已啟動")
     }
 
@@ -471,7 +449,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
         debugServer?.stop()
         debugServer = nil
         isDebugServerRunning = false
-        statusMessage = "Debug Server 已停止"
+        store.statusMessage = "Debug Server 已停止"
     }
 
     func toggleDebugServer() {
@@ -515,13 +493,13 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     func loadMajsoul() async {
         guard let webView = webView else {
-            statusMessage = "WebView 未初始化"
+            store.statusMessage = "WebView 未初始化"
             return
         }
 
         if let url = URL(string: "https://game.maj-soul.com/1/") {
             webView.load(URLRequest(url: url))
-            statusMessage = "正在加載雀魂麻將..."
+            store.statusMessage = "正在加載雀魂麻將..."
         }
     }
 

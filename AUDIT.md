@@ -103,7 +103,7 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 權威與送出端（`AutoPlayGate` / resolver / sender）一致，不會出現「徽章亮著但送不出去」。
 `updateAvailableActions()` 與同樣無人讀的 `lastCandidates` 一併移除。
 
-單元測試 10 條（`BotAvailableActionsTests`，含 controller 與 `GameStateManager` 兩層）。
+單元測試 10 條（`BotAvailableActionsTests`，含 controller 與 `GameStore` 兩層）。
 **沒有 live `/bot/status` 複查**——需要對局中的 oplist。
 
 ### 已處理：MCP 6 個 highlight 失敗樁已移除（2026-08-02）

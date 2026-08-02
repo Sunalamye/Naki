@@ -173,7 +173,7 @@ Naki 這邊如果某一格填錯東西，模型不會報錯，它會**照樣算�
 │                           │                              │
 │      AutoPlayDecisionResolver（合法性與模式閘門）          │
 │                           │                              │
-│          GameStateManager  ←→  SwiftUI Views             │
+│              GameStore  ←→  SwiftUI Views / MCP          │
 └──────────────────────────────────────────────────────────┘
 ```
 

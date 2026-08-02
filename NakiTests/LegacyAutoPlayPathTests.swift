@@ -135,8 +135,8 @@ final class AutoPlaySeatSourceTests: XCTestCase {
     @MainActor
     func testSeatComesFromGameStateNotBotStatus() {
         let model = SeatSourceDouble()
-        model.gameState.playerId = 2
-        model.botStatus.playerId = 0
+        model.store.gameState.playerId = 2
+        model.store.botStatus.playerId = 0
 
         XCTAssertEqual(model.autoPlaySeat, 2, "座位要取 gameState.playerId")
     }
@@ -144,33 +144,24 @@ final class AutoPlaySeatSourceTests: XCTestCase {
     @MainActor
     func testSeatIgnoresStaleBotStatus() {
         let model = SeatSourceDouble()
-        model.gameState.playerId = 1
-        model.botStatus.playerId = 3   // 例如 deleteNativeBot() 之後殘留／歸零的值
+        model.store.gameState.playerId = 1
+        model.store.botStatus.playerId = 3   // 例如 deleteNativeBot() 之後殘留／歸零的值
 
-        XCTAssertNotEqual(model.autoPlaySeat, model.botStatus.playerId)
+        XCTAssertNotEqual(model.autoPlaySeat, model.store.botStatus.playerId)
         XCTAssertEqual(model.autoPlaySeat, 1)
     }
 }
 
 /// 只為了驗 `autoPlaySeat` 的最小 `WebViewModelProtocol` 實作。
 ///
-/// 全部成員都是空殼——這個 double 唯一的用途是提供 `gameState` / `botStatus` 兩個欄位，
+/// 全部成員都是空殼——這個 double 唯一的用途是提供一份 `GameStore`，
 /// 讓協定 extension 的預設實作（兩條 path 共用的那一份）能被單獨呼叫到。
 @Observable
 @MainActor
 final class SeatSourceDouble: WebViewModelProtocol {
-    var statusMessage: String = ""
-    var isConnected: Bool = false
-    var recommendationCount: Int = 0
+    /// p3-1 之後協定只要求這一份狀態（先前是 9 個鏡像屬性 + 一個 `GameStateManager`）
+    let store = GameStore()
 
-    var gameState: GameState = GameState()
-    var botStatus: BotStatus = BotStatus()
-    var recommendations: [Recommendation] = []
-    var tehaiTiles: [String] = []
-    var tsumoTile: String?
-    var highlightedTile: String?
-
-    let gameStateManager = GameStateManager()
     var isDebugServerRunning: Bool = false
     var debugServerPort: UInt16 = 0
 

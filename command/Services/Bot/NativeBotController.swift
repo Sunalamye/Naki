@@ -110,7 +110,7 @@ class NativeBotController {
 
     init() {}
 
-    /// deinit 標 `nonisolated`——理由與 `GameStateManager` 同一條：
+    /// deinit 標 `nonisolated`——理由與 `GameStore` 同一條：
     /// app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，MainActor 隔離的 class
     /// 連隱含 deinit 都走 `swift_task_deinitOnExecutor`；在 NakiTests 的 host 進程裡釋放
     /// 這種物件會 `pointer being freed was not allocated` 而 SIGABRT，整個 test host 掛掉重啟。

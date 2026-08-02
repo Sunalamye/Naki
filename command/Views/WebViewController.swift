@@ -156,8 +156,8 @@ class NakiWebCoordinator {
             guard let self = self else { return }
 
             Task { @MainActor in
-                self.viewModel?.isConnected = connected
-                self.viewModel?.statusMessage = connected
+                self.viewModel?.store.isConnected = connected
+                self.viewModel?.store.statusMessage = connected
                     ? "已連線到雀魂服务器"
                     : "已斷開連線"
 
@@ -168,10 +168,9 @@ class NakiWebCoordinator {
                         print("[協調器] WebSocket 已重連, 嘗試重新同步 Bot...")
                         await self.resyncBot()
                     } else {
+                        // `deleteNativeBot()` 已經清空本局資料（同一個 store），
+                        // 這裡不再逐欄補一次——那是鏡像時代兩份資料各清各的遺跡。
                         self.viewModel?.deleteNativeBot()
-                        self.viewModel?.recommendations = []
-                        self.viewModel?.tehaiTiles = []
-                        self.viewModel?.tsumoTile = nil
                         print("[協調器] WebSocket 連線時重置狀態 (無進行中的遊戲)")
                     }
                 } else {
@@ -206,7 +205,7 @@ class NakiWebCoordinator {
 
             do {
                 try await viewModel?.createNativeBot(playerId: playerId, is3P: is3P)
-                viewModel?.statusMessage = "Bot 已建立 (Player \(playerId))"
+                viewModel?.store.statusMessage = "Bot 已建立 (Player \(playerId))"
                 bridgeLog("[協調器] 已為玩家 \(playerId) 建立 Bot")
                 systemLog("[生命週期] 對局開始，Bot 已建立 (Player \(playerId))")
                 startEventConsumer()
@@ -219,11 +218,8 @@ class NakiWebCoordinator {
             systemLog("[生命週期] 對局結束，清除 Bot 與 UI 狀態")
             eventStream.emit(event)
             eventStream.endGame()
-            viewModel?.deleteNativeBot()
-            viewModel?.recommendations = []
-            viewModel?.tehaiTiles = []
-            viewModel?.tsumoTile = nil
-            viewModel?.statusMessage = "遊戲結束"
+            viewModel?.deleteNativeBot()   // 手牌／推薦／botStatus 一併清空
+            viewModel?.store.statusMessage = "遊戲結束"
 
         default:
             eventStream.emit(event)
@@ -267,7 +263,7 @@ class NakiWebCoordinator {
 
         do {
             try await viewModel?.createNativeBot(playerId: playerId, is3P: is3P)
-            viewModel?.statusMessage = "Bot 已重新同步 (Player \(playerId))"
+            viewModel?.store.statusMessage = "Bot 已重新同步 (Player \(playerId))"
             startEventConsumer()
             bridgeLog("[協調器] Bot 重新同步成功")
         } catch {
@@ -279,11 +275,8 @@ class NakiWebCoordinator {
     func handleNavigationStarted() {
         websocketHandler.fullReset()
         eventStream.endGame()
-        viewModel?.deleteNativeBot()
-        viewModel?.recommendations = []
-        viewModel?.tehaiTiles = []
-        viewModel?.tsumoTile = nil
-        viewModel?.isConnected = false
+        viewModel?.deleteNativeBot()   // 手牌／推薦／botStatus 一併清空
+        viewModel?.store.isConnected = false
         print("[協調器] 導覽開始時完整重置 (包含 EventStream)")
     }
 }

@@ -141,9 +141,9 @@ final class BotAvailableActionsTests: XCTestCase {
         XCTAssertFalse(controller.canPon, "已處理過的 oplist 不該繼續點亮徽章")
     }
 
-    /// `GameStateManager.syncFrom` 是 `/bot/status` 的實際資料面，必須帶到同一組值
+    /// `GameStore.apply` 是 `/bot/status` 與側欄共同的資料面，必須帶到同一組值
     @MainActor
-    func testGameStateManagerSyncCarriesRealFlags() {
+    func testGameStoreApplyCarriesRealFlags() {
         let store = LiqiOperationStore.shared
         store.reset()
         defer { store.reset() }
@@ -152,11 +152,11 @@ final class BotAvailableActionsTests: XCTestCase {
                      operations: [LiqiOperation(type: .discard), LiqiOperation(type: .riichi)],
                      source: "test")
 
-        let manager = GameStateManager()
-        manager.syncFrom(controller: NativeBotController())
+        let gameStore = GameStore()
+        gameStore.apply(controller: NativeBotController(), showRecommendation: true)
 
-        XCTAssertTrue(manager.botStatus.canDiscard)
-        XCTAssertTrue(manager.botStatus.canRiichi)
-        XCTAssertFalse(manager.botStatus.canAgari)
+        XCTAssertTrue(gameStore.botStatus.canDiscard)
+        XCTAssertTrue(gameStore.botStatus.canRiichi)
+        XCTAssertFalse(gameStore.botStatus.canAgari)
     }
 }

@@ -92,6 +92,7 @@ OptionalOperationList
 | 平台 factory | `command/ViewModels/WebViewModelProtocol.swift` |
 | WebPage path | `command/ViewModels/WebViewModel.swift` |
 | Legacy path | `command/ViewModels/LegacyWebViewModel.swift` |
+| 牌局狀態單一來源 | `command/ViewModels/GameStore.swift`（SwiftUI 與 MCP 讀同一份） |
 | coordinator | `command/Views/WebViewController.swift` |
 | WS injection | `command/Services/Bridge/WebSocketInterceptor.swift` |
 | parser／bridge | `command/Services/Bridge/LiqiParser.swift`、`MajsoulBridge.swift` |
@@ -163,7 +164,7 @@ MCP 已沒有手動高亮工具（6 個 `highlight_*` 失敗樁於 2026-08-02 �
 
 MCP 工具需要 `import MCPKit`。
 
-app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，`NakiTests` target 沒開。後果是**單測釋放任何 MainActor 隔離的 app class 會直接 SIGABRT**（`pointer being freed was not allocated`，堆疊在 `swift_task_deinitOnExecutor` → `TaskLocal::StopLookupScope::~StopLookupScope()`），test host 崩掉重啟，畫面上像「那批測試莫名其妙沒跑」而不是 fail。要單測的 MainActor class 得補一行 `nonisolated deinit { }`（`GameStateManager`、`NativeBotController` 已補）。最小重現已確認：`@MainActor final class` 崩、同一個 class 加 `nonisolated deinit` 過、`nonisolated final class` 過。
+app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，`NakiTests` target 沒開。後果是**單測釋放任何 MainActor 隔離的 app class 會直接 SIGABRT**（`pointer being freed was not allocated`，堆疊在 `swift_task_deinitOnExecutor` → `TaskLocal::StopLookupScope::~StopLookupScope()`），test host 崩掉重啟，畫面上像「那批測試莫名其妙沒跑」而不是 fail。要單測的 MainActor class 得補一行 `nonisolated deinit { }`（`GameStore`、`NativeBotController` 已補）。最小重現已確認：`@MainActor final class` 崩、同一個 class 加 `nonisolated deinit` 過、`nonisolated final class` 過。
 
 ## 測試腳本
 

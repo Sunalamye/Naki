@@ -239,7 +239,7 @@ struct ContentView: View {
 
     private var iOSBottomPanel: some View {
         HStack(spacing: 0) {
-            if !viewModel.statusMessage.isEmpty {
+            if !viewModel.store.statusMessage.isEmpty {
                 StatusBar()
             }
         }
@@ -249,9 +249,9 @@ struct ContentView: View {
             VStack{
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(viewModel.isConnected ? Color.green : Color.red)
+                        .fill(viewModel.store.isConnected ? Color.green : Color.red)
                         .frame(width: 8, height: 8)
-                    Text(viewModel.isConnected ? "已連接" : "未連接")
+                    Text(viewModel.store.isConnected ? "已連接" : "未連接")
                         .font(.caption)
                 }
 
@@ -262,10 +262,10 @@ struct ContentView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("websocket-connection-indicator")
             .accessibilityLabel("WebSocket 連線狀態")
-            .accessibilityValue(viewModel.isConnected ? "已連接" : "未連接")
+            .accessibilityValue(viewModel.store.isConnected ? "已連接" : "未連接")
 
             RecommendationView(
-                recommendations: viewModel.recommendations,
+                recommendations: viewModel.store.recommendations,
                 maxDisplay: 5
             )
         }
@@ -316,13 +316,13 @@ struct ContentView: View {
                 VStack(spacing: 16) {
                     // Bot 狀態
                     BotStatusView(
-                        botStatus: viewModel.botStatus,
-                        gameState: viewModel.gameState
+                        botStatus: viewModel.store.botStatus,
+                        gameState: viewModel.store.gameState
                     )
 
                     // AI 推薦
                     RecommendationView(
-                        recommendations: viewModel.recommendations,
+                        recommendations: viewModel.store.recommendations,
                         maxDisplay: 5
                     )
 
@@ -365,13 +365,13 @@ struct GamePanel: View {
             VStack(spacing: 12) {
                 // Bot 狀態
                 BotStatusView(
-                    botStatus: viewModel?.botStatus ?? BotStatus(),
-                    gameState: viewModel?.gameState ?? GameState()
+                    botStatus: viewModel?.store.botStatus ?? BotStatus(),
+                    gameState: viewModel?.store.gameState ?? GameState()
                 )
 
                 // AI 推薦
                 RecommendationView(
-                    recommendations: viewModel?.recommendations ?? [],
+                    recommendations: viewModel?.store.recommendations ?? [],
                     maxDisplay: 5
                 )
 
@@ -399,7 +399,7 @@ struct GamePanel: View {
 struct ConnectionIndicator: View {
     @Environment(\.webViewModel) private var viewModel
 
-    private var isConnected: Bool { viewModel?.isConnected ?? false }
+    private var isConnected: Bool { viewModel?.store.isConnected ?? false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -668,18 +668,18 @@ struct StatusBar: View {
     @Environment(\.webViewModel) private var viewModel
 
     var body: some View {
-        if let vm = viewModel, !vm.statusMessage.isEmpty {
+        if let vm = viewModel, !vm.store.statusMessage.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: statusIcon)
                     .foregroundColor(statusColor)
-                Text(vm.statusMessage)
+                Text(vm.store.statusMessage)
                     .font(.system(.caption, design: .monospaced))
                     .lineLimit(1)
                 Spacer()
 
                 // 顯示推薦數量
-                if vm.recommendationCount > 0 {
-                    Text("\(vm.recommendationCount) 推薦")
+                if vm.store.recommendationCount > 0 {
+                    Text("\(vm.store.recommendationCount) 推薦")
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
@@ -697,9 +697,9 @@ struct StatusBar: View {
 
     private var statusIcon: String {
         guard let vm = viewModel else { return "info.circle.fill" }
-        if vm.statusMessage.contains("錯誤") || vm.statusMessage.contains("Error") {
+        if vm.store.statusMessage.contains("錯誤") || vm.store.statusMessage.contains("Error") {
             return "exclamationmark.triangle.fill"
-        } else if vm.statusMessage.contains("成功") || vm.statusMessage.contains("已") {
+        } else if vm.store.statusMessage.contains("成功") || vm.store.statusMessage.contains("已") {
             return "checkmark.circle.fill"
         }
         return "info.circle.fill"
@@ -707,9 +707,9 @@ struct StatusBar: View {
 
     private var statusColor: Color {
         guard let vm = viewModel else { return .blue }
-        if vm.statusMessage.contains("錯誤") || vm.statusMessage.contains("Error") {
+        if vm.store.statusMessage.contains("錯誤") || vm.store.statusMessage.contains("Error") {
             return .red
-        } else if vm.statusMessage.contains("成功") || vm.statusMessage.contains("已") {
+        } else if vm.store.statusMessage.contains("成功") || vm.store.statusMessage.contains("已") {
             return .green
         }
         return .blue
