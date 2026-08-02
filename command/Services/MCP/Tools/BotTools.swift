@@ -237,19 +237,16 @@ struct BotSyncTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
         context.log("MCP: Force reconnecting to rebuild Bot state")
 
-        let result = try await context.executeJavaScript(NakiWebSocketScript.forceReconnect)
-
-        let closedCount = NakiWebSocketScript.closedCount(from: result)
-        let success = closedCount > 0
-
-        context.log("MCP: forceReconnect result: closed \(closedCount) connections")
-
-        return [
-            "success": success,
-            "closedConnections": closedCount,
-            "message": success ? "已關閉 \(closedCount) 個連線，遊戲將自動重連並重建 Bot" : "沒有找到可關閉的連線"
-        ]
+        // 腳本、回傳值解讀與訊息措辭都在 `ForceReconnectAction`（p3-3）。
+        // 先前這裡自己跑一次 JS 並自己解讀結果，與 `WebViewModel.forceReconnect()`
+        // 是兩份會各自漂移的實作——p0-2 修的正是其中一份漏了 `return`。
+        let outcome = await nakiContext.forceReconnect()
+        context.log("MCP: forceReconnect result: \(outcome.statusMessage)")
+        return outcome.dictionary
     }
 }

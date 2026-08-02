@@ -10,6 +10,18 @@ import Foundation
 import Network
 import MCPKit
 
+// MARK: - HTTP Responder
+
+/// 把 JSON-RPC 回應交回 HTTP 那一層。
+///
+/// p3-3 之前這是 `var sendResponse: ((NWConnection, Int, String, String) -> Void)?`
+/// ——一個「一定會被設定、沒設定就整個 MCP 靜默失效」的 optional closure。
+/// 改成協定之後，`MCPHandler` 沒有 responder 就建不起來。
+@MainActor
+protocol MCPHTTPResponder: AnyObject {
+    func sendMCPResponse(connection: NWConnection, status: Int, body: String, contentType: String)
+}
+
 // MARK: - MCP Handler
 
 /// MCP Protocol 處理器
@@ -21,13 +33,17 @@ final class MCPHandler {
     /// 執行上下文
     let context: DefaultNakiMCPContext
 
-    /// 發送 HTTP 響應的回調
-    var sendResponse: ((NWConnection, Int, String, String) -> Void)?
+    /// HTTP 那一層（`DebugServer`）。unowned：server 持有 handler，反向不能再持有。
+    private unowned let responder: MCPHTTPResponder
 
     // MARK: - Initialization
 
-    init() {
-        self.context = DefaultNakiMCPContext()
+    /// - Parameters:
+    ///   - dependencies: MCP 工具層的全部能力（p3-3：一次注入，取代 9 個 closure）
+    ///   - responder: 把回應寫回 socket 的那一層
+    init(dependencies: NakiMCPDependencies, responder: MCPHTTPResponder) {
+        self.context = DefaultNakiMCPContext(dependencies: dependencies)
+        self.responder = responder
 
         // 註冊所有內建工具
         MCPToolRegistry.shared.registerBuiltInTools()
@@ -35,64 +51,10 @@ final class MCPHandler {
 
     // MARK: - Context Configuration
 
-    /// 設置伺服器埠號
+    /// 設置伺服器埠號（server 真正綁到 port 之後才知道）
     var serverPort: UInt16 {
         get { context.serverPort }
         set { context.serverPort = newValue }
-    }
-
-    /// 設置 JavaScript 執行回調
-    var executeJavaScript: ((String, @escaping (Any?, Error?) -> Void) -> Void)? {
-        get { context.executeJavaScriptCallback }
-        set { context.executeJavaScriptCallback = newValue }
-    }
-
-    /// 設置獲取 Bot 狀態回調
-    var getBotStatus: (() -> [String: Any])? {
-        get { context.getBotStatusCallback }
-        set { context.getBotStatusCallback = newValue }
-    }
-
-    /// 設置觸發自動打牌回調
-    var triggerAutoPlay: (() -> Void)? {
-        get { context.triggerAutoPlayCallback }
-        set { context.triggerAutoPlayCallback = newValue }
-    }
-
-    /// 設置 Liqi 請求送出回調（Unity 時代唯一有效的動作／大廳面）
-    var sendLiqi: ((LiqiRequestSpec, Int) async -> LiqiToolSendOutcome)? {
-        get { context.sendLiqiCallback }
-        set { context.sendLiqiCallback = newValue }
-    }
-
-    /// 設置遊戲狀態快照回調（Swift 協定層供給，取代已死的 DesktopMgr 讀取）
-    var getGameSnapshot: (() -> [String: Any])? {
-        get { context.getGameSnapshotCallback }
-        set { context.getGameSnapshotCallback = newValue }
-    }
-
-    /// 設置自動心跳（防閒置）開關回調
-    var setAntiIdle: ((Bool?, TimeInterval?) -> [String: Any])? {
-        get { context.antiIdleCallback }
-        set { context.antiIdleCallback = newValue }
-    }
-
-    /// 設置獲取日誌回調
-    var getLogs: (() -> [String])? {
-        get { context.getLogsCallback }
-        set { context.getLogsCallback = newValue }
-    }
-
-    /// 設置清空日誌回調
-    var clearLogs: (() -> Void)? {
-        get { context.clearLogsCallback }
-        set { context.clearLogsCallback = newValue }
-    }
-
-    /// 設置記錄日誌回調
-    var log: ((String) -> Void)? {
-        get { context.logCallback }
-        set { context.logCallback = newValue }
     }
 
     // MARK: - MCP Request Handler
@@ -114,7 +76,8 @@ final class MCPHandler {
 
         case .accepted:
             // JSON-RPC 通知沒有 id，也就沒有可回的 response
-            sendResponse?(connection, 202, "", "application/json")
+            responder.sendMCPResponse(connection: connection, status: 202, body: "",
+                                       contentType: "application/json")
 
         case .failure(let failure):
             sendFailure(connection: connection, id: plan.id, failure: failure)
@@ -231,9 +194,13 @@ final class MCPHandler {
             let sanitized = JSONSanitizer.sanitize(data)
             let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: [])
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
-            sendResponse?(connection, status, body, "application/json")
+            responder.sendMCPResponse(connection: connection, status: status, body: body,
+                                       contentType: "application/json")
         } catch {
-            sendResponse?(connection, 500, "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}", "application/json")
+            responder.sendMCPResponse(
+                connection: connection, status: 500,
+                body: "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}",
+                contentType: "application/json")
         }
     }
 }

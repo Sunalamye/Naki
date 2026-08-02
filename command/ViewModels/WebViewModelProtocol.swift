@@ -36,7 +36,15 @@ protocol WebViewModelProtocol: AnyObject, Observable {
     func processNativeEvents(_ events: [[String: Any]]) async throws -> [String: Any]?
     func deleteNativeBot()
     func resyncBot() async
-    func forceReconnect() async
+
+    /// 強制斷線重連以重建 Bot 狀態。
+    ///
+    /// 回傳結果而不是 Void（p3-3）：呼叫端有三個（UI 按鈕、MCP `bot_sync`、
+    /// ViewModel 自己的狀態列），先前三邊各自解讀「有沒有成功」，
+    /// 其中 MCP 那份還自己重跑一次 JS。手段仍由各 path 決定
+    /// （WebPage 走 `__nakiWebSocket.forceReconnect()`，Legacy 走 `reload()`）。
+    @discardableResult
+    func forceReconnect() async -> ForceReconnectOutcome
 
     // MARK: - Auto Play Methods
 

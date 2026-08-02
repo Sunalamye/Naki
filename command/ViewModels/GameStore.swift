@@ -36,7 +36,10 @@ import SwiftUI
 ///   （`botStatus` 的六個 canXxx 旗標是 `NativeBotController.availableActions` 的導出值，
 ///   而那個 computed property 每次都現讀 store，不是快取）。
 /// - Bot 的完整內部狀態仍在 `NativeBotController`；這裡只放「要被顯示／被查詢」的快照。
-/// - 自動打牌模式不放這裡：它的權威是 `AutoPlayModeStore`（UserDefaults）＋ ViewModel。
+/// - 自動打牌模式的**持久化**權威仍是 `AutoPlayModeStore`（UserDefaults）、收斂權威仍是
+///   `AutoPlayAvailability.commit`；這裡只放「現在生效的是哪一個」（p3-3）。
+///   放進來的理由是 MCP：`bot_status` / `game_state` 都要輸出 `autoPlay.mode`，
+///   而 p3-3 之後 MCP 的狀態面一律讀這個物件，不再靠 ViewModel 傳一個 closure 進去。
 @Observable
 @MainActor
 final class GameStore {
@@ -64,6 +67,15 @@ final class GameStore {
     /// 唯一的寫入點是 `updateHighlight(showRecommendation:)`。
     var highlightedTile: String?
 
+    // MARK: - 模式
+
+    /// 目前生效的自動打牌模式。
+    ///
+    /// **唯一的寫入點是 ViewModel 的 `setAutoPlayMode`**（它先過
+    /// `AutoPlayAvailability.commit` 做收斂與持久化）。這裡只是「現在跑的是哪一個」，
+    /// 不是設定的權威——直接寫這個欄位會跳過 Legacy 路徑的 `.auto` 降級。
+    var autoPlayMode: AutoPlayMode = AutoPlayModeStore.defaultMode
+
     // MARK: - 連線與狀態列
 
     /// 雀魂 WebSocket 是否連線中
@@ -71,6 +83,18 @@ final class GameStore {
 
     /// 狀態列文字（載入／連線／Bot 建立／MCP／錯誤都寫這裡）
     var statusMessage = ""
+
+    // MARK: - Debug／MCP Server
+
+    /// Debug／MCP server 是否在跑（工具列指示燈讀它）
+    ///
+    /// 寫入點：`DebugServer` 綁上 port 時、以及 ViewModel 的 `stopDebugServer()`。
+    /// 先前這是 ViewModel 的 stored property，由 `DebugServer.onPortChanged` closure
+    /// 回寫——那個 closure 是 p3-3 要拆掉的九跳之一。
+    var isDebugServerRunning = false
+
+    /// 實際綁到的 port（8765 被佔用時會往上找，所以不等於 preferred port）
+    var debugServerPort: UInt16 = 8765
 
     // MARK: - 導出值
 

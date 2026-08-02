@@ -13,10 +13,15 @@ import MortalSwift
 // MARK: - Bot Status View
 
 struct BotStatusView: View {
-    @Environment(\.webViewModel) private var viewModel
 
     var botStatus: BotStatus
     var gameState: GameState
+
+    /// 「重新載入」按鈕做的事（強制斷線重連）。
+    ///
+    /// p3-3：先前是 `@Environment(\.webViewModel)?.forceReconnect()`——View 為了一顆
+    /// 按鈕認得整個 view model，而 Preview 裡那顆按鈕等於壞的。
+    var reloadBot: ForceReconnectAction = .unavailable
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -42,9 +47,7 @@ struct BotStatusView: View {
                 .accessibilityLabel("Bot 運行狀態")
                 .accessibilityValue(botStatus.isActive ? "運行中" : "待機")
                 Button(action: {
-                    Task {
-                        await viewModel?.forceReconnect()
-                    }
+                    Task { await reloadBot() }
                 }) {
                     Image(systemName: "arrow.clockwise")
                 }

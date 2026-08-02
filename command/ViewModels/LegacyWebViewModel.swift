@@ -28,8 +28,15 @@ class LegacyWebViewModel: WebViewModelProtocol {
     /// ——同一個 MCP 端點的資料面取決於走哪條 WebView path。現在兩條路都讀 `GameStore`。
     let store = GameStore()
 
-    var isDebugServerRunning: Bool = false
-    var debugServerPort: UInt16 = 8765
+    /// server 狀態與主路徑同樣住在 `GameStore`（p3-3，見該處）
+    var isDebugServerRunning: Bool {
+        get { store.isDebugServerRunning }
+        set { store.isDebugServerRunning = newValue }
+    }
+    var debugServerPort: UInt16 {
+        get { store.debugServerPort }
+        set { store.debugServerPort = newValue }
+    }
 
     // MARK: - Services
 
@@ -47,7 +54,9 @@ class LegacyWebViewModel: WebViewModelProtocol {
     ///
     /// **不變式：這條路徑上它永遠不會是 `.auto`。** 兩個寫入點（init、`setAutoPlayMode`）
     /// 都先過 `AutoPlayAvailability.clamp`，理由見 `supportsAutoPlay`。
-    private(set) var autoPlayMode: AutoPlayMode = AutoPlayModeStore.defaultMode
+    ///
+    /// p3-3：儲存位置移進 `GameStore`（與主路徑同一個型別、同一個欄位）。
+    var autoPlayMode: AutoPlayMode { store.autoPlayMode }
 
     /// Legacy 路徑不提供自動送出（p2-2 路線 A）。
     ///
@@ -99,8 +108,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
         // `commit` 會把收斂後的值寫回存檔：不寫的話 UI 的 @AppStorage 與這裡讀到的模式
         // 會不一致，picker 顯示「自動」而實際跑「推薦」正是先前要修掉的那種說謊介面。
         let stored = AutoPlayModeStore.load()
-        autoPlayMode = AutoPlayAvailability.commit(stored, autoPlaySupported: supportsAutoPlay)
-        if autoPlayMode != stored {
+        store.autoPlayMode = AutoPlayAvailability.commit(stored, autoPlaySupported: supportsAutoPlay)
+        if store.autoPlayMode != stored {
             bridgeLog("[LegacyWebViewModel] 存檔為自動模式，本路徑不支援 → 降級為推薦")
         }
 
@@ -175,9 +184,16 @@ class LegacyWebViewModel: WebViewModelProtocol {
         store.statusMessage = "重新同步 Bot..."
     }
 
-    func forceReconnect() async {
+    /// Legacy 路徑沒有 `__nakiWebSocket.forceReconnect()` 之外的保證，改走整頁重載。
+    ///
+    /// 回傳 `.reloaded` 而不是假裝關了 n 條連線：`ForceReconnectOutcome` 的
+    /// `closedConnections` 在這條路上沒有意義，寫 0 會被讀成「找不到連線可關」。
+    @discardableResult
+    func forceReconnect() async -> ForceReconnectOutcome {
         webView?.reload()
-        store.statusMessage = "正在重新連接..."
+        let outcome = ForceReconnectOutcome.reloaded
+        store.statusMessage = outcome.statusMessage
+        return outcome
     }
 
     // MARK: - UI Update After Bot Response
@@ -208,7 +224,7 @@ class LegacyWebViewModel: WebViewModelProtocol {
     /// 之後任何呼叫端都不該有辦法在沒驗過的路徑上打開自動送出。
     func setAutoPlayMode(_ mode: AutoPlayMode) {
         let effective = AutoPlayAvailability.commit(mode, autoPlaySupported: supportsAutoPlay)
-        autoPlayMode = effective
+        store.autoPlayMode = effective
         // 切到 `.off` 時把「現在標了哪一張」收掉，切回來時立刻標回目前的第一推薦
         // （與主路徑同一個方法；先前這裡只清、不補，要等下一次 Bot 回應才會標回來）。
         store.updateHighlight(showRecommendation: effective.showRecommendation)
@@ -366,84 +382,48 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     // MARK: - Debug Server
 
+    /// 這條 path 提供給 MCP／Debug HTTP 的能力。
+    ///
+    /// **刻意與主路徑不同**：會送出 Liqi request 的能力一律 `.unavailable`。
+    /// 遷移前這幾個 closure 在 Legacy 上根本沒有被設定（`sendLiqi` / `triggerAutoPlay` /
+    /// `setAntiIdle` 都是 nil），所以 MCP 的動作類工具在這條路上本來就送不出東西；
+    /// p3-3 只是把那個事實從「忘了接線」變成「明講不提供，並附上原因」。
+    ///
+    /// 為什麼不順手接上：這條路沒有主路徑的閘門與重試保護，而且 macOS deployment
+    /// target 是 26，本機跑不到它——沒有 iOS 17–25 實機就沒有任何對局證據
+    /// （同 `supportsAutoPlay` 的理由，p2-2 路線 A）。
+    ///
+    /// 唯讀面（狀態快照、log、JS、截圖）與重連照常提供。快照的 account id 取不到
+    /// （Legacy 的 `WebSocketMessageHandler` 由 View 持有，VM 沒有引用），所以回 0。
+    private func makeMCPDependencies() -> NakiMCPDependencies {
+        let javaScript = ExecuteJavaScriptAction(viewModel: self)
+        // 短碼而不是自由文字：它會出現在 MCP 工具輸出與 log 裡，要能被 grep
+        let disabled = "legacy_path_action_send_disabled"
+        return NakiMCPDependencies(
+            store: store,
+            executeJavaScript: javaScript,
+            captureScreenshot: CaptureScreenshotAction(),
+            sendAction: .unavailable(disabled),
+            startMatch: StartMatchAction(send: .unavailable(disabled)),
+            cancelMatch: CancelMatchAction(send: .unavailable(disabled)),
+            triggerAutoPlay: .unavailable,
+            setAntiIdle: .unavailable,
+            gameSnapshot: GameSnapshotAction(store: store, accountSource: nil),
+            forceReconnect: ForceReconnectAction(javaScript: javaScript))
+    }
+
     func startDebugServer() {
         guard debugServer == nil else {
             store.statusMessage = "Debug Server 已在運行"
             return
         }
 
-        debugServer = DebugServer(port: debugServerPort)
-
-        // 設定 JavaScript 執行回調
-        debugServer?.executeJavaScript = { [weak self] script, completion in
-            guard let webView = self?.webView else {
-                completion(nil, NSError(domain: "Naki", code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "WebView not available"]))
-                return
-            }
-
-            Task { @MainActor in
-                // WKWebView 的 evaluateJavaScript 需要包裝成 IIFE
-                let wrappedScript = "(function() { \(script) })()"
-
-                webView.evaluateJavaScript(wrappedScript) { result, error in
-                    if let error = error {
-                        bridgeLog("[JS 除錯] 錯誤: \(error)")
-                        completion(nil, error)
-                    } else {
-                        bridgeLog("[JS 除錯] 結果: \(String(describing: result))")
-                        completion(result, nil)
-                    }
-                }
-            }
-        }
-
-        // 狀態列回調——只更新 UI（log 由 DebugServer.log() 單一寫入 LogManager）
-        debugServer?.onStatusMessage = { [weak self] message in
-            Task { @MainActor in
-                self?.store.statusMessage = message
-            }
-        }
-
-        // 設定 Bot 狀態回調
-        debugServer?.getBotStatus = { [weak self] in
-            guard let self = self else { return [:] }
-
-            let recs: [[String: Any]] = self.store.recommendations.map { rec in
-                [
-                    "tile": rec.displayTile,
-                    "action": rec.actionType.rawValue,
-                    "label": rec.displayLabel,
-                    "prob": rec.probability,
-                    "percentage": rec.percentageString,
-                ]
-            }
-
-            return [
-                "botStatus": [
-                    "isActive": self.store.botStatus.isActive,
-                    "playerId": self.store.botStatus.playerId,
-                ],
-                "gameState": [
-                    "bakaze": self.store.gameState.bakazeDisplay,
-                    "kyoku": self.store.gameState.kyoku,
-                    "honba": self.store.gameState.honba,
-                ],
-                // `isMyTurn` / `hasPendingAction` 已移除（來源恆 false／恆 nil 的假欄位）
-                "autoPlay": [
-                    "mode": self.autoPlayMode.rawValue
-                ],
-                "recommendations": recs,
-                "tehaiCount": self.store.tehaiTiles.count,
-                "tsumoTile": self.store.tsumoTile as Any,
-            ]
-        }
-
-        debugServer?.start()
-        isDebugServerRunning = true
-        store.statusMessage = "Debug Server 已啟動 (port \(debugServerPort))"
+        let server = DebugServer(port: debugServerPort, dependencies: makeMCPDependencies())
+        debugServer = server
+        server.start()
         bridgeLog("[LegacyWebViewModel] Debug Server 已啟動")
     }
+
 
     func stopDebugServer() {
         debugServer?.stop()

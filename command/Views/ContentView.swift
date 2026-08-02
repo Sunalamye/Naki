@@ -53,7 +53,9 @@ struct ContentView: View {
         // a11y: fixed width for segmented control; kept to preserve toolbar layout
         .frame(width: width)
         .onChange(of: autoPlayMode) { _, newValue in
-            viewModel.setAutoPlayMode(newValue)
+            // 收斂與持久化在 ViewModel → `AutoPlayAvailability.commit`；
+            // Action 只是這個 View 對「切模式」這件副作用的型別化入口（p3-3）。
+            SetAutoPlayModeAction(viewModel: viewModel)(newValue)
         }
         .accessibilityIdentifier("autoplay-mode-picker")
         .accessibilityLabel("自動打牌模式")
@@ -266,7 +268,9 @@ struct ContentView: View {
 
             RecommendationView(
                 recommendations: viewModel.store.recommendations,
-                maxDisplay: 5
+                maxDisplay: 5,
+                showsRecommendations: viewModel.autoPlayMode.showRecommendation,
+                reloadBot: ForceReconnectAction(viewModel: viewModel)
             )
         }
         .frame(width: 140)
@@ -317,13 +321,16 @@ struct ContentView: View {
                     // Bot 狀態
                     BotStatusView(
                         botStatus: viewModel.store.botStatus,
-                        gameState: viewModel.store.gameState
+                        gameState: viewModel.store.gameState,
+                        reloadBot: ForceReconnectAction(viewModel: viewModel)
                     )
 
                     // AI 推薦
                     RecommendationView(
                         recommendations: viewModel.store.recommendations,
-                        maxDisplay: 5
+                        maxDisplay: 5,
+                        showsRecommendations: viewModel.autoPlayMode.showRecommendation,
+                        reloadBot: ForceReconnectAction(viewModel: viewModel)
                     )
 
                     // 日誌（可展開）
@@ -359,6 +366,14 @@ struct GamePanel: View {
     @Environment(\.webViewModel) private var viewModel
     @Binding var showLog: Bool
 
+    /// 面板裡兩顆「重新載入」按鈕共用的動作。
+    ///
+    /// 沒有 view model（Preview／初始化中）時是 `.unavailable`：按下去不做事，
+    /// 而不是靜靜地什麼都沒接（先前 `viewModel?.forceReconnect()` 就是後者）。
+    private var reloadBot: ForceReconnectAction {
+        viewModel.map { ForceReconnectAction(viewModel: $0) } ?? .unavailable
+    }
+
     var body: some View {
         VSplitView {
             // 上半部分：Bot 狀態和推薦
@@ -366,13 +381,16 @@ struct GamePanel: View {
                 // Bot 狀態
                 BotStatusView(
                     botStatus: viewModel?.store.botStatus ?? BotStatus(),
-                    gameState: viewModel?.store.gameState ?? GameState()
+                    gameState: viewModel?.store.gameState ?? GameState(),
+                    reloadBot: reloadBot
                 )
 
                 // AI 推薦
                 RecommendationView(
                     recommendations: viewModel?.store.recommendations ?? [],
-                    maxDisplay: 5
+                    maxDisplay: 5,
+                    showsRecommendations: viewModel?.autoPlayMode.showRecommendation ?? true,
+                    reloadBot: reloadBot
                 )
 
                 Spacer()
@@ -427,6 +445,11 @@ struct AdvancedSettingsSheet: View {
     @Environment(\.webViewModel) private var viewModel
     @Environment(\.dismiss) private var dismiss
     @AppStorage("HidePlayerNames") private var hidePlayerNames = false
+
+    /// 「重建 Bot」＝強制斷線重連（手段由各 WebView path 決定，見 `ForceReconnectAction`）
+    private var rebuildBot: ForceReconnectAction {
+        viewModel.map { ForceReconnectAction(viewModel: $0) } ?? .unavailable
+    }
 
     var body: some View {
         #if os(macOS)
@@ -517,8 +540,8 @@ struct AdvancedSettingsSheet: View {
                     HStack {
                         Button("重建 Bot") {
                             Task {
-                                // 強制斷線重連以重建 Bot
-                                await viewModel?.forceReconnect()
+                                // 強制斷線重連以重建 Bot（手段由各 path 決定，見 Action）
+                                await rebuildBot()
                             }
                         }
                         .buttonStyle(.bordered)

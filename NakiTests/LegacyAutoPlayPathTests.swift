@@ -175,7 +175,8 @@ final class SeatSourceDouble: WebViewModelProtocol {
     func processNativeEvents(_ events: [[String: Any]]) async throws -> [String: Any]? { nil }
     func deleteNativeBot() {}
     func resyncBot() async {}
-    func forceReconnect() async {}
+    /// p3-3：回傳結果而不是 Void（三個呼叫端先前各自解讀「有沒有成功」）
+    func forceReconnect() async -> ForceReconnectOutcome { .failed("double") }
 
     func setAutoPlayMode(_ mode: AutoPlayMode) { autoPlayMode = mode }
     func triggerAutoPlayNow(delay: TimeInterval) {}

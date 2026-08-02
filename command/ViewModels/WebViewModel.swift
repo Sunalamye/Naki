@@ -46,7 +46,10 @@ class WebViewModel: WebViewModelProtocol {
   private var nativeBotController: NativeBotController?
 
   /// 自動打牌模式（唯一有人讀的自動打牌設定；持久化見 `AutoPlayModeStore`）
-  private(set) var autoPlayMode: AutoPlayMode = AutoPlayModeStore.defaultMode
+  ///
+  /// p3-3：儲存位置移進 `GameStore`。MCP 的 `bot_status` / `game_state` 要輸出
+  /// `autoPlay.mode`，而那一層現在只讀 store；留在 VM 就得再傳一個 closure 進去。
+  var autoPlayMode: AutoPlayMode { store.autoPlayMode }
 
   /// Liqi 動作／大廳請求送出器（Unity 時代唯一有效的動作面）
   ///
@@ -56,8 +59,17 @@ class WebViewModel: WebViewModelProtocol {
 
   // MCP Server
   private var debugServer: DebugServer?
-  var isDebugServerRunning = false
-  var debugServerPort: UInt16 = 8765
+
+  /// server 狀態同樣住在 `GameStore`（p3-3）：先前是兩個 VM stored property，
+  /// 由 `DebugServer.onPortChanged` closure 回寫——那是要拆掉的九跳之一。
+  var isDebugServerRunning: Bool {
+    get { store.isDebugServerRunning }
+    set { store.isDebugServerRunning = newValue }
+  }
+  var debugServerPort: UInt16 {
+    get { store.debugServerPort }
+    set { store.debugServerPort = newValue }
+  }
 
   // MARK: - WebPage (macOS 26.0+)
 
@@ -149,7 +161,7 @@ class WebViewModel: WebViewModelProtocol {
     // 沿用上次選的模式。
     // 舊行為是每次啟動都硬設 .auto，於是使用者選的「關閉」一重啟就被沖掉，
     // 看起來像「選了關閉還是會自動打牌」。
-    autoPlayMode = AutoPlayModeStore.load()
+    store.autoPlayMode = AutoPlayModeStore.load()
     bridgeLog("[WebViewModel] 自動打牌模式（沿用上次）: \(autoPlayMode.rawValue)")
 
     // 啟動自動打牌狀態機（單一 Task 迴圈，取代原本的 Timer）
@@ -324,26 +336,29 @@ class WebViewModel: WebViewModelProtocol {
   /// 強制 WebSocket 重連以重建 Bot 狀態
   /// 這會關閉所有雀魂 WebSocket 連接，觸發遊戲重連
   /// 伺服器會發送 authGame + syncGame 回應，從而完整重建 Bot
-  func forceReconnect() async {
-    guard let page = webPage else {
+  ///
+  /// 腳本、回傳值解讀與狀態列措辭都在 `ForceReconnectAction`（p3-3）：
+  /// UI 按鈕、MCP `bot_sync` 與這裡先前各寫一次，其中 MCP 那份還自己重跑 JS。
+  @discardableResult
+  func forceReconnect() async -> ForceReconnectOutcome {
+    guard webPage != nil else {
       bridgeLog("[WebViewModel] 無法強制重連: 無 webPage")
       store.statusMessage = "無法重連：WebView 不可用"
-      return
+      return .failed("no_webpage")
     }
 
     bridgeLog("[WebViewModel] 強制重連 WebSocket...")
     store.statusMessage = "正在強制重連..."
 
-    do {
-      // callJavaScript 是函式體語意：腳本必須自帶 return，否則恆回 nil（見 NakiWebSocketScript）
-      let result = try await page.callJavaScript(NakiWebSocketScript.forceReconnect)
-      let closedCount = NakiWebSocketScript.closedCount(from: result)
-      bridgeLog("[WebViewModel] 強制重連: 關閉了 \(closedCount) 個連線")
-      store.statusMessage = closedCount > 0 ? "已關閉 \(closedCount) 個連接，等待重連..." : "沒有活躍的連接"
-    } catch {
-      bridgeLog("[WebViewModel] 強制重連錯誤: \(error)")
-      store.statusMessage = "重連失敗：\(error.localizedDescription)"
-    }
+    let outcome = await forceReconnectAction()
+    bridgeLog("[WebViewModel] 強制重連: \(outcome.statusMessage)")
+    store.statusMessage = outcome.statusMessage
+    return outcome
+  }
+
+  /// 這條 path 的重連實作（JS 通道）。MCP 的 `bot_sync` 注入的是同一個。
+  private var forceReconnectAction: ForceReconnectAction {
+    ForceReconnectAction(javaScript: ExecuteJavaScriptAction(viewModel: self))
   }
 
   /// 從 Bot 控制器更新 UI 狀態並觸發自動打牌
@@ -422,7 +437,7 @@ class WebViewModel: WebViewModelProtocol {
   func setAutoPlayMode(_ mode: AutoPlayMode) {
     // 收斂＋持久化走與 Legacy 同一個入口（這條路 `supportsAutoPlay` 為 true，
     // 所以 clamp 是恆等式；共用是為了讓「選了什麼／記住什麼」只有一份定義）。
-    autoPlayMode = AutoPlayAvailability.commit(mode, autoPlaySupported: supportsAutoPlay)
+    store.autoPlayMode = AutoPlayAvailability.commit(mode, autoPlaySupported: supportsAutoPlay)
     bridgeLog("[WebViewModel] 自動打牌模式設定為: \(autoPlayMode.rawValue)")
     debugServer?.addLog("模式已變更: \(autoPlayMode.rawValue), 推薦數: \(store.recommendations.count)")
 
@@ -532,101 +547,39 @@ class WebViewModel: WebViewModelProtocol {
   // 一句都問不出來，只能靠 live 對局撞。引擎把儲存體、送出器、上下文與時間常數
   // 全部參數化，p0-5 的 fail-safe fixture 因此測得到產品狀態機本身。
 
-  // MARK: - 協定層狀態快照（MCP 狀態類工具的資料來源）
+  // 註：`protocolGameSnapshot()` 已搬到 `NakiStatePayload.gameSnapshot(store:accountId:)`（p3-3）。
+  // 它是**導出值**不是狀態：輸入只有 `GameStore`、`LiqiOperationStore` 與登入帳號 id，
+  // 留在 view model 裡的唯一後果是「要驗 /game/state 的欄位就得先有 WebPage」。
+  // MCP 端經 `GameSnapshotAction` 取用，帳號 id 由 `webCoordinator.websocketHandler` 提供。
 
-  /// 組出「Swift 協定層的遊戲快照」。
-  ///
-  /// Unity 客戶端下 `window.view.DesktopMgr.Inst` 不存在，舊的 `/game/state`、`/game/hand`、
-  /// `/game/ops` 全部讀不到東西。這些資訊本來就從 Liqi notify 流進 Swift，
-  /// 由 `MajsoulBridge` → `NativeBotController` → `GameStore` 維護，
-  /// 以及 `LiqiOperationStore`（可用操作）持有，這裡只是把它們攤成 JSON。
-  ///
-  /// ⚠️ 這是 **Naki 自己看到的狀態**，不是向伺服器查詢的結果；
-  /// 若 Naki 錯過封包（例如中途啟動），這裡會不完整——用 `bot_sync` 觸發重連重建。
-  func protocolGameSnapshot() -> [String: Any] {
-    let state = store.gameState
-    let bot = store.botStatus
-
-    var snapshot: [String: Any] = [
-      "source": "swift-protocol-layer",
-      "note": "Unity 客戶端沒有 JS 遊戲物件；本資料由 Liqi 封包在 Swift 端重建",
-      "accountId": webCoordinator?.websocketHandler.majsoulAccountId ?? 0,
-      "gameState": [
-        "bakaze": state.bakazeString,
-        "bakazeDisplay": state.bakazeDisplay,
-        "kyoku": state.kyoku,
-        "kyokuDisplay": state.kyokuDisplayName,
-        "honba": state.honba,
-        "kyotaku": state.kyotaku,
-        "jikaze": state.jikazeString,
-        "scores": state.scores,
-        "doraIndicators": state.doraIndicators,
-        "seat": state.playerId,
-        "is3P": state.is3P,
-        "inGame": store.isInGame,
-      ],
-      "bot": [
-        "isActive": bot.isActive,
-        "model": bot.modelName,
-        "seat": bot.playerId,
-        "is3P": bot.is3P,
-        "canDiscard": bot.canDiscard,
-        "canRiichi": bot.canRiichi,
-        "canChi": bot.canChi,
-        "canPon": bot.canPon,
-        "canKan": bot.canKan,
-        "canAgari": bot.canAgari,
-      ],
-      "hand": [
-        "tehai": store.tehaiTiles,
-        "tehaiCount": store.tehaiTiles.count,
-        "tsumo": store.tsumoTile as Any? ?? NSNull(),
-        "notation": "MJAI（5mr = 紅五萬；E/S/W/N/P/F/C = 字牌）",
-      ] as [String: Any],
-      "recommendations": store.recommendations.map { rec in
-        [
-          "tile": rec.displayTile,
-          "action": rec.actionType.rawValue,
-          "label": rec.displayLabel,
-          "prob": rec.probability,
-          "percentage": rec.percentageString,
-        ] as [String: Any]
-      },
-      // 註：`isMyTurn` / `hasPendingAction` 已移除——它們的來源欄位
-      // 從來沒有人寫過真值（恆 false / 恆 nil）。
-      // 要判斷「輪到誰」請看 `operations.pending`（server-authoritative）。
-      "autoPlay": [
-        "mode": autoPlayMode.rawValue
-      ],
-    ]
-
-    // 可用操作（協定層 oplist；pending = 尚未被動作層消化）
-    // 命名成 `opStore`：`store` 現在是本 VM 的 `GameStore`，同名區域變數會遮蔽它
-    let opStore = LiqiOperationStore.shared
-    var operations: [String: Any] = [:]
-    operations["pending"] = opStore.pending?.dictionary ?? NSNull()
-    operations["latest"] = opStore.latest?.dictionary ?? NSNull()
-    snapshot["operations"] = operations
-
-    return snapshot
-  }
 
   // MARK: - MCP Server
 
-  // 截圖是真正的平台分歧（AppKit）：iOS 沒有 `NSApplication`，
-  // `captureScreenshot` 回調在 iOS 分支直接回錯誤。Debug Server 本身兩個平台都跑。
-  #if os(macOS)
-  /// 整個視窗（Naki 側欄 + 遊戲畫面）轉成 PNG
-  static func windowScreenshot() -> Data? {
-    guard let window = NSApplication.shared.windows.first(where: { $0.isVisible && $0.contentView != nil }),
-          let content = window.contentView,
-          content.bounds.width > 0, content.bounds.height > 0,
-          let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds)
-    else { return nil }
-    content.cacheDisplay(in: content.bounds, to: rep)
-    return rep.representation(using: .png, properties: [:])
+  // 截圖的平台分歧（AppKit 只有 macOS 有）已收進 `CaptureScreenshotAction`。
+
+  /// 這條 path 提供給 MCP／Debug HTTP 的全部能力。
+  ///
+  /// p3-3：先前這裡是 9 段 `debugServer?.xxx = { [weak self] ... }`（約 130 行），
+  /// 每一段都是「把 view model 的一個方法包成 closure」，然後由 DebugServer 與
+  /// MCPHandler 兩層純轉發往下送。現在依賴表是一個值，型別上就看得出 MCP 需要什麼。
+  private func makeMCPDependencies() -> NakiMCPDependencies {
+    let javaScript = ExecuteJavaScriptAction(viewModel: self)
+    return NakiMCPDependencies(
+      store: store,
+      executeJavaScript: javaScript,
+      captureScreenshot: CaptureScreenshotAction(),
+      sendAction: SendActionAction(sender: liqiSender),
+      startMatch: StartMatchAction(send: SendActionAction(sender: liqiSender)),
+      cancelMatch: CancelMatchAction(send: SendActionAction(sender: liqiSender)),
+      // 統一走主自動打牌路徑：推薦 → gate → resolver → LiqiActionSender，
+      // 沒有第二條「照手牌排序索引直接打」的捷徑
+      triggerAutoPlay: TriggerAutoPlayAction(viewModel: self),
+      // Unity 下 GameMgr.clientHeatBeat 已不存在，改由 Swift 定期送 .lq.Lobby.heatbeat
+      setAntiIdle: SetAntiIdleAction(sender: liqiSender),
+      gameSnapshot: GameSnapshotAction(
+        store: store, accountSource: webCoordinator?.websocketHandler),
+      forceReconnect: ForceReconnectAction(javaScript: javaScript))
   }
-  #endif
 
   func startDebugServer() {
     guard debugServer == nil else {
@@ -634,156 +587,11 @@ class WebViewModel: WebViewModelProtocol {
       return
     }
 
-    debugServer = DebugServer(port: debugServerPort)
-
-    // 設定 JavaScript 執行回調
-    // ⚠️ 重要：WebPage.callJavaScript(functionBody:) 期望的是「函數體」
-    // 必須使用 return 語句才能獲取返回值，例如：
-    //   ❌ "1+1"              → 返回 null
-    //   ✅ "return 1+1"       → 返回 2
-    //   ❌ "document.title"   → 返回 null
-    //   ✅ "return document.title" → 返回 "雀魂麻將"
-    // 返回 Object 時使用 JSON.stringify()，Swift 端用 JSONSerialization 解析
-    debugServer?.executeJavaScript = { [weak self] script, completion in
-      guard let page = self?.webPage else {
-        completion(
-          nil,
-          NSError(
-            domain: "Naki", code: -1, userInfo: [NSLocalizedDescriptionKey: "WebPage not available"]
-          ))
-        return
-      }
-
-      Task { @MainActor in
-        do {
-          let result = try await page.callJavaScript(script)
-          print("[JS 除錯] 腳本: \(script.prefix(50))...")
-          print("[JS 除錯] 結果類型: \(type(of: result)), 值: \(String(describing: result))")
-          completion(result, nil)
-        } catch {
-          print("[JS 除錯] 錯誤: \(error)")
-          completion(nil, error)
-        }
-      }
-    }
-
-    // 設定截圖回調
-    //
-    // `contentView.cacheDisplay` 就抓得到 WKWebView 的內容——實測 macOS 26 上
-    // WebView 那塊會正常出現在 bitmap 裡（`?mode=view` 拍到的載入畫面可證）。
-    //
-    // 原本還疊了一層 `WebPage.exported(as: .image())`，是為了防「WKWebView 跨
-    // process 渲染、cacheDisplay 抓不到」。那個顧慮在這裡不成立，而合成本身
-    // 反而製造了瑕疵（web 影像的 frame 與底圖對不齊，畫面底部出現重複的功能列），
-    // 而且 `exported` 在 macOS 回的是 **TIFF** 不是 PNG。所以整層拿掉。
-    //
-    // 也沒有用 OS 層的 `screencapture`：那要「螢幕錄製」權限，視窗被遮住、
-    // 在其他 Space 或最小化都拍不到。
-    debugServer?.captureScreenshot = { completion in
-      Task { @MainActor in
-        #if os(macOS)
-        if let png = Self.windowScreenshot() {
-          completion(png, nil)
-        } else {
-          completion(nil, NSError(domain: "Naki", code: -1,
-                                  userInfo: [NSLocalizedDescriptionKey: "no visible window"]))
-        }
-        #else
-        completion(nil, NSError(domain: "Naki", code: -1,
-                                userInfo: [NSLocalizedDescriptionKey: "macOS only"]))
-        #endif
-      }
-    }
-
-    // 狀態列回調——只更新 UI。
-    // 訊息進 LogManager 由 `DebugServer.log()` 一手包辦；這裡再 bridgeLog 一次就會雙寫。
-    debugServer?.onStatusMessage = { [weak self] message in
-      Task { @MainActor in
-        self?.store.statusMessage = message
-      }
-    }
-
-    // 設定 Bot 狀態回調
-    debugServer?.getBotStatus = { [weak self] in
-      guard let self = self else { return [:] }
-
-      let recs: [[String: Any]] = self.store.recommendations.map { rec in
-        return [
-          "tile": rec.displayTile,
-          "action": rec.actionType.rawValue,
-          "label": rec.displayLabel,
-          "prob": rec.probability,
-          "percentage": rec.percentageString,
-        ]
-      }
-
-      let result: [String: Any] = [
-        "botStatus": [
-          "isActive": self.store.botStatus.isActive,
-          "playerId": self.store.botStatus.playerId,
-        ],
-        "gameState": [
-          "bakaze": self.store.gameState.bakazeDisplay,
-          "kyoku": self.store.gameState.kyoku,
-          "honba": self.store.gameState.honba,
-        ],
-        // `isMyTurn` / `hasPendingAction` 已移除（恆 false／恆 nil 的假欄位）
-        "autoPlay": [
-          "mode": self.autoPlayMode.rawValue
-        ],
-        "recommendations": recs,
-        "tehaiCount": self.store.tehaiTiles.count,
-        "tsumoTile": self.store.tsumoTile ?? NSNull(),
-      ]
-
-      return result
-    }
-
-    // 設定手動觸發自動打牌回調
-    // 統一走 WebViewModel 主自動打牌路徑：推薦 → gate → resolver → LiqiActionSender，
-    // 沒有第二條「照手牌排序索引直接打」的捷徑
-    debugServer?.triggerAutoPlay = { [weak self] in
-      guard let self = self else { return }
-      self.triggerAutoPlayNow()
-    }
-
-    // 設定 Liqi 請求送出回調（MCP 工具的動作／大廳面）
-    // 舊的 JS 路徑（GameMgr.uimgr / NetAgent / DesktopMgr）在 Unity 客戶端全部不存在，
-    // 所有 MCP 動作類工具改由這裡送 protobuf。
-    debugServer?.sendLiqi = { [weak self] spec, awaitMs in
-      guard let self = self else { return .unavailable("webviewmodel_deallocated") }
-      return await self.liqiSender.sendAwaitingResponse(spec, awaitResponseMs: awaitMs)
-    }
-
-    // 設定遊戲狀態快照回調（MCP 狀態類工具的資料來源）
-    debugServer?.getGameSnapshot = { [weak self] in
-      guard let self = self else { return [:] }
-      return self.protocolGameSnapshot()
-    }
-
-    // 設定自動心跳（防閒置）開關：Unity 下 GameMgr.clientHeatBeat 已不存在，
-    // 改由 Swift 定期送 .lq.Lobby.heatbeat
-    debugServer?.setAntiIdle = { [weak self] enabled, interval in
-      guard let self = self else { return [:] }
-      if enabled != nil || interval != nil {
-        self.liqiSender.setAntiIdle(
-          enabled: enabled ?? self.liqiSender.antiIdleEnabled, intervalSeconds: interval)
-      }
-      return self.liqiSender.antiIdleStatus
-    }
-
-    // 端口變更回調
-    debugServer?.onPortChanged = { [weak self] newPort in
-      Task { @MainActor in
-        self?.debugServerPort = newPort
-        self?.isDebugServerRunning = true
-        self?.store.statusMessage = "MCP Server 已啟動: http://localhost:\(newPort)"
-        systemLog("[生命週期] MCP Server 已啟動 port=\(newPort)")
-      }
-    }
-
-    debugServer?.start()
+    let server = DebugServer(port: debugServerPort, dependencies: makeMCPDependencies())
+    debugServer = server
+    server.start()
   }
+
 
   /// 停止 MCP Server
   func stopDebugServer() {

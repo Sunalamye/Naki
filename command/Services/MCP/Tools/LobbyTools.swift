@@ -128,13 +128,15 @@ struct StartMatchTool: MCPTool {
             throw MCPToolError.notAvailable("Naki context")
         }
 
-        let spec = LiqiRequestBuilder.matchGame(
+        // spec 的組裝在 `StartMatchAction`（p3-3）：工具只負責參數驗證與輸出格式，
+        // 不再自己拼 protobuf 欄位——那是「同一個請求兩個地方組」的漂移來源。
+        let result = await nakiContext.startMatch(
             matchMode: UInt32(matchMode),
-            clientVersionString: arguments["client_version_string"] as? String ?? "")
-        let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+            clientVersionString: arguments["client_version_string"] as? String ?? "",
+            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("🎮 lobby_start_match match_mode=\(matchMode)")
-        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["match_mode": matchMode])
+        return LiqiToolResult.dictionary(result.outcome, spec: result.spec,
+                                         extra: ["match_mode": matchMode])
     }
 }
 
@@ -169,11 +171,12 @@ struct CancelMatchTool: MCPTool {
             throw MCPToolError.notAvailable("Naki context")
         }
 
-        let spec = LiqiRequestBuilder.cancelMatch(matchMode: UInt32(max(0, matchMode)))
-        let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        let result = await nakiContext.cancelMatch(
+            matchMode: UInt32(max(0, matchMode)),
+            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("⏹️ lobby_cancel_match match_mode=\(matchMode)")
-        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["match_mode": matchMode])
+        return LiqiToolResult.dictionary(result.outcome, spec: result.spec,
+                                         extra: ["match_mode": matchMode])
     }
 }
 

@@ -65,9 +65,14 @@ struct DebugEndpoint {
 
 // MARK: - MCP Server
 
-/// 本地 HTTP MCP Server
-/// 支援 macOS 14.0+，使用回調式 JavaScript 執行抽象
-class DebugServer {
+/// 本地 HTTP MCP Server。
+///
+/// p3-3 之後這個型別**只負責 HTTP**：listener、request 累積、Origin 驗證、路由、
+/// 回應寫回 socket。先前它還兼任 MCP 的依賴中轉站——9 個 `var xxx: (...)?`
+/// 由 `WebViewModel` 寫進來、再由 `setupMCPHandler()` 一個一個轉發給 `MCPHandler`，
+/// 兩層純搬運，而 server 自己一個都沒用到。現在依賴是 init 參數
+/// （`NakiMCPDependencies`），漏接在編譯期就過不了。
+class DebugServer: MCPHTTPResponder {
 
     // MARK: - Properties
 
@@ -77,91 +82,31 @@ class DebugServer {
     private var isRunning = false
     private let maxPortRetries = 10
 
-    /// WebView 執行 JavaScript 的回調
-    var executeJavaScript: ((String, @escaping (Any?, Error?) -> Void) -> Void)?
-
-    /// WebView 截圖回調，回傳 PNG bytes
-    ///
-    /// 走 `WebPage.exported(as: .image(...))` 而不是 OS 層的 `screencapture`：
-    /// 後者需要「螢幕錄製」權限，而且抓的是螢幕上那塊區域——視窗被遮住、
-    /// 在其他 Space、或最小化就拍不到。WebView 自己輸出則不受這些影響。
-    var captureScreenshot: ((@escaping (Data?, Error?) -> Void) -> Void)?
-
-    /// 狀態列訊息回調（只給 UI 用）
-    ///
-    /// 名字從 `onLog` 改成這個是為了讓「這不是第二條 log 通道」變成看得出來的事：
-    /// 訊息進 LogManager 由 `log()` 一手包辦，這個回調只負責把最後一句話貼到畫面上。
-    var onStatusMessage: ((String) -> Void)?
-
-    /// 端口變更回調
-    var onPortChanged: ((UInt16) -> Void)?
-
     /// 單一 HTTP request 累積上限（含 header + body），避免超大或惡意 body 造成無限等待 / 記憶體爆掉
     private let maxRequestSize = 10 * 1024 * 1024  // 10 MB
 
-    /// 獲取 Bot 狀態的回調
-    var getBotStatus: (() -> [String: Any])?
+    /// MCP／Debug 這一層需要的全部能力（狀態讀 `store`，副作用走 Action）
+    private let dependencies: NakiMCPDependencies
 
-    /// 手動觸發自動打牌的回調
-    var triggerAutoPlay: (() -> Void)?
-
-    /// 送出 Liqi 請求的回調（Unity 時代的動作／大廳面；由 WebViewModel 注入）
-    var sendLiqi: ((LiqiRequestSpec, Int) async -> LiqiToolSendOutcome)?
-
-    /// 遊戲狀態快照回調（Swift 協定層供給）
-    var getGameSnapshot: (() -> [String: Any])?
-
-    /// 自動心跳（防閒置）開關回調
-    var setAntiIdle: ((Bool?, TimeInterval?) -> [String: Any])?
-
-    /// MCP 協議處理器
-    private let mcpHandler = MCPHandler()
+    /// MCP 協議處理器。
+    ///
+    /// `lazy` 是因為它要拿 `self` 當 HTTP responder——這也是「回應寫回 socket」
+    /// 這件事唯一還連著 DebugServer 的方向（協定，不是 closure）。
+    private lazy var mcpHandler = MCPHandler(dependencies: dependencies, responder: self)
 
     // MARK: - Initialization
 
-    init(port: UInt16 = 8765) {
+    init(port: UInt16 = 8765, dependencies: NakiMCPDependencies) {
         self.preferredPort = port
         self.actualPort = port
-        setupMCPHandler()
+        self.dependencies = dependencies
+        mcpHandler.serverPort = port
     }
 
-    /// 設置 MCP Handler 的回調
-    private func setupMCPHandler() {
-        mcpHandler.serverPort = actualPort
-        mcpHandler.executeJavaScript = { [weak self] script, completion in
-            self?.executeJavaScript?(script, completion)
-        }
-        mcpHandler.getBotStatus = { [weak self] in
-            self?.getBotStatus?() ?? [:]
-        }
-        mcpHandler.triggerAutoPlay = { [weak self] in
-            self?.triggerAutoPlay?()
-        }
-        mcpHandler.sendLiqi = { [weak self] spec, awaitMs in
-            guard let handler = self?.sendLiqi else {
-                return .unavailable("debug_server_liqi_sender_not_configured")
-            }
-            return await handler(spec, awaitMs)
-        }
-        mcpHandler.getGameSnapshot = { [weak self] in
-            self?.getGameSnapshot?() ?? [:]
-        }
-        mcpHandler.setAntiIdle = { [weak self] enabled, interval in
-            self?.setAntiIdle?(enabled, interval) ?? [:]
-        }
-        // log 只有一個歸宿：LogManager。這裡不再合併第二份 buffer（見 `log()` 的說明）
-        mcpHandler.getLogs = {
-            LogManager.shared.recentLogLines()
-        }
-        mcpHandler.clearLogs = {
-            LogManager.shared.clear()
-        }
-        mcpHandler.log = { [weak self] message in
-            self?.log(message)
-        }
-        mcpHandler.sendResponse = { [weak self] connection, status, body, contentType in
-            self?.sendResponse(connection: connection, status: status, body: body, contentType: contentType)
-        }
+    // MARK: - MCPHTTPResponder
+
+    func sendMCPResponse(connection: NWConnection, status: Int, body: String, contentType: String) {
+        sendResponse(connection: connection, status: status, body: body, contentType: contentType)
     }
 
     // MARK: - Server Control
@@ -202,8 +147,12 @@ class DebugServer {
                     self.actualPort = port
                     self.isRunning = true
                     self.mcpHandler.serverPort = port
+                    // 綁到哪個 port 是 server 自己才知道的事實（8765 被佔用會往上找），
+                    // 直接寫進共用的 store；先前這裡是 `onPortChanged` closure 繞回 ViewModel。
+                    self.dependencies.store.debugServerPort = port
+                    self.dependencies.store.isDebugServerRunning = true
                     self.log("MCP Server started on http://localhost:\(port)")
-                    self.onPortChanged?(port)
+                    systemLog("[生命週期] MCP Server 已啟動 port=\(port)")
                 case .failed(let error):
                     self.log("Server failed on port \(port): \(error)")
                     self.listener?.cancel()
@@ -590,17 +539,15 @@ class DebugServer {
     }
 
     private func handleScreenshot(connection: NWConnection) {
-        guard let capture = captureScreenshot else {
-            sendJSON(connection: connection, data: ["error": "screenshot not wired"])
-            return
-        }
-        capture { [weak self] data, error in
+        Task { [weak self] in
             guard let self else { return }
-            if let data, !data.isEmpty {
+            switch await self.dependencies.captureScreenshot() {
+            case .success(let data) where !data.isEmpty:
                 self.sendBinary(connection: connection, data: data, contentType: "image/png")
-            } else {
-                self.sendJSON(connection: connection,
-                              data: ["error": error?.localizedDescription ?? "empty snapshot"])
+            case .success:
+                self.sendJSON(connection: connection, data: ["error": "empty snapshot"])
+            case .failure(let error):
+                self.sendJSON(connection: connection, data: ["error": error.localizedDescription])
             }
         }
     }
@@ -757,10 +704,10 @@ class DebugServer {
     ///
     /// 先前這裡另外維護 `logBuffer`，同一條訊息又經 `onLog` 進 LogManager，
     /// `get_logs` 再把兩份 `+` 起來 → 每條 DebugServer 訊息在 `/logs` 出現兩次。
-    /// 現在只寫一次，`onStatusMessage` 純粹是 UI 狀態列，不再是第二條 log 通道。
+    /// 現在只寫一次；狀態列是同一個動作的副產品，不是第二條 log 通道
+    /// （實作在 `NakiMCPDependencies.log`，MCP context 走的也是那一份）。
     private func log(_ message: String) {
-        bridgeLog(message)
-        onStatusMessage?(message)
+        dependencies.log(message)
     }
 
     /// 添加外部日誌

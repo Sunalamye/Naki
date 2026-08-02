@@ -141,9 +141,15 @@ struct RecommendationRow: View {
 
 // MARK: - Recommendation List View
 
+/// AI 推薦列表。
+///
+/// p3-3：這個 View 不再認得 `WebViewModel`。先前它靠 `@Environment(\.webViewModel)`
+/// 拿兩樣東西——目前模式與「重新載入 Bot」的行為——結果是
+/// **沒有 view model 就沒有那顆按鈕的行為**，Preview 只能看靜態畫面，
+/// 而「按下去到底會發生什麼」無法在不啟動整個 App 的情況下換掉。
+///
+/// 現在兩者都是參數：模式是一個 Bool，動作是一個可 stub 的 `ForceReconnectAction`。
 struct RecommendationView: View {
-
-    @Environment(\.webViewModel) private var viewModel
 
     var recommendations: [Recommendation]
     var maxDisplay: Int = 5
@@ -153,10 +159,14 @@ struct RecommendationView: View {
     /// `AutoPlayMode.showRecommendation` 以前沒有任何讀取者：選了「關閉」，側欄照樣
     /// 一列一列列出推薦，只有送出被擋掉。介面因此在說謊——關掉的功能還在畫面上動。
     ///
-    /// 沒有 viewModel（SwiftUI Preview）時當作要顯示，否則 Preview 全是空白。
-    private var showsRecommendations: Bool {
-        viewModel?.autoPlayMode.showRecommendation ?? true
-    }
+    /// 預設 true：Preview 不必為了看見內容而先組一個 view model。
+    var showsRecommendations: Bool = true
+
+    /// 「重新載入 Bot」按鈕做的事（強制斷線重連）。
+    ///
+    /// 預設是 `.unavailable`（什麼都不做並回報 not_wired），所以 Preview 按下去
+    /// 不會有副作用；正式路徑由 `ContentView` 注入 `ForceReconnectAction(viewModel:)`。
+    var reloadBot: ForceReconnectAction = .unavailable
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -178,9 +188,7 @@ struct RecommendationView: View {
                         .accessibilityIdentifier("recommendation-off-badge")
                 } else if recommendations.isEmpty {
                     Button(action: {
-                        Task {
-                            await viewModel?.forceReconnect()
-                        }
+                        Task { await reloadBot() }
                     }) {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -347,6 +355,32 @@ struct CompactRecommendationView: View {
 
 #Preview("RecommendationView - Empty") {
     RecommendationView(recommendations: [])
+        .frame(width: 300, height: 150)
+        .padding()
+}
+
+/// p3-3 的驗收之一：這個 View 能只靠 stub Action 拉起來。
+///
+/// 空推薦時標題列會出現「重新載入 Bot」按鈕，正式路徑上它會真的關掉 WebSocket；
+/// 這裡換成一個只印字的 stub，Preview 因此可以按而不會有任何副作用。
+#Preview("RecommendationView - stub Action") {
+    RecommendationView(
+        recommendations: [],
+        reloadBot: ForceReconnectAction(stub: {
+            print("[Preview] forceReconnect stub 被呼叫")
+            return .closed(2)
+        }))
+        .frame(width: 300, height: 150)
+        .padding()
+}
+
+/// 模式 = 關閉：與「等待遊戲數據」刻意分成兩個空狀態
+#Preview("RecommendationView - 已關閉") {
+    RecommendationView(
+        recommendations: [
+            Recommendation(tile: "5mr", probability: 0.45, actionType: .discard)
+        ],
+        showsRecommendations: false)
         .frame(width: 300, height: 150)
         .padding()
 }

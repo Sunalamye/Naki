@@ -65,6 +65,7 @@
 		ECAAD5072EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Actions/NakiActions.swift,
 				"Color+Extension.swift",
 				Models/GameModels.swift,
 				Resources/Assets.xcassets,
@@ -101,6 +102,7 @@
 				Services/MCP/MCPTool.swift,
 				Services/MCP/MCPToolOutputSchema.swift,
 				Services/MCP/MCPToolRegistry.swift,
+				Services/MCP/NakiMCPDependencies.swift,
 				Services/MCP/Tools/BotTools.swift,
 				Services/MCP/Tools/EmojiTools.swift,
 				Services/MCP/Tools/GameTools.swift,
@@ -109,7 +111,6 @@
 				Services/MCP/Tools/RoomTools.swift,
 				Services/MCP/Tools/SystemTools.swift,
 				Services/MCP/Tools/UITools.swift,
-				Services/MCP/WebViewMCPContext.swift,
 				ViewModels/GameStore.swift,
 				ViewModels/LegacyWebViewModel.swift,
 				ViewModels/WebViewModel.swift,
@@ -126,6 +127,7 @@
 		ECAAD5082EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki-MUITests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Actions/NakiActions.swift,
 				Models/GameModels.swift,
 				Services/Bot/ActionDelayModel.swift,
 				Services/Bot/AutoPassDispatcher.swift,
@@ -150,6 +152,7 @@
 				Services/Debug/DebugServer.swift,
 				Services/LogManager.swift,
 				Services/MCP/MCPHandler.swift,
+				Services/MCP/NakiMCPDependencies.swift,
 				ViewModels/GameStore.swift,
 				ViewModels/LegacyWebViewModel.swift,
 				ViewModels/WebViewModel.swift,
@@ -166,6 +169,7 @@
 		ECAAD50B2EE1BB260056F965 /* Exceptions for "command" folder in "Naki-M" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Actions/NakiActions.swift,
 				"Color+Extension.swift",
 				Models/GameModels.swift,
 				Resources/index.html,
@@ -201,6 +205,7 @@
 				Services/MCP/MCPTool.swift,
 				Services/MCP/MCPToolOutputSchema.swift,
 				Services/MCP/MCPToolRegistry.swift,
+				Services/MCP/NakiMCPDependencies.swift,
 				Services/MCP/Tools/BotTools.swift,
 				Services/MCP/Tools/EmojiTools.swift,
 				Services/MCP/Tools/GameTools.swift,
@@ -209,7 +214,6 @@
 				Services/MCP/Tools/RoomTools.swift,
 				Services/MCP/Tools/SystemTools.swift,
 				Services/MCP/Tools/UITools.swift,
-				Services/MCP/WebViewMCPContext.swift,
 				ViewModels/GameStore.swift,
 				ViewModels/LegacyWebViewModel.swift,
 				ViewModels/WebViewModel.swift,

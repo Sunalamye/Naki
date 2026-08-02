@@ -364,6 +364,9 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
 
     /// 目前登入帳號的 account_id（由 MajsoulBridge 從登入／authGame 回應解析）。
     /// `ReqAccountInfo.account_id` 為必填，MCP 的帳號查詢工具需要它當預設值。
+    ///
+    /// 對外的讀取面是 `NakiAccountIdSource`（見檔案末尾的 conformance）：
+    /// MCP 的快照 Action 只需要這一個數字，不該因此認得整個 message handler。
     var majsoulAccountId: Int { majsoulBridge.accountId }
 
     /// MJAI 事件回調
@@ -590,3 +593,11 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         connectedSockets.removeAll()
     }
 }
+
+// MARK: - Account ID Source
+
+/// MCP 的協定層快照需要「現在登入的是誰」。
+///
+/// 只暴露這一個唯讀值（p3-3）：`GameSnapshotAction` 因此不必認得 `WebSocketMessageHandler`、
+/// 更不必認得 `NakiWebCoordinator`——那是 View 層。
+extension WebSocketMessageHandler: NakiAccountIdSource {}
