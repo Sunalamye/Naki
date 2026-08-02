@@ -358,6 +358,22 @@ class DebugServer {
         let path = rawPath.components(separatedBy: "?").first ?? rawPath
         _ = rawPath.components(separatedBy: "?").dropFirst()  // query 目前沒有端點需要
 
+        // Origin 驗證（MCP Streamable HTTP 的 DNS rebinding 防護）。
+        //
+        // 綁 loopback interface 擋得住同網段的其他裝置，擋不住**本機瀏覽器裡的任意頁面**：
+        // 對它們來說 127.0.0.1:8765 是可達位址，而這個 server 能執行 JS、送出遊戲動作。
+        // 規格要求非法 Origin 回 403，這裡對所有 endpoint 一起套用（`/js` 比 `/mcp` 更危險）。
+        // 沒帶 Origin 的請求放行——curl、Claude Code 的 MCP client、skill 腳本都不送。
+        let origin = NakiHTTPHeaderReader.value("origin", in: lines)
+        guard NakiMCPOriginPolicy.isAllowed(origin) else {
+            log("Rejected non-loopback origin: \(origin ?? "?") for \(method) \(path)")
+            sendResponse(connection: connection,
+                         status: 403,
+                         body: NakiMCPOriginPolicy.forbiddenBody(origin: origin),
+                         contentType: "application/json")
+            return
+        }
+
         log("Request: \(method) \(path)")
 
         // 解析 POST body
@@ -394,7 +410,8 @@ class DebugServer {
             server.handleStatus(connection: conn)
         },
         DebugEndpoint("POST", "/mcp", group: "Server",
-                      summary: "MCP JSON-RPC（initialize / tools/list / tools/call）") { server, req, conn in
+                      summary: "MCP JSON-RPC（server/discover ／ tools/list ／ tools/call；"
+                          + "帶 _meta 走 2026-07-28，initialize 走 legacy）") { server, req, conn in
             server.mcpHandler.handleRequest(body: req.body, headers: req.lines, connection: conn)
         },
 
@@ -671,11 +688,17 @@ class DebugServer {
     // MARK: - Response Helpers
 
     private func sendResponse(connection: NWConnection, status: Int, body: String, contentType: String = "text/plain") {
+        // MCP 2026-07-28 讓 status code 帶語意（400 = 版本／header 不合、
+        // 403 = Origin 被擋、404 = 方法不存在、202 = 通知已接受），所以這張表
+        // 不能只有原本那四個
         let statusText: String
         switch status {
         case 200: statusText = "OK"
+        case 202: statusText = "Accepted"
         case 400: statusText = "Bad Request"
+        case 403: statusText = "Forbidden"
         case 404: statusText = "Not Found"
+        case 405: statusText = "Method Not Allowed"
         case 500: statusText = "Internal Server Error"
         default: statusText = "Unknown"
         }

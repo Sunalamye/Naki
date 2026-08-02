@@ -37,6 +37,13 @@ struct GetStatusTool: MCPTool {
             "appBuild": NakiAppVersion.build,
             // 工具數直接數 registry；註解與文件都不是來源
             "toolsCount": MCPToolRegistry.shared.registeredToolNames.count,
+            // 協定版本也走唯讀面公開：不必發一個 MCP 請求就能確認這顆 binary
+            // 支援哪些版本（雙版本並存，見 MCPProtocolSpec.swift）
+            "mcpProtocol": [
+                "current": NakiMCPProtocol.current,
+                "supported": NakiMCPProtocol.supportedVersions,
+                "legacyHandshake": NakiMCPProtocol.legacyVersions
+            ],
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             // 每次啟動一個獨立目錄；要回報問題就整包送出，不必挑檔案
             "logDir": await LogManager.shared.logDirectory.path,
@@ -89,6 +96,15 @@ enum NakiHelpContent {
             "base_url": "http://localhost:\(serverPort)",
             "mcp_endpoint": "http://localhost:\(serverPort)/mcp",
             "tools_count": MCPToolRegistry.shared.registeredToolNames.count,
+            "protocol": [
+                "current": NakiMCPProtocol.current,
+                "supported": NakiMCPProtocol.supportedVersions,
+                "note": "請求 params._meta 帶 io.modelcontextprotocol/protocolVersion 走 2026-07-28"
+                    + "（stateless、server/discover、result 帶 resultType）；不帶則走 initialize handshake 的舊語意。",
+                "structuredOutput": "工具結果讀 result.structuredContent（真 JSON 物件）；"
+                    + "content[0].text 只是同一份 JSON 的字串化 fallback。",
+                "originPolicy": "非 loopback Origin 一律 403"
+            ],
             "architecture": [
                 "client": "Unity WebGL（chs_t-WebGL-release-4.0.45(45)）——window.Laya / GameMgr / uiscript / view.DesktopMgr / cfg 全部不存在",
                 "state": "狀態類工具（game_state / game_hand / game_ops / bot_*）讀 Swift 協定層："

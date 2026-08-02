@@ -97,90 +97,58 @@ final class MCPHandler {
 
     // MARK: - MCP Request Handler
 
-    /// 處理 MCP 請求入口
+    /// 處理 MCP 請求入口。
+    ///
+    /// 路由決策全部在 `NakiMCPRouter.plan`（純函式，單測對拍）；這裡只負責
+    /// 執行決策：回 result、跑工具、或送錯誤。
     func handleRequest(body: String, headers: [String], connection: NWConnection) {
         context.log("MCP request received")
 
-        // 解析 JSON-RPC 請求
-        guard let data = body.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let method = json["method"] as? String else {
-            sendError(connection: connection, id: nil, code: -32700, message: "Parse error")
-            return
-        }
+        let plan = NakiMCPRouter.plan(body: body,
+                                      headers: headers,
+                                      toolDefinitions: MCPToolRegistry.shared.allToolDefinitions())
 
-        let id = json["id"]  // 可以是 Int 或 String
-        let params = json["params"] as? [String: Any] ?? [:]
+        switch plan.outcome {
+        case .result(let result):
+            sendResult(connection: connection, id: plan.id, result: result)
 
-        context.log("MCP method: \(method)")
+        case .accepted:
+            // JSON-RPC 通知沒有 id，也就沒有可回的 response
+            sendResponse?(connection, 202, "", "application/json")
 
-        // 路由 MCP 方法
-        switch method {
-        case "initialize":
-            handleInitialize(id: id, params: params, connection: connection)
+        case .failure(let failure):
+            sendFailure(connection: connection, id: plan.id, failure: failure)
 
-        case "initialized":
-            // 客戶端確認初始化完成，直接返回空響應
-            sendResult(connection: connection, id: id, result: [:])
-
-        case "tools/list":
-            handleToolsList(id: id, connection: connection)
-
-        case "tools/call":
-            handleToolsCall(id: id, params: params, connection: connection)
-
-        default:
-            sendError(connection: connection, id: id, code: -32601, message: "Method not found: \(method)")
+        case .toolCall(let name, let arguments):
+            runTool(name: name, arguments: arguments, id: plan.id, era: plan.era, connection: connection)
         }
     }
 
     // MARK: - Method Handlers
 
-    /// 處理 initialize 請求
-    private func handleInitialize(id: Any?, params: [String: Any], connection: NWConnection) {
-        sendResult(connection: connection, id: id, result: Self.initializeResult())
-    }
-
     /// `initialize` 的回應內容。
     ///
     /// 抽成 static 是為了讓「serverInfo.version == App 版本」可以被單測比對，
-    /// 不必起一個真的 server。版本改讀 `NakiAppVersion`——先前寫死 `2.1.0`，
+    /// 不必起一個真的 server。版本讀 `NakiAppVersion`——先前寫死 `2.1.0`，
     /// App 早就是 2.6.0，MCP client 拿到的版本是假的。
-    nonisolated static func initializeResult() -> [String: Any] {
-        [
-            "protocolVersion": "2025-03-26",
-            "serverInfo": [
-                "name": "naki",
-                "version": NakiAppVersion.short
-            ],
-            "capabilities": [
-                "tools": [:]
-            ]
-        ]
+    ///
+    /// 內容本身已搬到 `NakiMCPProtocol`（協定語意的單一來源），這裡保留同名
+    /// 入口讓既有呼叫端與測試不必跟著改。
+    nonisolated static func initializeResult(requestedVersion: String? = nil) -> [String: Any] {
+        NakiMCPProtocol.initializeResult(requestedVersion: requestedVersion)
     }
 
-    /// 處理 tools/list 請求（從 Registry 自動生成）
-    private func handleToolsList(id: Any?, connection: NWConnection) {
-        let result: [String: Any] = [
-            "tools": MCPToolRegistry.shared.allToolDefinitions()
-        ]
-        sendResult(connection: connection, id: id, result: result)
-    }
+    /// 執行工具並回覆
+    private func runTool(name: String,
+                         arguments: [String: Any],
+                         id: Any?,
+                         era: NakiMCPProtocol.Era,
+                         connection: NWConnection) {
+        context.log("MCP tools/call: \(name) with args: \(arguments)")
 
-    /// 處理 tools/call 請求
-    private func handleToolsCall(id: Any?, params: [String: Any], connection: NWConnection) {
-        guard let toolName = params["name"] as? String else {
-            sendError(connection: connection, id: id, code: -32602, message: "Missing tool name")
-            return
-        }
-
-        let arguments = params["arguments"] as? [String: Any] ?? [:]
-        context.log("MCP tools/call: \(toolName) with args: \(arguments)")
-
-        // 使用 Registry 執行工具
         Task {
             let result = await MCPToolRegistry.shared.execute(
-                toolNamed: toolName,
+                toolNamed: name,
                 arguments: arguments,
                 context: context
             )
@@ -188,9 +156,15 @@ final class MCPHandler {
             await MainActor.run {
                 switch result {
                 case .success(let value):
-                    self.sendToolResult(connection: connection, id: id, content: value)
+                    self.sendResult(connection: connection,
+                                    id: id,
+                                    result: NakiMCPProtocol.toolSuccessPayload(content: value, era: era))
                 case .error(let message):
-                    self.sendToolError(connection: connection, id: id, message: message)
+                    // 參數驗證／執行失敗一律回 Tool Execution Error（`isError`），
+                    // 不是 protocol error——模型才有機會自己改參數重試
+                    self.sendResult(connection: connection,
+                                    id: id,
+                                    result: NakiMCPProtocol.toolErrorPayload(message: message, era: era))
                 }
             }
         }
@@ -235,64 +209,29 @@ final class MCPHandler {
         if let id = id {
             response["id"] = id
         }
-        sendJSON(connection: connection, data: response)
+        sendJSON(connection: connection, data: response, status: 200)
     }
 
-    /// 發送 MCP 工具執行結果
-    private func sendToolResult(connection: NWConnection, id: Any?, content: Any) {
-        let contentText: String
-        if let dict = content as? [String: Any] {
-            contentText = (try? JSONSerialization.data(withJSONObject: JSONSanitizer.sanitize(dict), options: []))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        } else if let array = content as? [Any] {
-            contentText = (try? JSONSerialization.data(withJSONObject: JSONSanitizer.sanitize(array), options: []))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        } else {
-            contentText = String(describing: content)
-        }
-
-        let result: [String: Any] = [
-            "content": [
-                ["type": "text", "text": contentText]
-            ],
-            "isError": false
-        ]
-        sendResult(connection: connection, id: id, result: result)
-    }
-
-    /// 發送 MCP 工具執行錯誤
-    private func sendToolError(connection: NWConnection, id: Any?, message: String) {
-        let result: [String: Any] = [
-            "content": [
-                ["type": "text", "text": message]
-            ],
-            "isError": true
-        ]
-        sendResult(connection: connection, id: id, result: result)
-    }
-
-    /// 發送 MCP 錯誤
-    private func sendError(connection: NWConnection, id: Any?, code: Int, message: String) {
+    /// 發送 MCP 錯誤（HTTP status 由 `NakiMCPFailure` 決定：
+    /// modern era 的 400／404 是規格要求，legacy era 維持 200 + JSON-RPC error）
+    private func sendFailure(connection: NWConnection, id: Any?, failure: NakiMCPFailure) {
         var response: [String: Any] = [
             "jsonrpc": "2.0",
-            "error": [
-                "code": code,
-                "message": message
-            ]
+            "error": failure.errorObject
         ]
         if let id = id {
             response["id"] = id
         }
-        sendJSON(connection: connection, data: response)
+        sendJSON(connection: connection, data: response, status: failure.httpStatus)
     }
 
     /// 發送 MCP JSON 響應
-    private func sendJSON(connection: NWConnection, data: [String: Any]) {
+    private func sendJSON(connection: NWConnection, data: [String: Any], status: Int) {
         do {
             let sanitized = JSONSanitizer.sanitize(data)
             let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: [])
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
-            sendResponse?(connection, 200, body, "application/json")
+            sendResponse?(connection, status, body, "application/json")
         } catch {
             sendResponse?(connection, 500, "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}", "application/json")
         }

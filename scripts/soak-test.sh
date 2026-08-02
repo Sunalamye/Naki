@@ -45,12 +45,17 @@ say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$REPORT"; }
 # grep -c 的 exit code 不可靠（0 筆時 exit 1），一律經過這裡取數字
 count() { grep -cE "$1" "$OUT/window.log" 2>/dev/null | head -1 | tr -dc '0-9' | sed 's/^$/0/'; }
 
-# MCP 回應是「JSON 包在 JSON 的字串欄位裡」，內層引號被跳脫成 \" 。
-# 逐個 pattern 去處理跳脫已經連續踩了三次（serverAccepted、success 都中過），
-# 所以統一先把反斜線清掉再比對——這類 bug 一次根除。
-unesc() { tr -d '\\' < "$1" 2>/dev/null; }
-rejected() { unesc "$1" | grep -q '"serverAccepted":[[:space:]]*false'; }
-accepted() { unesc "$1" | grep -q '"serverAccepted":[[:space:]]*true'; }
+# MCP 2026-07-28 起工具結果同時回 `structuredContent`（真的 JSON 物件）與
+# `content[0].text`（同一份 JSON 的字串化，留給舊 client）。比對一律走前者：
+# 先把回應切到 `structuredContent` 之後，再用**未跳脫**的 pattern 比對——
+# text 那份裡的引號都是 \"，不可能誤中。
+# （舊版要先 `tr -d '\\'` 去跳脫，連續踩了三次 serverAccepted / success 對不上；
+#   結構化輸出之後那個 workaround 已移除。）
+# ⚠️ 需要 2026-08-02 之後的 Naki binary。對著舊版跑，這兩個判斷會一律回 false，
+#    表現成 lobby_ready 探測失敗並在 preflight 之後停下——是大聲失敗，不是靜默誤判。
+structured() { sed 's/.*"structuredContent"://' "$1" 2>/dev/null; }
+rejected() { structured "$1" | grep -q '"serverAccepted":[[:space:]]*false'; }
+accepted() { structured "$1" | grep -q '"serverAccepted":[[:space:]]*true'; }
 
 # lobby session 是否可用。bot_sync 會把連線關掉重建，重建後那條 socket
 # 還沒完成登入，這時送 createRoom 伺服器一律回 error 1004。
@@ -74,7 +79,7 @@ lobby_ready() {
 # fetchGamingInfo 有 connect_token 才是權威答案。
 game_active() {
   mcp lobby_status "{}" > "$OUT/gaming.json" 2>&1 || true
-  unesc "$OUT/gaming.json" | grep -q '"field2"'
+  structured "$OUT/gaming.json" | grep -q '"field2"'
 }
 
 mcp() {
@@ -234,7 +239,7 @@ while [ "$done_games" -lt "$GAMES" ]; do
       say "   建房被拒（連續 $create_fails/${MAX_CREATE_FAILS}）"
       if [ "$create_fails" -ge "$MAX_CREATE_FAILS" ]; then
         say "✗ 連續 $MAX_CREATE_FAILS 次建房失敗，停止"
-        unesc "$OUT/start.json" | head -c 400 | tee -a "$REPORT"; echo | tee -a "$REPORT"
+        structured "$OUT/start.json" | head -c 400 | tee -a "$REPORT"; echo | tee -a "$REPORT"
         exit 1
       fi
       match_sent_at=0

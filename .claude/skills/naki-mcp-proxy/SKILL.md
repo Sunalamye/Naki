@@ -1,6 +1,6 @@
 ---
 name: naki-mcp-proxy
-description: Live-only router for Naki's current 42 MCP tools. Use for every Naki status, game, bot, lobby, room, Unity probe, or action request; discover the running registry first and never answer from a stale catalog.
+description: Live-only router for Naki's MCP tools (static count 38; always confirm with live tools/list). Use for every Naki status, game, bot, lobby, room, Unity probe, or action request; discover the running registry first and never answer from a stale catalog.
 allowed-tools:
   - Task
   - Read
@@ -21,6 +21,11 @@ Base directory: {baseDir}
 
 - Default endpoint: `http://127.0.0.1:8765/mcp`.
 - 2026-08-01 的 live registry 基準為 42 tools；2026-08-02 移除 6 個 highlight 失敗樁後靜態計數 38。數字、名稱與參數一律以每次 live `tools/list` 為準。
+- 協定雙版本並存（2026-08-02 升級）：請求 `params._meta` 帶 `io.modelcontextprotocol/protocolVersion` 就走 **2026-07-28**（stateless、無 handshake）；不帶則走 `initialize` handshake 的 legacy 語意（2025-03-26 ～ 2025-11-25）。兩條路徑的工具集完全相同。
+- **工具結果讀 `result.structuredContent`**（真的 JSON 物件）。`content[0].text` 只是同一份 JSON 的字串化 fallback；不要再對回應做 `tr -d '\\'` 去跳脫。每個工具都有 `outputSchema`，但它只宣告程式碼保證的欄位（`additionalProperties: true`），不是完整欄位清單。
+- 走 2026-07-28 時：`server/discover` 可一次取得 `supportedVersions` / `capabilities` / serverInfo；result 帶 `resultType: "complete"` 與 `_meta['io.modelcontextprotocol/serverInfo']`；`tools/list` 帶 `ttlMs` + `cacheScope`；版本不支援回 `-32022`（HTTP 400）並列出支援版本。
+- 參數錯誤回的是 Tool Execution Error（`isError: true` 的正常 result），不是 JSON-RPC error——看到 `isError` 要當成失敗，不要因為 HTTP 200 就當成功。
+- 非 loopback `Origin` 的請求一律 403（DNS rebinding 防護）。curl 與 MCP client 不送 Origin，不受影響。
 - 雀魂頁面是 Unity WebGL，不是 Laya。`window.Laya`、`GameMgr`、`uiscript`、`view.DesktopMgr`、`cfg`、`app.NetAgent` 都不是可用查詢面。
 - 遊戲狀態由 Naki 攔截 WebSocket、解析 Liqi protobuf 後累積在 Swift state；動作由 Naki 組 Liqi REQUEST 並送到正確 gateway。
 - `execute_js` 只用於 Unity/page/WebSocket/WebGL 的唯讀 probe。遊戲狀態走 `game_*`，動作走 `game_action_verify`；禁止用 JS 重造遊戲物件、raw request 或座標點擊。
@@ -67,14 +72,14 @@ Connect to the configured Naki MCP server.
 
 - `game_state`／`game_hand`／`game_ops` 是 live Naki process 內的 protocol-layer snapshot，不是每次向雀魂 server 重新抓一份完整 snapshot；回報時要保留這個資料語意。
 - 動作前先讀 `game_ops`，確認 server 提供的 `sequence`、`type`、`combination`。
-- 優先用 `game_action_verify`。`sent.success=true` 只表示 bytes 已交給 WebSocket，不等於 server 接受；要看同 msgId RESPONSE、`verified`、oplist/snapshot 推進，以及終局時的權威 action。
+- 優先用 `game_action_verify`。`sent.success=true` 只表示 bytes 已交給 WebSocket，不等於 server 接受；要看同 msgId RESPONSE、`verified`、oplist/snapshot 推進，以及終局時的權威 action。這些欄位都在 `structuredContent` 裡，直接讀，不要從 `content[0].text` 解字串。
 - 只有工具實際回傳的資料可標「已查到」。連線失敗、無對局或 snapshot 缺失都要標「未驗證」。
 
-## Current 42-tool shape
+## Current tool shape（靜態計數 38；live `tools/list` 才是真值）
 
 | Category | Count | Notes |
 |---|---:|---|
-| System | 4 | status/help/logs |
+| System | 6 | status/help/logs/replay |
 | Bot | 7 | Swift state + Liqi actions |
 | Game | 6 | state/hand/ops/action |
 | JavaScript | 1 | read-only Unity probe |
@@ -82,9 +87,8 @@ Connect to the configured Naki MCP server.
 | Anti-idle | 1 | Swift heartbeat scheduler |
 | Room | 7 | protocol room flow |
 | Emoji | 2 | Liqi broadcast send/capture |
-| Highlight compatibility stubs | 6 | fixed unavailable; not a working UI route |
 
-The six highlight tools remain in the registry only as explicit failure stubs. Naki's built-in `window.__nakiHighlight` WebGL renderer is a separate path; do not claim an MCP highlight call succeeded.
+高亮已經沒有 MCP 工具（6 個失敗樁於 2026-08-02 移除，呼叫回 `Unknown tool`）。Naki 內建的 `window.__nakiHighlight` WebGL renderer 由 Swift 直接驅動，不要宣稱 MCP 高亮呼叫成功。
 
 ## Removed routes
 

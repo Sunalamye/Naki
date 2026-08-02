@@ -48,6 +48,7 @@ curl -X POST http://127.0.0.1:8765/js \
 | Web client | Unity WebGL `chs_t-WebGL-release-4.0.45(45)`（2026-08-01 live） |
 | AI package | local resolution MortalSwift 0.5.0／`802dc3d…` |
 | Debug／MCP | loopback port 8765，same process／same port |
+| MCP 協定 | 雙版本並存：帶 `_meta.io.modelcontextprotocol/protocolVersion` 走 2026-07-28（stateless、`server/discover`、`resultType`），`initialize` handshake 服務 2025-03-26～2025-11-25 |
 
 Xcode dependency requirement 是 MortalSwift `[0.5.0,0.6.0)`，不是 exact；`Package.resolved` 被 ignore，clone 不保證同 revision。
 
@@ -176,7 +177,7 @@ app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，`NakiTests` targ
 
 `soak-test.sh` 用 `[協調器] start_game` / `end_game` 判斷局的邊界，**不用 `/game/state` 的 `inGame`**（結束後不會歸位）。開局走 `room_quick_test` + 必要時 `bot_sync`——`startRoom` 只讓伺服器開局，客戶端常常不會自己進場。
 
-MCP 回應是「JSON 包在 JSON 字串裡」，比對前要先 `tr -d '\\'` 去掉跳脫，否則 `grep '"serverAccepted":false'` 永遠對不上。
+MCP 工具結果現在同時回 `structuredContent`（真的 JSON 物件）與 `content[0].text`（同一份 JSON 的字串化，留給舊 client）。腳本比對一律讀 `structuredContent`——`soak-test.sh` 的 `structured()` 先把回應切到該欄位再比對，舊的 `tr -d '\\'` 去跳脫 workaround 已移除。
 
 ## 文件
 

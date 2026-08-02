@@ -77,14 +77,21 @@ final class MCPToolRegistry {
     // MARK: - Tool Definitions
 
     /// 生成所有工具的定義列表（用於 MCP tools/list）
+    ///
+    /// 順序＝註冊順序（`toolOrder`），符合規格對 deterministic ordering 的要求。
+    /// `outputSchema` 由 `NakiToolOutputSchemas` 提供——工具結果同時回
+    /// `structuredContent`，client 不必再解一層跳脫過的 JSON 字串。
     /// - Returns: 工具定義陣列
     func allToolDefinitions() -> [[String: Any]] {
+        // schema 表建一次就好——放進 compactMap 裡等於每個工具重建一次整張表
+        let schemas = NakiToolOutputSchemas.all
         return toolOrder.compactMap { name -> [String: Any]? in
             guard let toolType = toolTypes[name] else { return nil }
             return [
                 "name": toolType.name,
                 "description": toolType.description,
-                "inputSchema": toolType.inputSchema.toJSON()
+                "inputSchema": toolType.inputSchema.toJSON(),
+                "outputSchema": schemas[toolType.name] ?? NakiToolOutputSchemas.schema(for: toolType.name)
             ]
         }
     }

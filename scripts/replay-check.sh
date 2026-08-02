@@ -39,13 +39,17 @@ mcp() {
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":${2:-\{\}}}}"
 }
 
-# MCP 回應是 JSON 包在 JSON 字串裡，一律先去跳脫再處理（見 soak-test.sh 同樣的坑）
+# 取工具結果的 JSON。MCP 2026-07-28 起優先讀 `structuredContent`（真的 JSON 物件）；
+# 舊 server 沒有這個欄位時才退回 `content[0].text`（同一份 JSON 的字串化）。
 unwrap() {
   python3 -c "
 import json,sys
 try:
-    d=json.load(sys.stdin)
-    print(d['result']['content'][0]['text'])
+    r=json.load(sys.stdin)['result']
+    if 'structuredContent' in r:
+        print(json.dumps(r['structuredContent']))
+    else:
+        print(r['content'][0]['text'])
 except Exception as e:
     print('{\"error\": \"%s\"}' % e)
 "

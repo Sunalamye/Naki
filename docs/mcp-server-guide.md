@@ -11,6 +11,42 @@ Debug HTTP endpoint（`/status`、`/logs`、`/screenshot`、`/game/*`、`/bot/*`
 
 `initialize` 回的 `serverInfo.version` 讀 `Info.plist`（`NakiAppVersion`），與 App 版本同一個數字。
 
+## 協定版本（雙版本並存）
+
+程式端唯一來源是 `command/Services/MCP/MCPProtocolSpec.swift`。
+
+| 支援版本 | 進入方式 |
+|---|---|
+| `2026-07-28`（current） | 請求 `params._meta` 帶 `io.modelcontextprotocol/protocolVersion` |
+| `2025-11-25` / `2025-06-18` / `2025-03-26` | `initialize` handshake（client 宣告的版本我們支援就原樣回報） |
+
+era 由請求自己決定，不靠連線狀態——這正是 2026-07-28 的 stateless 模型。
+
+**2026-07-28 路徑的差異**
+
+- `server/discover`（規格 MUST）：回 `supportedVersions`、`capabilities`、`instructions`、`_meta['io.modelcontextprotocol/serverInfo']`，並帶 `ttlMs` + `cacheScope`。
+- 每個 result 帶 `resultType: "complete"` 與 `_meta` 裡的 serverInfo。
+- `tools/list` 另外帶 `ttlMs` + `cacheScope: "public"`（CacheableResult），順序＝registry 註冊順序（deterministic）。
+- 版本不支援回 `-32022`，`data.supported` 列出全部支援版本，HTTP 400。
+- `MCP-Protocol-Version` header 與 body `_meta` 不一致、或 `Mcp-Name` 與 `params.name` 不一致 → `-32020`，HTTP 400。
+- 未知方法 HTTP 404（body 仍是 `-32601`）。`initialize`、`ping`、`logging/setLevel` 在這條路徑上就是未知方法。
+
+**兩條路徑都有的**
+
+- 工具結果帶 `structuredContent`（真 JSON 物件）＋ `content[0].text`（同一份 JSON 字串化）；所有工具都有 `outputSchema`（`MCPToolOutputSchema.swift`）。
+- 參數錯誤回 Tool Execution Error（`isError: true`），不是 protocol error——模型可以自己改參數重試。
+- JSON-RPC batch（陣列 body）明確拒絕（`-32600`）。
+- 非 loopback `Origin` 一律 403（**所有** Debug endpoint，不只 `/mcp`）；沒帶 Origin 的 curl／MCP client 不受影響。
+
+未實作且不打算實作：Authorization／OAuth、Roots／Sampling／Logging（已 Deprecated）、Tasks extension、MRTR、`subscriptions/listen`、session 與 SSE resumability。
+
+```bash
+# 2026-07-28 路徑
+curl -s http://127.0.0.1:8765/mcp -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' -H 'Mcp-Method: server/discover' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+```
+
 ## 設定
 
 ```bash
@@ -212,6 +248,8 @@ return JSON.stringify({
 
 ## 資料語意與限制
 
+- 工具結果讀 `structuredContent`；`content[0].text` 只是同一份 JSON 的字串化 fallback。腳本不要再對回應做 `tr -d '\\'`。
+- `outputSchema` 只宣告程式碼保證的欄位，其餘 `additionalProperties: true`——它是契約，不是完整欄位清單。
 - `game_state`／`game_hand`／`game_ops` 讀 Naki 的 Swift protocol state，不是 server 完整查詢。
 - `game_action_verify` 比單純 send 更好，但仍應針對終局動作確認 `ActionHule`。
 - Legacy iOS 17–25 的自動路徑沒有主路徑 resolver；MCP sender 與自動模式不可混為一談。

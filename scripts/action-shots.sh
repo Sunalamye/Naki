@@ -26,6 +26,8 @@ mkdir -p "$OUT"
 
 STATUS="$(curl -s --max-time 5 "$API/status" || true)"
 [ -n "$STATUS" ] || { echo "✗ Naki loopback API 沒有回應"; exit 1; }
+# `/status` 是單層 REST JSON（不是 MCP envelope），所以這裡只需要還原路徑裡的 `\/`；
+# MCP 那邊的「JSON 包在 JSON 字串裡」已由 structuredContent 解決，見 soak-test.sh。
 pick() { printf '%s' "$STATUS" | sed -n "s/.*\"$1\"[^\"]*\"\([^\"]*\)\".*/\1/p" | sed 's|\\/|/|g'; }
 
 EVENTS="$(pick eventLog)"
