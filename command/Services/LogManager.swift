@@ -238,6 +238,38 @@ class LogManager {
         }
     }
 
+    // MARK: - `/logs` 的唯一來源
+
+    /// `GET /logs`／`get_logs` 讀的那一份。
+    ///
+    /// 先前 `DebugServer` 另外維護一個 `logBuffer`，而它記的每一條又會經 `onLog`
+    /// 進到這裡，`get_logs` 再把兩份 `+` 起來——同一件事回兩次。合併後還用字典序
+    /// `.sorted()`，只因兩邊都以 ISO8601 開頭才碰巧近似時間序（跨時區／跨格式就會亂）。
+    /// 現在 DebugServer 不再自己存，這裡是唯一來源，排序也改成真的比 `timestamp`。
+    func recentLogLines() -> [String] {
+        Self.formatLines(entries)
+    }
+
+    /// 把條目格式化成 `[<ISO8601 含毫秒>] [<類別>] <訊息>`，依 `timestamp` 排序。
+    ///
+    /// 純函式，方便單測；同一毫秒的條目用原本的插入順序穩定化（Swift 的 `sort` 不保證穩定）。
+    /// 時間戳帶毫秒是刻意的：`/logs` 的消費端要能自己再排序，秒級解析度不夠。
+    nonisolated static func formatLines(_ entries: [LogEntry]) -> [String] {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return entries.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.timestamp != rhs.element.timestamp {
+                    return lhs.element.timestamp < rhs.element.timestamp
+                }
+                return lhs.offset < rhs.offset
+            }
+            .map { _, entry in
+                "[\(formatter.string(from: entry.timestamp))] [\(entry.category.rawValue)] \(entry.message)"
+            }
+    }
+
     /// 寫入文件（透過 serial queue 序列化，避免多執行緒共用單一 FileHandle 造成資料競爭）
     private func writeToFile(_ entry: LogEntry) {
         let ts = ISO8601DateFormatter().string(from: entry.timestamp)

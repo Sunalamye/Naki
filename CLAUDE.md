@@ -34,14 +34,14 @@ curl -X POST http://127.0.0.1:8765/js \
 `/game/*`／`/bot/*` 回傳的是 Naki 從 WebSocket 累積的 Swift state，不是 server 即時完整 snapshot。沒有 live App 或沒有對局時要明確標「未做 runtime 驗證」。
 
 <IMPORTANT>
-所有 Naki MCP 操作使用 `.claude/skills/naki-mcp-proxy/SKILL.md`；工具數一律先 `tools/list` 或 `get_status` 現查（2026-08-01 live 是 42，2026-08-02 移除 6 個 highlight 失敗樁後靜態計數 38），不要依記憶呼叫舊 Laya 工具。
+所有 Naki MCP 操作使用 `.claude/skills/naki-mcp-proxy/SKILL.md`；工具數一律先 `tools/list` 或 `get_status.toolsCount` 現查（程式端唯一來源是 `MCPToolRegistry.registerBuiltInTools()`，回報欄位直接數 registry，文件不再寫死數字），不要依記憶呼叫舊 Laya 工具。Debug HTTP endpoint 清單查 `GET /`（由路由表產生）。
 </IMPORTANT>
 
 ## 專案基準
 
 | Property | Current value |
 |----------|---------------|
-| App version | 2.6.0 |
+| App version | 2.6.0（`MARKETING_VERSION`；MCP `serverInfo.version`／`get_status.appVersion`／Debug 首頁都讀 `NakiAppVersion` 這一份） |
 | macOS target | 26.0 |
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |
@@ -62,6 +62,8 @@ xcodebuild test -project Naki.xcodeproj -scheme Naki -only-testing:NakiTests
 開始前先看 `git status`、Xcode／package resolution 與現有 Naki process。
 
 log 每次啟動寫進 `~/Library/Logs/Naki/<timestamp>/`（`all.log`、`events.log`、六個分類、保留 8 次），所以 test host 與正式 App 不再共用檔名。仍建議不要在 live 對局期間跑 tests——test host 會另外啟一個 App instance。
+
+記憶體 log 只有 `LogManager` 一份：`DebugServer.log()` 寫進去，`GET /logs`／`get_logs` 從 `LogManager.recentLogLines()` 讀（依 `timestamp` 排序）。`DebugServer.onStatusMessage` 只更新 UI 狀態列，不是第二條 log 通道——在那裡再呼叫一次 `bridgeLog` 就會恢復成每條訊息出現兩次。
 
 ## 現行架構
 

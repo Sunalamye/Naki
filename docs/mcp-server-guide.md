@@ -1,10 +1,15 @@
 # Naki MCP Server
 
-**最後核對**：2026-08-01，live `tools/list`  
+**最後核對**：2026-08-02，source（`MCPToolRegistry.registerBuiltInTools()`）  
 **Endpoint**：`http://127.0.0.1:8765/mcp`  
-**工具數**：42
+**工具數**：不寫死——查 live `tools/list` 或 `get_status.toolsCount`
 
 MCP 與 Debug HTTP API 由同一個 Naki process／loopback port 提供。所有工具名稱與 schema 以 live `tools/list` 為準；本文件不保存已移除的 Laya 工具。
+
+Debug HTTP endpoint（`/status`、`/logs`、`/screenshot`、`/game/*`、`/bot/*`…）的清單不在本文件裡：
+`GET /` 的首頁由 `DebugServer.endpoints` 這張路由表直接產生，是唯一不會漂移的來源。
+
+`initialize` 回的 `serverInfo.version` 讀 `Info.plist`（`NakiAppVersion`），與 App 版本同一個數字。
 
 ## 設定
 
@@ -16,18 +21,21 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 
 ## 現行工具
 
-工具數以 live `tools/list` 或 `get_status.tools_count` 為準；
-`MCPToolRegistry.registerBuiltInTools()` 是程式端唯一真實來源（2026-08-02 靜態計數 38）。
+工具數以 live `tools/list`、`get_status.toolsCount` 或 `get_help.tools_count` 為準；
+`MCPToolRegistry.registerBuiltInTools()` 是程式端唯一真實來源，三個回報欄位都直接數 registry，
+所以文件與註解不再寫死數字（下表分組標題只是給人讀的索引，數字對不上時以 registry 為準）。
 2026-08-01 的 live snapshot 是 42，其中含 6 個已於 2026-08-02 移除的 highlight 失敗樁。
 
-### 系統（4）
+### 系統（6）
 
 | Tool | 作用 |
 |------|------|
-| `get_status` | server／port／時間／log path |
-| `get_help` | current JSON help |
-| `get_logs` | 近期記憶體 log |
-| `clear_logs` | 清除記憶體 log |
+| `get_status` | server／port／App 版本／`toolsCount`／時間／log 路徑／JS 注入結果 |
+| `get_help` | current JSON help（含 `app_version`） |
+| `get_logs` | 近期記憶體 log（來源 LogManager，時間排序） |
+| `clear_logs` | 清除記憶體 log（檔案 log 不動） |
+| `replay_list` | 列出已錄的對局 |
+| `replay_game` | 重跑錄影的決策 |
 
 ### Bot（7）
 

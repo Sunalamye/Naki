@@ -22,7 +22,7 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 | Liqi schema | live manifest fresh download + byte compare | repo `liqi.json` 與 CDN 完全相同 |
 | config | live manifest fresh download + repo parser | 41 tables／263 sheets／119,289 rows |
 | Mortal parity | fresh Debug／Release tests | 各 47 tests 通過；固定 fixtures obs／mask 零落差 |
-| Naki unit tests | fresh NakiTests（2026-08-02 Debug） | 149 tests 通過；resolver 專項 13、fail-safe fixture 10 |
+| Naki unit tests | fresh NakiTests（2026-08-02 Debug，`-derivedDataPath /tmp/naki-wf-dd`） | 218 tests 通過；resolver 專項 13、fail-safe fixture 10、log／版本／endpoint 單一來源 13 |
 | runtime ron | request／response／ActionHule trace | type 9 走 `inputOperation` 成功 |
 | runtime pon | request／response／ActionChiPengGang trace | type 3 走 `inputChiPengGang` 成功 |
 | WebGL hook | live `__nakiHighlight.state()` | hook 與染色分支有執行 |
@@ -228,6 +228,14 @@ hlslcc_mtx4x4unity_ObjectToWorld / WorldToObject / MatrixVP
 
 同時修掉一個重複：`DebugServer.log` 自己加時間戳後又透過 `onLog` 送進 `bridgeLog`
 再加一次，檔案裡變成 `[ts] [Bridge] [ts] 訊息`，且同一件事出現兩行。
+
+**2026-08-02 後續**：檔案那份修好了，但 `/logs` 那份沒有——`DebugServer` 仍保留自己的
+`logBuffer`，`get_logs` 把它與 `LogManager.entries` 合併再用**字典序** `.sorted()`，
+所以每條 DebugServer 訊息在 `/logs` 出現兩次。現已刪掉 `logBuffer`：`DebugServer.log()`
+只寫 LogManager，`onLog` 改名 `onStatusMessage` 並只更新 UI；`/logs` 走
+`LogManager.recentLogLines()`，依 `timestamp`（毫秒）排序。`liqiSender.logHandler`
+兩處原本 `addLog` 與 `bridgeLog` 都寫，也收斂成一條。
+單測涵蓋排序與單行；**「live `/logs` 同一事件只出現一次」未 live 複查**。
 
 ### 14.5 副露後的推薦是假的
 

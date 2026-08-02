@@ -75,11 +75,17 @@ class LegacyWebViewModel: WebViewModelProtocol {
         nativeBotController = NativeBotController()
 
         // 動作送出改走協定層：Swift 端組好 Liqi envelope，JS 只負責把 base64 丟進 WebSocket
+        // 同一條訊息只寫一次：`addLog` 內部已經進 LogManager（並更新狀態列）。
+        // 先前 addLog 與 bridgeLog 都寫，`/logs` 會看到兩種前綴的同一件事。
         liqiSender.logHandler = { [weak self] message in
+            let line = "[LegacyWebViewModel] \(message)"
             #if os(macOS)
-            self?.debugServer?.addLog(message)
+            if let server = self?.debugServer {
+                server.addLog(line)
+                return
+            }
             #endif
-            bridgeLog("[LegacyWebViewModel] \(message)")
+            bridgeLog(line)
         }
         liqiSender.sendHandler = { [weak self] base64 in
             guard let self else { return .failure("viewmodel_deallocated") }
@@ -418,9 +424,8 @@ class LegacyWebViewModel: WebViewModelProtocol {
             }
         }
 
-        // 設定日誌回調
-        debugServer?.onLog = { [weak self] message in
-            bridgeLog(message)
+        // 狀態列回調——只更新 UI（log 由 DebugServer.log() 單一寫入 LogManager）
+        debugServer?.onStatusMessage = { [weak self] message in
             Task { @MainActor in
                 self?.statusMessage = message
             }

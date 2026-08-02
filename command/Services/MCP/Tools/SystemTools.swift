@@ -34,6 +34,11 @@ struct GetStatusTool: MCPTool {
         var payload: [String: Any] = [
             "status": "running",
             "port": context.serverPort,
+            // 版本一律讀 bundle：MCP serverInfo、這裡與 Debug 首頁是同一個數字，不會各寫一份
+            "appVersion": NakiAppVersion.short,
+            "appBuild": NakiAppVersion.build,
+            // 工具數直接數 registry；註解與文件都不是來源
+            "toolsCount": MCPToolRegistry.shared.registeredToolNames.count,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             // 每次啟動一個獨立目錄；要回報問題就整包送出，不必挑檔案
             "logDir": await LogManager.shared.logDirectory.path,
@@ -78,7 +83,9 @@ enum NakiHelpContent {
     static func build(serverPort: UInt16) -> [String: Any] {
         [
             "name": "Naki Debug API",
+            // 這是「這份說明的版本」，跟 App 版本不是同一件事，所以兩個都給
             "version": "3.1",
+            "app_version": NakiAppVersion.full,
             "description": "Naki 麻將 AI 助手的 Debug / MCP API。"
                 + "雀魂客戶端已從 Laya 改為 Unity WebGL，所有遊戲狀態與動作改走 Liqi protobuf 協定層。",
             "base_url": "http://localhost:\(serverPort)",
@@ -124,7 +131,8 @@ enum NakiHelpContent {
 /// 獲取 Debug 日誌
 struct GetLogsTool: MCPTool {
     static let name = "get_logs"
-    static let description = "獲取 Debug 日誌（最多 10,000 條）"
+    // 條數上限由 LogManager.maxEntries 決定，不在這裡再寫一個會漂移的數字
+    static let description = "獲取記憶體中的近期日誌（來源 LogManager，依時間排序；完整紀錄看 get_status 的 logDir）"
     static let inputSchema = MCPInputSchema.empty
 
     private let context: MCPContext

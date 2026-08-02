@@ -218,9 +218,16 @@ class WebViewModel: WebViewModelProtocol {
   /// → JS 端取第一條 OPEN 的雀魂連線 `ws.send(buffer)`。
   /// JS 回報 `{success, bytes, socketId}` 或 `{success:false, reason}`。
   private func configureLiqiSender() {
+    // `addLog` 內部就會寫進 LogManager（並更新狀態列），所以這裡不能再 bridgeLog 一次；
+    // 先前兩行都寫，同一件事在 `/logs` 會以兩種前綴各出現一次。
+    // server 還沒建起來時仍要留紀錄，所以走 bridgeLog fallback。
     liqiSender.logHandler = { [weak self] message in
-      bridgeLog("[WebViewModel] \(message)")
-      self?.debugServer?.addLog(message)
+      let line = "[WebViewModel] \(message)"
+      if let server = self?.debugServer {
+        server.addLog(line)
+      } else {
+        bridgeLog(line)
+      }
     }
 
     liqiSender.sendHandler = { [weak self] base64 in
@@ -1160,9 +1167,9 @@ class WebViewModel: WebViewModelProtocol {
       }
     }
 
-    // 設定日誌回調
-    debugServer?.onLog = { [weak self] message in
-      bridgeLog(message)
+    // 狀態列回調——只更新 UI。
+    // 訊息進 LogManager 由 `DebugServer.log()` 一手包辦；這裡再 bridgeLog 一次就會雙寫。
+    debugServer?.onStatusMessage = { [weak self] message in
       Task { @MainActor in
         self?.statusMessage = message
       }

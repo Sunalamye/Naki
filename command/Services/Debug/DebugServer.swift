@@ -20,6 +20,45 @@ private struct ExecuteJSRequest: Codable {
     let code: String
 }
 
+/// 已解析的 HTTP 請求（交給 endpoint handler）
+struct DebugHTTPRequest {
+    let method: String
+    let path: String
+    /// 原始請求的行（含 header），`/mcp` 需要
+    let lines: [String]
+    let body: String
+}
+
+/// 一筆 HTTP endpoint。
+///
+/// 路由與首頁說明共用這一份定義。先前兩者各寫一次，結果首頁漏列 `/screenshot`、
+/// `/game/*` 的描述停留在 Laya 時代——首頁看起來像文件，其實是會過期的手寫字串。
+struct DebugEndpoint {
+    let method: String
+    let path: String
+    /// 首頁分組標題
+    let group: String
+    /// 一行說明
+    let summary: String
+    /// 帳號／對局會被影響（首頁會標出來）
+    let affectsAccount: Bool
+    let handler: (DebugServer, DebugHTTPRequest, NWConnection) -> Void
+
+    init(_ method: String,
+         _ path: String,
+         group: String,
+         summary: String,
+         affectsAccount: Bool = false,
+         handler: @escaping (DebugServer, DebugHTTPRequest, NWConnection) -> Void) {
+        self.method = method
+        self.path = path
+        self.group = group
+        self.summary = summary
+        self.affectsAccount = affectsAccount
+        self.handler = handler
+    }
+}
+
 // MARK: - MCP Server
 
 /// 本地 HTTP MCP Server
@@ -44,15 +83,14 @@ class DebugServer {
     /// 在其他 Space、或最小化就拍不到。WebView 自己輸出則不受這些影響。
     var captureScreenshot: ((@escaping (Data?, Error?) -> Void) -> Void)?
 
-    /// 日誌回調
-    var onLog: ((String) -> Void)?
+    /// 狀態列訊息回調（只給 UI 用）
+    ///
+    /// 名字從 `onLog` 改成這個是為了讓「這不是第二條 log 通道」變成看得出來的事：
+    /// 訊息進 LogManager 由 `log()` 一手包辦，這個回調只負責把最後一句話貼到畫面上。
+    var onStatusMessage: ((String) -> Void)?
 
     /// 端口變更回調
     var onPortChanged: ((UInt16) -> Void)?
-
-    /// 日誌存儲（最多保留 10000 條）
-    private var logBuffer: [String] = []
-    private let maxLogCount = 10000
 
     /// 單一 HTTP request 累積上限（含 header + body），避免超大或惡意 body 造成無限等待 / 記憶體爆掉
     private let maxRequestSize = 10 * 1024 * 1024  // 10 MB
@@ -107,18 +145,11 @@ class DebugServer {
         mcpHandler.setAntiIdle = { [weak self] enabled, interval in
             self?.setAntiIdle?(enabled, interval) ?? [:]
         }
-        mcpHandler.getLogs = { [weak self] in
-            // 合併 DebugServer log 和 LogManager log
-            let serverLogs = self?.logBuffer ?? []
-            let managerLogs = LogManager.shared.entries.map { entry in
-                let timestamp = ISO8601DateFormatter().string(from: entry.timestamp)
-                return "[\(timestamp)] [\(entry.category.rawValue)] \(entry.message)"
-            }
-            // 按時間排序合併
-            return (serverLogs + managerLogs).sorted()
+        // log 只有一個歸宿：LogManager。這裡不再合併第二份 buffer（見 `log()` 的說明）
+        mcpHandler.getLogs = {
+            LogManager.shared.recentLogLines()
         }
-        mcpHandler.clearLogs = { [weak self] in
-            self?.logBuffer.removeAll()
+        mcpHandler.clearLogs = {
             LogManager.shared.clear()
         }
         mcpHandler.log = { [weak self] message in
@@ -331,72 +362,105 @@ class DebugServer {
             body = lines[(emptyLineIndex + 1)...].joined(separator: "\r\n")
         }
 
-        // 路由處理
-        switch (method, path) {
-        case ("GET", "/"):
-            handleRoot(connection: connection)
-
-        case ("GET", "/help"):
-            handleHelp(connection: connection)
-
-        case ("GET", "/status"):
-            handleStatus(connection: connection)
-
-        case ("POST", "/js"):
-            handleJavaScript(body: body, connection: connection)
-
-        // 遊戲 API 端點
-        case ("GET", "/game/state"):
-            handleGameState(connection: connection)
-
-        case ("GET", "/game/hand"):
-            handleGameHand(connection: connection)
-
-        case ("GET", "/game/ops"):
-            handleGameOps(connection: connection)
-
-        case ("POST", "/game/discard"):
-            handleGameDiscard(body: body, connection: connection)
-
-        case ("POST", "/game/action"):
-            handleGameAction(body: body, connection: connection)
-
-        // Debug 端點
-        case ("GET", "/screenshot"):
-            handleScreenshot(connection: connection)
-
-        case ("GET", "/logs"):
-            handleLogs(connection: connection)
-
-        case ("DELETE", "/logs"):
-            handleClearLogs(connection: connection)
-
-        case ("GET", "/bot/status"):
-            handleBotStatus(connection: connection)
-
-        case ("POST", "/bot/trigger"):
-            handleTriggerAutoPlay(connection: connection)
-
-        case ("GET", "/bot/ops"):
-            handleExploreOps(connection: connection)
-
-        case ("GET", "/bot/deep"):
-            handleDeepExplore(connection: connection)
-
-        case ("POST", "/bot/chi"):
-            handleTestChi(connection: connection)
-
-        case ("POST", "/bot/pon"):
-            handleTestPon(connection: connection)
-
-        // MCP Protocol 端點（委託給 MCPHandler）
-        case ("POST", "/mcp"):
-            mcpHandler.handleRequest(body: body, headers: lines, connection: connection)
-
-        default:
-            sendResponse(connection: connection, status: 404, body: "Not Found: \(path)")
+        // 路由處理：查同一份 endpoint 表（首頁也是從這份表產生的）
+        let parsed = DebugHTTPRequest(method: method, path: path, lines: lines, body: body)
+        guard let endpoint = Self.endpoints.first(where: { $0.method == method && $0.path == path }) else {
+            sendResponse(connection: connection, status: 404, body: "Not Found: \(method) \(path)")
+            return
         }
+        endpoint.handler(self, parsed, connection)
     }
+
+    // MARK: - Endpoint Catalog
+
+    /// 全部 HTTP endpoint 的唯一來源：路由查它、首頁列它。
+    ///
+    /// 加端點只要在這裡加一行；忘了更新首頁這種漂移在結構上不可能發生。
+    static let endpoints: [DebugEndpoint] = [
+        DebugEndpoint("GET", "/", group: "Server",
+                      summary: "這張說明頁（由路由表產生）") { server, _, conn in
+            server.handleRoot(connection: conn)
+        },
+        DebugEndpoint("GET", "/help", group: "Server",
+                      summary: "JSON 版 API 說明（等同 MCP get_help）") { server, _, conn in
+            server.handleHelp(connection: conn)
+        },
+        DebugEndpoint("GET", "/status", group: "Server",
+                      summary: "server 狀態、port、版本、log 路徑、JS 注入結果") { server, _, conn in
+            server.handleStatus(connection: conn)
+        },
+        DebugEndpoint("POST", "/mcp", group: "Server",
+                      summary: "MCP JSON-RPC（initialize / tools/list / tools/call）") { server, req, conn in
+            server.mcpHandler.handleRequest(body: req.body, headers: req.lines, connection: conn)
+        },
+
+        DebugEndpoint("POST", "/js", group: "Debug",
+                      summary: "在 WebView 執行 function body（取值要寫 return）") { server, req, conn in
+            server.handleJavaScript(body: req.body, connection: conn)
+        },
+        DebugEndpoint("GET", "/screenshot", group: "Debug",
+                      summary: "WebView 內容輸出 PNG（不需螢幕錄製權限，視窗被遮住也拍得到）") { server, _, conn in
+            server.handleScreenshot(connection: conn)
+        },
+        DebugEndpoint("GET", "/logs", group: "Debug",
+                      summary: "讀記憶體 log（LogManager，時間排序）") { server, _, conn in
+            server.handleLogs(connection: conn)
+        },
+        DebugEndpoint("DELETE", "/logs", group: "Debug",
+                      summary: "清空記憶體 log（檔案 log 不受影響）") { server, _, conn in
+            server.handleClearLogs(connection: conn)
+        },
+
+        DebugEndpoint("GET", "/game/state", group: "Game（Swift 協定層狀態）",
+                      summary: "Liqi 累積出來的對局快照") { server, _, conn in
+            server.handleGameState(connection: conn)
+        },
+        DebugEndpoint("GET", "/game/hand", group: "Game（Swift 協定層狀態）",
+                      summary: "手牌與 AI 推薦") { server, _, conn in
+            server.handleGameHand(connection: conn)
+        },
+        DebugEndpoint("GET", "/game/ops", group: "Game（Swift 協定層狀態）",
+                      summary: "pending／latest 的 Liqi oplist") { server, _, conn in
+            server.handleGameOps(connection: conn)
+        },
+
+        DebugEndpoint("POST", "/game/discard", group: "Game（會送出動作）",
+                      summary: "打牌，body: {\"tile\":\"5m\",\"moqie\":false}",
+                      affectsAccount: true) { server, req, conn in
+            server.handleGameDiscard(body: req.body, connection: conn)
+        },
+        DebugEndpoint("POST", "/game/action", group: "Game（會送出動作）",
+                      summary: "送動作，body: {\"action\":\"pass\"}（參數平鋪）",
+                      affectsAccount: true) { server, req, conn in
+            server.handleGameAction(body: req.body, connection: conn)
+        },
+
+        DebugEndpoint("GET", "/bot/status", group: "Bot",
+                      summary: "Bot、模式、推薦") { server, _, conn in
+            server.handleBotStatus(connection: conn)
+        },
+        DebugEndpoint("GET", "/bot/ops", group: "Bot",
+                      summary: "Liqi operation 快照") { server, _, conn in
+            server.handleExploreOps(connection: conn)
+        },
+        DebugEndpoint("GET", "/bot/deep", group: "Bot",
+                      summary: "協定層診斷（request／response 細節）") { server, _, conn in
+            server.handleDeepExplore(connection: conn)
+        },
+        DebugEndpoint("POST", "/bot/trigger", group: "Bot（會送出動作）",
+                      summary: "手動觸發自動打牌（需要當下有合法 oplist）",
+                      affectsAccount: true) { server, _, conn in
+            server.handleTriggerAutoPlay(connection: conn)
+        },
+        DebugEndpoint("POST", "/bot/chi", group: "Bot（會送出動作）",
+                      summary: "送出吃", affectsAccount: true) { server, _, conn in
+            server.handleTestChi(connection: conn)
+        },
+        DebugEndpoint("POST", "/bot/pon", group: "Bot（會送出動作）",
+                      summary: "送出碰", affectsAccount: true) { server, _, conn in
+            server.handleTestPon(connection: conn)
+        }
+    ]
 
     // MARK: - MCP Tool Helper
 
@@ -421,50 +485,59 @@ class DebugServer {
     // MARK: - Request Handlers
 
     private func handleRoot(connection: NWConnection) {
-        let html = """
+        sendResponse(connection: connection,
+                     status: 200,
+                     body: Self.rootHTML(port: actualPort),
+                     contentType: "text/html")
+    }
+
+    /// 首頁 HTML——完全由 `endpoints` 產生，沒有第二份手寫清單
+    static func rootHTML(port: UInt16) -> String {
+        // 保持 `endpoints` 的宣告順序分組（不排序，否則群組順序會被字典序打亂）
+        var groups: [(name: String, items: [DebugEndpoint])] = []
+        for endpoint in endpoints {
+            if let index = groups.firstIndex(where: { $0.name == endpoint.group }) {
+                groups[index].items.append(endpoint)
+            } else {
+                groups.append((endpoint.group, [endpoint]))
+            }
+        }
+
+        let sections = groups.map { group -> String in
+            let items = group.items.map { endpoint -> String in
+                let warning = endpoint.affectsAccount ? " <strong>⚠️ 會影響帳號</strong>" : ""
+                return "  <li><code>\(escapeHTML(endpoint.method)) \(escapeHTML(endpoint.path))</code>"
+                    + " — \(escapeHTML(endpoint.summary))\(warning)</li>"
+            }.joined(separator: "\n")
+            return "<h3>\(escapeHTML(group.name))</h3>\n<ul>\n\(items)\n</ul>"
+        }.joined(separator: "\n")
+
+        return """
         <!DOCTYPE html>
-        <html>
-        <head><title>Naki MCP Server</title></head>
+        <html lang="zh-Hant">
+        <head><meta charset="utf-8"><title>Naki Debug / MCP Server</title></head>
         <body>
-        <h1>🀄 Naki MCP Server</h1>
-        <h2>Available Endpoints:</h2>
-        <ul>
-            <li><code>GET /help</code> - Current JSON API help</li>
-            <li><code>GET /status</code> - Get server status</li>
-            <li><code>POST /js</code> - Execute a JavaScript function body (use return for a value)</li>
-            <li><code>GET /logs</code> / <code>DELETE /logs</code> - Read / clear in-memory logs</li>
-            <li><code>POST /mcp</code> - MCP JSON-RPC endpoint</li>
-        </ul>
-        <h3>Game API:</h3>
-        <ul>
-            <li><code>GET /game/state</code> - Get Naki's Swift protocol-layer snapshot</li>
-            <li><code>GET /game/hand</code> - Get hand and recommendations</li>
-            <li><code>GET /game/ops</code> - Get pending / latest Liqi operations</li>
-            <li><code>POST /game/discard</code> - Discard by tile string (body: {"tile":"5m","moqie":false})</li>
-            <li><code>POST /game/action</code> - Execute action (body: {"action":"pass"})</li>
-        </ul>
-        <h3>Debug & Auto-Play:</h3>
-        <ul>
-            <li><code>GET /bot/status</code> - Get bot and auto-play status</li>
-            <li><code>POST /bot/trigger</code> - Manually trigger auto-play</li>
-            <li><code>GET /bot/ops</code> - Get Liqi operation snapshot</li>
-            <li><code>GET /bot/deep</code> - Get protocol-layer diagnostics</li>
-            <li><code>POST /bot/chi</code> - Send chi (real account action)</li>
-            <li><code>POST /bot/pon</code> - Send pon (real account action)</li>
-        </ul>
-        <h2>Quick Test:</h2>
-        <pre>curl http://localhost:\(actualPort)/status</pre>
-        <pre>curl http://localhost:\(actualPort)/bot/status</pre>
-        <pre>curl http://localhost:\(actualPort)/logs</pre>
-        <h2>Account-affecting actions (test account only):</h2>
-        <pre>curl -X POST http://localhost:\(actualPort)/bot/trigger  # requires a current legal oplist</pre>
-        <pre>curl http://localhost:\(actualPort)/bot/deep</pre>
-        <pre>curl -X POST http://localhost:\(actualPort)/bot/chi</pre>
-        <pre>curl -X POST http://localhost:\(actualPort)/bot/pon</pre>
+        <h1>🀄 Naki Debug / MCP Server</h1>
+        <p>App \(escapeHTML(NakiAppVersion.full)) · port \(port) · loopback only</p>
+        <p>這份清單由程式內的路由表產生，不是手寫的；工具數與 MCP 工具清單請查
+        <code>POST /mcp</code> 的 <code>tools/list</code>。</p>
+        \(sections)
+        <h2>唯讀快測</h2>
+        <pre>curl http://127.0.0.1:\(port)/status
+        curl http://127.0.0.1:\(port)/bot/status
+        curl http://127.0.0.1:\(port)/logs</pre>
+        <p>標了 ⚠️ 的端點會真的送出 Liqi request，只在測試帳號使用。</p>
         </body>
         </html>
         """
-        sendResponse(connection: connection, status: 200, body: html, contentType: "text/html")
+    }
+
+    /// 說明字串會出現 `{"tile":"5m"}` 這種內容，直接塞進 HTML 會壞掉
+    private static func escapeHTML(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     private func handleStatus(connection: NWConnection) {
@@ -642,7 +715,7 @@ class DebugServer {
                 throw NSError(domain: "MCPServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty JSON data"])
             }
 
-            let sanitized = sanitizeForJSON(data) as! [String: Any]
+            let sanitized = JSONSanitizer.sanitize(data)
             let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: .prettyPrinted)
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
             sendResponse(connection: connection, status: 200, body: body, contentType: "application/json")
@@ -651,41 +724,16 @@ class DebugServer {
         }
     }
 
-    private func sanitizeForJSON(_ value: Any) -> Any {
-        switch value {
-        case let dict as [String: Any]:
-            return dict.mapValues { sanitizeForJSON($0) }
-        case let array as [Any]:
-            return array.map { sanitizeForJSON($0) }
-        case let d as Double where d.isNaN || d.isInfinite:
-            return NSNull()
-        case let f as Float where f.isNaN || f.isInfinite:
-            return NSNull()
-        case let n as NSNumber:
-            let d = n.doubleValue
-            if d.isNaN || d.isInfinite {
-                return NSNull()
-            }
-            return n
-        default:
-            return value
-        }
-    }
-
     // MARK: - Logging
 
+    /// DebugServer 的訊息只有一個歸宿：LogManager。
+    ///
+    /// 先前這裡另外維護 `logBuffer`，同一條訊息又經 `onLog` 進 LogManager，
+    /// `get_logs` 再把兩份 `+` 起來 → 每條 DebugServer 訊息在 `/logs` 出現兩次。
+    /// 現在只寫一次，`onStatusMessage` 純粹是 UI 狀態列，不再是第二條 log 通道。
     private func log(_ message: String) {
-        // buffer 自己保留時間戳（`/logs` 直接回這份）
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        logBuffer.append("[\(timestamp)] \(message)")
-        if logBuffer.count > maxLogCount {
-            logBuffer.removeFirst()
-        }
-
-        // 轉給 LogManager 的是**原始訊息**。
-        // 先前傳的是已加時間戳的字串，LogManager 又加一次，
-        // 於是檔案裡變成 `[ts] [Bridge] [ts] 訊息`，而且同一件事會出現兩行。
-        onLog?(message)
+        bridgeLog(message)
+        onStatusMessage?(message)
     }
 
     /// 添加外部日誌
@@ -693,14 +741,14 @@ class DebugServer {
         log(message)
     }
 
-    /// 獲取所有日誌
+    /// 獲取所有日誌（單一來源：LogManager，已依時間排序）
     func getLogs() -> [String] {
-        return logBuffer
+        LogManager.shared.recentLogLines()
     }
 
-    /// 清空日誌
+    /// 清空日誌（記憶體那份；檔案 log 是完整紀錄，不清）
     func clearLogs() {
-        logBuffer.removeAll()
+        LogManager.shared.clear()
     }
 }
 

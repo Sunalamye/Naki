@@ -141,17 +141,25 @@ final class MCPHandler {
 
     /// 處理 initialize 請求
     private func handleInitialize(id: Any?, params: [String: Any], connection: NWConnection) {
-        let result: [String: Any] = [
+        sendResult(connection: connection, id: id, result: Self.initializeResult())
+    }
+
+    /// `initialize` 的回應內容。
+    ///
+    /// 抽成 static 是為了讓「serverInfo.version == App 版本」可以被單測比對，
+    /// 不必起一個真的 server。版本改讀 `NakiAppVersion`——先前寫死 `2.1.0`，
+    /// App 早就是 2.6.0，MCP client 拿到的版本是假的。
+    nonisolated static func initializeResult() -> [String: Any] {
+        [
             "protocolVersion": "2025-03-26",
             "serverInfo": [
                 "name": "naki",
-                "version": "2.1.0"
+                "version": NakiAppVersion.short
             ],
             "capabilities": [
                 "tools": [:]
             ]
         ]
-        sendResult(connection: connection, id: id, result: result)
     }
 
     /// 處理 tools/list 請求（從 Registry 自動生成）
@@ -237,10 +245,10 @@ final class MCPHandler {
     private func sendToolResult(connection: NWConnection, id: Any?, content: Any) {
         let contentText: String
         if let dict = content as? [String: Any] {
-            contentText = (try? JSONSerialization.data(withJSONObject: sanitizeForJSON(dict), options: []))
+            contentText = (try? JSONSerialization.data(withJSONObject: JSONSanitizer.sanitize(dict), options: []))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         } else if let array = content as? [Any] {
-            contentText = (try? JSONSerialization.data(withJSONObject: sanitizeForJSON(array), options: []))
+            contentText = (try? JSONSerialization.data(withJSONObject: JSONSanitizer.sanitize(array), options: []))
                 .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
         } else {
             contentText = String(describing: content)
@@ -284,34 +292,12 @@ final class MCPHandler {
     /// 發送 MCP JSON 響應
     private func sendJSON(connection: NWConnection, data: [String: Any]) {
         do {
-            let sanitized = sanitizeForJSON(data) as! [String: Any]
+            let sanitized = JSONSanitizer.sanitize(data)
             let jsonData = try JSONSerialization.data(withJSONObject: sanitized, options: [])
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
             sendResponse?(connection, 200, body, "application/json")
         } catch {
             sendResponse?(connection, 500, "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}", "application/json")
-        }
-    }
-
-    /// 清理 JSON 值（處理 NaN 和 Infinity）
-    private func sanitizeForJSON(_ value: Any) -> Any {
-        switch value {
-        case let dict as [String: Any]:
-            return dict.mapValues { sanitizeForJSON($0) }
-        case let array as [Any]:
-            return array.map { sanitizeForJSON($0) }
-        case let d as Double where d.isNaN || d.isInfinite:
-            return NSNull()
-        case let f as Float where f.isNaN || f.isInfinite:
-            return NSNull()
-        case let n as NSNumber:
-            let d = n.doubleValue
-            if d.isNaN || d.isInfinite {
-                return NSNull()
-            }
-            return n
-        default:
-            return value
         }
     }
 }
