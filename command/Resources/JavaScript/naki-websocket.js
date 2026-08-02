@@ -75,9 +75,9 @@
             created: Date.now()
         });
 
-        // 通知 Swift 新連接
+        // 通知 Swift 新連接（此刻還沒 open；沒有後續 websocket_connected 就是握手失敗）
         sendToSwift('websocket_connect', {
-            id: wsId,
+            socketId: wsId,
             url: url,
             isMajsoul: isMajsoul
         });
@@ -90,8 +90,9 @@
         // 監聽打開
         ws.addEventListener('open', function() {
             console.log('[Naki WS] 已開啟:', wsId);
-            // 發送兩種格式確保兼容
-            sendToSwift('websocket_open', { id: wsId, socketId: wsId, url: url });
+            // 同一個 open 事件以前送兩份（`websocket_open` + `websocket_connected`），
+            // 名義上是「兩種格式確保兼容」，實際上 Swift 兩個 case 都在、其中一個只是
+            // 多印一行 log。留一份就好。
             sendToSwift('websocket_connected', { socketId: wsId, url: url });
         });
 
@@ -100,7 +101,6 @@
             console.log('[Naki WS] 已關閉:', wsId, event.code, event.reason);
             sendToSwift('websocket_close', {
                 socketId: wsId,
-                id: wsId,
                 code: event.code,
                 reason: event.reason
             });
@@ -112,7 +112,6 @@
             console.error('[Naki WS] 錯誤:', wsId, event);
             sendToSwift('websocket_error', {
                 socketId: wsId,
-                id: wsId,
                 error: 'WebSocket error'
             });
         });

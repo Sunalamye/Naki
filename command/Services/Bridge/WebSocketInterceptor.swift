@@ -8,6 +8,7 @@
 //  Updated: 2025/12/03 - 重構為從外部 JS 檔案載入
 //  Updated: 2025/12/04 - 支援 WebPage API (macOS 26.0+)
 //  Updated: 2026/08/02 - 刪除 fallback inlineScript，載入失敗改為 fail loud
+//  Updated: 2026/08/02 - JS↔Swift 訊息契約收斂成 BridgeMessageType，未知 type 改為 warning
 //
 
 import Foundation
@@ -277,9 +278,83 @@ class WebSocketInterceptor {
     }
 }
 
+// MARK: - JS ↔ Swift 訊息契約
+
+/// `websocketBridge` 這個 message handler 收得懂的全部 type。
+///
+/// **這個 enum 是契約的唯一真相來源。**
+///
+/// 訊息 envelope 固定是 `naki-core.js` 的 `sendToSwift(type, data)` 產生的
+/// `{ type: String, data: Object, timestamp: Number }`；下表的 schema 指的是
+/// `data` 內的欄位（Swift 端一律從 `body["data"]` 取，缺欄位就整筆略過）。
+///
+/// | type | data schema | Swift 行為 |
+/// |------|-------------|-----------|
+/// | `websocket_connect` | `socketId: Int`, `url: String`, `isMajsoul: Bool` | log 連線建立（`new WebSocket()` 當下，還沒 open） |
+/// | `websocket_connected` | `socketId: Int`, `url: String` | 記入 `connectedSockets`，狀態轉 connected |
+/// | `websocket_message` | `socketId: Int`, `direction: "send"｜"receive"`, `data: String`（binary 為 base64）, `type: "binary"｜"blob"｜"text"`, `size: Int` | 解 base64 → `MajsoulBridge` → MJAI 事件 |
+/// | `websocket_close` | `socketId: Int`, `code: Int`, `reason: String` | 從 `connectedSockets` 移除；全空則狀態轉 disconnected |
+/// | `websocket_error` | `socketId: Int`, `error: String` | log |
+/// | `force_reconnect` | `closedCount: Int` | log：接下來那幾筆 `websocket_close` 是 Naki 自己關的 |
+///
+/// 兩個機械保證，缺一契約就會再漂：
+/// 1. `WebSocketMessageHandler` 的 switch **不寫 `default`**——新增 case 沒處理就編不過。
+/// 2. `BridgeMessageContractTests` 從 bundle 內的 JS 原始碼抓出所有
+///    `sendToSwift('…')` 的 type，與 `allCases` 做雙向比對：
+///    JS 送了但這裡沒有 → 訊息被丟掉；這裡有但 JS 不送 → 死 case。
+///
+/// 已刪除的舊 type（別再加回來，除非同時補上活的送出端）：
+/// `websocket_open`（與 `websocket_connected` 同一個 open 事件送兩份）、
+/// `websocket_closed`（`websocket_close` 的別名，零送出端）、
+/// `websocket_debug`／`interceptor_ready`（零送出端）、
+/// `console_log`（JS 送 `{level,args}`、Swift 讀 `data["message"]`，欄位從來沒對上）、
+/// `addHandPai` 與 `autoplay_*`（送出端在 `naki-autoplay.js`，該檔已整檔刪除）。
+nonisolated enum BridgeMessageType: String, CaseIterable, Sendable {
+    case websocketConnect = "websocket_connect"
+    case websocketConnected = "websocket_connected"
+    case websocketMessage = "websocket_message"
+    case websocketClose = "websocket_close"
+    case websocketError = "websocket_error"
+    case forceReconnect = "force_reconnect"
+}
+
+/// 未知／畸形訊息的 warning 去重器。
+///
+/// 契約漂掉的症狀是「JS 一直送、Swift 一直丟」，一秒可以發生幾十次；
+/// 每次都寫 log 會把對局時間軸淹掉，所以同一個 type 只吐一次。
+///
+/// 但也不能無上限記住：頁面上任何腳本都能對 `websocketBridge` postMessage，
+/// 亂送 type 就會讓這個 Set 無限長大。撞到上限後整個閉嘴（`isSaturated`），
+/// 由呼叫端補一行「後續不再報」的說明。
+nonisolated struct UnknownBridgeTypeReporter {
+
+    /// 最多記住幾種不同的未知 type
+    let limit: Int
+
+    private var seen: Set<String> = []
+
+    init(limit: Int = 32) {
+        self.limit = limit
+    }
+
+    /// 這個 type 是不是第一次看到（第一次才值得寫 log）
+    mutating func shouldWarn(_ type: String) -> Bool {
+        guard seen.count < limit else { return false }
+        return seen.insert(type).inserted
+    }
+
+    /// 已經記滿，之後一律不再報
+    var isSaturated: Bool { seen.count >= limit }
+
+    /// 目前記住的種類數
+    var count: Int { seen.count }
+}
+
 // MARK: - WebSocket Message Handler
 
 /// 處理從 JavaScript 傳來的 WebSocket 消息
+///
+/// 契約表在 `BridgeMessageType`。
 class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: - Properties
@@ -300,63 +375,87 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     /// 連接的 WebSocket 數量
     private var connectedSockets: Set<Int> = []
 
+    /// 未知 type 的 warning 去重
+    private var unknownTypes = UnknownBridgeTypeReporter()
+
     // MARK: - WKScriptMessageHandler
 
     func userContentController(_ userContentController: WKUserContentController,
                               didReceive message: WKScriptMessage) {
 
-        guard let body = message.body as? [String: Any],
-              let type = body["type"] as? String else {
+        guard let body = message.body as? [String: Any] else {
+            warnMalformed("body 不是 dictionary（實際型別 \(Swift.type(of: message.body))）")
+            return
+        }
+        guard let type = body["type"] as? String else {
+            warnMalformed("缺少 type 欄位（keys=\(body.keys.sorted().joined(separator: ","))）")
             return
         }
 
         let data = body["data"] as? [String: Any] ?? [:]
 
-        switch type {
-        case "interceptor_ready":
-            let version = data["version"] as? String ?? "unknown"
-            let autoplay = data["autoplay"] as? Bool ?? false
-            wsLog("[JS] WebSocket interceptor is ready (v\(version), autoplay=\(autoplay))")
+        // 認不得就出聲。舊版是 `default: break`——JS 改了 type、Swift 沒跟上時，
+        // 訊息會安靜地掉進地上，表象只是「某個功能不動」，log 裡一個字都沒有。
+        guard let messageType = BridgeMessageType(rawValue: type) else {
+            warnUnknown(type)
+            return
+        }
 
-        case "websocket_debug":
-            if let url = data["url"] as? String,
-               let msg = data["message"] as? String {
-                wsLog("[WS] DEBUG: \(msg) - \(url)")
-            }
+        // 刻意不寫 `default`：這樣 `BridgeMessageType` 加了新 case 而沒人處理時，
+        // 會在編譯期就爆，而不是等 live 對局才發現訊息被吃掉。
+        switch messageType {
+        case .websocketConnect:
+            handleWebSocketConnect(data)
 
-        case "websocket_open":
-            handleWebSocketOpen(data)
-
-        case "websocket_connected":
+        case .websocketConnected:
             handleWebSocketConnected(data)
 
-        case "websocket_message":
+        case .websocketMessage:
             handleWebSocketMessage(data)
 
-        case "websocket_close", "websocket_closed":
+        case .websocketClose:
             handleWebSocketClose(data)
 
-        case "websocket_error":
+        case .websocketError:
             handleWebSocketError(data)
 
-        // 註：`autoplay_click` / `autoplay_tile_click` / `autoplay_button_click` /
-        // `autoplay_error` / `addHandPai` / `console_log` 這幾個 case 已移除。
-        // 它們唯一的送出端是 naki-autoplay.js（座標點擊、Laya `_AddHandPai` hook）
-        // 與 naki-websocket.js 的 `interceptConsole`，前者整檔刪除、後者零呼叫者，
-        // 所以這些訊息在現行客戶端永遠不會抵達。
-
-        default:
-            break
+        case .forceReconnect:
+            handleForceReconnect(data)
         }
+    }
+
+    // MARK: - 契約違規
+
+    /// 收到不在契約裡的 type
+    private func warnUnknown(_ type: String) {
+        guard unknownTypes.shouldWarn(type) else { return }
+        wsLog("[JS] ⚠️ 未知的 bridge 訊息 type：'\(type)'（已丟棄）。"
+            + "JS 端送了 Swift 不認得的 type——契約表在 BridgeMessageType，兩端要一起改。",
+              level: .event)
+        if unknownTypes.isSaturated {
+            wsLog("[JS] ⚠️ 未知 type 已達 \(unknownTypes.limit) 種上限，後續不再逐一回報。",
+                  level: .event)
+        }
+    }
+
+    /// 收到連 envelope 都不對的東西（同樣只報一次，避免洗版）
+    private func warnMalformed(_ detail: String) {
+        guard unknownTypes.shouldWarn("(malformed) \(detail)") else { return }
+        wsLog("[JS] ⚠️ bridge 訊息格式錯誤，已丟棄：\(detail)", level: .event)
     }
 
     // MARK: - Message Handlers
 
-    private func handleWebSocketOpen(_ data: [String: Any]) {
+    /// `new WebSocket()` 當下（還沒 open）。
+    ///
+    /// 留著它是為了看見「連了但從來沒 open」的連線——這種只會在 connect 出現、
+    /// 不會有 connected，是握手失敗的唯一線索。
+    private func handleWebSocketConnect(_ data: [String: Any]) {
         guard let socketId = data["socketId"] as? Int,
               let url = data["url"] as? String else { return }
 
-        wsLog("[WS] WebSocket opening: \(socketId) - \(url)")
+        let isMajsoul = data["isMajsoul"] as? Bool ?? false
+        wsLog("[WS] WebSocket connecting: \(socketId) - \(url)\(isMajsoul ? " (雀魂)" : "")")
     }
 
     private func handleWebSocketConnected(_ data: [String: Any]) {
@@ -463,6 +562,19 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         if let socketId = data["socketId"] as? Int {
             wsLog("[WS] WebSocket error: \(socketId)")
         }
+    }
+
+    /// Naki 自己呼叫 `__nakiWebSocket.forceReconnect()` 關掉連線。
+    ///
+    /// 關閉數本身已經由 `NakiWebSocketScript.forceReconnect` 的回傳值交給呼叫端
+    /// （p0-2），這裡不是為了取值，是為了**歸因**：緊接著進來的那幾筆
+    /// `websocket_close` 是預期內的，不是斷線。少了這一行，log 上主動重連與
+    /// 網路掉線長得一模一樣。
+    private func handleForceReconnect(_ data: [String: Any]) {
+        guard let closedCount = data["closedCount"] as? Int else { return }
+
+        wsLog("[WS] Naki 主動強制重連：已關閉 \(closedCount) 條連線"
+            + "（接下來的 websocket_close 是預期內的）", level: .event)
     }
 
     // MARK: - Public Methods

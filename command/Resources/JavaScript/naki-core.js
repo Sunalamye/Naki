@@ -58,6 +58,14 @@
 
     /**
      * 發送消息到 Swift (安全版本)
+     *
+     * ⚠️ `type` 不是自由字串：Swift 端只認得
+     * `WebSocketInterceptor.swift` 的 `BridgeMessageType`（那張表是契約的唯一真相來源）。
+     * 送不在表上的 type 不會靜默消失，但也不會被處理——Swift 會丟一行
+     * 「未知的 bridge 訊息 type」warning 然後丟掉。要加新訊息就兩端一起加，
+     * `BridgeMessageContractTests` 會做雙向比對，單邊改一定紅。
+     *
+     * envelope 固定是 `{ type, data, timestamp }`；`data` 的欄位 schema 見上述契約表。
      */
     function sendToSwift(type, data) {
         try {
