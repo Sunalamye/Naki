@@ -1,0 +1,24 @@
+{
+  "originHash" : "4365a4e563373cab0151cb1cdd12d91c43bad6758fba6930e352e70a6c2125ad",
+  "pins" : [
+    {
+      "identity" : "mcpkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Sunalamye/MCPKit",
+      "state" : {
+        "revision" : "0bf9df9f0c75058760a81a4e0854a8d1ccafcb82",
+        "version" : "0.2.1"
+      }
+    },
+    {
+      "identity" : "mortalswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Sunalamye/MortalSwift",
+      "state" : {
+        "revision" : "78b048e808c09406fc440d7fe642e8e014c210f0",
+        "version" : "0.5.1"
+      }
+    }
+  ],
+  "version" : 3
+}

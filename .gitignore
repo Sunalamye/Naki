@@ -30,8 +30,9 @@ playground.xcworkspace
 # Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
 # Packages/  # Commented out - we have our own local packages
 Package.pins
-Package.resolved
-*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+# Package.resolved 刻意「不」ignore：requirement 是 upToNextMinor（範圍不是 exact），
+# 沒有 lockfile 的 clean clone 會解到範圍內任意版本。詳見 CLAUDE.md「專案基準」。
+*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/configuration/
 .swiftpm/
 .build/
 
