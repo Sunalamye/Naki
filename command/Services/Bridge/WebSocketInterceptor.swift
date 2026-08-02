@@ -22,13 +22,16 @@ import os.log
 class WebSocketInterceptor {
 
     /// JavaScript 模組文件名稱（按載入順序）
-    /// 注意：順序很重要，coordinator 必須在其他模組之後載入
+    ///
+    /// 只剩兩個模組。`naki-autoplay` / `naki-game-api` / `naki-coordinator` 已整檔刪除：
+    /// 它們的每一條路徑都走 `Laya` / `GameMgr` / `app.NetAgent` / `view.DesktopMgr`，
+    /// 而 Unity WebGL 客戶端沒有這些物件，所以那 2,900 行在 runtime 只會靜默失敗。
+    /// 注入腳本是 `forMainFrameOnly: false`，每個 iframe 都要 parse 一次，留著只有成本。
+    ///
+    /// 順序仍然重要：`naki-websocket` 會取 `naki-core` 的 base64／sendToSwift。
     private static let jsModules = [
         "naki-core",
-        "naki-autoplay",
-        "naki-game-api",
-        "naki-websocket",
-        "naki-coordinator"  // 統一協調器，整合所有 API
+        "naki-websocket"
     ]
 
     /// 從 Bundle 載入 JavaScript 文件
@@ -213,12 +216,6 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     /// WebSocket 狀態回調
     var onWebSocketStatusChanged: ((Bool) -> Void)?
 
-    /// 自動打牌發送結果回調
-    var onAutoPlayResult: ((Bool, String?) -> Void)?
-
-    /// 摸牌事件回調 (handCount: 摸牌後手牌數量)
-    var onAddHandPai: ((Int) -> Void)?
-
     /// 連接的 WebSocket 數量
     private var connectedSockets: Set<Int> = []
 
@@ -239,11 +236,6 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
             let version = data["version"] as? String ?? "unknown"
             let autoplay = data["autoplay"] as? Bool ?? false
             wsLog("[JS] WebSocket interceptor is ready (v\(version), autoplay=\(autoplay))")
-
-        case "console_log":
-            if let message = data["message"] as? String {
-                wsLog("[JS] \(message)")
-            }
 
         case "websocket_debug":
             if let url = data["url"] as? String,
@@ -266,34 +258,11 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         case "websocket_error":
             handleWebSocketError(data)
 
-        // ⭐ 自動打牌 UI 自動化相關消息
-        case "autoplay_click":
-            if let x = data["x"] as? Double, let y = data["y"] as? Double {
-                wsLog("[AutoPlay] Click at: (\(Int(x)), \(Int(y)))")
-            }
-
-        case "autoplay_tile_click":
-            if let index = data["index"] as? Int {
-                wsLog("[AutoPlay] Tile click: index=\(index)")
-            }
-
-        case "autoplay_button_click":
-            if let action = data["action"] as? String {
-                wsLog("[AutoPlay] Button click: \(action)")
-            }
-
-        case "autoplay_error":
-            if let error = data["error"] as? String {
-                wsLog("[AutoPlay] Error: \(error)")
-                onAutoPlayResult?(false, error)
-            }
-
-        // 🎯 遊戲事件 Hook
-        case "addHandPai":
-            // 玩家摸牌事件
-            let handCount = data["handCount"] as? Int ?? 0
-            wsLog("[Hook] 摸牌事件: handCount=\(handCount)")
-            onAddHandPai?(handCount)
+        // 註：`autoplay_click` / `autoplay_tile_click` / `autoplay_button_click` /
+        // `autoplay_error` / `addHandPai` / `console_log` 這幾個 case 已移除。
+        // 它們唯一的送出端是 naki-autoplay.js（座標點擊、Laya `_AddHandPai` hook）
+        // 與 naki-websocket.js 的 `interceptConsole`，前者整檔刪除、後者零呼叫者，
+        // 所以這些訊息在現行客戶端永遠不會抵達。
 
         default:
             break

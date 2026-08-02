@@ -199,15 +199,6 @@ class LegacyWebViewCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
                 }
             }
         }
-
-        websocketHandler.onAddHandPai = { [weak self] handCount in
-            guard let self = self else { return }
-
-            Task { @MainActor in
-                bridgeLog("[Legacy Hook] 收到摸牌事件: handCount=\(handCount)")
-                await self.viewModel?.onAddHandPai(handCount: handCount)
-            }
-        }
     }
 
     // MARK: - MJAI Event Handling

@@ -349,23 +349,6 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     // MARK: - Settings
 
-    func setHighlightSettings(showRotatingEffect: Bool) {
-        Task {
-            let script = """
-            (function() {
-                if (window.__nakiRecommendHighlight) {
-                    window.__nakiRecommendHighlight.setSettings({
-                        showRotatingEffect: \(showRotatingEffect)
-                    });
-                    return true;
-                }
-                return false;
-            })()
-            """
-            _ = try? await executeJavaScript(script)
-        }
-    }
-
     func setHidePlayerNames(_ hide: Bool) {
         // 與主路徑同一條協定層實作；舊的 `__nakiPlayerNames` 依賴不存在的 uiscript。
         UserDefaults.standard.set(hide, forKey: "HidePlayerNames")
@@ -549,13 +532,6 @@ class LegacyWebViewModel: WebViewModelProtocol {
 
     func reload() {
         webView?.reload()
-    }
-
-    // MARK: - Game Events
-
-    func onAddHandPai(handCount: Int) async {
-        bridgeLog("[LegacyWebViewModel] 摸牌事件: handCount=\(handCount)")
-        // 可以在這裡觸發相關邏輯
     }
 }
 

@@ -53,7 +53,7 @@ Swift 狀態同時提供給 SwiftUI、Debug HTTP 與 MCP。
 
 1. 建立 `NakiWebCoordinator`、navigation decider、dialog presenter。
 2. 建立 `WKUserContentController`，註冊 `websocketBridge`。
-3. 依序注入 5 個 Naki JavaScript modules。
+3. 依序注入 2 個 Naki JavaScript modules（`naki-core.js` → `naki-websocket.js`）。
 4. 建立 `WebPage`。
 5. 建立 `NativeBotController` 與 `AutoPlayController`。
 6. 設定 `LiqiActionSender` 的 JS send handler。

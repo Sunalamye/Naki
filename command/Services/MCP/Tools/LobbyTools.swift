@@ -345,8 +345,8 @@ struct LoginBeatTool: MCPTool {
 struct AntiIdleToggleTool: MCPTool {
     static let name = "lobby_anti_idle"
     static let description = """
-        切換自動防閒置：啟用後由 Swift 定期送 .lq.Lobby.heatbeat（取代已失效的 \
-        window.__nakiAntiIdle，它呼叫 GameMgr.Inst.clientHeatBeat()）。\
+        切換自動防閒置：啟用後由 Swift 定期送 .lq.Lobby.heatbeat（取代已刪除的 \
+        window.__nakiAntiIdle，它呼叫 Unity 下不存在的 GameMgr.Inst.clientHeatBeat()）。\
         不帶參數則只回報目前狀態。
         """
     static let inputSchema = MCPInputSchema(

@@ -412,16 +412,6 @@
             else if (direction === 'send') attributeSend(info, data);
         }
 
-        // 收到伺服器訊息時，刷新心跳防止閒置登出
-        if (direction === 'receive' && window.__nakiAntiIdle && window.__nakiAntiIdle.isEnabled()) {
-            window.__nakiAntiIdle.refresh();
-        }
-
-        // 嘗試安裝表情自動回應監聽器（需要等 NetAgent 準備好）
-        if (direction === 'receive' && window.__nakiEmojiAutoReply && !window.__nakiEmojiListenerInstalled) {
-            window.__nakiEmojiAutoReply.installListener();
-        }
-
         try {
             if (data instanceof ArrayBuffer) {
                 nakiNicknameMask.observe(new Uint8Array(data), direction);
@@ -472,77 +462,6 @@
         } catch (e) {
             console.error('[Naki WS] 處理訊息錯誤:', e);
         }
-    }
-
-    // ========================================
-    // Console 攔截（調試用）
-    // ========================================
-
-    // 保存原始 console
-    const originalConsole = {
-        log: console.log.bind(console),
-        warn: console.warn.bind(console),
-        error: console.error.bind(console)
-    };
-
-    // 是否啟用 console 攔截
-    let consoleInterceptEnabled = false;
-
-    /**
-     * 攔截 console 輸出
-     */
-    function interceptConsole() {
-        if (consoleInterceptEnabled) return;
-        consoleInterceptEnabled = true;
-
-        console.log = function(...args) {
-            originalConsole.log.apply(console, args);
-            sendToSwift('console_log', { level: 'log', args: formatArgs(args) });
-        };
-
-        console.warn = function(...args) {
-            originalConsole.warn.apply(console, args);
-            sendToSwift('console_log', { level: 'warn', args: formatArgs(args) });
-        };
-
-        console.error = function(...args) {
-            originalConsole.error.apply(console, args);
-            sendToSwift('console_log', { level: 'error', args: formatArgs(args) });
-        };
-
-        console.log('[Naki] 主控台攔截已啟用');
-    }
-
-    /**
-     * 格式化 console 參數
-     */
-    function formatArgs(args) {
-        return args.map(arg => {
-            if (arg === null) return 'null';
-            if (arg === undefined) return 'undefined';
-            if (typeof arg === 'object') {
-                try {
-                    return JSON.stringify(arg).substring(0, 1000);
-                } catch (e) {
-                    return '[Object]';
-                }
-            }
-            return String(arg).substring(0, 1000);
-        }).join(' ');
-    }
-
-    /**
-     * 恢復原始 console
-     */
-    function restoreConsole() {
-        if (!consoleInterceptEnabled) return;
-        consoleInterceptEnabled = false;
-
-        console.log = originalConsole.log;
-        console.warn = originalConsole.warn;
-        console.error = originalConsole.error;
-
-        console.log('[Naki] 主控台攔截已停用');
     }
 
     // ========================================
@@ -709,13 +628,6 @@
             console.log('[Naki WS] 強制重連: 已關閉', closedCount, '個連線');
             sendToSwift('force_reconnect', { closedCount: closedCount });
             return closedCount;
-        },
-
-        // Console 控制
-        interceptConsole: interceptConsole,
-        restoreConsole: restoreConsole,
-        isConsoleIntercepted: function() {
-            return consoleInterceptEnabled;
         },
 
         // 原始 WebSocket（供需要時使用）

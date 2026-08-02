@@ -97,12 +97,13 @@ macOS deployment target 是 26.0，所以 macOS 實際只走新路徑；iOS depl
 `WebSocketInterceptor.jsModules` 目前依序注入：
 
 1. `naki-core.js`
-2. `naki-autoplay.js`
-3. `naki-game-api.js`
-4. `naki-websocket.js`
-5. `naki-coordinator.js`
+2. `naki-websocket.js`
 
-其中舊 Laya API 仍可能載入，但不可作為現行遊戲狀態或動作來源。活路徑是 `naki-websocket.js` 與 `naki-core.js` 的 Unity/WebGL hook。
+順序有意義：`naki-websocket.js` 取用 `naki-core.js` 的 base64／`sendToSwift`。
+
+`naki-autoplay.js`、`naki-game-api.js`、`naki-coordinator.js` 已於 2026-08-02 整檔刪除（合計約 2,900 行）。它們的每一條路徑都經過 `Laya` / `GameMgr` / `app.NetAgent` / `view.DesktopMgr` / `uiscript`，在 Unity 客戶端一律不存在，所以只會靜默失敗；注入腳本是 `forMainFrameOnly: false`，每個 iframe 都要 parse 一次，留著只有成本。同批移除的還有 `naki-core.js` 的 `__nakiAntiIdle`（改由 Swift 定期送 `.lq.Lobby.heatbeat`）、`__nakiEmojiAutoReply`，以及 `naki-websocket.js` 的 `interceptConsole`（零呼叫者）。
+
+現存的 JS 全域面只有四個：`__nakiCore`（base64／`sendToSwift`）、`__nakiWebSocket`（連線清單／`sendRaw`／`forceReconnect`）、`__nakiHideNames`（authGame 暱稱等長覆寫）、`__nakiHighlight`（WebGL draw hook）。任何 `window.naki`、`NakiCoordinator`、`__nakiGameAPI`、`__nakiAutoPlay`、`__nakiRecommendHighlight`、`__nakiPlayerNames`、`__nakiDoraHook`、`__nakiAntiIdle`、`__nakiEmojiAutoReply` 都已不存在，probe 到的一定是 `undefined`。
 
 ### Envelope
 

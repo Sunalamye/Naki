@@ -69,10 +69,7 @@
 				Models/GameModels.swift,
 				Resources/Assets.xcassets,
 				Resources/index.html,
-				"Resources/JavaScript/naki-autoplay.js",
-				"Resources/JavaScript/naki-coordinator.js",
 				"Resources/JavaScript/naki-core.js",
-				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
 				Services/Bot/ActionDelayModel.swift,
 				Services/Bot/AutoPassDispatcher.swift,
@@ -162,10 +159,7 @@
 				"Color+Extension.swift",
 				Models/GameModels.swift,
 				Resources/index.html,
-				"Resources/JavaScript/naki-autoplay.js",
-				"Resources/JavaScript/naki-coordinator.js",
 				"Resources/JavaScript/naki-core.js",
-				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
 				Services/Bot/ActionDelayModel.swift,
 				Services/Bot/AutoPassDispatcher.swift,
@@ -228,10 +222,7 @@
 			membershipExceptions = (
 				Resources/Assets.xcassets,
 				Resources/index.html,
-				"Resources/JavaScript/naki-autoplay.js",
-				"Resources/JavaScript/naki-coordinator.js",
 				"Resources/JavaScript/naki-core.js",
-				"Resources/JavaScript/naki-game-api.js",
 				"Resources/JavaScript/naki-websocket.js",
 			);
 		};

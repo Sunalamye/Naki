@@ -582,15 +582,6 @@ class WebViewModel: WebViewModelProtocol {
     bridgeLog("[WebViewModel] Bot 已刪除並清除狀態")
   }
 
-  // MARK: - Game Event Hooks
-
-  /// 處理摸牌事件（由 JavaScript _AddHandPai hook 觸發）
-  /// - Parameter handCount: 摸牌後手牌數量
-  func onAddHandPai(handCount: Int) async {
-    bridgeLog("[WebViewModel] 摸牌事件: handCount=\(handCount)")
-    // 高亮由 recommendation update 的 syncGameHighlight() 驅動，不需 Laya 摸牌 hook。
-  }
-
   // MARK: - Auto Play Methods
 
   /// 自動打牌模式的持久化 key
@@ -619,29 +610,6 @@ class WebViewModel: WebViewModelProtocol {
   /// 設定自動打牌延遲
   func setAutoPlayDelay(_ delay: TimeInterval) {
     autoPlayController?.setActionDelay(delay)
-  }
-
-  /// 設定遊戲內高亮效果選項
-  /// ⚠️ Unity WebGL 客戶端已無 Laya 特效物件，此設定不會產生任何遊戲內視覺變化；
-  /// JS 端只會更新 flag 並在實際套用時回報 `unity-client-no-laya`。
-  /// 保留只為相容 WebViewModelProtocol；設定 UI 已移除，MCP highlighter 另有失敗樁。
-  func setHighlightSettings(showRotatingEffect: Bool) {
-    guard let page = webPage else { return }
-
-    let script = """
-      window.__nakiRecommendHighlight?.setSettings({
-      showRotatingEffect: \(showRotatingEffect)
-      });
-      """
-
-    Task {
-      do {
-        _ = try await page.callJavaScript(script)
-        bridgeLog("[WebViewModel] 高亮設定: 旋轉=\(showRotatingEffect)")
-      } catch {
-        bridgeLog("[WebViewModel] 設定高亮錯誤: \(error.localizedDescription)")
-      }
-    }
   }
 
   /// 設定是否隱藏玩家名稱

@@ -50,7 +50,10 @@ protocol WebViewModelProtocol: AnyObject, Observable {
 
     // MARK: - Settings
 
-    func setHighlightSettings(showRotatingEffect: Bool)
+    // 註：`setHighlightSettings(showRotatingEffect:)` 已移除。它唯一做的事是呼叫
+    // `__nakiRecommendHighlight.setSettings`，而那個物件隨 naki-autoplay.js 一起刪掉了；
+    // 它背後的旋轉特效本來就建立在 Laya `effect_recommend` 上，Unity 客戶端沒有。
+    // 遊戲內高亮的唯一實作是 naki-core.js 的 `__nakiHighlight` WebGL draw hook。
     func setHidePlayerNames(_ hide: Bool)
     /// 頁面載入完成後重推持久化的隱藏名稱設定（JS 端的開關會被 reload 清掉）
     func applyHideNamesSettingsIfNeeded()
@@ -74,10 +77,6 @@ protocol WebViewModelProtocol: AnyObject, Observable {
     func loadMajsoul() async
     func loadURL(_ urlString: String) async
     func reload()
-
-    // MARK: - Game Events
-
-    func onAddHandPai(handCount: Int) async
 }
 
 // MARK: - Default Implementations

@@ -9,7 +9,7 @@ allowed-tools: Read, Glob, Grep, Task
 <IMPORTANT>
 所有 Naki 查詢與動作都必須透過 `/naki-mcp-proxy` 連到 live Naki。每一個使用者 request 先做 live `tools/list`，再呼叫當次 registry 中的實際工具。不得只讀本 skill、repo 文件、舊 log 或先前 session 結果後宣稱查到目前狀態。
 
-`execute_js` 僅允許唯讀 Unity/page/WebSocket/WebGL probe。禁止 Laya／DesktopMgr／NakiCoordinator 遊戲物件路徑、DOM/canvas 座標點擊、合成 pointer event、raw Liqi send 或任何 JS 狀態修改。
+`execute_js` 僅允許唯讀 Unity/page/WebSocket/WebGL probe。禁止 Laya／DesktopMgr 遊戲物件路徑、DOM/canvas 座標點擊、合成 pointer event、raw Liqi send 或任何 JS 狀態修改。`window.naki`／`NakiCoordinator`／`__nakiGameAPI` 這類注入 API 已於 2026-08-02 隨 `naki-coordinator.js`／`naki-autoplay.js`／`naki-game-api.js` 整檔刪除，probe 到的一定是 `undefined`。
 </IMPORTANT>
 
 ## Identify the surface
@@ -40,6 +40,17 @@ Authorized action
 ```
 
 JavaScript remains useful only for the web page shell, Unity canvas, Naki's injected WebSocket bridge, and the WebGL highlight hook. It is not the game-state source.
+
+Naki now injects exactly two modules — `naki-core.js` then `naki-websocket.js` — exposing exactly four globals:
+
+| Global | Purpose | Read-only members |
+|---|---|---|
+| `window.__nakiCore` | base64 helpers, `sendToSwift` | — |
+| `window.__nakiWebSocket` | intercepted sockets | `getConnections()`, `getMajsoulConnections()` |
+| `window.__nakiHideNames` | authGame nickname masking | `getStatus()` |
+| `window.__nakiHighlight` | WebGL draw hook | `state()`, `decode(st)` |
+
+Anything else that starts with `__naki` or `naki` was deleted on 2026-08-02 and now reads `undefined`.
 
 ## Mandatory live workflow
 
@@ -135,8 +146,19 @@ GameMgr
 uiscript
 cfg
 app.NetAgent
-window.naki / window.NakiCoordinator game-state APIs
-window.__nakiGameAPI
+```
+
+These Naki globals were deleted with their modules on 2026-08-02. Probing them proves nothing except that the deletion happened:
+
+```text
+window.naki / window.NakiCoordinator     (naki-coordinator.js — deleted)
+window.__nakiGameAPI / __nakiPlayerNames / __nakiDoraHook / __nakiDetectGameAPI
+window.__nakiExploreGameObjects / __nakiHighlightInit   (naki-game-api.js — deleted)
+window.__nakiAutoPlay / __nakiRecommendHighlight / __nakiClickTile
+window.__nakiClickButton / __nakiExecuteAction / __nakiTestIndicators
+window.__nakiTestClick                                  (naki-autoplay.js — deleted)
+window.__nakiAntiIdle / __nakiEmojiAutoReply            (naki-core.js — removed)
+window.__nakiWebSocket.interceptConsole                 (naki-websocket.js — removed)
 ```
 
 The following MCP tools were removed and must not be called:
