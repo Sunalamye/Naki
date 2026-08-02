@@ -10,7 +10,7 @@
 
 ## 結論
 
-Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存在，四麻 observation／mask fixtures 與 resolver 純邏輯也有測試。但是「能自摸時必定自摸」尚未完成端到端驗收，而且現行 source 仍有兩個可直接造成漏和的整合漏洞。因此不能宣稱問題已完全修復，也不能把目前 bundled 權重稱為最新最強模型。
+Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存在，四麻 observation／mask fixtures 與 resolver 純邏輯也有測試。兩個可直接造成漏和的整合漏洞在 source 層已收斂，並自 2026-08-02 起有注入式 fixture 逐條驗（§15.5）；但「能自摸時必定自摸」的**端到端**驗收仍未完成——那條路要 live 對局才走得到。因此不能宣稱問題已完全修復，也不能把目前 bundled 權重稱為最新最強模型。
 
 ## 已驗證
 
@@ -22,22 +22,31 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 | Liqi schema | live manifest fresh download + byte compare | repo `liqi.json` 與 CDN 完全相同 |
 | config | live manifest fresh download + repo parser | 41 tables／263 sheets／119,289 rows |
 | Mortal parity | fresh Debug／Release tests | 各 47 tests 通過；固定 fixtures obs／mask 零落差 |
-| Naki unit tests | fresh NakiTests | 75 tests 通過；resolver 專項 13 tests 通過 |
+| Naki unit tests | fresh NakiTests（2026-08-02 Debug） | 149 tests 通過；resolver 專項 13、fail-safe fixture 10 |
 | runtime ron | request／response／ActionHule trace | type 9 走 `inputOperation` 成功 |
 | runtime pon | request／response／ActionChiPengGang trace | type 3 走 `inputChiPengGang` 成功 |
 | WebGL hook | live `__nakiHighlight.state()` | hook 與染色分支有執行 |
 
 ## 已確認差距
 
-### P0：自摸 resolver 仍可能不被呼叫
+### P0：自摸 resolver 仍可能不被呼叫（source 已收斂，live 未驗證）
 
-`AutoPlayDecisionResolver` 本身會讓 server oplist 的 tsumo／ron 凌駕 AI。但 `WebViewModel` 仍以 Mortal recommendation 是否非空作為進入自動動作的條件；空推薦時，timer 只補副露 pass。
+原始差距：`AutoPlayDecisionResolver` 本身會讓 server oplist 的 tsumo／ron 凌駕 AI，但 `WebViewModel` 以 Mortal recommendation 是否非空作為進入自動動作的條件；空推薦時 timer 只補副露 pass。結果是 server 即使給 type 8，只要 Mortal 回空推薦就可能完全不進 resolver。
 
-結果：server 即使給 type 8，只要 Mortal 回空推薦，就可能完全不進 resolver。
+現況：1 秒輪詢改走 `AutoPlayGate`，空推薦 ＋ `snapshot.horaOperation != nil` 回 `.forceHora`，`triggerAutoPlayNow(forcedAction: .hora)` 不受「無推薦就不觸發」限制。
 
-### P0：hora send 失敗仍可能被標成完成
+機械驗收（2026-08-02）：`NakiTests/AutoPlayFailsafeFixtureTests` 的 fixture A（空推薦 ＋ oplist `[8]`）與 D（老化 3 秒的 `[3,9]`）以注入的 oplist 走完 gate → resolver → sender，斷言送出的 bytes 是 `12020808`／`12020809`。實跑 mutation：拿掉 gate 的 `forceHora` 分支 → A、B、B'、D 四個測試轉紅。
+**仍未驗證**：live 對局沒有出現過這個分支（§15.4：兩次和牌模型都給 `hora@99.6%` 以上）。
 
-外層在呼叫 sender 後，只看 resolved action 是 `.hora` 就 `markHandled`；沒有拿到實際 `LiqiSendResult`。沒有 game-gateway、JS send 失敗或 server 拒絕時，pending opportunity 仍可能被吃掉且不重試。
+### P0：hora send 失敗仍可能被標成完成（source 已收斂，live 未驗證）
+
+原始差距：外層在呼叫 sender 後，只看 resolved action 是 `.hora` 就 `markHandled`，沒有拿到實際 `LiqiSendResult`；沒有 game-gateway、JS send 失敗或 server 拒絕時，pending opportunity 會被吃掉且不重試。
+
+現況：`executeAutoPlayAction` 回傳 `LiqiSendResult?`，只有 `success == true` 才 `markSnapshotHandled`；和牌失敗走 bounded retry（15 次 × 0.2 秒），用完仍不標記。
+
+機械驗收（2026-08-02）：fixture B（第 1 次 `no_open_majsoul_connection`、第 2 次成功）斷言重試期間看到的 oplist 序號沒變、成功後才 `pending == nil`；fixture B'（一路失敗）斷言 3 次用完後 `pending` 仍在，且通道恢復後同一批 oplist 還能送成功。實跑 mutation：把 `markHandled` 搬到送出之前 → B、B' 轉紅。
+**這個 mutation 動的是測試 harness，不是 `WebViewModel`**：正式的「成功才 `markHandled`」寫在 `WebViewModel.executeAutoPlayAction` 裡，測試建不出 `WebViewModel`，所以鎖住的是語意規格而不是那幾行 source（p2-1 抽出 executor 後才能直接鎖）。
+**仍未驗證**：live 對局沒有出現過 send 失敗（§15.4：兩次都是第 1 次就成功）。
 
 ### P0：Legacy iOS 沒有 server-authoritative 保護
 
@@ -91,9 +100,9 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 ## 未驗證
 
-- 最新 source 在「AI 想 discard、server 有 tsumo」情境能否穩定 override 並收到 `ActionHule`。
-- 空 recommendation + tsumo。
-- send failure／server reject／中斷 cleanup。
+- 最新 source 在「AI 想 discard、server 有 tsumo」情境能否穩定 override 並收到 `ActionHule`（決策層已有 fixture C，live 仍缺）。
+- 空 recommendation + tsumo 的 live 重現（fixture A 已覆蓋決策層）。
+- server reject（送出成功但伺服器不接受）／中斷 cleanup；send failure 只有 fixture B／B' 的注入版本。
 - Legacy iOS 17–25 實機完整對局。
 - chi variants、赤五 combination、ankan／minkan／kakan。
 - WebGL 高亮與 action popup 的視覺正確性。
@@ -109,9 +118,9 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 只有在下列條件同時成立後，才可對外寫「漏自摸已修復」：
 
-- source 層兩個 P0 integration gap 已消失。
-- resolver／integration tests 覆蓋上述正常與 failure paths。
-- 測試帳號 live 對局重現原始 `[discard, riichi, tsumo] + AI discard` 情境。
+- source 層兩個 P0 integration gap 已消失。（2026-08-02：source 已收斂，見上面兩節）
+- resolver／integration tests 覆蓋上述正常與 failure paths。（2026-08-02：決策層已覆蓋 §15.5；`WebViewModel` 的重試框架本體仍只有註解與 log）
+- 測試帳號 live 對局重現原始 `[discard, riichi, tsumo] + AI discard` 情境。（仍未做）
 - log 顯示 resolver 選 hora、送到 game-gateway、同 msgId 成功 RESPONSE，並收到 `ActionHule`。
 - 測試後沒有 stale pending、重複 request、殘留 process 或非預期帳號操作。
 
@@ -287,7 +296,34 @@ fixture（server `[1,7,8]` + **AI 想 discard** → resolver 覆蓋成 hora）�
 因為模型自己就選了和牌，從頭到尾沒有分歧。防守程式碼要靠正常對局驗證，本來就是
 矛盾的——真要驗只能注入假 oplist，那是另一件事。
 
-仍未驗證：P0-1、P0-2、Legacy 路徑（macOS 跑不到）、暱稱在畫面上的實際顯示、
+### 15.5 兩個 P0 分支的注入式驗收（2026-08-02）
+
+上一段講的「另一件事」已經做了：`NakiTests/AutoPlayFailsafeFixtureTests`（10 tests）
+用注入的 oplist ／推薦，讓兩個分支第一次真的被執行。
+
+| fixture | 前提 | 斷言 |
+|---------|------|------|
+| A | 空推薦 ＋ oplist `[8]` | gate `.forceHora` → resolver hora → 送出 bytes 結尾 `12020808`、成功後才 `markHandled` |
+| B | hora send 第 1 次失敗、第 2 次成功 | 重試期間 oplist 序號不變、成功後才消化、失敗原因進 log |
+| B' | hora send 一路失敗 | 用完 3 次仍 `pending`，通道恢復後同一批還能送成功 |
+| C | server `[1,7,8]` ＋ AI `discard@87%` | resolver 覆蓋成 hora，送出的是自摸不是打牌，log 有「決策覆蓋」 |
+| D / D' | 老化 3 秒的 `[3,9]` ／ `[3]` | 有和牌就和（`12020809`）、沒有才送過（`12021801`） |
+| E | 推薦由 `NativeBotController` 注入 | 模型輸出 → 決策層這一段接得起來 |
+
+注入入口（`LiqiOperationStore.injectForTesting`、`NativeBotController.injectRecommendationsForTesting`）
+都在 `#if DEBUG` 內；Release binary 用 `nm` 查為 0 個符號，Debug dylib 有 4 個。
+
+**NakiTests 沒有 Release 版**：`ENABLE_TESTABILITY = YES` 只設在 Debug config，
+`xcodebuild test -configuration Release` 會停在 `Unable to find module dependency: 'Naki'`
+（`@testable import` 需要 testability）。這是既有專案設定，不是本次改動造成的；
+Release 能驗的是 `xcodebuild build -configuration Release` 成功（已跑）＋ 上面的符號檢查。
+
+**這些走的是 `AutoPlayFailsafePipeline`（測試 harness），不是 `WebViewModel` 本體**：
+證明的是 gate → resolver → sender → markHandled 這條組合的語意，不含 asyncAfter 延遲、
+去抖與 `currentExecutionId` 互斥。CLAUDE.md 要求的 live fixture
+（RESPONSE → `ActionHule`）**仍未驗證**。
+
+仍未驗證：P0-1／P0-2 的 live 重現、Legacy 路徑（macOS 跑不到）、暱稱在畫面上的實際顯示、
 非推薦牌透明度的視覺結果。
 
 ## 16. Soak test 與截圖（2026-08-01）

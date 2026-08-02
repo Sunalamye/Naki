@@ -761,6 +761,23 @@ class NativeBotController {
             canAgari: canAgari
         )
     }
+
+    // MARK: - 測試注入（只在 DEBUG build 存在）
+
+    #if DEBUG
+    /// 直接指定「模型此刻說什麼」，不跑 Core ML 推論。**只有 DEBUG build 有這個入口。**
+    ///
+    /// fail-safe fixture 需要的是推薦這一個輸入，不是推論本身：
+    /// 「推薦為空 ＋ oplist 有和牌」與「AI 想 discard ＋ 伺服器給 tsumo」兩種前提
+    /// 都得精確擺出來，而真的跑一次模型既慢又給不出這兩種輸入
+    /// （實測兩次和牌，模型都回 `hora@99.6%` 以上，從頭到尾沒有分歧）。
+    ///
+    /// 不進 Release 的理由與 `LiqiOperationStore.injectForTesting` 相同：
+    /// 能偽造模型輸出的入口不該存在於使用者跑的 binary 裡。
+    func injectRecommendationsForTesting(_ recommendations: [Recommendation]) {
+        lastRecommendations = recommendations
+    }
+    #endif
 }
 
 // MARK: - Errors

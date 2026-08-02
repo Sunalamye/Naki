@@ -362,4 +362,27 @@ nonisolated final class LiqiOperationStore: @unchecked Sendable {
         sequenceCounter = 0
         handledSequence = 0
     }
+
+    // MARK: - 測試注入（只在 DEBUG build 存在）
+
+    #if DEBUG
+    /// 直接放進一份現成快照。**只有 DEBUG build 有這個入口。**
+    ///
+    /// 正式路徑只有 `record(...)`：序號由 store 自己配、`capturedAt` 一律是當下。
+    /// 那表達不出 fail-safe 分支的前提——「這批 oplist 是 3 秒前到的」（寬限期已過）
+    /// 與「序號已經被換掉」（stale）。這兩條分支在正常對局撞不到（模型幾乎總是
+    /// 給出 hora 推薦、送出幾乎不失敗），要驗只能注入。
+    ///
+    /// 之所以不讓它進 Release：注入等於繞過「合法性的權威在 oplist」這條界線，
+    /// 使用者跑的 binary 裡不該存在能偽造伺服器授權的入口。
+    ///
+    /// `handledSequence` 刻意不動——注入的快照要不要算 pending，由它自己的序號決定。
+    func injectForTesting(_ snapshot: LiqiOperationSnapshot) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.snapshot = snapshot
+        // 注入後 record 的新快照仍必須贏過它，否則新到的 oplist 會被誤判成舊的
+        sequenceCounter = max(sequenceCounter, snapshot.sequence)
+    }
+    #endif
 }
