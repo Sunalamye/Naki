@@ -83,8 +83,7 @@ xcodebuild clean build -project Naki.xcodeproj -scheme Naki -configuration Relea
   2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | tail -3
 APP_PATH=$(find ./build -name "Naki.app" -type d | head -1)
 [ -n "$APP_PATH" ] || { echo "❌ 找不到 Naki.app"; exit 1; }
-BUILT_VER=$(/usr/bin/defaults read "$(cd "$(dirname "$APP_PATH")" && pwd)/Naki.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "?")
-echo "  built app 版本：$BUILT_VER（此時還是舊版號，稍後 bump）"
+echo "  built: $APP_PATH（版本此時還是舊號，稍後 bump）"
 
 # ── 3. Package DMG + ZIP ─────────────────────────────────────
 echo "▶ Package"
