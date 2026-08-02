@@ -111,9 +111,22 @@ final class GameStore {
     /// 那時還沒發牌；重連時也可能先建 Bot 才進局。所以再要求真的有局在跑。
     var isInGame: Bool { botStatus.isActive && gameState.kyoku > 0 }
 
+    /// 送給 `AutoPlayDecisionResolver` 的自家座位，**全專案唯一的定義點**。
+    ///
+    /// 先前 Legacy path 讀 `botStatus.playerId`、主 path 讀 `gameState.playerId`
+    /// （定義在 `WebViewModelProtocol` 的 extension 裡，p3-4 隨協定一起刪除）。
+    /// 兩者雖然都源自 `NativeBotController.playerId`，但重置時機不同
+    /// （`clearAfterBotDeleted()` 把 `botStatus` 打回預設值 0，`gameState` 不動），
+    /// 所以「座位對不對」在兩條路上可以得到不同答案，而 resolver 的 `seat_mismatch`
+    /// 是 fail-closed——判錯就整批 oplist 不動作。
+    var autoPlaySeat: Int { gameState.playerId }
+
     // MARK: - Lifecycle
 
-    init() {}
+    /// `nonisolated`：`NakiEnvironment` 的 Preview 預設值要在 `@Entry` 生成的
+    /// **nonisolated** `EnvironmentKey.defaultValue` 裡建起來。這個 init 只寫值型別
+    /// 欄位，沒有任何 MainActor 語意代價。
+    nonisolated init() {}
 
     /// deinit 標 `nonisolated`——**沒有它，任何碰到本 class 的單元測試都會讓 test host 崩掉**。
     ///

@@ -5,14 +5,21 @@
 //  Created by Suoie on 2025/11/29.
 //  Updated: 2025/12/05 - 使用 @Environment 傳遞 WebViewModel
 //  Updated: 2026/01/26 - 使用 AdaptiveNakiWebView 支援 macOS 14+/iOS 17+
+//  Updated: 2026/08/02 - p3-4：改吃 `@Environment(\.naki)`（store / settings / actions）
 //
 
 import SwiftUI
-import WebKit
 
 struct ContentView: View {
-    /// 使用 Factory 模式創建適當版本的 ViewModel
-    @State private var viewModel: any WebViewModelProtocol = WebViewModelFactory.create()
+
+    /// Naki 的三件東西：狀態、設定、副作用。
+    ///
+    /// p3-4：先前是 `@State private var viewModel = WebViewModelFactory.create()`
+    /// ——View 自己建 view model，於是「誰擁有 App 的生命週期」是 SwiftUI 的
+    /// diffing 規則說了算，而 Preview 會真的去建一個 WebView、啟一個 MCP server。
+    /// 現在由 App 層（`NakiApp` / `Naki_MApp`）持有 `NakiRuntime` 並顯式注入；
+    /// 這裡的預設值只給 Preview（見 `NakiEnvironment`）。
+    @Environment(\.naki) private var naki
 
 #if os(macOS)
     @State private var showGamePanel = true
@@ -24,7 +31,7 @@ struct ContentView: View {
 
     // 自動打牌控制
     //
-    // key 與 ViewModel 共用（`AutoPlayModeStore.key`）：以前 UI 存 "AutoPlayMode"、
+    // key 與 runtime 共用（`AutoPlayModeStore.key`）：以前 UI 存 "AutoPlayMode"、
     // ViewModel 存 "naki.autoPlayMode"，兩邊各記各的，picker 顯示的模式可以跟
     // 實際驅動送出的模式不一致。舊 key 的一次性遷移在 `NakiApp.init()`。
     @AppStorage(AutoPlayModeStore.key) private var autoPlayMode: AutoPlayMode = AutoPlayModeStore
@@ -32,7 +39,7 @@ struct ContentView: View {
 
     /// 這條 WebView 路徑真的能執行的模式（Legacy 沒有「自動」，見 `AutoPlayAvailability`）
     private var availableAutoPlayModes: [AutoPlayMode] {
-        AutoPlayAvailability.modes(autoPlaySupported: viewModel.supportsAutoPlay)
+        AutoPlayAvailability.modes(autoPlaySupported: naki.settings.supportsAutoPlay)
     }
 
     /// 模式 picker 本體：**刻意放在 `#if` 之外**，兩個平台的 toolbar 共用同一份。
@@ -53,13 +60,13 @@ struct ContentView: View {
         // a11y: fixed width for segmented control; kept to preserve toolbar layout
         .frame(width: width)
         .onChange(of: autoPlayMode) { _, newValue in
-            // 收斂與持久化在 ViewModel → `AutoPlayAvailability.commit`；
+            // 收斂與持久化在 `NakiRuntime.setAutoPlayMode` → `AutoPlayAvailability.commit`；
             // Action 只是這個 View 對「切模式」這件副作用的型別化入口（p3-3）。
-            SetAutoPlayModeAction(viewModel: viewModel)(newValue)
+            naki.actions.setAutoPlayMode(newValue)
         }
         .accessibilityIdentifier("autoplay-mode-picker")
         .accessibilityLabel("自動打牌模式")
-        .accessibilityHint(viewModel.supportsAutoPlay
+        .accessibilityHint(naki.settings.supportsAutoPlay
                            ? "" : AutoPlayAvailability.autoUnavailableReason)
     }
 
@@ -71,16 +78,15 @@ struct ContentView: View {
             iOSLayout
 #endif
         }
-        .environment(\.webViewModel, viewModel)
         .task {
             // 存檔可能是在支援自動送出的裝置上寫下的 `.auto`。Picker 上沒有那個選項時，
             // 選取值對不到任何 tag，segmented control 會顯示成「沒有任何一段被選中」；
-            // ViewModel 那邊也已經降級成推薦，兩邊必須講同一句話。
+            // runtime 那邊也已經降級成推薦，兩邊必須講同一句話。
             let clamped = AutoPlayAvailability.clamp(
-                autoPlayMode, autoPlaySupported: viewModel.supportsAutoPlay)
+                autoPlayMode, autoPlaySupported: naki.settings.supportsAutoPlay)
             if clamped != autoPlayMode {
                 autoPlayMode = clamped
-                viewModel.setAutoPlayMode(clamped)
+                naki.actions.setAutoPlayMode(clamped)
             }
         }
     }
@@ -89,7 +95,7 @@ struct ContentView: View {
 #if os(macOS)
     private var macOSLayout: some View {
         HSplitView {
-            // WebView (自動選擇新版或舊版實現)
+            // WebView (由 WebSession 決定是 WebPage 還是 WKWebView)
             AdaptiveNakiWebView()
                 .frame(minWidth: 600)
 
@@ -130,7 +136,7 @@ struct ContentView: View {
         // 左側：自動打牌模式
         ToolbarItem(placement: .navigation) {
             autoPlayModePicker(width: 160)
-                .help(viewModel.supportsAutoPlay
+                .help(naki.settings.supportsAutoPlay
                       ? "AI 推薦模式"
                       : "AI 推薦模式（此裝置不提供自動送出）")
         }
@@ -141,14 +147,14 @@ struct ContentView: View {
 
         // MCP Server
         ToolbarItem(placement: .navigation) {
-            Button(action: { viewModel.toggleDebugServer() }) {
+            Button(action: { naki.actions.toggleDebugServer() }) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack{
                         Circle()
-                            .fill(viewModel.isDebugServerRunning ? Color.green : Color.gray)
+                            .fill(naki.store.isDebugServerRunning ? Color.green : Color.gray)
                             .frame(width: 6, height: 6)
 
-                        Text("\(viewModel.debugServerPort)")
+                        Text("\(naki.store.debugServerPort)")
                             .font(.system(.caption, design: .monospaced))
 
                     }
@@ -158,10 +164,11 @@ struct ContentView: View {
                 }
             }
             .frame(width: 80)
-            .help(viewModel.isDebugServerRunning ? "MCP Server 運行中" : "MCP Server 已停止")
+            .help(naki.store.isDebugServerRunning ? "MCP Server 運行中" : "MCP Server 已停止")
             .accessibilityIdentifier("mcp-server-toggle")
             .accessibilityLabel("MCP Server")
-            .accessibilityValue(viewModel.isDebugServerRunning ? "運行中，連接埠 \(viewModel.debugServerPort)" : "未運行")
+            .accessibilityValue(naki.store.isDebugServerRunning
+                                ? "運行中，連接埠 \(naki.store.debugServerPort)" : "未運行")
         }
 
         // 連接狀態
@@ -172,9 +179,7 @@ struct ContentView: View {
 
         // 重新載入
         ToolbarItem(placement: .destructiveAction) {
-            Button(action: {
-                viewModel.reload()
-            }) {
+            Button(action: { naki.actions.reloadPage() }) {
                 Image(systemName: "arrow.clockwise")
             }
             .help("重新載入")
@@ -241,7 +246,7 @@ struct ContentView: View {
 
     private var iOSBottomPanel: some View {
         HStack(spacing: 0) {
-            if !viewModel.store.statusMessage.isEmpty {
+            if !naki.store.statusMessage.isEmpty {
                 StatusBar()
             }
         }
@@ -251,9 +256,9 @@ struct ContentView: View {
             VStack{
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(viewModel.store.isConnected ? Color.green : Color.red)
+                        .fill(naki.store.isConnected ? Color.green : Color.red)
                         .frame(width: 8, height: 8)
-                    Text(viewModel.store.isConnected ? "已連接" : "未連接")
+                    Text(naki.store.isConnected ? "已連接" : "未連接")
                         .font(.caption)
                 }
 
@@ -264,13 +269,13 @@ struct ContentView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("websocket-connection-indicator")
             .accessibilityLabel("WebSocket 連線狀態")
-            .accessibilityValue(viewModel.store.isConnected ? "已連接" : "未連接")
+            .accessibilityValue(naki.store.isConnected ? "已連接" : "未連接")
 
             RecommendationView(
-                recommendations: viewModel.store.recommendations,
+                recommendations: naki.store.recommendations,
                 maxDisplay: 5,
-                showsRecommendations: viewModel.autoPlayMode.showRecommendation,
-                reloadBot: ForceReconnectAction(viewModel: viewModel)
+                showsRecommendations: naki.store.autoPlayMode.showRecommendation,
+                reloadBot: naki.actions.forceReconnect
             )
         }
         .frame(width: 140)
@@ -280,9 +285,7 @@ struct ContentView: View {
     private var iOSToolbarContent: some ToolbarContent {
         // 左側：重新載入
         ToolbarItem(placement: .navigationBarLeading) {
-            Button(action: {
-                viewModel.reload()
-            }) {
+            Button(action: { naki.actions.reloadPage() }) {
                 Image(systemName: "arrow.clockwise")
             }
             .accessibilityIdentifier("toolbar-reload")
@@ -320,17 +323,17 @@ struct ContentView: View {
                 VStack(spacing: 16) {
                     // Bot 狀態
                     BotStatusView(
-                        botStatus: viewModel.store.botStatus,
-                        gameState: viewModel.store.gameState,
-                        reloadBot: ForceReconnectAction(viewModel: viewModel)
+                        botStatus: naki.store.botStatus,
+                        gameState: naki.store.gameState,
+                        reloadBot: naki.actions.forceReconnect
                     )
 
                     // AI 推薦
                     RecommendationView(
-                        recommendations: viewModel.store.recommendations,
+                        recommendations: naki.store.recommendations,
                         maxDisplay: 5,
-                        showsRecommendations: viewModel.autoPlayMode.showRecommendation,
-                        reloadBot: ForceReconnectAction(viewModel: viewModel)
+                        showsRecommendations: naki.store.autoPlayMode.showRecommendation,
+                        reloadBot: naki.actions.forceReconnect
                     )
 
                     // 日誌（可展開）
@@ -363,16 +366,8 @@ struct ContentView: View {
 
 #if os(macOS)
 struct GamePanel: View {
-    @Environment(\.webViewModel) private var viewModel
+    @Environment(\.naki) private var naki
     @Binding var showLog: Bool
-
-    /// 面板裡兩顆「重新載入」按鈕共用的動作。
-    ///
-    /// 沒有 view model（Preview／初始化中）時是 `.unavailable`：按下去不做事，
-    /// 而不是靜靜地什麼都沒接（先前 `viewModel?.forceReconnect()` 就是後者）。
-    private var reloadBot: ForceReconnectAction {
-        viewModel.map { ForceReconnectAction(viewModel: $0) } ?? .unavailable
-    }
 
     var body: some View {
         VSplitView {
@@ -380,17 +375,17 @@ struct GamePanel: View {
             VStack(spacing: 12) {
                 // Bot 狀態
                 BotStatusView(
-                    botStatus: viewModel?.store.botStatus ?? BotStatus(),
-                    gameState: viewModel?.store.gameState ?? GameState(),
-                    reloadBot: reloadBot
+                    botStatus: naki.store.botStatus,
+                    gameState: naki.store.gameState,
+                    reloadBot: naki.actions.forceReconnect
                 )
 
                 // AI 推薦
                 RecommendationView(
-                    recommendations: viewModel?.store.recommendations ?? [],
+                    recommendations: naki.store.recommendations,
                     maxDisplay: 5,
-                    showsRecommendations: viewModel?.autoPlayMode.showRecommendation ?? true,
-                    reloadBot: reloadBot
+                    showsRecommendations: naki.store.autoPlayMode.showRecommendation,
+                    reloadBot: naki.actions.forceReconnect
                 )
 
                 Spacer()
@@ -415,9 +410,9 @@ struct GamePanel: View {
 // MARK: - Connection Indicator
 
 struct ConnectionIndicator: View {
-    @Environment(\.webViewModel) private var viewModel
+    @Environment(\.naki) private var naki
 
-    private var isConnected: Bool { viewModel?.store.isConnected ?? false }
+    private var isConnected: Bool { naki.store.isConnected }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -442,14 +437,8 @@ struct ConnectionIndicator: View {
 // MARK: - Advanced Settings Sheet
 
 struct AdvancedSettingsSheet: View {
-    @Environment(\.webViewModel) private var viewModel
+    @Environment(\.naki) private var naki
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("HidePlayerNames") private var hidePlayerNames = false
-
-    /// 「重建 Bot」＝強制斷線重連（手段由各 WebView path 決定，見 `ForceReconnectAction`）
-    private var rebuildBot: ForceReconnectAction {
-        viewModel.map { ForceReconnectAction(viewModel: $0) } ?? .unavailable
-    }
 
     var body: some View {
         #if os(macOS)
@@ -507,6 +496,15 @@ struct AdvancedSettingsSheet: View {
     }
     #endif
 
+    /// 隱藏玩家名稱的持久化來源只有 `SettingsStore` 一份。
+    ///
+    /// 先前這裡是 `@AppStorage("HidePlayerNames")`，而兩個 view model 各自也寫同一個
+    /// key——同一個設定三個寫入點，其中兩個是字面值字串。
+    private var hidePlayerNames: Binding<Bool> {
+        Binding(get: { naki.settings.hidePlayerNames },
+                set: { naki.actions.setHidePlayerNames($0) })
+    }
+
     private var settingsForm: some View {
         VStack(alignment: .leading, spacing: 20) {
 
@@ -516,11 +514,8 @@ struct AdvancedSettingsSheet: View {
             // 畫面
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("隱藏玩家名稱", isOn: $hidePlayerNames)
+                    Toggle("隱藏玩家名稱", isOn: hidePlayerNames)
                         .accessibilityIdentifier("hide-player-names-toggle")
-                        .onChange(of: hidePlayerNames) { _, newValue in
-                            viewModel?.setHidePlayerNames(newValue)
-                        }
 
                     Text("在遊戲解析封包前把暱稱改寫成 Player 1–4。只對開啟之後才開始的對局生效；斷線重連與終局結算畫面仍會顯示原名。")
                         .font(.caption)
@@ -541,7 +536,7 @@ struct AdvancedSettingsSheet: View {
                         Button("重建 Bot") {
                             Task {
                                 // 強制斷線重連以重建 Bot（手段由各 path 決定，見 Action）
-                                await rebuildBot()
+                                await naki.actions.forceReconnect()
                             }
                         }
                         .buttonStyle(.bordered)
@@ -549,7 +544,7 @@ struct AdvancedSettingsSheet: View {
                         .accessibilityIdentifier("rebuild-bot-button")
 
                         Button("刪除 Bot") {
-                            viewModel?.deleteNativeBot()
+                            naki.actions.deleteBot()
                         }
                         .buttonStyle(.bordered)
                         #if os(macOS)
@@ -570,32 +565,32 @@ struct AdvancedSettingsSheet: View {
                     HStack {
                         HStack {
                             Circle()
-                                .fill((viewModel?.isDebugServerRunning ?? false) ? Color.green : Color.gray)
+                                .fill(naki.store.isDebugServerRunning ? Color.green : Color.gray)
                                 .frame(width: 8, height: 8)
-                            Text((viewModel?.isDebugServerRunning ?? false) ? "運行中" : "已停止")
+                            Text(naki.store.isDebugServerRunning ? "運行中" : "已停止")
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("mcp-server-status")
                         .accessibilityLabel("MCP Server 狀態")
-                        .accessibilityValue((viewModel?.isDebugServerRunning ?? false) ? "運行中" : "已停止")
+                        .accessibilityValue(naki.store.isDebugServerRunning ? "運行中" : "已停止")
 
                         Spacer()
 
-                        Button((viewModel?.isDebugServerRunning ?? false) ? "停止" : "啟動") {
-                            viewModel?.toggleDebugServer()
+                        Button(naki.store.isDebugServerRunning ? "停止" : "啟動") {
+                            naki.actions.toggleDebugServer()
                         }
                         .buttonStyle(.bordered)
-                        .tint((viewModel?.isDebugServerRunning ?? false) ? .red : .green)
+                        .tint(naki.store.isDebugServerRunning ? .red : .green)
                         .accessibilityIdentifier("mcp-server-toggle-button")
                     }
 
-                    if viewModel?.isDebugServerRunning ?? false {
+                    if naki.store.isDebugServerRunning {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("http://localhost:\(viewModel?.debugServerPort ?? 8765)")
+                            Text("http://localhost:\(naki.store.debugServerPort)")
                                 .font(.system(.caption, design: .monospaced))
                                 .textSelection(.enabled)
 
-                            Text("curl http://localhost:\(viewModel?.debugServerPort ?? 8765)/logs")
+                            Text("curl http://localhost:\(naki.store.debugServerPort)/logs")
                                 .font(.system(.caption2, design: .monospaced))
                                 .foregroundColor(.secondary)
                                 .textSelection(.enabled)
@@ -615,7 +610,7 @@ struct AdvancedSettingsSheet: View {
     /// 而是這條 WebView 路徑沒有經過任何實機對局驗證（見 `AutoPlayAvailability`）。
     @ViewBuilder
     private var autoPlayAvailabilityBox: some View {
-        if viewModel?.supportsAutoPlay == false {
+        if !naki.settings.supportsAutoPlay {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("自動送出：不可用")
@@ -688,21 +683,23 @@ struct JSInjectionFailureBanner: View {
 // MARK: - Status Bar
 
 struct StatusBar: View {
-    @Environment(\.webViewModel) private var viewModel
+    @Environment(\.naki) private var naki
+
+    private var message: String { naki.store.statusMessage }
 
     var body: some View {
-        if let vm = viewModel, !vm.store.statusMessage.isEmpty {
+        if !message.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: statusIcon)
                     .foregroundColor(statusColor)
-                Text(vm.store.statusMessage)
+                Text(message)
                     .font(.system(.caption, design: .monospaced))
                     .lineLimit(1)
                 Spacer()
 
                 // 顯示推薦數量
-                if vm.store.recommendationCount > 0 {
-                    Text("\(vm.store.recommendationCount) 推薦")
+                if naki.store.recommendationCount > 0 {
+                    Text("\(naki.store.recommendationCount) 推薦")
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
@@ -719,20 +716,18 @@ struct StatusBar: View {
     }
 
     private var statusIcon: String {
-        guard let vm = viewModel else { return "info.circle.fill" }
-        if vm.store.statusMessage.contains("錯誤") || vm.store.statusMessage.contains("Error") {
+        if message.contains("錯誤") || message.contains("Error") {
             return "exclamationmark.triangle.fill"
-        } else if vm.store.statusMessage.contains("成功") || vm.store.statusMessage.contains("已") {
+        } else if message.contains("成功") || message.contains("已") {
             return "checkmark.circle.fill"
         }
         return "info.circle.fill"
     }
 
     private var statusColor: Color {
-        guard let vm = viewModel else { return .blue }
-        if vm.store.statusMessage.contains("錯誤") || vm.store.statusMessage.contains("Error") {
+        if message.contains("錯誤") || message.contains("Error") {
             return .red
-        } else if vm.store.statusMessage.contains("成功") || vm.store.statusMessage.contains("已") {
+        } else if message.contains("成功") || message.contains("已") {
             return .green
         }
         return .blue
@@ -740,6 +735,8 @@ struct StatusBar: View {
 }
 
 #Preview {
+    // 預設 `NakiEnvironment`（空 store + 無副作用的 Action）——不會建立 WebView，
+    // 也不會啟動 MCP server。正式 Scene 由 `NakiApp` 顯式注入。
     ContentView()
         #if os(macOS)
         .frame(width: 1200, height: 800)

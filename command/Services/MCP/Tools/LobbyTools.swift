@@ -376,7 +376,7 @@ struct AntiIdleToggleTool: MCPTool {
             return [
                 "success": false,
                 "error": "anti_idle_not_configured",
-                "reason": "尚未注入自動心跳控制回調（WebViewModel 未啟動 Debug Server 時會如此）"
+                "reason": "這條 WebView path 不提供自動心跳（未驗證的 Legacy path 上動作面一律停用）"
             ]
         }
 

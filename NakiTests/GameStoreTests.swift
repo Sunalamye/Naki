@@ -247,9 +247,13 @@ final class SingleGameStoreSourceTests: XCTestCase {
                 + hits.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
     }
 
-    /// ViewModel 不得再自己存一份牌局資料——鏡像屬性正是雙重真實來源的載體
-    func testViewModelsDeclareNoMirrorState() throws {
+    /// 狀態層與組裝層不得再自己存一份牌局資料——鏡像屬性正是雙重真實來源的載體。
+    ///
+    /// p3-4：掃描範圍從 `ViewModels/` 擴到 `App/`（組裝點）與 `Services/Web/`
+    /// （頁面 service）——view model 已刪除，鏡像如果要復活會長在這兩個地方。
+    func testStateHoldersDeclareNoMirrorState() throws {
         let root = try commandSourceRoot()
+        let scanned = ["ViewModels/", "App/", "Services/Web/"]
         let mirrors = ["statusMessage", "isConnected", "recommendationCount", "gameState",
                        "botStatus", "recommendations", "tehaiTiles", "tsumoTile",
                        "highlightedTile"]
@@ -257,7 +261,8 @@ final class SingleGameStoreSourceTests: XCTestCase {
             pattern: #"var\s+(\#(mirrors.joined(separator: "|")))\s*(:|=)"#)
 
         let hits = codeLines(in: root)
-            .filter { $0.file.hasPrefix("ViewModels/") && $0.file != "ViewModels/GameStore.swift" }
+            .filter { line in scanned.contains { line.file.hasPrefix($0) } }
+            .filter { $0.file != "ViewModels/GameStore.swift" }
             .filter { line in
                 let range = NSRange(line.text.startIndex..., in: line.text)
                 return declaration.firstMatch(in: line.text, range: range) != nil

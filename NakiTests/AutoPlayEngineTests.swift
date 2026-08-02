@@ -291,7 +291,10 @@ final class AutoPlayEngineTests: XCTestCase {
 
 // MARK: - 結構鎖（p3-2 的驗收條件之一）
 
-/// 「WebViewModel 內無 Timer／asyncAfter 殘留」是結構性約束，型別系統看不見。
+/// 「組裝點內無 Timer／asyncAfter 殘留」是結構性約束，型別系統看不見。
+///
+/// p3-4：掃描對象從 `ViewModels/WebViewModel.swift` 換成 `App/NakiRuntime.swift`
+/// （view model 已刪除，自動打牌引擎的建立與轉發點搬到組裝點）。
 ///
 /// 掃法與 `SingleGameStoreSourceTests` / `PlatformDivergenceTests` 同一套：
 /// 跳過純註解行（檔案裡刻意留了說明搬走了什麼的註解），只看會被編譯的程式碼。
@@ -317,9 +320,9 @@ final class AutoPlayEngineSourceTests: XCTestCase {
     }
 
     /// 自動打牌的併發原語只剩 `AutoPlayEngine` 的那一個 Task 迴圈
-    func testWebViewModelHasNoTimerOrAsyncAfter() throws {
+    func testRuntimeHasNoTimerOrAsyncAfter() throws {
         let file = try commandSourceRoot()
-            .appendingPathComponent("ViewModels/WebViewModel.swift")
+            .appendingPathComponent("App/NakiRuntime.swift")
         let banned = ["Timer(", "Timer.scheduledTimer", "asyncAfter", "currentExecutionId"]
 
         let hits = try codeLines(in: file).filter { line in
@@ -329,13 +332,13 @@ final class AutoPlayEngineSourceTests: XCTestCase {
         XCTAssertTrue(
             hits.isEmpty,
             "輪詢與延遲已收進 `AutoPlayEngine`（單一 Task 迴圈 + Task.sleep）；實際: "
-                + hits.map { "WebViewModel.swift:\($0.line)" }.joined(separator: ", "))
+                + hits.map { "NakiRuntime.swift:\($0.line)" }.joined(separator: ", "))
     }
 
-    /// 送出的決策順序只准有一份：`WebViewModel` 不得再自己呼叫 gate／resolver／executor
-    func testWebViewModelDoesNotReimplementTheDecisionOrder() throws {
+    /// 送出的決策順序只准有一份：組裝點不得再自己呼叫 gate／resolver／executor
+    func testRuntimeDoesNotReimplementTheDecisionOrder() throws {
         let file = try commandSourceRoot()
-            .appendingPathComponent("ViewModels/WebViewModel.swift")
+            .appendingPathComponent("App/NakiRuntime.swift")
         let banned = ["AutoPlayGate.evaluate",
                       "AutoPlayDecisionResolver.resolve",
                       "AutoPlayActionExecutor.execute",
@@ -348,6 +351,36 @@ final class AutoPlayEngineSourceTests: XCTestCase {
         XCTAssertTrue(
             hits.isEmpty,
             "閘門 → resolver → executor 的順序只准存在於 `AutoPlayEngine`；實際: "
-                + hits.map { "WebViewModel.swift:\($0.line)" }.joined(separator: ", "))
+                + hits.map { "NakiRuntime.swift:\($0.line)" }.joined(separator: ", "))
+    }
+
+    /// p2-2 路線 A 的回歸鎖：Legacy path **不得**自己實作一條送出決策。
+    ///
+    /// 先前 `LegacyWebViewModel.triggerAutoPlayNow` 抄了一份 resolver → executor
+    /// （沒有閘門、沒有重試），現在兩條 path 共用同一個 `AutoPlayEngine`，
+    /// 而「Legacy 不自動送出」由 `AutoPlayAvailability.commit` 的模式收斂達成。
+    func testNoSecondDecisionPathOutsideTheEngine() throws {
+        let root = try commandSourceRoot()
+        let banned = ["AutoPlayGate.evaluate",
+                      "AutoPlayDecisionResolver.resolve",
+                      "AutoPlayActionExecutor.execute",
+                      "AutoPassDispatcher.send"]
+
+        guard let walker = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
+        else { return XCTFail("無法列舉 \(root.path)") }
+
+        var hits: [String] = []
+        for case let url as URL in walker where url.pathExtension == "swift" {
+            let relative = url.path.replacingOccurrences(of: root.path + "/", with: "")
+            guard relative != "Services/Bot/AutoPlayEngine.swift" else { continue }
+            for line in try codeLines(in: url) where banned.contains(where: { line.text.contains($0) }) {
+                hits.append("\(relative):\(line.line)")
+            }
+        }
+
+        XCTAssertTrue(
+            hits.isEmpty,
+            "閘門 → resolver → executor 的順序只准存在於 `AutoPlayEngine`；實際: "
+                + hits.joined(separator: ", "))
     }
 }

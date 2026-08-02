@@ -10,10 +10,12 @@
 //  macOS deployment target 是 26，本機根本跑不到它——沒有 iOS 17–25 實機
 //  就沒有任何對局證據。路線 A 的決策是：那條路只顯示推薦，不自己送牌。
 //
-//  這裡刻意只測**純函式與協定 extension**：`LegacyWebViewModel` 是 app target 的
-//  MainActor 類別，在 NakiTests（沒開 `SWIFT_DEFAULT_ACTOR_ISOLATION`）裡建立／釋放
-//  會 SIGABRT 把 test host 打掉（實測過，見 CLAUDE.md「專案結構的坑」），
-//  所以 ViewModel 只呼叫這些函式、不在單測裡建實例。
+//  這裡刻意只測**純函式與 `GameStore`**：p3-4 之前 `LegacyWebViewModel` 是 app target
+//  的 MainActor 類別，在 NakiTests（沒開 `SWIFT_DEFAULT_ACTOR_ISOLATION`）裡建立／釋放
+//  會 SIGABRT 把 test host 打掉（實測過，見 CLAUDE.md「專案結構的坑」）。
+//  p3-4 之後那個型別已經不存在：Legacy 的「不自動送出」由
+//  `AutoPlayAvailability.commit`（模式收斂）與 `LegacyWebBackend.supportsAutoPlay`
+//  兩處決定，兩者都測得到。
 //
 //  ⚠️ picker 上實際長什麼樣、iOS 17–25 上跑起來如何，仍然只能實機驗證。
 //
@@ -122,80 +124,46 @@ final class AutoPlayAvailabilityTests: XCTestCase {
 
 // MARK: - 座位來源
 
-/// `WebViewModelProtocol.autoPlaySeat` 的回歸鎖。
+/// `GameStore.autoPlaySeat` 的回歸鎖。
 ///
-/// 先前 Legacy 讀 `botStatus.playerId`、主路徑讀 `gameState.playerId`。兩者都源自
-/// `NativeBotController.playerId`，但重置時機不同（`deleteNativeBot()` 把 botStatus
-/// 打回預設值 0），所以同一個局面在兩條路上可以得到不同的 seat，
-/// 而 resolver 的 `seat_mismatch` 是 fail-closed——判錯就整批 oplist 不動作。
-///
-/// 這裡用最小 double 驗「唯一定義」的行為：seat 只看 gameState。
+/// 先前 Legacy path 讀 `botStatus.playerId`、主 path 讀 `gameState.playerId`
+/// （定義在 `WebViewModelProtocol` 的 extension，p3-4 隨協定一起刪除）。
+/// 兩者都源自 `NativeBotController.playerId`，但重置時機不同
+/// （`clearAfterBotDeleted()` 把 botStatus 打回預設值 0），所以同一個局面在兩條路上
+/// 可以得到不同的 seat，而 resolver 的 `seat_mismatch` 是 fail-closed
+/// ——判錯就整批 oplist 不動作。
 final class AutoPlaySeatSourceTests: XCTestCase {
 
     @MainActor
     func testSeatComesFromGameStateNotBotStatus() {
-        let model = SeatSourceDouble()
-        model.store.gameState.playerId = 2
-        model.store.botStatus.playerId = 0
+        let store = GameStore()
+        store.gameState.playerId = 2
+        store.botStatus.playerId = 0
 
-        XCTAssertEqual(model.autoPlaySeat, 2, "座位要取 gameState.playerId")
+        XCTAssertEqual(store.autoPlaySeat, 2, "座位要取 gameState.playerId")
     }
 
     @MainActor
     func testSeatIgnoresStaleBotStatus() {
-        let model = SeatSourceDouble()
-        model.store.gameState.playerId = 1
-        model.store.botStatus.playerId = 3   // 例如 deleteNativeBot() 之後殘留／歸零的值
+        let store = GameStore()
+        store.gameState.playerId = 1
+        store.botStatus.playerId = 3   // 例如 clearAfterBotDeleted() 之後殘留／歸零的值
 
-        XCTAssertNotEqual(model.autoPlaySeat, model.store.botStatus.playerId)
-        XCTAssertEqual(model.autoPlaySeat, 1)
+        XCTAssertNotEqual(store.autoPlaySeat, store.botStatus.playerId)
+        XCTAssertEqual(store.autoPlaySeat, 1)
     }
-}
 
-/// 只為了驗 `autoPlaySeat` 的最小 `WebViewModelProtocol` 實作。
-///
-/// 全部成員都是空殼——這個 double 唯一的用途是提供一份 `GameStore`，
-/// 讓協定 extension 的預設實作（兩條 path 共用的那一份）能被單獨呼叫到。
-@Observable
-@MainActor
-final class SeatSourceDouble: WebViewModelProtocol {
-    /// p3-1 之後協定只要求這一份狀態（先前是 9 個鏡像屬性 + 一個 `GameStateManager`）
-    let store = GameStore()
+    /// `clearAfterBotDeleted()` 之後座位仍在：那段期間（刪 bot → 建下一個 bot）
+    /// 把座位打回 0 會讓 resolver 誤判整批 oplist。
+    @MainActor
+    func testSeatSurvivesBotDeletion() {
+        let store = GameStore()
+        store.gameState.playerId = 3
+        store.botStatus.playerId = 3
 
-    var isDebugServerRunning: Bool = false
-    var debugServerPort: UInt16 = 0
+        store.clearAfterBotDeleted()
 
-    var autoPlayMode: AutoPlayMode = .off
-
-    /// MainActor 隔離的 class 在 NakiTests 裡釋放會 SIGABRT（見檔頭），double 也不例外
-    nonisolated deinit { }
-
-    func createNativeBot(playerId: Int, is3P: Bool) async throws {}
-    func processNativeEvent(_ event: [String: Any]) async throws -> [String: Any]? { nil }
-    func processNativeEvents(_ events: [[String: Any]]) async throws -> [String: Any]? { nil }
-    func deleteNativeBot() {}
-    func resyncBot() async {}
-    /// p3-3：回傳結果而不是 Void（三個呼叫端先前各自解讀「有沒有成功」）
-    func forceReconnect() async -> ForceReconnectOutcome { .failed("double") }
-
-    func setAutoPlayMode(_ mode: AutoPlayMode) { autoPlayMode = mode }
-    func triggerAutoPlayNow(delay: TimeInterval) {}
-
-    func setHidePlayerNames(_ hide: Bool) {}
-    func applyHideNamesSettingsIfNeeded() {}
-    func getPlayerNamesStatus() async -> [String: Any]? { nil }
-    func resetHideNamesSettings() {}
-
-    // 兩個平台都要（p2-3 統一啟動語意後，protocol 不再包 `#if os(macOS)`）
-    func startDebugServer() {}
-    func stopDebugServer() {}
-    func toggleDebugServer() {}
-
-    func makeWebView() -> AnyView { AnyView(EmptyView()) }
-
-    func executeJavaScript(_ script: String) async throws -> Any? { nil }
-
-    func loadMajsoul() async {}
-    func loadURL(_ urlString: String) async {}
-    func reload() {}
+        XCTAssertEqual(store.autoPlaySeat, 3)
+        XCTAssertEqual(store.botStatus.playerId, 0, "botStatus 才是被清掉的那一份")
+    }
 }

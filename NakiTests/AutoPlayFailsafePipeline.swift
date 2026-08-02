@@ -63,7 +63,7 @@ struct AutoPlayFailsafePipeline {
         await engine().runCycle(now: now)
     }
 
-    /// 手動觸發：MCP 的 `bot_trigger` → `WebViewModel.triggerAutoPlayNow()`。
+    /// 手動觸發：MCP 的 `bot_trigger` → `NakiRuntime.triggerAutoPlayNow()`。
     ///
     /// 這條路**不經閘門**（閘門只掛在輪詢與推薦更新上），所以 resolver 自己的
     /// 模式閘門（`.recommend` → `surfaceOnly`、`.off` → `none`）只有在這裡看得到。

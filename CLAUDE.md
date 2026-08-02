@@ -89,11 +89,13 @@ OptionalOperationList
 
 | 責任 | 檔案 |
 |------|------|
-| 平台 factory | `command/ViewModels/WebViewModelProtocol.swift` |
-| WebPage path | `command/ViewModels/WebViewModel.swift` |
-| Legacy path | `command/ViewModels/LegacyWebViewModel.swift` |
+| App 組裝點 | `command/App/NakiRuntime.swift`（唯一一份接線；Scene 顯式注入） |
+| View 環境 | `command/App/NakiEnvironment.swift`（`@Entry var naki`：store／settings／actions；預設值僅供 Preview） |
+| 使用者設定 | `command/App/SettingsStore.swift` |
+| 頁面 service | `command/Services/Web/WebSession.swift`（載入／JS／導覽／高亮；`callJavaScript` 一律函式體語意） |
+| 平台分歧 | `command/Services/Web/WebSessionBackends.swift`（WebPage vs WKWebView，唯一 `#available` 在 `WebSession.init`） |
 | 牌局狀態單一來源 | `command/ViewModels/GameStore.swift`（SwiftUI 與 MCP 讀同一份） |
-| coordinator | `command/Views/WebViewController.swift` |
+| coordinator | `command/Services/Bridge/NakiWebCoordinator.swift`（兩條 path 共用；持有 bot、直接寫 GameStore） |
 | WS injection | `command/Services/Bridge/WebSocketInterceptor.swift` |
 | parser／bridge | `command/Services/Bridge/LiqiParser.swift`、`MajsoulBridge.swift` |
 | oplist／sender | `command/Services/Bridge/LiqiOperationStore.swift`、`LiqiActionSender.swift` |
@@ -118,18 +120,18 @@ OptionalOperationList
 
 ## 平台差距
 
-`WebViewModelFactory`：OS 26+ 用 WebPage `WebViewModel`；iOS 17–25 用 `LegacyWebViewModel`。macOS deployment target 是 26，所以 macOS 不走 Legacy。
+`WebSession.init` 的 `#available`：OS 26+ 用 `WebPageBackend`（WebPage），iOS 17–25 用 `LegacyWebBackend`（WKWebView）。macOS deployment target 是 26，所以 macOS 不走 Legacy。p3-4 之後**兩條 path 只差三件事**：怎麼執行 JS（WebPage 原生函式體 vs WKWebView 的 IIFE 包裝）、怎麼重連（關 WebSocket vs 整頁重載）、交出哪個 View。其餘（bot、event stream、autoplay engine、MCP、狀態）全部共用一份。
 
-兩條 path 現在都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override），送出也都走同一個 `AutoPlayActionExecutor`（7-case switch、chi 組合對照、成功才 markHandled、診斷輸出）；`sendRaw` 的腳本字串與回傳值解析同樣只剩 `NakiWebSocketScript` 一份。差別在狀態機：新 path 有 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、bounded retry 15 次，每次重跑 resolver），Legacy 只有 `triggerAutoPlayNow` 送一次就結束、失敗等下一次推薦更新。重試刻意留在引擎而不是 executor 裡——盲目重送等於拿舊決策操作可能已換批的 oplist。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
+兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（7-case switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、bounded retry 15 次）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
 
 ## 自摸問題的 current truth
 
 resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests 通過；但 integration 還有兩個 P0：
 
-1. `WebViewModel` 仍要求 recommendations 非空才進主動作。空推薦 + type 8 可能完全不呼叫 resolver。
+1. 主動作仍要求 recommendations 非空（`AutoPlayGate.proceed`）。空推薦 + type 8 靠 `forceHora` 補救，但那條沒有 live fixture。
 2. hora sender 沒把 `LiqiSendResult` 回給外層；呼叫後可能不論失敗都 `markHandled`。
 
-`WebViewModel` 的其他 failure path 已收斂成同一語意（`AutoPassDispatcher` + 轉換失敗不標記）：沒有送出成功就不消化 oplist。這只有單測，沒有 live 驗證。
+其他 failure path 已收斂成同一語意（`AutoPassDispatcher` + 轉換失敗不標記）：沒有送出成功就不消化 oplist。這只有單測，沒有 live 驗證。
 
 `.off` 現在同時關掉顯示：`RecommendationView` 與 `GameHighlightScript.make()` 都讀 `showRecommendation`，關閉時側欄顯示「推薦顯示已關閉」、遊戲內送 `__nakiHighlight.clear()`。AI 仍在背景計算（否則切回來會一片空白），`/bot/status` 的 recommendations 也照舊為真。腳本內容有單測，**畫面實際效果未 live 驗證**。
 
@@ -160,6 +162,8 @@ MCP 已沒有手動高亮工具（6 個 `highlight_*` 失敗樁於 2026-08-02 �
 隱藏玩家名稱已用協定層重做：`naki-websocket.js` 的 `__nakiHideNames` 在遊戲解析封包前，就地把 `ResAuthGame` 的 nickname bytes 覆寫成等長 ASCII。等長是硬性條件——改長度就要連動所有外層 protobuf 長度前綴。範圍只有 authGame RESPONSE；syncGame 重連與 NotifyGameEndResult 結算畫面仍顯示原名。node 合成 frame 測過（等長、關閉不動、非 authGame 不動、垃圾 bytes 不丟例外），**沒有 live 對局驗證**。
 
 ## 專案結構的坑
+
+`#Preview` 的內容在 **Release 也會被編譯**（`ENABLE_PREVIEWS = YES` 兩個 configuration 都開，而 `DEBUG` 只在 Debug 定義）。用到 `#if DEBUG` 才存在的東西（例如 Action 的 `init(stub:)`）的 Preview 必須自己包一層 `#if DEBUG`，否則 `xcodebuild -configuration Release` 會失敗，而 Debug build 完全看不出來。
 
 `Naki.xcodeproj` 的 `membershipExceptions` 是**包含清單**不是排除清單——新增的 Swift 檔要手動加進對應的 exception set（跟著同目錄既有檔案加），否則不會被編譯，錯誤訊息是 `cannot find 'X' in scope`，看起來像 import 問題。
 

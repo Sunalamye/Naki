@@ -66,6 +66,9 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Actions/NakiActions.swift,
+				App/NakiEnvironment.swift,
+				App/NakiRuntime.swift,
+				App/SettingsStore.swift,
 				"Color+Extension.swift",
 				Models/GameModels.swift,
 				Resources/Assets.xcassets,
@@ -89,6 +92,7 @@
 				Services/Bridge/LiqiResponseStore.swift,
 				Services/Bridge/MajsoulBridge.swift,
 				Services/Bridge/MJAIEventStream.swift,
+				Services/Bridge/NakiWebCoordinator.swift,
 				Services/Bridge/NakiWebSocketScript.swift,
 				Services/Bridge/ObservedMatchModes.swift,
 				Services/Bridge/SerialEventIntake.swift,
@@ -111,16 +115,15 @@
 				Services/MCP/Tools/RoomTools.swift,
 				Services/MCP/Tools/SystemTools.swift,
 				Services/MCP/Tools/UITools.swift,
+				Services/Web/GameHighlightScript.swift,
+				Services/Web/WebSession.swift,
+				Services/Web/WebSessionBackends.swift,
 				ViewModels/GameStore.swift,
-				ViewModels/LegacyWebViewModel.swift,
-				ViewModels/WebViewModel.swift,
-				ViewModels/WebViewModelProtocol.swift,
 				Views/BotStatusView.swift,
 				Views/ContentView.swift,
-				Views/LegacyWebViewController.swift,
 				Views/LogPanel.swift,
+				Views/NakiWebViewHost.swift,
 				Views/RecommendationView.swift,
-				Views/WebViewController.swift,
 			);
 			target = EC30765D2EDAFD2300216E0C /* Naki */;
 		};
@@ -128,6 +131,9 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Actions/NakiActions.swift,
+				App/NakiEnvironment.swift,
+				App/NakiRuntime.swift,
+				App/SettingsStore.swift,
 				Models/GameModels.swift,
 				Services/Bot/ActionDelayModel.swift,
 				Services/Bot/AutoPassDispatcher.swift,
@@ -145,6 +151,7 @@
 				Services/Bridge/LiqiResponseStore.swift,
 				Services/Bridge/MajsoulBridge.swift,
 				Services/Bridge/MJAIEventStream.swift,
+				Services/Bridge/NakiWebCoordinator.swift,
 				Services/Bridge/NakiWebSocketScript.swift,
 				Services/Bridge/ObservedMatchModes.swift,
 				Services/Bridge/SerialEventIntake.swift,
@@ -153,16 +160,15 @@
 				Services/LogManager.swift,
 				Services/MCP/MCPHandler.swift,
 				Services/MCP/NakiMCPDependencies.swift,
+				Services/Web/GameHighlightScript.swift,
+				Services/Web/WebSession.swift,
+				Services/Web/WebSessionBackends.swift,
 				ViewModels/GameStore.swift,
-				ViewModels/LegacyWebViewModel.swift,
-				ViewModels/WebViewModel.swift,
-				ViewModels/WebViewModelProtocol.swift,
 				Views/BotStatusView.swift,
 				Views/ContentView.swift,
-				Views/LegacyWebViewController.swift,
 				Views/LogPanel.swift,
+				Views/NakiWebViewHost.swift,
 				Views/RecommendationView.swift,
-				Views/WebViewController.swift,
 			);
 			target = ECAAD4312EE1BAB60056F965 /* Naki-MUITests */;
 		};
@@ -170,6 +176,9 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Actions/NakiActions.swift,
+				App/NakiEnvironment.swift,
+				App/NakiRuntime.swift,
+				App/SettingsStore.swift,
 				"Color+Extension.swift",
 				Models/GameModels.swift,
 				Resources/index.html,
@@ -192,6 +201,7 @@
 				Services/Bridge/LiqiResponseStore.swift,
 				Services/Bridge/MajsoulBridge.swift,
 				Services/Bridge/MJAIEventStream.swift,
+				Services/Bridge/NakiWebCoordinator.swift,
 				Services/Bridge/NakiWebSocketScript.swift,
 				Services/Bridge/ObservedMatchModes.swift,
 				Services/Bridge/SerialEventIntake.swift,
@@ -214,16 +224,15 @@
 				Services/MCP/Tools/RoomTools.swift,
 				Services/MCP/Tools/SystemTools.swift,
 				Services/MCP/Tools/UITools.swift,
+				Services/Web/GameHighlightScript.swift,
+				Services/Web/WebSession.swift,
+				Services/Web/WebSessionBackends.swift,
 				ViewModels/GameStore.swift,
-				ViewModels/LegacyWebViewModel.swift,
-				ViewModels/WebViewModel.swift,
-				ViewModels/WebViewModelProtocol.swift,
 				Views/BotStatusView.swift,
 				Views/ContentView.swift,
-				Views/LegacyWebViewController.swift,
 				Views/LogPanel.swift,
+				Views/NakiWebViewHost.swift,
 				Views/RecommendationView.swift,
-				Views/WebViewController.swift,
 			);
 			target = ECAAD41B2EE1BAB40056F965 /* Naki-M */;
 		};

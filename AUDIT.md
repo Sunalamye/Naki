@@ -31,7 +31,7 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 
 ### P0：自摸 resolver 仍可能不被呼叫（source 已收斂，live 未驗證）
 
-原始差距：`AutoPlayDecisionResolver` 本身會讓 server oplist 的 tsumo／ron 凌駕 AI，但 `WebViewModel` 以 Mortal recommendation 是否非空作為進入自動動作的條件；空推薦時 timer 只補副露 pass。結果是 server 即使給 type 8，只要 Mortal 回空推薦就可能完全不進 resolver。
+原始差距：`AutoPlayDecisionResolver` 本身會讓 server oplist 的 tsumo／ron 凌駕 AI，但當時的 `WebViewModel`（p3-4 已刪除，狀態機在 `AutoPlayEngine`）以 Mortal recommendation 是否非空作為進入自動動作的條件；空推薦時 timer 只補副露 pass。結果是 server 即使給 type 8，只要 Mortal 回空推薦就可能完全不進 resolver。
 
 現況：輪詢改走 `AutoPlayGate`，空推薦 ＋ `snapshot.horaOperation != nil` 回 `.forceHora`，該分支不受「無推薦就不觸發」限制（p3-2 起這條路在 `AutoPlayEngine.runCycle()` 裡，延遲 0 直接進 resolver）。
 
@@ -50,7 +50,7 @@ p2-1 之後 fixture 走的是**正式的** `AutoPlayActionExecutor`（不再是 
 
 ### P0：Legacy iOS 沒有 server-authoritative 保護
 
-iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resolver、oplist action 檢查、seat check、stale check 或 fail-closed。新舊路徑功能不一致。
+iOS 17–25 的 `LegacyWebViewModel`（p3-4 已刪除）直接使用 AI 第一推薦，沒有 resolver、oplist action 檢查、seat check、stale check 或 fail-closed。新舊路徑功能不一致。
 
 手動 MCP／HTTP `game_action(action=hora)` 另有相同類型的缺口：沒有 oplist snapshot 時目前會猜 tsumo，應改成 fail closed。
 
@@ -62,7 +62,7 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 
 ### 已處理：其他 failure path 不再過早消化 snapshot
 
-`WebPage` 路徑（`WebViewModel`）三條路徑已改成「沒送出去就不消化 oplist」：
+`WebPage` 路徑（p3-4 之後是 `WebSession` + `AutoPlayEngine`）三條路徑已改成「沒送出去就不消化 oplist」：
 
 - 空推薦的副露 pass 改由 `AutoPassDispatcher` 送出，只有 `LiqiSendResult.success == true` 才 `markHandled`；失敗保留 pending、bounded retry（5 次 × 0.2 秒），用完次數仍不標記，留給輪詢的下一輪。送出期間佔住 `AutoPlayEngine` 的執行位（p3-2 起是 `occupy(...)` 作用域＋`defer`，先前是裸 `currentExecutionId`），避免同一批 oplist 被送兩次過。
 - 打牌字串轉換失敗、立直找不到宣言牌：只 log，不 `markHandled`。
@@ -157,7 +157,7 @@ iOS 17–25 的 `LegacyWebViewModel` 直接使用 AI 第一推薦，沒有 resol
 只有在下列條件同時成立後，才可對外寫「漏自摸已修復」：
 
 - source 層兩個 P0 integration gap 已消失。（2026-08-02：source 已收斂，見上面兩節）
-- resolver／integration tests 覆蓋上述正常與 failure paths。（2026-08-02：決策層已覆蓋 §15.5；`WebViewModel` 的重試框架本體仍只有註解與 log）
+- resolver／integration tests 覆蓋上述正常與 failure paths。（2026-08-02：決策層已覆蓋 §15.5；重試框架本體在 p3-2 搬進 `AutoPlayEngine` 後已可單測）
 - 測試帳號 live 對局重現原始 `[discard, riichi, tsumo] + AI discard` 情境。（仍未做）
 - log 顯示 resolver 選 hora、送到 game-gateway、同 msgId 成功 RESPONSE，並收到 `ActionHule`。
 - 測試後沒有 stale pending、重複 request、殘留 process 或非預期帳號操作。
@@ -280,7 +280,7 @@ MJAI 協定在自己吃／碰／槓之後不會再送事件要你打牌，`bot.r
 
 ### 15.2 Legacy path 接上 resolver — 已修
 
-`LegacyWebViewModel.triggerAutoPlayNow` 以前直接送 `recommendations.first`：
+`LegacyWebViewModel.triggerAutoPlayNow`（p3-4 之後兩條 path 共用 `AutoPlayEngine`）以前直接送 `recommendations.first`：
 沒有 oplist 合法性檢查、沒有座位檢查、沒有過期檢查、沒有 fail-closed。
 也就是說「伺服器說可以自摸但 AI 想打牌」時，它會忠實把和牌牌打掉——
 那正是主路徑用 resolver 擋住的情況。

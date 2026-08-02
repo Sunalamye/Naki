@@ -116,7 +116,7 @@ enum AutoPlayAvailability {
 /// 兩邊各存各的，UI picker 顯示的模式與 ViewModel 實際採用的模式可以不一致
 /// （例如 Legacy 路徑改了模式根本沒寫進任何 key，重啟就被沖掉）。
 /// 這裡收斂成 `naki.autoPlayMode` 一個 key，舊 key 做一次性遷移後刪除。
-enum AutoPlayModeStore {
+nonisolated enum AutoPlayModeStore {
     /// 目前唯一的 key（ViewModel 與 ContentView 的 `@AppStorage` 共用）
     static let key = "naki.autoPlayMode"
 

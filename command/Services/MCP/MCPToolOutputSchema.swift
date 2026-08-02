@@ -108,7 +108,7 @@ enum NakiToolOutputSchemas {
 
         // ── Bot ─────────────────────────────────────────────
         table["bot_status"] = object(
-            "Bot、對局狀態、模式與 AI 推薦（由 WebViewModel 供給）",
+            "Bot、對局狀態、模式與 AI 推薦（由 GameStore 供給）",
             properties: [
                 "botStatus": object("isActive / playerId"),
                 "gameState": object("bakaze / kyoku / honba"),

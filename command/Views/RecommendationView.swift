@@ -363,16 +363,23 @@ struct CompactRecommendationView: View {
 ///
 /// 空推薦時標題列會出現「重新載入 Bot」按鈕，正式路徑上它會真的關掉 WebSocket；
 /// 這裡換成一個只印字的 stub，Preview 因此可以按而不會有任何副作用。
-#Preview("RecommendationView - stub Action") {
-    RecommendationView(
-        recommendations: [],
-        reloadBot: ForceReconnectAction(stub: {
-            print("[Preview] forceReconnect stub 被呼叫")
-            return .closed(2)
-        }))
-        .frame(width: 300, height: 150)
-        .padding()
-}
+///
+/// ⚠️ `#if DEBUG` 是必要的，不是保守：`ENABLE_PREVIEWS = YES` 在 Release 也成立，
+/// 所以 `#Preview` 的內容**會被 Release 編譯**，而 `ForceReconnectAction(stub:)`
+/// 本身是 `#if DEBUG`。少了這個 guard，`xcodebuild -configuration Release` 會以
+/// 「argument passed to call that takes no arguments」失敗（p3-4 發現，p3-3 引入）。
+#if DEBUG
+    #Preview("RecommendationView - stub Action") {
+        RecommendationView(
+            recommendations: [],
+            reloadBot: ForceReconnectAction(stub: {
+                print("[Preview] forceReconnect stub 被呼叫")
+                return .closed(2)
+            }))
+            .frame(width: 300, height: 150)
+            .padding()
+    }
+#endif
 
 /// 模式 = 關閉：與「等待遊戲數據」刻意分成兩個空狀態
 #Preview("RecommendationView - 已關閉") {

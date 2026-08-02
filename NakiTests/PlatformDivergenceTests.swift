@@ -51,16 +51,16 @@ final class PlatformDivergenceTests: XCTestCase {
         return out
     }
 
-    /// 版本分歧只有 `WebViewModelFactory.create()` 一處
+    /// 版本分歧只有 `WebSession.init` 一處（p3-4 之前是 `WebViewModelFactory.create()`）
     func testVersionCheckExistsExactlyOnce() throws {
         let root = try commandSourceRoot()
         let hits = codeLines(in: root).filter { $0.text.contains("#available") }
 
         XCTAssertEqual(
             hits.count, 1,
-            "`#available` 應只出現在 WebViewModelFactory；實際: "
+            "`#available` 應只出現在 WebSession.init；實際: "
                 + hits.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
-        XCTAssertEqual(hits.first?.file, "ViewModels/WebViewModelProtocol.swift")
+        XCTAssertEqual(hits.first?.file, "Services/Web/WebSession.swift")
     }
 
     /// Debug／MCP 整層不得再被平台條件編譯切掉（截圖那份 AppKit 分歧留在 WebViewModel）
@@ -76,15 +76,32 @@ final class PlatformDivergenceTests: XCTestCase {
                 + gated.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
     }
 
-    /// View 的選擇必須來自 VM，`AdaptiveNakiWebView` 不得自己認型別
-    func testAdaptiveWebViewDelegatesToViewModel() throws {
+    /// View 的選擇必須來自 Action，`AdaptiveNakiWebView` 不得自己認型別
+    func testAdaptiveWebViewDelegatesToAction() throws {
         let root = try commandSourceRoot()
         let adaptive = try String(
-            contentsOf: root.appendingPathComponent("Views/LegacyWebViewController.swift"),
+            contentsOf: root.appendingPathComponent("Views/NakiWebViewHost.swift"),
             encoding: .utf8)
 
         XCTAssertTrue(
-            adaptive.contains("viewModel.makeWebView()"),
-            "AdaptiveNakiWebView 應向 VM 要 View")
+            adaptive.contains("naki.actions.webView()"),
+            "AdaptiveNakiWebView 應向 `WebViewAction` 要 View")
+    }
+
+    /// 兩條 path 的 WebView 實作只准住在 `Services/Web/`。
+    ///
+    /// `WebPage` 與 `WKWebView` 的名字一旦出現在 View 或 Action 層，就代表
+    /// 「平台差異只有一個地方」這件事又破了一次。`WKScriptMessageHandler`
+    /// （bridge 的收件人型別）與 WebKit 匯入本身不算——那是介面而不是實作選擇。
+    func testWebViewImplementationsLiveOnlyInWebSessionLayer() throws {
+        let root = try commandSourceRoot()
+        let leaked = codeLines(in: root)
+            .filter { !$0.file.hasPrefix("Services/Web/") }
+            .filter { $0.text.contains("WebPage(") || $0.text.contains("WKWebView(") }
+
+        XCTAssertTrue(
+            leaked.isEmpty,
+            "WebPage／WKWebView 只准在 `Services/Web/` 內被建立；實際: "
+                + leaked.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
     }
 }

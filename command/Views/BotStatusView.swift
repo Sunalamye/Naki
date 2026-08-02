@@ -115,7 +115,7 @@ struct BotStatusView: View {
 /// 拿四麻模型推三麻不是「稍微偏差」而是**結構上無效**（MortalSwift p3-1）。
 ///
 /// 因此自動送出在三麻一律停用（`AutoPlayGate` / `AutoPlayDecisionResolver` /
-/// `WebViewModel.triggerAutoPlayNow` 三層 fail-closed），這裡負責把這件事說出來——
+/// `AutoPlayEngine.runManualCycle` 三層 fail-closed），這裡負責把這件事說出來——
 /// 「不能運作又不說」正是 AUDIT §13 要防的。
 struct SanmaUnsupportedNotice: View {
     var body: some View {
