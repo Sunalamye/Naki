@@ -1,6 +1,6 @@
 //
 //  RecommendationView.swift
-//  akagi
+//  Naki
 //
 //  Created by Suoie on 2025/11/30.
 //  AI 推薦列表元件 - 顯示 Bot 推薦的動作
@@ -36,8 +36,11 @@ struct RecommendationRow: View {
                 .foregroundColor(recommendation.actionType.color)
                 .cornerRadius(3)
 
-            // 牌面（放大顯示）
-            if recommendation.actionType == .discard || recommendation.actionType == .riichi {
+            // 牌面（放大顯示）。
+            // 只有打牌列有牌面可畫：立直推薦從不帶牌（宣言牌是同批的第一個打牌列，
+            // executor 也是這樣取），走牌面分支只會 fallback 成 raw 標籤「reach」
+            // ——2026-08-05 顯示掃描抓到的問題，改走 displayLabel 顯示「立直」。
+            if recommendation.actionType == .discard {
                 // 固定字級 28/22 保留：此列為固定 40pt 寬版面，改用 Dynamic Type 會與機率條/百分比欄位錯位，風險高故僅補 a11y
                 Text(recommendation.tileUnicode)
                     .font(.system(size: isTop ? 28 : 22))
@@ -49,6 +52,15 @@ struct RecommendationRow: View {
                 Text(recommendation.displayLabel)
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+
+            // 實際牌組補充（雲端 reaction 帶 consumed 時才有：
+            // 「用 4m·5m 吃 3m」）；本地 mask 只有粗變體 ⇒ 無此行
+            if let detail = recommendation.detail {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -143,12 +155,10 @@ struct RecommendationRow: View {
 
 /// AI 推薦列表。
 ///
-/// p3-3：這個 View 不再認得 `WebViewModel`。先前它靠 `@Environment(\.webViewModel)`
-/// 拿兩樣東西——目前模式與「重新載入 Bot」的行為——結果是
-/// **沒有 view model 就沒有那顆按鈕的行為**，Preview 只能看靜態畫面，
-/// 而「按下去到底會發生什麼」無法在不啟動整個 App 的情況下換掉。
-///
-/// 現在兩者都是參數：模式是一個 Bool，動作是一個可 stub 的 `ForceReconnectAction`。
+/// 這個 View 不認得任何 service：目前模式與「重新載入 Bot」的行為都是參數
+/// ——模式是一個 Bool，動作是一個可 stub 的 `ForceReconnectAction`。
+/// 改成從環境撈的話，「按下去到底會發生什麼」就無法在不啟動整個 App 的情況下換掉，
+/// Preview 也只剩靜態畫面。
 struct RecommendationView: View {
 
     var recommendations: [Recommendation]
@@ -156,10 +166,10 @@ struct RecommendationView: View {
 
     /// `.off` 模式下不顯示推薦。
     ///
-    /// `AutoPlayMode.showRecommendation` 以前沒有任何讀取者：選了「關閉」，側欄照樣
-    /// 一列一列列出推薦，只有送出被擋掉。介面因此在說謊——關掉的功能還在畫面上動。
+    /// 這裡是 `AutoPlayMode.showRecommendation` 在側欄的讀取端。少了它，選「關閉」
+    /// 只會擋掉送出，側欄照樣一列一列列出推薦——介面因此在說謊，關掉的功能還在畫面上動。
     ///
-    /// 預設 true：Preview 不必為了看見內容而先組一個 view model。
+    /// 預設 true：Preview 不必先接上真的狀態就能看見內容。
     var showsRecommendations: Bool = true
 
     /// 「重新載入 Bot」按鈕做的事（強制斷線重連）。
@@ -359,7 +369,7 @@ struct CompactRecommendationView: View {
         .padding()
 }
 
-/// p3-3 的驗收之一：這個 View 能只靠 stub Action 拉起來。
+/// 這個 View 能只靠 stub Action 拉起來。
 ///
 /// 空推薦時標題列會出現「重新載入 Bot」按鈕，正式路徑上它會真的關掉 WebSocket；
 /// 這裡換成一個只印字的 stub，Preview 因此可以按而不會有任何副作用。
@@ -367,7 +377,7 @@ struct CompactRecommendationView: View {
 /// ⚠️ `#if DEBUG` 是必要的，不是保守：`ENABLE_PREVIEWS = YES` 在 Release 也成立，
 /// 所以 `#Preview` 的內容**會被 Release 編譯**，而 `ForceReconnectAction(stub:)`
 /// 本身是 `#if DEBUG`。少了這個 guard，`xcodebuild -configuration Release` 會以
-/// 「argument passed to call that takes no arguments」失敗（p3-4 發現，p3-3 引入）。
+/// 「argument passed to call that takes no arguments」失敗。
 #if DEBUG
     #Preview("RecommendationView - stub Action") {
         RecommendationView(

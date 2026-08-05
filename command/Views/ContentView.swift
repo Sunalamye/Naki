@@ -3,9 +3,8 @@
 //  Naki
 //
 //  Created by Suoie on 2025/11/29.
-//  Updated: 2025/12/05 - 使用 @Environment 傳遞 WebViewModel
 //  Updated: 2026/01/26 - 使用 AdaptiveNakiWebView 支援 macOS 14+/iOS 17+
-//  Updated: 2026/08/02 - p3-4：改吃 `@Environment(\.naki)`（store / settings / actions）
+//  Updated: 2026/08/02 - 改吃 `@Environment(\.naki)`（store / settings / actions）
 //
 
 import SwiftUI
@@ -14,11 +13,10 @@ struct ContentView: View {
 
     /// Naki 的三件東西：狀態、設定、副作用。
     ///
-    /// p3-4：先前是 `@State private var viewModel = WebViewModelFactory.create()`
-    /// ——View 自己建 view model，於是「誰擁有 App 的生命週期」是 SwiftUI 的
-    /// diffing 規則說了算，而 Preview 會真的去建一個 WebView、啟一個 MCP server。
-    /// 現在由 App 層（`NakiApp` / `Naki_MApp`）持有 `NakiRuntime` 並顯式注入；
-    /// 這裡的預設值只給 Preview（見 `NakiEnvironment`）。
+    /// **View 不自己建這些東西**：由 App 層（`NakiApp` / `Naki_MApp`）持有 `NakiRuntime`
+    /// 並顯式注入。改成在 View 裡用 `@State` 建的話，「誰擁有 App 的生命週期」就變成
+    /// SwiftUI 的 diffing 規則說了算，而 Preview 會真的去建一個 WebView、啟一個 MCP server。
+    /// 這裡讀到的預設值只給 Preview（見 `NakiEnvironment`）。
     @Environment(\.naki) private var naki
 
 #if os(macOS)
@@ -31,9 +29,9 @@ struct ContentView: View {
 
     // 自動打牌控制
     //
-    // key 與 runtime 共用（`AutoPlayModeStore.key`）：以前 UI 存 "AutoPlayMode"、
-    // ViewModel 存 "naki.autoPlayMode"，兩邊各記各的，picker 顯示的模式可以跟
-    // 實際驅動送出的模式不一致。舊 key 的一次性遷移在 `NakiApp.init()`。
+    // key 與 runtime 共用（`AutoPlayModeStore.key`）：UI 與送出端各記各的 key，
+    // picker 顯示的模式就會跟實際驅動送出的模式不一致。
+    // 舊 key 的一次性遷移在 `NakiApp.init()`。
     @AppStorage(AutoPlayModeStore.key) private var autoPlayMode: AutoPlayMode = AutoPlayModeStore
         .defaultMode
 
@@ -61,7 +59,7 @@ struct ContentView: View {
         .frame(width: width)
         .onChange(of: autoPlayMode) { _, newValue in
             // 收斂與持久化在 `NakiRuntime.setAutoPlayMode` → `AutoPlayAvailability.commit`；
-            // Action 只是這個 View 對「切模式」這件副作用的型別化入口（p3-3）。
+            // Action 只是這個 View 對「切模式」這件副作用的型別化入口。
             naki.actions.setAutoPlayMode(newValue)
         }
         .accessibilityIdentifier("autoplay-mode-picker")
@@ -72,9 +70,9 @@ struct ContentView: View {
 
     /// 自動打牌基準延遲 stepper：`[ 1.0s ⌃⌄ ]`。
     ///
-    /// p1-3 移除的假控制在 p2-6 做回來並接真——它不是取代 `ActionDelayModel` 的隨機
-    /// 分布（那是防偵測的刻意設計），而是當它的**縮放係數**：1.0s＝現行行為，
-    /// 向下更快、向上更慢。值寫進 `SettingsStore`（重啟保留），讀取端是 `AutoPlayEngine`。
+    /// 它不取代 `ActionDelayModel` 的隨機分布（那是防偵測的刻意設計），而是當它的
+    /// **縮放係數**：1.0s＝現行行為，向下更快、向上更慢。
+    /// 值寫進 `SettingsStore`（重啟保留），讀取端是 `AutoPlayEngine`。
     ///
     /// **只在這條 path 真的會自動送出時才出現**（`supportsAutoPlay`）：Legacy 路徑
     /// 不提供自動送出，延遲永遠不會生效，掛在那裡就又是一個假控制（見 picker 的同款判斷）。
@@ -178,9 +176,9 @@ struct ContentView: View {
                       : "AI 推薦模式（此裝置不提供自動送出）")
         }
 
-        // 延遲基準 stepper（p2-6）：它縮放 `ActionDelayModel` 的隨機分布，讀取端是
+        // 延遲基準 stepper：它縮放 `ActionDelayModel` 的隨機分布，讀取端是
         // `AutoPlayEngine`。只在支援自動送出的 path 上出現——否則延遲永不生效，
-        // 掛著就是 p1-3 抓到的那種假控制。
+        // 掛著就是個假控制。
         if naki.settings.supportsAutoPlay {
             ToolbarItem(placement: .navigation) {
                 actionDelayStepper
@@ -558,8 +556,8 @@ struct AdvancedSettingsSheet: View {
 
     /// 隱藏玩家名稱的持久化來源只有 `SettingsStore` 一份。
     ///
-    /// 先前這裡是 `@AppStorage("HidePlayerNames")`，而兩個 view model 各自也寫同一個
-    /// key——同一個設定三個寫入點，其中兩個是字面值字串。
+    /// **不要改回 `@AppStorage("HidePlayerNames")`**：那會讓同一個設定多一個寫入點，
+    /// 而且 key 是字面值字串（唯一定義在 `SettingsStore.hidePlayerNamesKey`）。
     private var hidePlayerNames: Binding<Bool> {
         Binding(get: { naki.settings.hidePlayerNames },
                 set: { naki.actions.setHidePlayerNames($0) })
@@ -751,9 +749,9 @@ struct AdvancedSettingsSheet: View {
                 Label("Bot 管理", systemImage: "cpu")
             }
 
-            // MCP Server（兩個平台都有——p2-3 之後 DebugServer 不再是 macOS 專屬）。
-            // 這個 GroupBox 先前包在 `#if os(macOS)` 裡，寫著「僅 macOS」；
-            // 現在 iOS 也會綁 loopback 8765，控制項再藏起來就變成「跑著卻看不到、關不掉」。
+            // MCP Server（兩個平台都有，`DebugServer` 不是 macOS 專屬）。
+            // **不要包回 `#if os(macOS)`**：iOS 也會綁 loopback 8765，
+            // 控制項藏起來就變成「跑著卻看不到、關不掉」。
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -876,9 +874,9 @@ struct JSInjectionFailureBanner: View {
 
 // MARK: - Liqi 解析失敗橫幅
 
-/// 封包解析失敗到「這一局不會運作」程度時的常駐橫幅（p4-1）。
+/// 封包解析失敗到「這一局不會運作」程度時的常駐橫幅。
 ///
-/// 為什麼要有它：以前 authGame 回應少了 seatList 只會寫一行 log，
+/// 為什麼要有它：沒有橫幅時，authGame 回應少了 seatList 只會寫一行 log，
 /// `start_game` 不發、Bot 不建立、推薦永遠是空的——而畫面上顯示的是
 /// 「已連線到雀魂服务器」。使用者唯一的線索是「怎麼都沒有推薦」。
 ///

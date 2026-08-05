@@ -149,6 +149,16 @@ final class KyokuStreamAccumulatorTests: XCTestCase {
         XCTAssertNil(shaped["pai"], "伺服器要裸 reach，預測捨牌欄位要剝掉")
     }
 
+    func test_apiEvent_nukidora_isTranslatedToKita() {
+        // bridge 的拔北事件名是 nukidora，伺服器 schema 是 kita——必須轉譯，
+        // 否則三麻事件流 desync
+        let event: [String: Any] = ["type": "nukidora", "actor": 2, "pai": "N"]
+        let shaped = KyokuStreamAccumulator.apiEvent(event, is3P: true)
+        XCTAssertEqual(shaped["type"] as? String, "kita")
+        XCTAssertEqual(shaped["actor"] as? Int, 2)
+        XCTAssertEqual(shaped["pai"] as? String, "N")
+    }
+
     func test_apiEvent_3p_padsNamesScoresTehaisToFour() {
         let game: [String: Any] = ["type": "start_game", "id": 0, "is3P": true,
                                    "names": ["A", "B", "C"]]
@@ -302,8 +312,9 @@ final class CloudDecisionMapperTests: XCTestCase {
     }
 
     func test_unknownReactionType_isUnmappable() {
+        // kita 已於 2026-08-05 接上（三麻自動打鏈），改用真正未知的型別
         XCTAssertNil(CloudDecisionMapper.recommendations(
-            reaction: ["type": "kita", "actor": 0],
+            reaction: ["type": "ryukyoku"],
             candidates: [], reachDiscard: nil),
             "未知動作不硬映射，退回本地")
     }
@@ -312,10 +323,28 @@ final class CloudDecisionMapperTests: XCTestCase {
         let recs = CloudDecisionMapper.recommendations(
             reaction: ["type": "dahai", "actor": 0, "pai": "1m", "tsumogiri": true],
             candidates: [CloudCandidate(action: "dahai:1m", prob: 0.7),
-                         CloudCandidate(action: "nukidora", prob: 0.2),
+                         CloudCandidate(action: "ryukyoku", prob: 0.2),
                          CloudCandidate(action: "future_label", prob: 0.1)],
             reachDiscard: nil)
-        XCTAssertEqual(recs?.count, 1, "nukidora 與未知標籤都略過")
+        XCTAssertEqual(recs?.count, 1, "ryukyoku 與未知標籤都略過")
+    }
+
+    // MARK: 拔北（三麻，2026-08-05）
+
+    func test_kitaReaction_andNukidoraCandidate_mapToKita() {
+        let recs = CloudDecisionMapper.recommendations(
+            reaction: ["type": "kita", "actor": 0, "pai": "N"],
+            candidates: [CloudCandidate(action: "nukidora", prob: 0.8),
+                         CloudCandidate(action: "dahai:N", prob: 0.2)],
+            reachDiscard: nil)
+        XCTAssertEqual(recs?[0].actionType, .kita)
+        XCTAssertEqual(recs?[0].probability ?? 0, 0.8, accuracy: 1e-9)
+        XCTAssertEqual(recs?[1].actionType, .discard)
+    }
+
+    func test_nukidoraCandidateAlone_mapsToKitaRow() {
+        let rec = CloudDecisionMapper.recommendation(fromCandidate: "nukidora", prob: 0.3)
+        XCTAssertEqual(rec?.actionType, .kita)
     }
 
     func test_duplicateCandidateOfReaction_isDeduped() {

@@ -101,6 +101,8 @@ nonisolated struct BotAvailableActions: Equatable {
     var canPon: Bool = false
     var canKan: Bool = false
     var canAgari: Bool = false
+    /// 拔北（三麻，oplist type 11 babei）
+    var canKita: Bool = false
 
     /// 沒有任何授權（沒有 oplist ＝ 什麼都不能做，不是「未知」）
     static let none = BotAvailableActions()
@@ -118,11 +120,13 @@ nonisolated struct BotAvailableActions: Equatable {
         canKan = snapshot.kanOperation != nil
         // 和了兩種（自摸 / 榮和）
         canAgari = snapshot.horaOperation != nil
+        // 拔北（三麻）
+        canKita = snapshot.contains(.babei)
     }
 
     /// 是否有任何可用動作
     var hasAny: Bool {
-        canDiscard || canRiichi || canChi || canPon || canKan || canAgari
+        canDiscard || canRiichi || canChi || canPon || canKan || canAgari || canKita
     }
 }
 
@@ -149,11 +153,18 @@ struct BotStatus: Equatable {
     /// UI 必須常駐顯示（pluggable-bots-plan 安全節第 3 條）。
     var cloudHost: String? = nil
 
+    /// 雲端已設定但目前退化中（斷路器不健康/退避）——決策在 rollback 本地
+    /// （三麻＝無推薦）。UI 依此把雲端行轉成紅色警示。
+    var cloudDegraded: Bool = false
+
+    /// 雲端啟用期間連續以非雲端來源結束的決策數；0＝雲端正常服務
+    var cloudFallbackStreak: Int = 0
+
     // MARK: - Available Actions
     //
     // 這六個欄位的唯一真實來源是協定層 oplist（見 `BotAvailableActions`）。
-    // 曾經有一段時間它們的寫入點是零呼叫的 `NativeBotController.updateAvailableActions()`，
-    // 於是 UI 徽章與 `/bot/status` 恆為 false——不要再從別的地方寫進來。
+    // 不要從別的地方寫進來：多一個沒被呼叫到的寫入點，UI 徽章與 `/bot/status`
+    // 就會恆為 false，而且不會有任何錯誤訊息。
 
     /// 可打牌
     var canDiscard: Bool = false
@@ -167,8 +178,14 @@ struct BotStatus: Equatable {
     var canKan: Bool = false
     /// 可和
     var canAgari: Bool = false
+    /// 可拔北（三麻）
+    var canKita: Bool = false
 
     // MARK: - Computed Properties
+
+    /// 這批推薦是否由雲端模型算出。三麻放行與 UI 警告的共同判準，
+    /// 規則見 `AutoPlayGate.Input.cloudDecision`。
+    var isCloudDecision: Bool { decisionSource.hasPrefix("cloud:") }
 
     /// 模型顯示名稱
     ///
@@ -181,14 +198,20 @@ struct BotStatus: Equatable {
         switch modelName {
         case "mortal": base = "Mortal (4P)"
         case "mortal3p": base = "Mortal (3P)"
+        case "cloud-3p": base = "雲端推論 (3P)"
         default: base = modelName
         }
-        return is3P ? "\(base) ⚠️ 三麻無專用模型" : base
+        // 警告後綴只在雲端沒有在服務時出現（服務中掛著會與雲端指示行矛盾）；
+        // 三麻本地模型不啟動，cloud-3p 未生效＝無推論
+        guard is3P && !isCloudDecision else { return base }
+        return modelName == "cloud-3p"
+            ? "\(base) ⚠️ 未生效，無推論"
+            : "\(base) ⚠️ 三麻無專用模型"
     }
 
     /// 是否有任何可用動作
     var hasAvailableAction: Bool {
-        canDiscard || canRiichi || canChi || canPon || canKan || canAgari
+        canDiscard || canRiichi || canChi || canPon || canKan || canAgari || canKita
     }
 
     // MARK: - Mutators
@@ -201,6 +224,7 @@ struct BotStatus: Equatable {
         canPon = actions.canPon
         canKan = actions.canKan
         canAgari = actions.canAgari
+        canKita = actions.canKita
     }
 }
 
@@ -219,6 +243,10 @@ struct Recommendation: Identifiable, Equatable {
     let probability: Double
     /// 動作類型
     let actionType: ActionType
+    /// 顯示用補充（例：吃列的實際牌組「用 4m·5m 吃 3m」）。
+    /// 只有資訊源頭真的知道牌組時才有值（雲端 reaction 帶 consumed；
+    /// 本地 mask 只有粗變體 ⇒ nil）。純顯示，executor 不讀它。
+    let detail: String?
 
     /// 動作類型
     enum ActionType: String, CaseIterable {
@@ -228,6 +256,8 @@ struct Recommendation: Identifiable, Equatable {
         case pon = "pon"
         case kan = "kan"
         case hora = "hora"
+        /// 拔北（三麻）。只有雲端 3p 模型會產出（本地 action space 46 無此槽位）。
+        case kita = "kita"
         case none = "none"
         case unknown = "unknown"
 
@@ -239,6 +269,7 @@ struct Recommendation: Identifiable, Equatable {
             case .pon: return "碰"
             case .kan: return "槓"
             case .hora: return "和"
+            case .kita: return "拔北"
             case .none: return "過"
             case .unknown: return "?"
             }
@@ -252,6 +283,7 @@ struct Recommendation: Identifiable, Equatable {
             case .pon: return .purple
             case .kan: return .red
             case .hora: return .yellow
+            case .kita: return .teal
             case .none: return .gray
             case .unknown: return .secondary
             }
@@ -261,23 +293,27 @@ struct Recommendation: Identifiable, Equatable {
     // MARK: - Initializers
 
     /// 強類型初始化（打牌）
-    init(tile: Tile, probability: Double) {
+    init(tile: Tile, probability: Double, detail: String? = nil) {
         self.tile = tile
         self.label = tile.mjaiString
         self.probability = probability
         self.actionType = .discard
+        self.detail = detail
     }
 
     /// 強類型初始化（非打牌動作）
-    init(actionType: ActionType, probability: Double, label: String = "") {
+    init(actionType: ActionType, probability: Double, label: String = "",
+         detail: String? = nil) {
         self.tile = nil
         self.label = label.isEmpty ? actionType.rawValue : label
         self.probability = probability
         self.actionType = actionType
+        self.detail = detail
     }
 
     /// 從 MJAI 字串初始化（保持兼容性）
-    init(tile tileString: String, probability: Double, actionType: ActionType) {
+    init(tile tileString: String, probability: Double, actionType: ActionType,
+         detail: String? = nil) {
         if actionType == .discard, let t = Tile(mjaiString: tileString) {
             self.tile = t
         } else {
@@ -286,6 +322,7 @@ struct Recommendation: Identifiable, Equatable {
         self.label = tileString
         self.probability = probability
         self.actionType = actionType
+        self.detail = detail
     }
 
     /// 從字典初始化（Legacy）
@@ -303,6 +340,7 @@ struct Recommendation: Identifiable, Equatable {
         self.label = tileStr
         self.probability = prob
         self.actionType = type
+        self.detail = dict["detail"] as? String
     }
 
     // MARK: - Computed Properties
@@ -336,6 +374,7 @@ struct Recommendation: Identifiable, Equatable {
         case .kan: return "槓"
         case .hora: return "和"
         case .riichi: return "立直"
+        case .kita: return "拔北"
         case .none: return "過"
         case .discard: return tile?.mjaiString ?? label
         case .unknown: return label

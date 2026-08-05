@@ -93,6 +93,13 @@ struct KyokuStreamAccumulator {
             if let actor = event["actor"] { shaped["actor"] = actor }
             return shaped
 
+        case "nukidora":
+            // 拔北：Naki bridge 的事件名是 `nukidora`（`MajsoulBridge` ActionBaBei），
+            // 伺服器的 mjai schema 是 `kita`——不轉譯的話三麻事件流會 desync
+            var shaped: [String: Any] = ["type": "kita", "pai": "N"]
+            if let actor = event["actor"] { shaped["actor"] = actor }
+            return shaped
+
         default:
             var shaped = event
             shaped.removeValue(forKey: MJAIEventKey.oplistSequence)

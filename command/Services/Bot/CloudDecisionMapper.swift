@@ -15,8 +15,8 @@
 //
 //  標籤詞彙來自 Akagi v3 `label_pais_candidate`：`dahai:<pai>`、`reach`、
 //  `pon`、`chi_low|chi_mid|chi_high`、`kan`、`hora`、`ryukyoku`、`nukidora`、
-//  `none`。`ryukyoku`/`nukidora` Naki 沒有對應 ActionType，略過該列（不影響
-//  第一列的 reaction）。未知標籤一律略過，不猜。
+//  `none`。`nukidora`（拔北）對應 `.kita`（2026-08-05 三麻自動打鏈）；
+//  `ryukyoku` 無對應 ActionType，略過該列。未知標籤一律略過，不猜。
 //
 
 import Foundation
@@ -65,7 +65,9 @@ enum CloudDecisionMapper {
             ]
 
         case "pon":
-            return [Recommendation(tile: "pon", probability: prob, actionType: .pon)]
+            let detail = (reaction["pai"] as? String).map { "碰 \($0)" }
+            return [Recommendation(tile: "pon", probability: prob, actionType: .pon,
+                                   detail: detail)]
 
         case "chi":
             guard let pai = reaction["pai"] as? String,
@@ -73,11 +75,16 @@ enum CloudDecisionMapper {
                   let variant = chiVariant(called: pai, consumed: consumed) else {
                 return nil
             }
+            // 雲端 reaction 帶實際牌組——顯示「用哪兩張吃哪張」，
+            // 不再只有 ①②③ 的相對位置（2026-08-05 顯示掃描的增強）
             return [Recommendation(tile: "chi_\(variant)", probability: prob,
-                                   actionType: .chi)]
+                                   actionType: .chi,
+                                   detail: "用 \(consumed.joined(separator: "·")) 吃 \(pai)")]
 
         case "daiminkan", "ankan", "kakan":
-            return [Recommendation(tile: "kan", probability: prob, actionType: .kan)]
+            let detail = (reaction["consumed"] as? [String]).map { $0.joined(separator: "·") }
+            return [Recommendation(tile: "kan", probability: prob, actionType: .kan,
+                                   detail: detail)]
 
         case "hora":
             return [Recommendation(tile: "hora", probability: prob, actionType: .hora)]
@@ -85,8 +92,12 @@ enum CloudDecisionMapper {
         case "none":
             return [Recommendation(tile: "none", probability: prob, actionType: .none)]
 
+        case "kita":
+            // 拔北（三麻）。伺服器 schema 是 `{"type":"kita","actor":N,"pai":"N"}`
+            return [Recommendation(tile: "kita", probability: prob, actionType: .kita)]
+
         default:
-            // 未知動作型別（例如三麻 kita）不硬映射——回 nil 讓本地決策生效。
+            // 未知動作型別不硬映射——回 nil 讓本地決策生效。
             return nil
         }
     }
@@ -114,6 +125,9 @@ enum CloudDecisionMapper {
             return Recommendation(tile: "kan", probability: prob, actionType: .kan)
         case "hora":
             return Recommendation(tile: "hora", probability: prob, actionType: .hora)
+        case "nukidora":
+            // Akagi 的粗標籤用 nukidora，reaction 事件型別用 kita——同一個動作
+            return Recommendation(tile: "kita", probability: prob, actionType: .kita)
         case "none":
             return Recommendation(tile: "none", probability: prob, actionType: .none)
         default:

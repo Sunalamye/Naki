@@ -6,11 +6,12 @@
 //  本地 HTTP MCP Server - 允許外部工具控制 App
 //
 //  平台：**macOS 與 iOS 都編譯**。整層只用 Foundation / Network / MCPKit，沒有一行 AppKit
-//  （唯一真正的平台分歧是視窗截圖，留在 `WebViewModel.windowScreenshot` 的 `#if os(macOS)`）。
-//  先前整個檔案包在 `#if os(macOS)` 裡，但 `scripts/soak-test.sh`、`action-shots.sh`、
-//  `replay-check.sh` 與所有 MCP 工具都只透過 loopback 8765 說話——把它從 iOS 拿掉等於
-//  iOS build 完全沒有外部驗證面，而且 `WebViewModel.init()` 本來就無條件啟動它，
-//  於是「iOS 上有沒有 MCP」變成 OS 版本（26+ 走哪條 VM）的函數而不是平台決策。
+//  （唯一真正的平台分歧是視窗截圖，留在 `CaptureScreenshotAction.windowScreenshot`
+//  的 `#if os(macOS)`）。
+//
+//  不要把整個檔案包回 `#if os(macOS)`：`scripts/soak-test.sh`、`action-shots.sh`、
+//  `replay-check.sh` 與所有 MCP 工具都只透過 loopback 8765 說話，關掉它等於
+//  iOS build 完全沒有外部驗證面。
 //
 
 import Foundation
@@ -35,8 +36,8 @@ struct DebugHTTPRequest {
 
 /// 一筆 HTTP endpoint。
 ///
-/// 路由與首頁說明共用這一份定義。先前兩者各寫一次，結果首頁漏列 `/screenshot`、
-/// `/game/*` 的描述停留在 Laya 時代——首頁看起來像文件，其實是會過期的手寫字串。
+/// 路由與首頁說明共用這一份定義。兩者各寫一次的話，首頁看起來像文件，
+/// 其實是會過期的手寫字串——漏列 endpoint、描述停在上一代客戶端都不會有人發現。
 struct DebugEndpoint {
     let method: String
     let path: String
@@ -67,11 +68,9 @@ struct DebugEndpoint {
 
 /// 本地 HTTP MCP Server。
 ///
-/// p3-3 之後這個型別**只負責 HTTP**：listener、request 累積、Origin 驗證、路由、
-/// 回應寫回 socket。先前它還兼任 MCP 的依賴中轉站——9 個 `var xxx: (...)?`
-/// 由 `WebViewModel` 寫進來、再由 `setupMCPHandler()` 一個一個轉發給 `MCPHandler`，
-/// 兩層純搬運，而 server 自己一個都沒用到。現在依賴是 init 參數
-/// （`NakiMCPDependencies`），漏接在編譯期就過不了。
+/// 這個型別**只負責 HTTP**：listener、request 累積、Origin 驗證、路由、回應寫回 socket。
+/// 它不是 MCP 的依賴中轉站——依賴是 init 參數（`NakiMCPDependencies`），漏接在編譯期
+/// 就過不了；改成 server 自己持有可寫的 `var xxx: (...)?` 再轉發，漏接就只剩執行期才發現。
 class DebugServer: MCPHTTPResponder {
 
     // MARK: - Properties
@@ -430,7 +429,79 @@ class DebugServer: MCPHTTPResponder {
                       summary: "送出碰", affectsAccount: true) { server, _, conn in
             server.handleTestPon(connection: conn)
         }
+    ] + debugBuildOnlyEndpoints
+
+    /// 只存在於 DEBUG build 的端點（Release 查表查不到 ⇒ 404）。
+    ///
+    /// 與 `injectRecommendationsForTesting` 同一條理由：能偽造顯示狀態的入口
+    /// 不該存在於使用者跑的 binary 裡。
+    #if DEBUG
+    static let debugBuildOnlyEndpoints: [DebugEndpoint] = [
+        DebugEndpoint("POST", "/debug/ui", group: "Debug（僅 DEBUG build）",
+                      summary: "注入側欄顯示狀態（純顯示層；下一次真實 bot 回應會覆蓋）") { server, request, conn in
+            server.handleDebugUIState(body: request.body, connection: conn)
+        }
     ]
+    #else
+    static let debugBuildOnlyEndpoints: [DebugEndpoint] = []
+    #endif
+
+    // MARK: - DEBUG 顯示層注入
+
+    #if DEBUG
+    /// `POST /debug/ui`（僅 DEBUG build）：直接寫 `GameStore`，讓 agent 能把側欄
+    /// 擺出任意動作組合後用 `/screenshot` 逐一目視驗證。
+    ///
+    /// **純顯示層**：不碰決策管線、不送任何 Liqi 請求；下一次真實 bot 回應
+    /// （`GameStore.apply`）會整份覆蓋。
+    ///
+    /// Body（全部欄位可選，缺省不動）：
+    /// ```json
+    /// { "recommendations": [{"action_type":"discard","tile":"5mr","prob":0.42}],
+    ///   "isActive": true, "is3P": false,
+    ///   "decisionSource": "cloud:4p-akg-v8", "cloudHost": "mjapi.shinkuan.me",
+    ///   "available": ["discard","riichi","chi","pon","kan","hora","kita"],
+    ///   "tehai": ["1m","2m"] }
+    /// ```
+    private func handleDebugUIState(body: String, connection: NWConnection) {
+        guard let data = body.data(using: .utf8),
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            sendResponse(connection: connection, status: 400,
+                         body: #"{"error":"body 必須是 JSON 物件"}"#,
+                         contentType: "application/json")
+            return
+        }
+        let store = dependencies.store
+
+        if let recs = json["recommendations"] as? [[String: Any]] {
+            store.recommendations = recs.map { Recommendation(from: $0) }
+        }
+
+        var status = store.botStatus
+        if let value = json["isActive"] as? Bool { status.isActive = value }
+        if let value = json["is3P"] as? Bool { status.is3P = value }
+        if let value = json["decisionSource"] as? String { status.decisionSource = value }
+        if json.keys.contains("cloudHost") { status.cloudHost = json["cloudHost"] as? String }
+        if let value = json["cloudDegraded"] as? Bool { status.cloudDegraded = value }
+        if let value = json["cloudFallbackStreak"] as? Int { status.cloudFallbackStreak = value }
+        if let available = json["available"] as? [String] {
+            status.canDiscard = available.contains("discard")
+            status.canRiichi = available.contains("riichi")
+            status.canChi = available.contains("chi")
+            status.canPon = available.contains("pon")
+            status.canKan = available.contains("kan")
+            status.canAgari = available.contains("hora")
+            status.canKita = available.contains("kita")
+        }
+        store.botStatus = status
+
+        if let tehai = json["tehai"] as? [String] { store.tehaiTiles = tehai }
+
+        sendResponse(connection: connection, status: 200,
+                     body: #"{"ok":true,"note":"顯示層注入；下一次真實 bot 回應會覆蓋"}"#,
+                     contentType: "application/json")
+    }
+    #endif
 
     // MARK: - MCP Tool Helper
 

@@ -4,38 +4,25 @@
 //
 //  「已經決定要做什麼」之後，真正把它組成 Liqi request 送出去的那一層。
 //
-//  由來（p2-1）：同一個 7-case switch（discard / riichi / chi / pon / kan / hora / pass）
-//  原本有三份拷貝，而且已經漂移：
+//  兩條 WebView path 共用的唯一 7-case switch（discard / riichi / chi / pon / kan /
+//  hora / pass）。
 //
-//      WebViewModel.executeAutoPlayAction          85 行，有完整診斷輸出
-//      LegacyWebViewModel.sendAction               46 行，**一行 log 都沒有**
-//      AutoPlayFailsafePipeline.send（測試 harness）自己 markHandled
-//
-//  漂移的實際後果：
-//  - Legacy 路徑送出去的是什麼、吃的組合對到第幾個索引、為什麼沒送，全部看不到。
-//  - Legacy 沒有「chi 組合對照失敗 → 退回索引 0」的警告，等於靜默送出可能錯的吃。
-//  - harness 自己 markHandled，所以 fail-safe fixture 測到的是 harness 的語意，
-//    不是 `WebViewModel` 的（AutoPlayFailsafeFixtureTests 檔頭原本就註明「要等 p2-1」）。
-//
-//  收成一份之後，**markHandled 的語意內聚在這裡**：只有 `sendRaw` 回 success 才消化
-//  這批 oplist（p0-1 的結論——沒有送出成功就不能把機會當成處理完）。
-//  呼叫端不需要、也不應該自己標記。
+//  **markHandled 的語意內聚在這裡**：只有 `sendRaw` 回 success 才消化這批 oplist——
+//  沒有送出成功就不能把機會當成處理完。呼叫端不需要、也不應該自己標記。
 //
 //  ⚠️ 重試刻意**不**在這一層。
-//  主路徑的 15 次重試寫在 `WebViewModel.executeAutoPlayActionWithRetry`，它每一次都會
-//  重跑 `AutoPlayDecisionResolver.resolve` 與 `isStillValid`——因為延遲期間 oplist 可能
-//  已經換批，盲目重送等於拿舊決策操作新機會。把次數搬進本層只有兩種結果：
-//  變成不重新決策的盲送，或與外層相乘（15×N）。Legacy 沒有重試框架（送一次就結束），
-//  差異因此留在呼叫端，收斂計畫見 p2-2／p3-2。
+//  15 次重試在 `AutoPlayEngine`，它每一次都會重跑 `AutoPlayDecisionResolver.resolve`
+//  與 `isStillValid`——因為延遲期間 oplist 可能已經換批，盲目重送等於拿舊決策操作
+//  新機會。把次數搬進本層只有兩種結果：變成不重新決策的盲送，或與外層相乘（15×N）。
 //
 
 import Foundation
 
 /// 自動打牌動作的唯一送出點。
 ///
-/// 做成獨立型別而不是 `WebViewModel` 的方法，是為了可單測：`WebViewModel` 要有
-/// WebPage、Timer、DebugServer，而且是 `@MainActor class`（在 NakiTests host 釋放會
-/// SIGABRT，見 CLAUDE.md）。把 sender、oplist 儲存體、log 通道都做成參數之後，
+/// 做成無依賴的 enum 而不是 `NakiWebCoordinator` 的方法，是為了可單測：coordinator
+/// 要有 WebSession、bot 與 GameStore，而且是 `@MainActor class`（在 NakiTests host
+/// 釋放會 SIGABRT，見 CLAUDE.md「專案結構的坑」）。把 sender、oplist 儲存體、log 通道都做成參數之後，
 /// 「哪個動作送出哪一種 request」「成功才 markHandled」就有機械驗收依據。
 enum AutoPlayActionExecutor {
 
@@ -54,7 +41,7 @@ enum AutoPlayActionExecutor {
     /// - Returns: 送出結果；**`nil` 代表一個 request 都沒組出來**（牌字串轉不了、
     ///   找不到宣言牌、未知動作）。這與「送出失敗」不同，但兩者都不會消化 oplist。
     /// - Parameter awaitResponseMs: > 0 時等同 msgId 的 RESPONSE 並驗第 2 層（伺服器有沒有
-    ///   受理，見 p5-verify）。0＝只驗第 1 層（`sendRaw` 送進 WebSocket）——測試預設值，
+    ///   受理）。0＝只驗第 1 層（`sendRaw` 送進 WebSocket）——測試預設值，
     ///   保留舊語意。正式路徑傳 > 0，讓「送成功但伺服器拒絕」不再被靜默當成功。
     @discardableResult
     static func execute(
@@ -128,6 +115,12 @@ enum AutoPlayActionExecutor {
                 (snapshot?.isCallOpportunity ?? true) ? .chiPengGang : .selfOperation
             log("執行: 過 (\(channel.method))")
             spec = LiqiRequestBuilder.cancel(channel: channel)
+
+        case .kita:
+            // 拔北（三麻）：ReqSelfOperation type=11（babei）。
+            // 只有雲端 3p 推薦會走到這裡（gate/resolver 已確認 oplist 有 babei）。
+            log("執行: 拔北")
+            spec = LiqiRequestBuilder.babei()
 
         case .unknown:
             event("❌ 未知動作類型，未送出，保留 oplist")

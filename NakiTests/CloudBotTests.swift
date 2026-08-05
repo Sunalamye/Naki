@@ -243,6 +243,132 @@ final class CloudBotTests: XCTestCase {
         XCTAssertEqual(CloudMockURLProtocol.captured.count, 1)
     }
 
+    // MARK: fallback 可視化（cloudDegraded / cloudFallbackStreak）
+
+    /// 失敗→streak 累加＋degraded 亮；恢復→雙雙歸零（rollback 狀態要讓人看得到）。
+    /// 恢復路徑用「改設定＝明確重試」觸發（reconcile 會 reset 斷路器），
+    /// 不能靠真的等 5 秒退避視窗。
+    func test_fallbackStreak_countsFailures_andResetsOnSuccess() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (500, #"{"error":"boom"}"#, [:]),
+            (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"#
+                + #""candidates":[],"model":"4p-x"}"#, [:]),
+        ])
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CloudMockURLProtocol.self]
+        var model = "4p-x"
+        let local = StubEngine()
+        let bot = CloudBot(
+            local: local, playerId: 0, is3P: false,
+            configProvider: {
+                CloudInferenceConfig(enabled: true, baseURL: "http://mock.test",
+                                     apiKey: "SECRETKEY",
+                                     model4P: model, model3P: "")
+            },
+            clientConfiguration: config)
+        try await feedOpening(bot)
+        XCTAssertEqual(bot.cloudFallbackStreak, 0)
+
+        _ = try await decide(bot, local: local, reaction: localDahai("1m"))
+        XCTAssertEqual(bot.cloudFallbackStreak, 1, "雲端失敗的決策要累計")
+        XCTAssertTrue(bot.cloudDegraded, "斷路器開了＝退化中")
+
+        // 斷路器 5s 視窗內的下一手：不打 API、照樣算 fallback
+        _ = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(bot.cloudFallbackStreak, 2)
+
+        // 改設定＝明確的「現在再試一次」→ 斷路器歸零 → 下一手成功 → 全部復位
+        model = "4p-y"
+        _ = try await decide(bot, local: local, reaction: localDahai("3m"))
+        XCTAssertEqual(bot.cloudFallbackStreak, 0, "雲端恢復後 streak 歸零")
+        XCTAssertFalse(bot.cloudDegraded)
+    }
+
+    /// 雲端未設定（disabled）不算 fallback——streak 恆 0、無退化警示
+    func test_fallbackStreak_staysZeroWhenCloudNotConfigured() async throws {
+        CloudMockURLProtocol.reset(script: [])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local, enabled: false)
+        try await feedOpening(bot)
+        _ = try await decide(bot, local: local, reaction: localDahai("1m"))
+        XCTAssertEqual(bot.cloudFallbackStreak, 0)
+        XCTAssertFalse(bot.cloudDegraded)
+    }
+
+    // MARK: 雲端-only（三麻，2026-08-05：本地模型不啟動）
+
+    private func makeCloudOnlyBot(authorized: Bool = true) -> CloudBot {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CloudMockURLProtocol.self]
+        return CloudBot(
+            local: nil, playerId: 0, is3P: true,
+            configProvider: {
+                CloudInferenceConfig(enabled: true,
+                                     baseURL: "http://mock.test",
+                                     apiKey: "SECRETKEY",
+                                     model4P: "", model3P: "3p-x")
+            },
+            serverAuthorization: { authorized },
+            clientConfiguration: config)
+    }
+
+    private func feedSanmaOpening(_ bot: CloudBot) async throws {
+        _ = try await bot.react(events: [["type": "start_game", "id": 0,
+                                          "names": ["A", "B", "C"]]])
+        _ = try await bot.react(events: [["type": "start_kyoku", "kyoku": 1]])
+    }
+
+    /// 決策點由 oplist 驅動：帶 oplistSequence 的事件恰觸發一次雲端；
+    /// 同授權 pending 期間的後續事件不重複觸發
+    func test_cloudOnly_consultsExactlyOncePerOplistSequence() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (200, #"{"reaction":{"type":"kita","actor":0,"pai":"N"},"#
+                + #""candidates":[{"action":"nukidora","prob":0.5}],"model":"3p-x"}"#, [:]),
+        ])
+        let bot = makeCloudOnlyBot()
+        try await feedSanmaOpening(bot)
+        XCTAssertTrue(CloudMockURLProtocol.captured.isEmpty,
+                      "沒有伺服器授權的事件不觸發雲端")
+
+        let reaction = try await bot.react(events: [
+            ["type": "tsumo", "actor": 0, "pai": "N",
+             MJAIEventKey.oplistSequence: UInt64(7)]])
+        XCTAssertEqual(reaction?.source, "cloud:3p-x")
+        XCTAssertEqual(reaction?.recommendations.first?.actionType, .kita)
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 1)
+
+        // 同一批授權（同 seq）不重問；無 seq 的事件也不問
+        _ = try await bot.react(events: [
+            ["type": "tsumo", "actor": 0, "pai": "1m",
+             MJAIEventKey.oplistSequence: UInt64(7)]])
+        _ = try await bot.react(events: [["type": "dahai", "actor": 1, "pai": "2m",
+                                          "tsumogiri": true]])
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 1)
+    }
+
+    /// 雲端失敗＝本手誠實沒有推薦（不會有本地無效輸出頂上）
+    func test_cloudOnly_failureYieldsNoRecommendation() async throws {
+        CloudMockURLProtocol.reset(script: [(500, #"{"error":"boom"}"#, [:])])
+        let bot = makeCloudOnlyBot()
+        try await feedSanmaOpening(bot)
+        let reaction = try await bot.react(events: [
+            ["type": "tsumo", "actor": 0, "pai": "N",
+             MJAIEventKey.oplistSequence: UInt64(3)]])
+        XCTAssertNil(reaction, "三麻雲端失敗不得產生任何推薦")
+    }
+
+    /// 授權已被消化（autopass 競態）→ 不問雲端
+    func test_cloudOnly_consumedAuthorizationSkipsCloud() async throws {
+        CloudMockURLProtocol.reset(script: [])
+        let bot = makeCloudOnlyBot(authorized: false)
+        try await feedSanmaOpening(bot)
+        let reaction = try await bot.react(events: [
+            ["type": "tsumo", "actor": 0, "pai": "N",
+             MJAIEventKey.oplistSequence: UInt64(3)]])
+        XCTAssertNil(reaction)
+        XCTAssertTrue(CloudMockURLProtocol.captured.isEmpty)
+    }
+
     // MARK: reset
 
     func test_reset_forwardsToLocal_andClearsWindow() async throws {

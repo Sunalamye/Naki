@@ -167,7 +167,7 @@ final class LogAndVersionSingleSourceTests: XCTestCase {
     @MainActor
     func testEndpointTableCoversEveryRoutedPath() {
         let actual = Set(DebugServer.endpoints.map { "\($0.method) \($0.path)" })
-        let expected: Set<String> = [
+        var expected: Set<String> = [
             "GET /", "GET /help", "GET /status", "POST /mcp",
             "POST /js", "GET /screenshot", "GET /logs", "DELETE /logs",
             "GET /game/state", "GET /game/hand", "GET /game/ops",
@@ -175,6 +175,10 @@ final class LogAndVersionSingleSourceTests: XCTestCase {
             "GET /bot/status", "GET /bot/ops", "GET /bot/deep",
             "POST /bot/trigger", "POST /bot/chi", "POST /bot/pon"
         ]
+        // 顯示層注入只存在於 DEBUG build（Release 查表 404，見 DebugServer）
+        #if DEBUG
+        expected.insert("POST /debug/ui")
+        #endif
 
         XCTAssertEqual(actual, expected)
         XCTAssertEqual(actual.count, DebugServer.endpoints.count, "(method, path) 不可重複")

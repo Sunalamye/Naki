@@ -122,8 +122,7 @@ final class AkagiApiClient {
         self.session = URLSession(configuration: configuration)
     }
 
-    /// `nonisolated`：app target 預設 MainActor 隔離，NakiTests host 釋放
-    /// MainActor class 會 SIGABRT（見 CLAUDE.md「專案結構的坑」）。
+    /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit {}
 
     // MARK: - 端點
@@ -228,6 +227,10 @@ final class AkagiApiClient {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CloudAPIError.invalidResponse
         }
+        // 原始回應落 log（debug 通道，非 event log）：伺服器給的數值細節
+        // （top-k prob、served model…）只有這裡查得到——摘要行只有前 6 列。
+        // 上限 2000 字防淹；回應不含 key，落 log 安全。
+        botLog("[Cloud] \(what) ← \(String(decoding: data.prefix(2000), as: UTF8.self))")
         return object
     }
 

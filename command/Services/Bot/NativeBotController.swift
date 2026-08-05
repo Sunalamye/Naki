@@ -1,6 +1,6 @@
 //
 //  NativeBotController.swift
-//  akagi
+//  Naki
 //
 //  Created by Suoie on 2025/11/30.
 //  原生 Mortal Bot 控制器 - 使用 MortalSwift 進行本地 AI 推理
@@ -15,8 +15,8 @@ import MortalSwift
 /// 原生 Bot 控制器，使用 MortalSwift 進行 Core ML 推理
 /// ⭐ 現在 MortalBot 是 actor，所有方法都需要 async
 /// ⭐ 支援強類型 MJAIEvent/MJAIAction API
-/// ⭐ #2: 標為 @MainActor —— 可變狀態（tehai/tsumo/lastRecommendations…）在 MainActor 隔離，
-///        消除呼叫端（WebViewModel/NakiWebCoordinator 皆 @MainActor）的資料競態。
+/// ⭐ 標為 @MainActor —— 可變狀態（tehai/tsumo/lastRecommendations…）在 MainActor 隔離，
+///        消除呼叫端（`NakiWebCoordinator`，@MainActor）的資料競態。
 ///        heavy 的 Core ML 推理仍在 MortalBot actor 內 off-main，不受此隔離影響。
 @MainActor
 class NativeBotController {
@@ -81,7 +81,7 @@ class NativeBotController {
     ///
     /// 只在推薦**真的刷新**時更新，推薦被保留（react 回 nil）時保持不動——這樣它證明的是
     /// 「這份推薦由哪批 oplist 算出」而非「正在處理哪個 event」。自動打牌用它確認推薦與
-    /// 當前決策機會同源，避免用舊推薦回應新機會（p5 #1）。nil＝provenance 未知（不設限）。
+    /// 當前決策機會同源，避免用舊推薦回應新機會。nil＝provenance 未知（不設限）。
     private(set) var lastRecommendationsOplistSequence: UInt64?
 
     // 註：`lastCandidates` 已移除。它的唯一寫入點是同樣零呼叫的 `updateAvailableActions()`，
@@ -135,12 +135,7 @@ class NativeBotController {
 
     init() {}
 
-    /// deinit 標 `nonisolated`——理由與 `GameStore` 同一條：
-    /// app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，MainActor 隔離的 class
-    /// 連隱含 deinit 都走 `swift_task_deinitOnExecutor`；在 NakiTests 的 host 進程裡釋放
-    /// 這種物件會 `pointer being freed was not allocated` 而 SIGABRT，整個 test host 掛掉重啟。
-    /// 沒有這行，任何「建一個 controller 餵給別人」的單測都跑不完。
-    /// 本 class 的 deinit 不需要碰 MainActor 狀態（只放掉 bot reference 與值型別欄位）。
+    /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit { }
 
     /// 創建新的 Bot 實例
@@ -153,20 +148,29 @@ class NativeBotController {
         self.playerId = playerId
         self.is3P = is3P
 
-        // 內建引擎經 handProvider 讀 controller 的手牌——手牌是**遊戲**狀態，
-        // 權威在 `updateInternalState`（UI/MCP 匯出也讀同一份），引擎只讀不寫。
-        // ⚠️ #3 已知風險不變：內建仍是單一四麻 Core ML 模型（見 BundledCoreMLBot）。
-        let local = try BundledCoreMLBot(playerId: playerId, is3P: is3P,
-                                         hand: { [weak self] in
-                                             (self?.tehai ?? [], self?.tsumo)
-                                         })
-        // 有雲端設定來源就包一層 CloudBot（設定未啟用時它是純轉發）；
-        // Replay／單測沒有 provider ⇒ 純本地，決策指紋天然穩定
-        if let provider = cloudConfigProvider {
-            bot = CloudBot(local: local, playerId: playerId, is3P: is3P,
-                           configProvider: provider)
+        if is3P {
+            // 三麻：本地 4p 模型推三麻結構上無效——**連啟動都不啟動**
+            // （2026-08-05 使用者定案）。引擎是雲端-only 的 CloudBot：
+            // 決策點由伺服器 oplist 驅動，雲端未生效＝誠實地沒有推薦，
+            // 不會有本地無效輸出頂上；設定啟用後下一批授權即生效。
+            bot = CloudBot(local: nil, playerId: playerId, is3P: true,
+                           configProvider: cloudConfigProvider ?? { nil },
+                           serverAuthorization: { LiqiOperationStore.shared.pending != nil })
         } else {
-            bot = local
+            // 內建引擎經 handProvider 讀 controller 的手牌——手牌是**遊戲**狀態，
+            // 權威在 `updateInternalState`（UI/MCP 匯出也讀同一份），引擎只讀不寫。
+            let local = try BundledCoreMLBot(playerId: playerId, is3P: false,
+                                             hand: { [weak self] in
+                                                 (self?.tehai ?? [], self?.tsumo)
+                                             })
+            // 有雲端設定來源就包一層 CloudBot（設定未啟用時它是純轉發）；
+            // Replay／單測沒有 provider ⇒ 純本地，決策指紋天然穩定
+            if let provider = cloudConfigProvider {
+                bot = CloudBot(local: local, playerId: playerId, is3P: false,
+                               configProvider: provider)
+            } else {
+                bot = local
+            }
         }
 
         botLog("[NativeBotController] Bot 創建成功: playerId=\(playerId), is3P=\(is3P), gen=\(generation), engine=\(bot?.identity.name ?? "?")")
@@ -215,7 +219,7 @@ class NativeBotController {
         // 記錄事件類型，用於判斷是否需要更新推薦
         let eventType = event["type"] as? String ?? ""
         // 這個 event 是針對哪一批 oplist 產生的（MajsoulBridge 在 parse 時標的）。
-        // 只有在推薦真的刷新時才拿它更新 provenance（p5 #1）。
+        // 只有在推薦真的刷新時才拿它更新 provenance。
         let eventOplistSeq = event[MJAIEventKey.oplistSequence] as? UInt64
         let eventActor = event["actor"] as? Int ?? -1
         let isMyDahai = eventType == "dahai" && eventActor == Int(playerId)
@@ -271,7 +275,7 @@ class NativeBotController {
         // 引擎刷新了推薦（有動作，或自家副露後的捨牌建議）→ 套用並綁定 provenance
         lastRecommendations = reaction.recommendations
         lastDecisionSource = reaction.source
-        lastRecommendationsOplistSequence = eventOplistSeq   // 推薦刷新 → 綁定 provenance（p5 #1）
+        lastRecommendationsOplistSequence = eventOplistSeq   // 推薦刷新 → 綁定 provenance
 
         guard let response = reaction.action else {
             // 副露後的推薦刷新：無動作要回（log 由引擎的「副露後推論」一行負責）
@@ -480,25 +484,6 @@ class NativeBotController {
         }
     }
 
-    // 註：`updateAvailableActions()` 已移除。
-    //
-    // 它是 private 而且**零呼叫**——唯一的呼叫點在 `updateInternalState` 尾巴被換成
-    // 一行「移到 react() 後處理」的註解，而 react() 從來沒有接上去。於是它寫的六個
-    // canXxx 旗標永遠停在 false，`BotStatusView` 的徽章與 `/bot/status` 的四個欄位
-    // 也就永遠是假的。
-    //
-    // 它掃 mask 的方式本身也有事實錯誤：`mask.prefix(AI.discardEnd + 1)` 就是
-    // `prefix(34)`，看不到索引 34–36。上游 MortalSwift 把 34–36 註解成「保留 (3麻用)」
-    // 是錯的——`ObsEncoder` 會在「手上只有紅五」時把 34–36 設 1、把 4/13/22 設 0
-    // （見 MortalSwift p0-1）。照 prefix(34) 掃，那一手會被判成「沒有牌可打」。
-    //
-    // 現在可用動作改由協定層 oplist 導出（見上方 `availableActions`）。
-    // 掃 mask 的路徑（推薦生成、副露特例與紅五 34–36）已隨 2026-08-05
-    // protocol 重構搬進 `BundledCoreMLBot`／`MortalActionMapper`；
-    // 紅五回歸鎖 `AkaDiscardActionIndexTests` 跟著指向 mapper。
-
-
-
     // MARK: - 雲端推論（重連重放抑制）
 
     /// 重連重放歷史事件前呼叫（`NakiWebCoordinator.resyncBot`）：
@@ -549,9 +534,9 @@ class NativeBotController {
     var botState: BotStatus {
         var status = BotStatus(
             isActive: isInitialized,
-            // 內建模型只有四麻一份，modelName 必須反映**實際載入的是哪個**，
-            // 不能因為對局是三麻就標成 mortal3p——那會讓 UI 宣稱有三麻模型
-            modelName: "mortal",
+            // modelName 必須反映**實際載入的是哪個**：四麻＝內建 Mortal；
+            // 三麻＝雲端-only（本地模型不啟動，2026-08-05 起）
+            modelName: is3P ? "cloud-3p" : "mortal",
             playerId: Int(playerId),
             is3P: is3P
         )
@@ -560,6 +545,9 @@ class NativeBotController {
         // （UI 常駐顯示的依據，pluggable-bots-plan 安全節）
         status.decisionSource = lastDecisionSource
         status.cloudHost = bot?.cloudHost
+        // fallback 可視化：退化旗標＋連續本地手數（紅色警示行的資料源）
+        status.cloudDegraded = bot?.cloudDegraded ?? false
+        status.cloudFallbackStreak = bot?.cloudFallbackStreak ?? 0
         return status
     }
 

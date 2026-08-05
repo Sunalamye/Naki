@@ -148,3 +148,127 @@ log 目錄保留 8 次啟動，而**跑一次 NakiTests 就是一次啟動**。2
 （note/ 不受輪替、gitignored 不進 repo——錄影含其他玩家暱稱），
 `ReplayFingerprintTests` 優先讀備份。**之後每錄到值得當 fixture 的對局，
 先 cp 進 note/ 再說。**
+
+## D13. （2026-08-05 晚）三麻自動打：逐決策放行＋kita 全鏈
+
+使用者定案「有開啟雲端推論就要可以自動打（三麻）」。實作取的條件比字面
+更嚴：**逐決策**放行——`AutoPlayGate`／resolver／手動觸發只在「這批推薦
+由雲端算出」（`decisionSource` 有 `cloud:` 前綴）時放行三麻；雲端失敗
+fallback 到本地四麻模型的那一手**自動關回 fail-closed**。理由：三麻擋自動
+打的根因是「本地四麻模型推三麻結構上無效」，這個根因在 fallback 的瞬間
+仍然成立，設定層開關擋不住那幾手。唯一例外是局間自動確認
+（`allowsConfirm`）跟著設定層走——按「下一局」不是模型決策。
+
+同輪補齊拔北（kita）全鏈，否則三麻自動打會在拔北手停擺：
+- **關鍵發現**：Naki bridge 的拔北事件名是 `nukidora`（ActionBaBei→mjai），
+  伺服器 schema 是 `kita`——`KyokuStreamAccumulator.apiEvent` 加轉譯，
+  不然三麻上傳流會 desync。bridge 本身不動（本地 MortalSwift 路徑與既有
+  錄影都用 `nukidora`）。
+- `ActionType.kita` ＋ mapper（reaction `kita`／candidate `nukidora`）＋
+  resolver（oplist type 11 babei）＋ executor（`LiqiRequestBuilder.babei`，
+  Liqi 層本來就齊）。
+- UI：三麻警告只在「本批決策非雲端」時顯示（fallback 手警告如實回來）。
+
+另補（同輪使用者需求）：雲端 HTTP **原始回應**落 botLog（debug 通道，
+上限 2000 字）——摘要行只有前 6 列，伺服器給的 top-k 原始數值只有這裡
+查得到。top-k 只有 3（伺服器方案 topk），prob 視覺校正未做（使用者未拍板）。
+
+驗證：481 tests 全過（新增 gate×5、resolver×4、mapper/accumulator×3）；
+**三麻 live 對局未驗**（AUDIT §20.2），要一局真三麻含拔北手才能蓋章。
+
+## D14. （2026-08-05 深夜）顯示驗證管道：`POST /debug/ui`＋截圖迴圈
+
+使用者要求「所有動作的顯示都看過一遍、你要能直接送指令、直接看」且**不開
+真實對局**。做法：DEBUG-only 的 `POST /debug/ui`（直接寫 `GameStore`——純顯
+示層注入，不碰決策管線；Release 查不到此路由，endpoint 表測試斷言這一點）
+＋既有 `GET /screenshot`，agent 注入狀態→截圖→目視，一輪十幾秒。
+
+這一輪掃出並修掉三個顯示問題、補一個增強：
+1. **立直列顯示 raw「reach」**——riichi 推薦從不帶牌，卻走牌面分支 fallback
+   成原始標籤；改走 `displayLabel`（顯示「立直」）。live 對局同樣會發生，
+   是既有 bug 不是注入假象。
+2. **雲端 3p 決策時模型行仍掛「⚠️ 三麻無專用模型」**——與下一行的
+   `cloud:3p` 指示矛盾；後綴改為只在 `decisionSource` 非 cloud 時顯示
+   （fallback 手警告如實回來）。
+3. **可用動作徽章列沒有拔北**——補 `canKita`（oplist type 11），徽章只在
+   三麻對局出現（四麻永遠不可能亮，常駐是噪音）。
+4. **吃列增強**：`Recommendation.detail`（純顯示欄位，executor 不讀）——
+   雲端 reaction 帶 consumed 時顯示「用 4m·5m 吃 3m」；本地 mask 只有粗變體
+   ⇒ 維持 ①②③。「吃完丟哪張」不顯示：那是副露執行後的**下一個決策點**，
+   模型屆時才會算（雲端/本地皆然），預先顯示等於偽造未來的決策。
+
+## D15. （2026-08-05 深夜）三麻改雲端-only：本地模型連啟動都不啟動
+
+live 三麻首戰揭露的病理（events.log 20260805-230638）：本地 4p 模型推三麻
+會**幻覺出吃窗口**（三麻沒有吃、伺服器也沒授權），CloudBot 把幻覺當決策點
+問伺服器 → null reaction ×3；一次真決策（拔北）在脫節時序下被伺服器
+靜默丟單，22 秒後逾時代打、watchdog 重連自救。拔北鏈本身多次成功
+（23:12:17×2、23:14:07、23:20:59、23:21:42——live 首驗通過）。
+
+使用者定案：「三麻不應該送本地的」「本地就沒有三麻，就不應該啟動本地的」。
+實作：
+
+- `CloudBot.local` 改為 optional；三麻時 `NativeBotController.createBot`
+  **不建 `BundledCoreMLBot`**（MortalBot/Core ML 完全不載），bot =
+  `CloudBot(local: nil)`。
+- 雲端-only 的決策點改由**伺服器授權驅動**：事件上的
+  `MJAIEventKey.oplistSequence` 每批恰觸發一次雲端呼叫（同授權 pending
+  期間不重複），`serverAuthorization`（pending 非 nil）擋 autopass 競態。
+  幻覺窗口從根拔除——沒有本地就沒有幻覺。
+- 雲端失敗／null＝**本手誠實沒有推薦**（不會有結構無效的本地輸出頂上）；
+  三麻閘門本來就不送非雲端決策，行為一致。
+- UI 同步：三麻 modelName=`cloud-3p`（「雲端推論 (3P)」），未生效時後綴
+  「⚠️ 未生效，無推論」；SanmaUnsupportedNotice 文案改「三麻僅雲端推論」。
+- null reaction 的警告行現在附**上傳尾巴**（最後 6 個事件），真脫節可直接定位。
+
+**自動發現**（在使用者發現前）：`scripts/cloud-watch.sh` 監看 events.log，
+命中「null reaction／雲端失敗／強制重連／送出後 15 秒停滯」即發 macOS 通知；
+agent session 側另掛 Monitor 同步喚醒查因。
+
+驗證狀態：code 完成、**尚未 build**（使用者對局中，明令不 build）；
+待對局結束跑全測試（新增雲端-only ×3）＋rebuild＋重啟。
+
+## D16. （2026-08-05 深夜）422 事故：重連 reset 歸零 seat——雲端當了偵錯器
+
+Monitor 上線 36 分鐘就抓到第一起真事故：四麻局全程 HTTP 422
+（"could not process event stream"），斷路器 5s→80s 一路退避。
+
+**病理**：`MajsoulBridge.reset()`（局中重連路徑）把 `seat` 歸零但只保留
+accountId；syncGame 重連不會再送 seatList，seat 永遠恢復不了。之後每個
+新 kyoku 的 `parseNewRound` 把自家手牌放到 `tehais[0]`（實際座位 2）——
+伺服器看到「seat 2 憑空打未知牌、seat 0 抱 13 張不動」如實 422 拒收整局；
+**本地模型吃同一份壞手牌，退化成摸切（1 item @100%）**。
+
+**這是先於雲端接入的既有 bug**：純本地時代重連後的 kyoku 推薦一直是壞的，
+只是本地不會「拒收」、壞得無聲。雲端的 422 第一次把它變成可見、可定位
+（Monitor 通知 → events/bridge log 對時 → parseNewRound 的 seat=0 一行）。
+
+**修法**：reset() 保留 seat／is3P（重連回同一局，座位不可能變）；換帳號
+／換對局的歸零由 fullReset()＋authGame 負責。當下救援：重載頁面
+（fullReset → authGame 重發 seatList）。
+
+**取捨**：不做「resync 時從 eventStream.getPlayerId() 再導 seat」的第二層
+防護——單一來源原則，保留就夠；再加一條推導路徑反而製造兩個權威。
+
+## D17. （2026-08-06）fallback 可視化：紅色退化警示＋連續手數
+
+使用者需求：「如果失敗了，我需要知道現在是用 rollback 的本地模型」。
+原本的揭露只有雲端行小字從 `(cloud:模型)` 變 `(local)`——對局中根本不會注意到。
+
+設計＝把「退化」變成一級狀態：
+
+- `CloudBot` 新增 `cloudDegraded`（斷路器不健康或退避中）與
+  `cloudFallbackStreak`（雲端啟用下**連續**非雲端決策數；成功歸零、
+  改設定歸零、未設定恆 0——「沒開雲端」不是 fallback，不該掛警示）。
+  經 `MahjongBot` protocol 曝露（extension 預設 false/0，本地引擎零負擔）。
+- UI：雲端行三態——正常橙色「送往 host（cloud:模型）」；退化時整行轉
+  **紅色 `icloud.slash` 警示框**「雲端失敗——正在用本地模型（連續 N 手，
+  自動重試中）」；三麻文案改「本手無推薦（三麻不用本地）」。
+- `/bot/status` 增 `cloudDegraded`／`cloudFallbackStreak`（cloud-watch 與
+  agent 監看可機讀）；`/debug/ui` 可注入這兩欄供顯示驗證。
+
+取捨：不做 toast／彈窗——桌面通知已由 cloud-watch 負責（app 內再彈是雙重
+打擾）；常駐紅框比一次性通知更符合「這個狀態會持續一段時間」的性質。
+
+狀態：code＋測試就緒，**未 build**（使用者對局中）；待對局結束驗證
+＋ /debug/ui 截圖確認紅框視覺。

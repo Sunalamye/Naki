@@ -31,6 +31,14 @@ protocol MahjongBot: AnyObject {
     /// 非 nil 代表對局事件正在送往該主機——UI 依此常駐顯示。
     var cloudHost: String? { get }
 
+    /// 雲端已設定但目前**退化中**（斷路器不健康或退避中）——決策正在用
+    /// rollback 的本地模型（三麻＝沒有推薦）。UI 依此顯示紅色警示。
+    var cloudDegraded: Bool { get }
+
+    /// 雲端啟用期間**連續**以非雲端來源結束的決策數；0＝雲端正常服務。
+    /// 「fallback 必須讓人看得出來」的量化版：紅色警示行會顯示這個數字。
+    var cloudFallbackStreak: Int { get }
+
     /// 對一批事件做出反應。
     ///
     /// 批次是 mjai 慣例（自上次反應以來的事件，最後一個是觸發點）。目前的
@@ -46,6 +54,8 @@ protocol MahjongBot: AnyObject {
 
 extension MahjongBot {
     var cloudHost: String? { nil }
+    var cloudDegraded: Bool { false }
+    var cloudFallbackStreak: Int { 0 }
 }
 
 /// 引擎自述。

@@ -274,6 +274,62 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
     }
   }
 
+  // MARK: - 三麻 × 雲端（2026-08-05 條件放行）
+
+  /// 這批推薦由雲端 3p 模型算出時，三麻不降級——有效決策可以自動送
+  func testSanmaAutoSendsWhenDecisionIsCloudServed() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard]),
+      recommendations: [rec(.discard, "9s")],
+      mode: .auto,
+      seat: 0,
+      isSanma: true,
+      cloudDecision: true)
+
+    XCTAssertEqual(decision, .send(action: .discard, tile: "9s"))
+  }
+
+  /// 逐決策：雲端 fallback 到本地的那一手（cloudDecision=false）照舊降級
+  func testSanmaDowngradesOnLocalFallbackEvenWithCloudConfigured() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard]),
+      recommendations: [rec(.discard, "9s")],
+      mode: .auto,
+      seat: 0,
+      isSanma: true,
+      cloudDecision: false)
+
+    XCTAssertEqual(decision, .surfaceOnly(action: .discard, tile: "9s"))
+  }
+
+  /// 拔北：oplist 有 babei（type 11）時 kita 推薦可送
+  func testKitaSendsWhenOplistOffersBabei() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.babei]),
+      recommendations: [Recommendation(tile: "kita", probability: 0.8, actionType: .kita)],
+      mode: .auto,
+      seat: 0,
+      isSanma: true,
+      cloudDecision: true)
+
+    XCTAssertEqual(decision, .send(action: .kita, tile: "kita"))
+  }
+
+  /// 拔北不在這批 oplist 裡就不送（isSupported fail-closed）
+  func testKitaNotSentWithoutBabeiInOplist() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard]),
+      recommendations: [Recommendation(tile: "kita", probability: 0.8, actionType: .kita)],
+      mode: .auto,
+      seat: 0,
+      isSanma: true,
+      cloudDecision: true)
+
+    if case .send = decision {
+      XCTFail("oplist 沒有 babei 時不得送出拔北，實際: \(decision)")
+    }
+  }
+
   /// 四麻不受影響——確認上面三條不是「把所有人都關掉」的假綠燈
   func testFourPlayerStillAutoSends() {
     let decision = AutoPlayDecisionResolver.resolve(

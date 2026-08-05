@@ -1,6 +1,6 @@
 //
 //  BotStatusView.swift
-//  akagi
+//  Naki
 //
 //  Created by Suoie on 2025/11/30.
 //  Bot 狀態顯示元件
@@ -19,8 +19,9 @@ struct BotStatusView: View {
 
     /// 「重新載入」按鈕做的事（強制斷線重連）。
     ///
-    /// p3-3：先前是 `@Environment(\.webViewModel)?.forceReconnect()`——View 為了一顆
-    /// 按鈕認得整個 view model，而 Preview 裡那顆按鈕等於壞的。
+    /// 由外面交進來、可以 stub，而不是這個 View 自己去環境裡撈頁面 service：
+    /// 一顆按鈕不該把整個 App 的型別拖進 View 的簽章，Preview 也才換得掉
+    /// 「按下去會發生什麼」。
     var reloadBot: ForceReconnectAction = .unavailable
 
     var body: some View {
@@ -78,21 +79,42 @@ struct BotStatusView: View {
                 }
 
                 // ☁️ 雲端推論常駐指示（pluggable-bots-plan 安全節第 3 條）：
-                // 只要對局資料正在送往外部主機，就必須一直看得到；
-                // decisionSource 同時揭露 fallback——退回本地時這行如實變回 local
+                // 只要對局資料正在送往外部主機，就必須一直看得到。
+                // 退化時整行轉紅色警示——「現在是 rollback 的本地模型在服務」
+                // 不能只靠一個小字 (local) 讓人自己發現（2026-08-06 使用者需求）。
                 if let host = botStatus.cloudHost {
-                    HStack(spacing: 4) {
-                        Image(systemName: "icloud.and.arrow.up")
-                            .font(.caption)
-                        Text("對局資料送往 \(host)（\(botStatus.decisionSource)）")
-                            .font(.caption)
+                    if botStatus.cloudDegraded || botStatus.cloudFallbackStreak > 0 {
+                        HStack(alignment: .top, spacing: 4) {
+                            Image(systemName: "icloud.slash.fill")
+                                .font(.caption)
+                            Text(botStatus.is3P
+                                 ? "雲端失敗——本手無推薦（三麻不用本地，連續 \(botStatus.cloudFallbackStreak) 手，自動重試中）"
+                                 : "雲端失敗——正在用本地模型（連續 \(botStatus.cloudFallbackStreak) 手，自動重試中）")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundColor(.red)
+                        .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.12))
+                        .cornerRadius(6)
+                        .accessibilityIdentifier("cloud-degraded-indicator")
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "icloud.and.arrow.up")
+                                .font(.caption)
+                            Text("對局資料送往 \(host)（\(botStatus.decisionSource)）")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.orange)
+                        .accessibilityIdentifier("cloud-inference-indicator")
                     }
-                    .foregroundColor(.orange)
-                    .accessibilityIdentifier("cloud-inference-indicator")
                 }
 
-                // 三麻：明講不支援，而不是讓使用者以為 AI 正常運作
-                if botStatus.is3P {
+                // 三麻：明講不支援，而不是讓使用者以為 AI 正常運作；
+                // 雲端 3p 決策服務中不顯示，fallback 手警告如實回來
+                if botStatus.is3P && !botStatus.isCloudDecision {
                     SanmaUnsupportedNotice()
                 }
 
@@ -126,7 +148,7 @@ struct BotStatusView: View {
 ///
 /// 內建 Core ML 只有四麻一份（obs 1012×34、action 46）。三麻的牌山、規則與
 /// observation 佈局都不同（沒有 2m–8m、北是拔北寶牌、只有三家的分數與河），
-/// 拿四麻模型推三麻不是「稍微偏差」而是**結構上無效**（MortalSwift p3-1）。
+/// 拿四麻模型推三麻不是「稍微偏差」而是**結構上無效**。
 ///
 /// 因此自動送出在三麻一律停用（`AutoPlayGate` / `AutoPlayDecisionResolver` /
 /// `AutoPlayEngine.runManualCycle` 三層 fail-closed），這裡負責把這件事說出來——
@@ -138,10 +160,10 @@ struct SanmaUnsupportedNotice: View {
                 .font(.caption)
                 .foregroundColor(.orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text("三麻不支援")
+                Text("三麻僅雲端推論")
                     .font(.caption)
                     .fontWeight(.semibold)
-                Text("內建只有四麻模型，推薦結果無效；自動打牌已停用。")
+                Text("本地四麻模型不啟動；雲端未生效時沒有推薦、自動打牌停用。")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -282,6 +304,10 @@ struct AvailableActionsView: View {
                 ActionBadge(name: "碰", isAvailable: botStatus.canPon, color: .purple)
                 ActionBadge(name: "槓", isAvailable: botStatus.canKan, color: .red)
                 ActionBadge(name: "和", isAvailable: botStatus.canAgari, color: .yellow)
+                // 拔北只在三麻對局出現——四麻永遠不可能亮，常駐只是噪音
+                if botStatus.is3P {
+                    ActionBadge(name: "拔北", isAvailable: botStatus.canKita, color: .teal)
+                }
             }
         }
     }

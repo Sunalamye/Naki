@@ -46,6 +46,7 @@ final class AutoPlayGateTests: XCTestCase {
 
     private func input(auto: Bool = true,
                        sanma: Bool = false,
+                       cloud: Bool = false,
                        inFlight: Bool = false,
                        snapshot: LiqiOperationSnapshot?,
                        recs: [Recommendation] = [],
@@ -53,6 +54,7 @@ final class AutoPlayGateTests: XCTestCase {
                        grace: TimeInterval = 2.0) -> AutoPlayGate.Input {
         .init(isAutoMode: auto,
               isSanma: sanma,
+              cloudDecision: cloud,
               hasActionInFlight: inFlight,
               snapshot: snapshot,
               recommendations: recs,
@@ -172,6 +174,45 @@ final class AutoPlayGateTests: XCTestCase {
         let s = snapshot(types: [1])
         let d = AutoPlayGate.evaluate(input(sanma: true, snapshot: s, recs: [rec(.discard)]))
         XCTAssertEqual(d, .skip(.sanmaUnsupported))
+    }
+
+    // MARK: - 三麻 × 雲端（2026-08-05 條件放行）
+
+    /// 這批推薦來自雲端 3p 模型時，三麻閘門放行——雲端推薦是有效決策
+    func testSanmaProceedsWhenDecisionIsCloudServed() {
+        let s = snapshot(types: [1])
+        let d = AutoPlayGate.evaluate(
+            input(sanma: true, cloud: true, snapshot: s, recs: [rec(.discard)]))
+        XCTAssertEqual(d, .proceed)
+    }
+
+    /// 逐決策判斷：雲端 fallback 到本地的那一手（cloud=false）照舊 fail-closed
+    func testSanmaClosesBackOnLocalFallbackDecision() {
+        let s = snapshot(types: [1])
+        let d = AutoPlayGate.evaluate(
+            input(sanma: true, cloud: false, snapshot: s, recs: [rec(.discard)]))
+        XCTAssertEqual(d, .skip(.sanmaUnsupported))
+    }
+
+    /// 四麻不受 cloud 旗標影響（旗標只在三麻分支參與判斷）
+    func testYonmaIgnoresCloudFlag() {
+        let s = snapshot(types: [1])
+        XCTAssertEqual(AutoPlayGate.evaluate(
+            input(cloud: true, snapshot: s, recs: [rec(.discard)])), .proceed)
+        XCTAssertEqual(AutoPlayGate.evaluate(
+            input(cloud: false, snapshot: s, recs: [rec(.discard)])), .proceed)
+    }
+
+    /// 局間確認：三麻在雲端推論啟用（設定層）時放行；未啟用照舊擋
+    func testSanmaConfirmFollowsCloudInferenceSetting() {
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true,
+                                                  cloudInferenceActive: true), .proceed)
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true,
+                                                  cloudInferenceActive: false),
+                       .skip(.sanmaUnsupported))
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: false, isSanma: true,
+                                                  cloudInferenceActive: true),
+                       .skip(.notAutoMode))
     }
 
     /// 連「伺服器提供和牌」這條最高優先的路也不放行——fail-closed 的意思是全部關掉

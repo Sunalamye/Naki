@@ -2,23 +2,11 @@
 //  NakiRuntime.swift
 //  Naki
 //
-//  p3-4：App 的組裝點（composition root）。
+//  App 的組裝點（composition root）：**誰持有誰**，全專案只有這一份。
 //
-//  這是 `WebViewModel` / `LegacyWebViewModel` / `WebViewModelProtocol` 三者留下的
-//  最後一塊：**誰持有誰**。刪掉的不只是行數，是三個結構性問題：
-//
-//  1. **協定不是抽象，是兩份實作的最大公因數。** `WebViewModelProtocol` 有 20 個成員，
-//     其中 `processNativeEvents` / `getPlayerNamesStatus` 兩條**零呼叫端**——它們存在的
-//     唯一理由是兩份實作都寫了。而真正的平台差異（WebPage vs WKWebView）只有
-//     「怎麼執行 JS、怎麼載入、交出哪個 View」三件事，現在收在 `WebSessionBackend`。
-//  2. **View 靠 `as?` 撈具體型別。** `NakiWebView` 要 `as? WebViewModel` 才拿得到
-//     `webPage`、`LegacyNakiWebView` 要 `as? LegacyWebViewModel` 才呼叫得到
-//     `setWebView`；轉型失敗沒有編譯錯誤也沒有例外，畫面只剩「正在初始化…」。
-//  3. **兩條 path 各抄一份組裝。** 兩個 view model 各自建 bot、各自接 `liqiSender`、
-//     各自組 MCP 依賴表、各自 clamp 模式。差異只有「哪些能力不提供」，
-//     卻用整份拷貝來表達。
-//
-//  現在只有一份組裝，差異是**值**（`session.supportsAutoPlay`）而不是型別。
+//  兩條 WebView path 共用這份組裝——bot、`liqiSender`、MCP 依賴表、模式收斂都只建
+//  一次，「哪些能力不提供」是一個**值**（`session.supportsAutoPlay`）而不是另一份拷貝。
+//  真正的平台差異（怎麼執行 JS、怎麼載入、交出哪個 View）收在 `WebSessionBackend`。
 //
 //  ## 生命週期
 //
@@ -36,7 +24,7 @@ final class NakiRuntime {
 
     // MARK: - 狀態
 
-    /// 牌局、連線與狀態列的唯一真實來源（SwiftUI 與 MCP 讀同一份，p3-1）
+    /// 牌局、連線與狀態列的唯一真實來源（SwiftUI 與 MCP 讀同一份）
     let store = GameStore()
 
     /// 使用者設定與這條 WebView path 的能力
@@ -106,7 +94,7 @@ final class NakiRuntime {
         // 自動啟動 MCP Server（兩個平台、兩條 path 一律啟動）
         //
         // 頁面本身**不在這裡載入**：首次載入掛在 `WebSession.makeView()` 的 `.task` 上，
-        // 與遷移前同一個時機（見 `WebSession.loadMajsoulIfNeeded`）。
+        // 等頁面真的要顯示了才開始（見 `WebSession.loadMajsoulIfNeeded`）。
         startDebugServer()
     }
 
@@ -122,7 +110,7 @@ final class NakiRuntime {
     /// 由 `WebSession.callJavaScript` 統一，兩條 path 這裡看不到差別。
     private func configureLiqiSender() {
         // `addLog` 內部就會寫進 LogManager（並更新狀態列），所以這裡不能再 bridgeLog 一次；
-        // 先前兩行都寫，同一件事在 `/logs` 會以兩種前綴各出現一次。
+        // 兩邊都寫的話，同一件事在 `/logs` 會以兩種前綴各出現一次。
         liqiSender.logHandler = { [weak self] message in
             let line = "[Naki] \(message)"
             if let server = self?.debugServer {
@@ -148,7 +136,6 @@ final class NakiRuntime {
 
     /// 沿用上次選的模式，並收斂到這條 path 真的能執行的值。
     ///
-    /// 舊行為是每次啟動都硬設 `.auto`，於是使用者選的「關閉」一重啟就被沖掉。
     /// `commit` 會把收斂後的值寫回存檔：不寫的話 UI 的 `@AppStorage` 與這裡讀到的
     /// 模式會不一致，picker 顯示「自動」而實際跑「推薦」。
     private func adoptStoredAutoPlayMode() {
@@ -165,7 +152,7 @@ final class NakiRuntime {
     ///
     /// 引擎不認得 runtime：它只拿到 oplist 儲存體、送出器、一個「現在的上下文」
     /// closure 與兩條 log 通道。這是它能被單測的前提（`AutoPlayEngineTests` 與
-    /// p0-5 的 fail-safe fixture 建的是同一個型別）。
+    /// fail-safe fixture 建的是同一個型別）。
     ///
     /// **Legacy path 也跑這個迴圈**，但 `supportsAutoPlay == false` ⇒ 模式永遠不是
     /// `.auto` ⇒ `AutoPlayGate` 第一關就 `.skip(.notAutoMode)`（不記 log、不動作）。
@@ -182,11 +169,13 @@ final class NakiRuntime {
                     // 座位來源只有 `GameStore.autoPlaySeat` 一份定義
                     seat: self.store.autoPlaySeat,
                     isSanma: self.store.gameState.is3P,
+                    cloudDecision: self.store.botStatus.isCloudDecision,
+                    cloudInferenceActive: self.settings.cloudConfig.isActive,
                     tsumoTile: self.store.tsumoTile,
                     isReady: self.session.isReady,
-                    // 延遲 stepper 的讀取端：每輪重取，調一下下一手就生效（p2-6）
+                    // 延遲 stepper 的讀取端：每輪重取，調一下下一手就生效
                     actionDelayScale: self.settings.actionDelayScale,
-                    // 推薦綁定的 oplist sequence：讓 .proceed 確認推薦與機會同源（p5 #1）
+                    // 推薦綁定的 oplist sequence：讓 .proceed 確認推薦與機會同源
                     recommendationsOplistSequence: self.store.recommendationsOplistSequence)
             },
             log: { [weak self] message in self?.debugServer?.addLog(message) },
@@ -242,8 +231,8 @@ final class NakiRuntime {
     /// 這條 path 提供給 MCP／Debug HTTP 的全部能力。
     ///
     /// **會送出 Liqi request 的能力在 Legacy path 上一律不提供**（`supportsAutoPlay`
-    /// 為 false 時）。遷移前那幾個 closure 在 Legacy 上根本沒有被設定，行為等價；
-    /// 這裡只是把「忘了接線」變成「明講不提供，並附上可 grep 的短碼」。
+    /// 為 false 時）。不提供是明講出來的（帶一個可 grep 的短碼），不是靠「忘了接線」
+    /// ——後者在工具輸出上看起來與「呼叫了但沒反應」一模一樣。
     /// 唯讀面（狀態快照、log、JS、截圖）與重連兩條 path 都有。
     private func makeMCPDependencies() -> NakiMCPDependencies {
         let javaScript = ExecuteJavaScriptAction(session: session)
@@ -322,9 +311,9 @@ extension NakiRuntime: BotResponseObserving {
 
     /// 模型剛跑完推論：同步遊戲內高亮，並叫醒自動打牌引擎。
     ///
-    /// 先前這裡是直接呼叫 `triggerAutoPlayIfNeeded()`——那是第二個觸發源，
-    /// **不經閘門**（沒有三麻檢查、沒有「已非本家打牌回合」檢查），
-    /// 只與輪詢共用去抖變數。現在兩個觸發源走同一輪 `AutoPlayEngine.runCycle()`。
+    /// **不要在這裡直接送出**：繞過引擎就等於繞過閘門（三麻檢查、「已非本家打牌回合」
+    /// 檢查）與去抖，變成第二個不受控的觸發源。兩個觸發源（輪詢與這裡）
+    /// 走的是同一輪 `AutoPlayEngine.runCycle()`。
     func botDidRespond() {
         session.syncHighlight()
         autoPlayEngine?.recommendationsDidChange()

@@ -26,14 +26,26 @@ import Foundation
 @MainActor
 final class CloudBot: MahjongBot {
 
-    /// 本地引擎：閘門＋fallback。永遠先於雲端收到每一個事件。
-    private let local: any MahjongBot
+    /// 本地引擎：閘門＋fallback，永遠先於雲端收到每一個事件。
+    ///
+    /// **三麻時為 nil**（2026-08-05 使用者定案：本地只有四麻模型，推三麻
+    /// 結構上無效——連啟動都不啟動）。nil 時決策點改由**伺服器 oplist 驅動**
+    /// （事件上的 `MJAIEventKey.oplistSequence` 標記，每批授權恰問一次雲端），
+    /// 雲端失敗＝這一手沒有推薦（誠實留空），不會有本地的無效輸出頂上。
+    private let local: (any MahjongBot)?
 
     private let playerId: UInt8
     private let is3P: Bool
 
     /// 每個決策點重讀一次設定（由 `NakiRuntime` 注入 `SettingsStore.cloudConfig`）
     private let configProvider: () -> CloudInferenceConfig?
+
+    /// 伺服器當下是否有待處理的授權（oplist）。
+    ///
+    /// 雲端-only 模式（三麻，`local == nil`）的決策點守門：事件帶了
+    /// oplistSequence 但授權已被消化（autopass 競態）時不再問雲端。
+    /// 預設 `{ true }`＝不過濾（測試／4p 用不到）。
+    private let serverAuthorization: () -> Bool
 
     /// 供測試注入 `URLProtocol` stub；正式路徑 ephemeral（牌局資料不落磁碟 cache）
     private let clientConfiguration: URLSessionConfiguration
@@ -56,13 +68,22 @@ final class CloudBot: MahjongBot {
     /// 還剩幾個「重放中」的歷史事件要跳過雲端呼叫
     private var suppressRemaining = 0
 
-    init(local: any MahjongBot, playerId: UInt8, is3P: Bool,
+    /// 雲端-only 模式：已問過雲端的 oplist sequence（每批授權恰問一次，
+    /// 避免同一授權 pending 期間每個事件都觸發一次 API）
+    private var lastConsultedOplistSequence: UInt64?
+
+    /// 雲端啟用期間連續以非雲端來源結束的決策數（fallback 可視化）
+    private(set) var fallbackStreak = 0
+
+    init(local: (any MahjongBot)?, playerId: UInt8, is3P: Bool,
          configProvider: @escaping () -> CloudInferenceConfig?,
+         serverAuthorization: @escaping () -> Bool = { true },
          clientConfiguration: URLSessionConfiguration = .ephemeral) {
         self.local = local
         self.playerId = playerId
         self.is3P = is3P
         self.configProvider = configProvider
+        self.serverAuthorization = serverAuthorization
         self.clientConfiguration = clientConfiguration
     }
 
@@ -70,18 +91,26 @@ final class CloudBot: MahjongBot {
     nonisolated deinit {}
 
     var identity: BotIdentity {
-        let base = local.identity
+        let base = local?.identity
+            ?? BotIdentity(name: "cloud-only", displayName: "雲端推論",
+                           supports3P: false, isLocal: false)
         guard let cfg = appliedConfig else { return base }
         return BotIdentity(
-            name: "cloud+\(base.name)",
-            displayName: "\(base.displayName) ＋ 雲端",
-            // 雲端只有在「啟用＋選了 3p 模型」時才如實支援三麻；
-            // fallback 仍是四麻本地模型，decisionSource 會揭露降級
+            name: local == nil ? "cloud-only" : "cloud+\(base.name)",
+            displayName: local == nil ? "雲端推論" : "\(base.displayName) ＋ 雲端",
+            // 雲端只有在「啟用＋選了 3p 模型」時才如實支援三麻
             supports3P: !cfg.model3P.trimmingCharacters(in: .whitespaces).isEmpty,
             isLocal: false)
     }
 
     var cloudHost: String? { client?.host }
+
+    /// 雲端已設定但斷路器不健康或退避中——決策正在 rollback
+    var cloudDegraded: Bool {
+        client != nil && (!breaker.healthy || !breaker.allows(now: Date()))
+    }
+
+    var cloudFallbackStreak: Int { fallbackStreak }
 
     /// 重連重放歷史事件前呼叫：接下來 `count` 個事件只走本地，不打 API。
     func suppressCloud(forNextEvents count: Int) {
@@ -94,7 +123,9 @@ final class CloudBot: MahjongBot {
     func reset() {
         kyokuStream.reset()
         suppressRemaining = 0
-        local.reset()
+        lastConsultedOplistSequence = nil
+        fallbackStreak = 0
+        local?.reset()
     }
 
     // MARK: - React
@@ -105,7 +136,8 @@ final class CloudBot: MahjongBot {
             kyokuStream.accumulate(event)
         }
 
-        let localReaction = try await local.react(events: events)
+        // 本地引擎照餵（nil＝三麻雲端-only，見 `local` 註解）
+        let localReaction = try await local?.react(events: events)
 
         // 重放抑制：照餵本地（重建狀態），跳過雲端
         if suppressRemaining > 0 {
@@ -113,10 +145,37 @@ final class CloudBot: MahjongBot {
             return localReaction
         }
 
-        // 本地閘門：不是決策點連 API 都不打
+        guard local != nil else {
+            // ── 雲端-only（三麻）：決策點由伺服器授權驅動 ──
+            // 事件帶 oplistSequence ＝ 這個事件伴隨一批新授權抵達；
+            // 每批恰問一次（同授權 pending 期間的後續事件不重複觸發）。
+            guard let seq = events.compactMap({ $0[MJAIEventKey.oplistSequence] as? UInt64 }).last,
+                  seq != lastConsultedOplistSequence,
+                  serverAuthorization() else {
+                return nil
+            }
+            lastConsultedOplistSequence = seq
+            // 雲端失敗／null reaction：這一手誠實地沒有推薦——沒有本地的
+            // 無效輸出頂上（三麻閘門本來也不會送非雲端決策），畫面保持現狀
+            if let cloud = await cloudOverride() {
+                fallbackStreak = 0
+                return cloud
+            }
+            fallbackStreak += 1
+            return nil
+        }
+
+        // ── 4p：本地閘門——不是決策點連 API 都不打 ──
         guard let localReaction else { return nil }
 
-        return await cloudOverride() ?? localReaction
+        if let cloud = await cloudOverride() {
+            fallbackStreak = 0
+            return cloud
+        }
+        // 雲端有設定卻沒能服務這一手（失敗/退避/null）＝ rollback 中；
+        // 未設定（client nil）不算 fallback，維持 0
+        if client != nil { fallbackStreak += 1 }
+        return localReaction
     }
 
     // MARK: - 雲端代理
@@ -141,7 +200,8 @@ final class CloudBot: MahjongBot {
             let backoff = breaker.recordFailure(now: Date())
             recordHealth(ok: false, detail: error.localizedDescription)
             eventLog("[Bot] ☁️ 雲端推論失敗（\(error.localizedDescription)），"
-                   + "改用本地模型，\(Int(backoff))s 內不再嘗試")
+                   + "\(local == nil ? "本手無推薦（三麻不用本地）" : "改用本地模型")，"
+                   + "\(Int(backoff))s 內不再嘗試")
             return nil
         }
         breaker.recordSuccess()
@@ -150,7 +210,16 @@ final class CloudBot: MahjongBot {
         guard let reaction = response.reaction else {
             // 伺服器認為無合法動作、本地卻有決策 ⇒ 事件流不同步。打本地決策，
             // 絕不默默 pass 掉真回合。（HTTP 有來回＝伺服器可達，不算斷路器失敗。）
-            eventLog("[Bot] ☁️ 雲端回 null reaction 但本地有決策（事件流可能不同步），改用本地")
+            // 上傳尾巴一起落 log：真脫節時這是定位「哪種事件讓伺服器分岔」
+            // 的直接證據（2026-08-05 加，幻覺窗口已被上面過濾，剩下的 null
+            // 每一筆都值得查）。
+            let tail = events.suffix(6).map { event in
+                let type = event["type"] as? String ?? "?"
+                let actor = (event["actor"] as? Int).map { "@\($0)" } ?? ""
+                return type + actor
+            }.joined(separator: " ")
+            eventLog("[Bot] ☁️ 雲端回 null reaction 但本地有決策（事件流可能不同步），"
+                   + "改用本地；上傳尾巴: \(tail)")
             return nil
         }
 

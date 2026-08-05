@@ -4,27 +4,6 @@
 //
 //  自動打牌的狀態機：「什麼時候動、等多久、送幾次」全部收在這一個型別裡。
 //
-//  由來（p3-2）：這段邏輯原本約 260 行散在 `WebViewModel`，混用四種併發原語——
-//
-//      Timer.scheduledTimer(1.0)          1 秒輪詢
-//      DispatchQueue.main.asyncAfter      動作延遲
-//      Task { @MainActor }                跳回主執行緒
-//      async 遞迴（深度 15）               重試
-//
-//  三個實際後果：
-//
-//  1. **不變量只靠註解維繫。** `currentExecutionId` 是一個裸 `UUID?`，
-//     「每一條結束路徑都要記得呼叫 `clearExecutionIfCurrent`」寫在註解裡；
-//     漏掉任何一條，殘留的 id 會讓 1 秒輪詢（以 `currentExecutionId == nil` 為前提）
-//     **永久停用**，自動打牌黏著卡死。原檔有 8 個呼叫點，全靠人工檢查。
-//  2. **TOCTOU。** 閘門在 T0 讀一次 `store.pending` 做決策，重試框架在 T1
-//     （延遲 1–3 秒之後）**重新讀一次**再交給 resolver。中間換批的話，
-//     「因為 A 批而觸發」的動作會落在 B 批上；resolver 的 `isStillValid` 補救不到，
-//     因為它比對的是自己剛讀的那一份。
-//  3. **兩個觸發源（1 秒輪詢／推薦更新）共用去抖狀態**，時序耦合、無從單測。
-//
-//  現在的形狀：
-//
 //      單一 Task 迴圈 ── tick ──▶ AutoPlayGate ──▶（延遲）──▶ resolver ──▶ executor
 //            ▲                      同一份 snapshot 一路往下傳
 //            └── wake()：推薦更新／模式切換／手動觸發提早叫醒
@@ -32,15 +11,17 @@
 //  - `Task.sleep` 同時擔任輪詢間隔、動作延遲與重試間隔，沒有 Timer 也沒有 asyncAfter。
 //  - 重試是 `while` 迴圈，不是遞迴。
 //  - 執行狀態是 enum（`idle`／`waiting`／`executing`），而且只能經由 `occupy(...)`
-//    這個**作用域**進出：`defer { state = .idle }` 讓「一定歸零」變成語言保證，
-//    不再是註解要求（`clearExecutionIfCurrent` 因此不存在）。
+//    這個**作用域**進出：`defer { state = .idle }` 讓「一定歸零」變成語言保證。
+//    自己手寫進出、漏掉任何一條結束路徑，殘留狀態會讓輪詢永久停用、自動打牌卡死。
+//  - 決策用的 snapshot 由閘門一路傳到 executor，中途**不重讀** `store.pending`：
+//    重讀等於讓「因為 A 批而觸發」的動作落在換批後的 B 批上，而 resolver 的
+//    `isStillValid` 補救不到——它比對的是自己剛讀的那一份。
 //  - 迴圈本身就是互斥：同一時間只有一輪在跑，所以閘門的 `hasActionInFlight`
 //    在正常情況下恆為 false（仍然照傳，讓輸入保持完整）。
 //
-//  可單測是設計條件而不是副產品：`WebViewModel` 要有 WebPage／DebugServer／Timer，
-//  測試裡建不出來。這裡把 oplist 儲存體、送出器、上下文、兩條 log 通道與所有時間常數
-//  都做成參數，`runCycle()` 是一個可以直接呼叫並回傳完整軌跡的單位——
-//  p0-5 的 fail-safe fixture 因此測得到**產品程式碼**，不再是 harness 自己的語意。
+//  可單測是設計條件而不是副產品：oplist 儲存體、送出器、上下文、兩條 log 通道與所有
+//  時間常數都做成參數，`runCycle()` 是一個可以直接呼叫並回傳完整軌跡的單位——
+//  fail-safe fixture 因此測得到**產品程式碼**，不是 harness 自己的語意。
 //
 
 import Foundation
@@ -84,8 +65,7 @@ nonisolated struct AutoPlayCycle {
 
 /// 執行位的狀態。
 ///
-/// 取代原本的裸 `UUID?`：「有沒有動作在跑」與「跑到哪一階段」現在是同一個值，
-/// 而且只有 `occupy(...)` 能改它。
+/// 「有沒有動作在跑」與「跑到哪一階段」是同一個值，而且只有 `occupy(...)` 能改它。
 nonisolated enum AutoPlayExecutionState: Equatable {
     /// 沒有動作在跑，閘門可以放行
     case idle
@@ -95,7 +75,7 @@ nonisolated enum AutoPlayExecutionState: Equatable {
     case executing(id: UUID)
 }
 
-/// 局間確認一輪的結論（p2-5）
+/// 局間確認一輪的結論
 ///
 /// `nonisolated`：與 `AutoPlayCycleOutcome` 同理，測試端（沒開 MainActor 預設隔離）
 /// 拿它做 `XCTAssertEqual` 不該冒 isolation 告警。
@@ -108,9 +88,9 @@ nonisolated enum AutoConfirmCycleResult: Equatable {
     case skipped(AutoPlayGate.Reason)
     /// 真的走了送出流程，附 dispatcher 的結論
     case dispatched(AutoConfirmOutcome)
-    /// 已被伺服器受理（第 2 層），正在等權威 `ActionNewRound`（第 3 層）；這一輪不重送（p5 #3）
+    /// 已被伺服器受理（第 2 層），正在等權威 `ActionNewRound`（第 3 層）；這一輪不重送
     case awaitingRound
-    /// watchdog 重送用完仍等不到 `ActionNewRound`，放掉待確認避免自動打牌餓死（p5 #3）
+    /// watchdog 重送用完仍等不到 `ActionNewRound`，放掉待確認避免自動打牌餓死
     case abandoned
 }
 
@@ -123,14 +103,18 @@ final class AutoPlayEngine {
 
     /// 引擎每次要決策時，向外面問到的當下狀態。
     ///
-    /// 做成「一次取一份」而不是持有 `WebViewModel`：引擎不該知道 UI 的存在，
+    /// 做成「一次取一份」而不是持有 coordinator：引擎不該知道 UI 的存在，
     /// 而且每次重試都要拿**最新**的推薦（延遲期間模型可能已經重算）。
     struct Context {
         var mode: AutoPlayMode = .auto
         var recommendations: [Recommendation] = []
-        /// 自家座位（`WebViewModelProtocol.autoPlaySeat`，兩條 path 同一份定義）
+        /// 自家座位（`GameStore.autoPlaySeat`，兩條 path 同一份定義）
         var seat: Int = 0
         var isSanma: Bool = false
+        /// 這批推薦是否由雲端模型算出（`BotStatus.isCloudDecision`，每輪重取）
+        var cloudDecision: Bool = false
+        /// 雲端推論是否已設定啟用（設定層，局間確認用；見 `AutoPlayGate.allowsConfirm`）
+        var cloudInferenceActive: Bool = false
         /// 這一巡摸到的牌，用來判斷 moqie
         var tsumoTile: String?
         /// WebView 是否已就緒（正式路徑 `webPage != nil`）
@@ -142,7 +126,7 @@ final class AutoPlayEngine {
         /// 讓引擎持有 settings：引擎不認得 UI／設定物件，這是它能被單測的前提。
         var actionDelayScale: Double = 1.0
         /// `recommendations` 是針對哪一批 oplist 算的（`GameStore.recommendationsOplistSequence`）。
-        /// `.proceed` 用它確認推薦與當前決策機會同源；nil 代表推薦不綁任何 oplist（p5 #1）。
+        /// `.proceed` 用它確認推薦與當前決策機會同源；nil 代表推薦不綁任何 oplist。
         var recommendationsOplistSequence: UInt64?
     }
 
@@ -154,7 +138,7 @@ final class AutoPlayEngine {
     /// `nonisolated`：它是 `init` 的預設引數，而預設引數的運算式在 nonisolated
     /// 環境下檢查——不標的話 `.live` 會冒出 actor-isolation 告警。
     nonisolated struct Timing {
-        /// 輪詢間隔（原本的 `Timer.scheduledTimer(withTimeInterval: 1.0)`）
+        /// 輪詢間隔
         var poll: TimeInterval = 1.0
         /// 副露機會在多久之後才允許「因為沒推薦而自動送過」
         ///
@@ -172,7 +156,7 @@ final class AutoPlayEngine {
         /// 從 50（5 秒）降到 15（1.5 秒）：觸發點已經確認過 oplist 存在，
         /// 這裡要處理的只是短暫空窗，等 5 秒不會讓它比較可能消失。
         var maxAttempts: Int = 15
-        /// 打牌／副露／和牌送出後等同 msgId RESPONSE 的毫秒數（第 2 層驗證，見 p5-verify）。
+        /// 打牌／副露／和牌送出後等同 msgId RESPONSE 的毫秒數（第 2 層驗證）。
         /// 0＝只驗第 1 層（sendRaw）。正式路徑 800ms：實測 RESPONSE 約 100ms 到，800ms 有餘裕；
         /// 「送成功但伺服器拒絕（error 1004/1023/…）」不再被靜默當成功、能自動重送。
         var actionAwaitResponseMs: Int = 800
@@ -184,8 +168,8 @@ final class AutoPlayEngine {
         /// 送出前的模擬人類延遲；nil＝用 `ActionDelayModel`（正式路徑）。
         ///
         /// 第二個參數是使用者的延遲係數（`Context.actionDelayScale`）：seam 帶著它，
-        /// 測試才驗得到「引擎真的把 stepper 的值讀出來並往下傳」，而不是像 p1-3 那批
-        /// 假控制一樣寫進去沒人讀。正式路徑（nil）走 `ActionDelayModel.delay(for:scale:)`。
+        /// 測試才驗得到「引擎真的把 stepper 的值讀出來並往下傳」，而不是寫進去沒人讀的
+        /// 假控制。正式路徑（nil）走 `ActionDelayModel.delay(for:scale:)`。
         var actionDelay: ((Recommendation.ActionType?, Double) -> TimeInterval)?
 
         // MARK: 局間確認（confirmNewRound）
@@ -200,14 +184,14 @@ final class AutoPlayEngine {
         /// confirmNewRound 被伺服器受理（RESPONSE 無 error，第 2 層）之後，等權威
         /// `ActionNewRound`（第 3 層）到達的上限。逾時仍沒進下一局，就重送 confirmNewRound
         /// ——RESPONSE 可能假成功、或 hook 漏了那個 frame，沒有這道 watchdog 會整局卡在
-        /// 結算畫面、不重試也不 resync（p5 #3）。結算窗口有數十秒，這個上限給得寬。
+        /// 結算畫面、不重試也不 resync。結算窗口有數十秒，這個上限給得寬。
         var confirmAckWatchdog: TimeInterval = 6.0
-        /// watchdog 重送的次數上限（p5 #3 Codex 復核）。用完仍等不到 `ActionNewRound`
+        /// watchdog 重送的次數上限。用完仍等不到 `ActionNewRound`
         /// 就放掉 `confirmPending`——若瀏覽器其實已進下一局（我們漏收了 frame），繼續無限
         /// 重送會讓正常自動打牌被 confirm 永久餓死；放掉後自動打牌能對「實際正在進行的那局」
-        /// 恢復。若真的卡在結算，退回 p2-5 之前的基準（使用者自己點），不會更糟。
+        /// 恢復。若真的卡在結算，退回「使用者自己點確認」的基準，不會更糟。
         var confirmMaxWatchdogResends: Int = 3
-        /// 時鐘 seam（p5 #3 Codex 復核）：watchdog 的起算與比對都用它，測試可注入可控時鐘。
+        /// 時鐘 seam：watchdog 的起算與比對都用它，測試可注入可控時鐘。
         /// 用它而不是 runConfirmCycle 的入口時間——ack 實際發生在 grace + 送出 + 等 RESPONSE
         /// 之後，用入口時間當起算點會讓後段 attempt 成功時 watchdog 立刻誤判逾時。
         var clock: () -> Date = Date.init
@@ -258,13 +242,13 @@ final class AutoPlayEngine {
 
     /// confirmNewRound 已被伺服器受理（第 2 層）的時間；`ActionNewRound`（第 3 層）到達或
     /// 逾時前一直保留。nil＝尚未送出成功或已進下一局。`confirmPending && confirmAckedAt != nil`
-    /// 代表「已確認、等下一局」——這一段先前不存在，confirmed 就直接清 pending（p5 #3）。
+    /// 代表「已確認、等下一局」；confirmed 不可以直接清 pending，否則 watchdog 沒有起算點。
     private(set) var confirmAckedAt: Date?
 
-    /// 已 watchdog 重送幾次（p5 #3 Codex 復核）。到上限就放掉 pending，避免自動打牌餓死。
+    /// 已 watchdog 重送幾次。到上限就放掉 pending，避免自動打牌餓死。
     private var confirmWatchdogResends = 0
 
-    /// 是否已進入「ACK 逾時後的 recovery 模式」（p5 #3 Codex 二次復核）。
+    /// 是否已進入「ACK 逾時後的 recovery 模式」。
     /// 一旦第一次 ACK-timeout 就設 true，之後**每次** recovery dispatch（不論 confirmed
     /// 或 failed）都消耗 budget——否則 resend 一直回 .failed 時 confirmAckedAt 停在 nil，
     /// 永遠不進 watchdog 分支、counter 卡住、confirm 永久佔住 tick 讓自動打牌餓死。
@@ -324,9 +308,8 @@ final class AutoPlayEngine {
 
     /// 提早結束這次輪詢間隔。
     ///
-    /// 事件驅動的觸發（推薦更新／模式切換／手動觸發）不必等下一拍——
-    /// 這是原本「推薦更新直接呼叫 triggerAutoPlayIfNeeded」那條路的替代品，
-    /// 差別是它現在走**同一個**閘門與同一份去抖狀態。
+    /// 事件驅動的觸發（推薦更新／模式切換／手動觸發）不必等下一拍。
+    /// 叫醒之後仍走**同一個**閘門與同一份去抖狀態——事件源不可以自己繞過去直接送出。
     func wake() {
         wakeRequested = true
         nap?.cancel()
@@ -351,7 +334,7 @@ final class AutoPlayEngine {
         wake()
     }
 
-    // MARK: - 局間確認生命週期（p2-5）
+    // MARK: - 局間確認生命週期
 
     /// 一局結束（`ActionHule` / `ActionNoTile` / `ActionLiuJu` → `end_kyoku`）。
     ///
@@ -433,6 +416,7 @@ final class AutoPlayEngine {
         let gate = AutoPlayGate.evaluate(.init(
             isAutoMode: ctx.mode == .auto,
             isSanma: ctx.isSanma,
+            cloudDecision: ctx.cloudDecision,
             hasActionInFlight: state != .idle,
             snapshot: snapshot,
             recommendations: ctx.recommendations,
@@ -475,7 +459,7 @@ final class AutoPlayEngine {
             }
             // 推薦必須是針對「這一批 oplist」算出來的。推論是 async 的：新的決策機會
             // （新 snapshot）可能在舊推薦還沒被新推論取代前就到達，此時用舊推薦回應新
-            // 機會會送出不可逆的錯誤動作（p5 #1）。
+            // 機會會送出不可逆的錯誤動作。
             //
             // provenance（`recommendationsOplistSequence`）由 controller 在推薦真的刷新時綁定。
             // **只在有正面證據時才擋**：provenance 已知且比當前機會**舊**（更小的 sequence）＝
@@ -515,10 +499,10 @@ final class AutoPlayEngine {
             return finish(gate: nil, outcome: .notSent(reason: "web_view_not_ready"))
         }
 
-        // 三麻 fail-closed（與 `AutoPlayGate` / `AutoPlayDecisionResolver` 同一條規則）。
-        // 手動觸發不經閘門，所以要自己擋一次：內建模型只有四麻一份。
-        guard !ctx.isSanma else {
-            note("⏭️ 三麻對局：自動送出已停用（僅支援四麻）", to: .log)
+        // 三麻 fail-closed（同 `AutoPlayGate` 規則）。手動觸發不經閘門，
+        // 要自己擋一次；雲端 3p 決策放行。
+        guard !ctx.isSanma || ctx.cloudDecision else {
+            note("⏭️ 三麻對局：本批推薦來自本地四麻模型，自動送出停用（雲端推薦才放行）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "sanma_unsupported"))
         }
 
@@ -533,7 +517,7 @@ final class AutoPlayEngine {
             return finish(gate: nil, outcome: .notSent(reason: "no_oplist"))
         }
 
-        // 已知 stale 也要擋（p5 #1c Codex 復核）：推薦明確是為更早的機會（recSeq < snapshot）
+        // 已知 stale 也要擋：推薦明確是為更早的機會（recSeq < snapshot）
         // 算的，就算是手動／MCP `bot_trigger` 也不該把它套到新機會——那動作不可逆，
         // 而 bot_trigger 可能由自動化呼叫。nil provenance 仍放行（與 auto path 一致，
         // 不重現 strict 等號的 0 觸發），只擋有正面 stale 證據的。
@@ -560,7 +544,7 @@ final class AutoPlayEngine {
     /// `.confirmed`（第 2 層 RESPONSE 無 error）**不**清 pending，而是記 `confirmAckedAt`
     /// 進入「等下一局」狀態；`roundDidBegin` 到才真的清。若 `confirmAckWatchdog` 內
     /// `ActionNewRound` 仍沒到，重送 confirmNewRound（RESPONSE 可能假成功、或漏了 frame）——
-    /// 沒有這道 watchdog 會整局卡在結算畫面（p5 #3）。
+    /// 沒有這道 watchdog 會整局卡在結算畫面。
     @discardableResult
     func runConfirmCycle() async -> AutoConfirmCycleResult {
         guard confirmPending else { return .noPending }
@@ -577,10 +561,9 @@ final class AutoPlayEngine {
             confirmInRecovery = true
         }
 
-        // Recovery 模式：**每一次** dispatch 都消耗 budget，不論這次是 confirmed 還是 failed
-        // （p5 #3 Codex 二次復核）。先前只在「ACK 後再次逾時」才 +1，於是 resend 一直回
-        // .failed 時 confirmAckedAt 停在 nil、永遠不進 watchdog 分支、counter 卡在 1，confirm
-        // 永久佔住 tick 讓自動打牌餓死。改成「進入 recovery 後每次重送都算一次」即封住。
+        // Recovery 模式：**每一次** dispatch 都消耗 budget，不論這次是 confirmed 還是 failed。
+        // 改成只在「ACK 後再次逾時」才 +1 的話，resend 一直回 .failed 時 confirmAckedAt 停在
+        // nil、永遠不進 watchdog 分支、counter 卡在 1，confirm 會永久佔住 tick 讓自動打牌餓死。
         if confirmInRecovery {
             confirmWatchdogResends += 1
             if confirmWatchdogResends > timing.confirmMaxWatchdogResends {
@@ -602,7 +585,8 @@ final class AutoPlayEngine {
             return .notReady
         }
 
-        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode == .auto, isSanma: ctx.isSanma) {
+        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode == .auto, isSanma: ctx.isSanma,
+                                          cloudInferenceActive: ctx.cloudInferenceActive) {
         case .skip(let reason):
             // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。
             // 使用者在 `.off`/`.recommend`/三麻自己確認，ActionNewRound 到達會清 pending。
@@ -713,7 +697,8 @@ final class AutoPlayEngine {
                 recommendations: ctx.recommendations,
                 mode: ctx.mode,
                 seat: ctx.seat,
-                isSanma: ctx.isSanma)
+                isSanma: ctx.isSanma,
+                cloudDecision: ctx.cloudDecision)
 
             let action: Recommendation.ActionType
             let tile: String
@@ -737,7 +722,7 @@ final class AutoPlayEngine {
 
             note("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes) → \(action.rawValue)", to: .event)
 
-            // ③ 實際送出：7-case switch 與「成功才 markHandled」都在 executor（p2-1）
+            // ③ 實際送出：7-case switch 與「成功才 markHandled」都在 executor
             let result = await AutoPlayActionExecutor.execute(
                 action: action,
                 tile: tile,
@@ -790,7 +775,7 @@ final class AutoPlayEngine {
 
     /// 「模型判斷不做副露 → 主動送過」。
     ///
-    /// 送出與收工策略在 `AutoPassDispatcher`（p0-1）：**只有送出成功之後**才消化 oplist。
+    /// 送出與收工策略在 `AutoPassDispatcher`：**只有送出成功之後**才消化 oplist。
     private func sendPass(snapshot: LiqiOperationSnapshot,
                           channel: LiqiActionChannel,
                           gate: AutoPlayGate.Decision?) async -> AutoPlayCycle {
@@ -860,9 +845,9 @@ final class AutoPlayEngine {
         overrode = nil
     }
 
-    /// 上一次「沒送出」記過的原因——用來只在**原因變化時**記一次 log（p5-verify 教訓）。
-    /// 先前 skip 路徑刻意完全不記 log，導致「沒自動打」無從查（連 skip 原因都看不到，
-    /// 只能猜）。這裡在 finish() 這個唯一收尾點，把沒送出的原因去重後記進 events.log：
+    /// 上一次「沒送出」記過的原因——用來只在**原因變化時**記一次 log。
+    /// skip 路徑也要記 log，否則「沒自動打」無從查——連 skip 原因都看不到，只能猜。
+    /// 這裡在 finish() 這個唯一收尾點，把沒送出的原因去重後記進 events.log：
     /// 一秒一次的重複原因只會出現一行，卡住時能直接 grep 出「為什麼沒送」。
     private var lastNonSendReason: String?
 

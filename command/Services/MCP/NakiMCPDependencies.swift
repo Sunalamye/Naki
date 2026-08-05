@@ -2,20 +2,17 @@
 //  NakiMCPDependencies.swift
 //  Naki
 //
-//  p3-3：MCP 工具層的依賴表，一次注入。
+//  MCP 工具層的依賴表，一次注入。
 //
-//  取代先前那條四跳 closure 鏈（`WebViewModel` → `DebugServer` → `MCPHandler`
-//  → `DefaultNakiMCPContext` → tool）。每一跳都有一組 `var x: ((A) -> B)?`，
-//  中間兩層（DebugServer / MCPHandler）**只是轉發**——它們不使用那些 closure，
-//  只是把它們往下傳。九個欄位 × 三層轉發 = 27 行沒有語意的搬運，
-//  而且漏接任何一個都只在執行期以 `xxx_callback_not_configured` 現形。
+//  `NakiRuntime` 組出這一個 struct，`DebugServer.init` 吃它，工具經
+//  `DefaultNakiMCPContext` 讀它。DebugServer 只負責 HTTP（socket、路由、回應），
+//  MCPHandler 只負責 JSON-RPC，兩層都不轉發能力。
 //
-//  現在：view model 組出這一個 struct，`DebugServer.init` 吃它，工具經
-//  `DefaultNakiMCPContext` 讀它。DebugServer 從此只負責 HTTP（socket、路由、回應），
-//  MCPHandler 只負責 JSON-RPC。
+//  不要退回逐欄位的 `var x: ((A) -> B)?` 轉發鏈：漏接任何一個都不會編譯期報錯，
+//  只在執行期以 `xxx_callback_not_configured` 現形。
 //
 //  「狀態」與「副作用」在這裡是分開的兩種東西：
-//  - 狀態一律讀 `store`（`GameStore`，SwiftUI 與 MCP 同一份，p3-1）
+//  - 狀態一律讀 `store`（`GameStore`，SwiftUI 與 MCP 同一份）
 //  - 副作用一律走 Action（`NakiActions.swift`，可 stub）
 //
 
@@ -60,10 +57,6 @@ struct NakiMCPDependencies {
 
   /// Debug／MCP 這一層的訊息歸宿：**LogManager 一份**，外加狀態列。
   ///
-  /// 先前 `DebugServer.log()` 做 `bridgeLog` + `onStatusMessage?()`，
-  /// 而 `MCPHandler` 另外經 `context.logCallback` 繞回同一個方法。
-  /// 兩條路寫同一個地方，卻靠三個 closure 接起來。
-  ///
   /// `onStatusMessage` 不是第二條 log 通道——它只把最後一句話貼到畫面上
   /// （在這裡再呼叫一次 `bridgeLog` 就會恢復成每條訊息出現兩次）。
   func log(_ message: String) {
@@ -76,9 +69,9 @@ struct NakiMCPDependencies {
 
 /// 把 `GameStore` 攤成 MCP／HTTP 的 JSON 形狀。
 ///
-/// 這些是**導出值**不是狀態：先前它們是兩份手寫 closure（`WebViewModel` 與
-/// `LegacyWebViewModel` 各一份的 `debugServer?.getBotStatus`），兩份的
-/// `tsumoTile` 空值寫法還不一樣。收成一份之後可以被單測直接呼叫。
+/// 這些是**導出值**不是狀態，而且只有這一份：兩條 WebView path 共用它，
+/// 所以不會出現「同一個欄位兩邊空值寫法不一樣」這種只有 live 才看得出的漂移。
+/// 純函式，單測可以直接呼叫。
 @MainActor
 enum NakiStatePayload {
 
@@ -92,6 +85,9 @@ enum NakiStatePayload {
         // ＝對局事件正在送往該主機。純增量欄位，既有讀者不受影響。
         "decisionSource": store.botStatus.decisionSource,
         "cloudHost": store.botStatus.cloudHost ?? NSNull(),
+        // fallback 可視化（cloud-watch／agent 監看用）
+        "cloudDegraded": store.botStatus.cloudDegraded,
+        "cloudFallbackStreak": store.botStatus.cloudFallbackStreak,
       ],
       "gameState": [
         "bakaze": store.gameState.bakazeDisplay,

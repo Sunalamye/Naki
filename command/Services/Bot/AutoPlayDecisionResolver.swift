@@ -53,16 +53,21 @@ nonisolated struct AutoPlayDecisionResolver {
                         recommendations: [Recommendation],
                         mode: AutoPlayMode,
                         seat: Int,
-                        isSanma: Bool = false) -> AutoPlayDecision {
+                        isSanma: Bool = false,
+                        cloudDecision: Bool = false) -> AutoPlayDecision {
 
         // 三麻 fail-closed：自動模式降級成「只顯示、不送出」。
         //
         // bundled 模型只有四麻一份，三麻的 observation 佈局與動作空間都不同
-        // （MortalSwift p3-1：無三麻權重、無 775×34 encoder、無拔北槽位）。
+        // （MortalSwift 上游：無三麻權重、無 775×34 encoder、無拔北槽位）。
         // 推薦本身已經是無效輸出，讓它自動送出等於用亂數打牌。
         // 這裡刻意不整條 return `.none`：伺服器授權仍然要看得見，
         // 使用者可以自己決定要不要照做。
-        let effectiveMode: AutoPlayMode = (isSanma && mode == .auto) ? .recommend : mode
+        //
+        // 例外：`cloudDecision`（雲端 3p 算出的那一手）不降級，
+        // 規則見 `AutoPlayGate.Input.cloudDecision`。
+        let effectiveMode: AutoPlayMode =
+            (isSanma && !cloudDecision && mode == .auto) ? .recommend : mode
 
         // 缺少權威資料一律 fail closed。
         // 舊行為是「沒有 snapshot 時預設當自摸送出」，那等於在沒有伺服器授權的
@@ -135,6 +140,10 @@ nonisolated struct AutoPlayDecisionResolver {
             return snapshot.kanOperation != nil
         case .hora:
             return snapshot.horaOperation != nil
+        case .kita:
+            // 拔北（三麻）：oplist type 11（babei）。只有雲端 3p 模型會產出
+            // 這種推薦（本地 action space 46 沒有拔北槽位）。
+            return snapshot.contains(.babei)
         case .none:
             // 「過」永遠可以送（前提是這批確實是副露機會）
             return snapshot.isCallOpportunity
