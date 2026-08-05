@@ -12,9 +12,9 @@
 //          → base64
 //          → window.__nakiWebSocket.sendRaw(base64)   // 已實測可送出
 //
-//  p4-2 之前本檔還兼著牌碼轉換（→ `LiqiTile.swift`）、請求組裝
-//  （→ `LiqiRequestBuilder.swift`）與 MCP 呈現層（→ `Services/MCP/LiqiToolResult.swift`）。
-//  拆開之後這一層不再呼叫任何全域 log 函式：要寫 log 的呼叫端自己注入 `logHandler`。
+//  這一層不呼叫任何全域 log 函式：要寫 log 的呼叫端自己注入 `logHandler`。
+//  牌碼轉換在 `LiqiTile.swift`、請求組裝在 `LiqiRequestBuilder.swift`、
+//  MCP 呈現層在 `Services/MCP/LiqiToolResult.swift`，都不屬於本檔。
 //
 //  ## msgId → method 對照表只有一份
 //
@@ -22,7 +22,7 @@
 //  唯一的來源是 `LiqiParser.pendingRequests`：Naki 送出的 frame 會經過 JS 端
 //  `ws.send` 的 hook 回到 `MajsoulBridge.parseRaw`，所以自送請求與遊戲自己的請求
 //  都在那一份表裡（`LiqiResponseStore` 正是靠它拿到方法名）。
-//  以前這裡另存一份，卻沒有任何讀取端使用它來配對回應——只是一個會漂的第二份事實。
+//  在這裡另存一份不會有任何讀取端用它配對回應，只會多一份會漂的事實。
 //
 
 import Foundation
@@ -86,14 +86,7 @@ final class LiqiActionSender {
         self.sendHandler = sendHandler
     }
 
-    /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）。
-    ///
-    /// ⚠️ 「不寫 deinit 就沒有 isolated deinit」是**錯的**：`SWIFT_DEFAULT_ACTOR_ISOLATION
-    /// = MainActor` 下，即使不寫 deinit，編譯器仍會合成一個 **isolated** `__deallocating_deinit`。
-    /// 當本類別被 `AutoPlayEngine`（`nonisolated deinit`）之類的 owner 傳遞釋放時，
-    /// 那個 isolated deinit 會走 `swift_task_deinitOnExecutorImpl` → `pointer being freed
-    /// was not allocated` 打掉 test host（p2-5 的 confirmNewRound 單測第一次踩到，因為引擎
-    /// 成了 sender 的唯一 owner）。補一行 `nonisolated deinit {}` 換掉合成的 isolated 版本。
+    /// MainActor class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit {}
 
     // MARK: - 核心送出
@@ -126,128 +119,11 @@ final class LiqiActionSender {
 
     // MARK: - ② 動作層 API
 
-    /// 打牌
-    /// - Parameter tile: **雀魂格式**（`5m` / `0m` / `1z`）
-    @discardableResult
-    func discard(tile: String, moqie: Bool, timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.discard(tile: tile, moqie: moqie, timeuse: timeuse))
-    }
-
-    /// 立直（需附帶要打出的牌，雀魂格式）
-    @discardableResult
-    func riichi(tile: String, moqie: Bool = false, timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.riichi(tile: tile, moqie: moqie, timeuse: timeuse))
-    }
-
-    /// 吃（index 為 oplist combination 的索引）
-    @discardableResult
-    func chi(index: UInt32, timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.chi(index: index, timeuse: timeuse))
-    }
-
-    /// 碰
-    @discardableResult
-    func pon(index: UInt32 = 0, timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.pon(index: index, timeuse: timeuse))
-    }
-
-    /// 槓（暗槓 / 加槓 / 大明槓由 type 決定走哪個方法）
-    @discardableResult
-    func kan(type: LiqiOperationType, index: UInt32 = 0, tile: String? = nil,
-             timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.kan(type: type, index: index, tile: tile, timeuse: timeuse))
-    }
-
-    /// 自摸和
-    @discardableResult
-    func tsumo(timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.tsumo(timeuse: timeuse))
-    }
-
-    /// 榮和
-    @discardableResult
-    func ron(timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.ron(timeuse: timeuse))
-    }
-
-    /// 九種九牌
-    @discardableResult
-    func kyushu(timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.kyushu(timeuse: timeuse))
-    }
-
-    /// 拔北（三麻）
-    @discardableResult
-    func babei(timeuse: UInt32 = 0) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.babei(timeuse: timeuse))
-    }
-
     /// 跳過（cancel_operation = true）
     /// - Parameter channel: 預設 `.chiPengGang`（跳過的情境幾乎都是回應他家打牌）
     @discardableResult
     func pass(channel: LiqiActionChannel = .chiPengGang, timeuse: UInt32 = 0) async -> LiqiSendResult {
         await send(LiqiRequestBuilder.cancel(channel: channel, timeuse: timeuse))
-    }
-
-    // MARK: - ③ 大廳層 API
-
-    /// 建立好友房
-    @discardableResult
-    func createFriendRoom(config: LiqiFriendRoomConfig) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.createRoom(config: config))
-    }
-
-    /// 建立好友房（常用參數版）
-    @discardableResult
-    func createFriendRoom(playerCount: Int = 4,
-                          mode: UInt32 = 1,
-                          timeFixed: UInt32 = 60,
-                          timeAdd: UInt32 = 5,
-                          aiLevel: UInt32? = nil,
-                          enableAI: Bool = false,
-                          publicLive: Bool = false,
-                          clientVersionString: String = "") async -> LiqiSendResult {
-        var config = LiqiFriendRoomConfig()
-        config.playerCount = UInt32(max(0, playerCount))
-        config.mode = mode
-        config.timeFixed = timeFixed
-        config.timeAdd = timeAdd
-        config.aiLevel = aiLevel
-        config.enableAI = enableAI
-        config.publicLive = publicLive
-        config.clientVersionString = clientVersionString
-        return await createFriendRoom(config: config)
-    }
-
-    /// 加機器人到指定座位
-    @discardableResult
-    func addRobot(position: UInt32) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.addRoomRobot(position: position))
-    }
-
-    /// 開始對局
-    @discardableResult
-    func startRoom() async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.startRoom())
-    }
-
-    /// 加入房間
-    @discardableResult
-    func joinRoom(roomId: UInt32, clientVersionString: String = "") async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.joinRoom(roomId: roomId,
-                                               clientVersionString: clientVersionString))
-    }
-
-    /// 離開房間
-    @discardableResult
-    func leaveRoom() async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.leaveRoom())
-    }
-
-    /// 查詢目前房間
-    @discardableResult
-    func fetchRoom() async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.fetchRoom())
     }
 
     // MARK: - 送出 + 等待回應
@@ -279,38 +155,7 @@ final class LiqiActionSender {
                                    response: LiqiResponseStore.shared.response(forMsgId: result.msgId))
     }
 
-    // MARK: - ③ 大廳層：匹配 / 帳號 / 保活 API
-
-    /// 段位場排隊
-    @discardableResult
-    func matchGame(matchMode: UInt32, clientVersionString: String = "") async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.matchGame(matchMode: matchMode,
-                                                clientVersionString: clientVersionString))
-    }
-
-    /// 取消排隊
-    @discardableResult
-    func cancelMatch(matchMode: UInt32) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.cancelMatch(matchMode: matchMode))
-    }
-
-    /// 查詢帳號資訊（account_id 必填）
-    @discardableResult
-    func fetchAccountInfo(accountId: UInt32) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.fetchAccountInfo(accountId: accountId))
-    }
-
-    /// 查詢目前對局／房間狀態
-    @discardableResult
-    func fetchGamingInfo() async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.fetchGamingInfo())
-    }
-
-    /// 查詢伺服器時間
-    @discardableResult
-    func fetchServerTime() async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.fetchServerTime())
-    }
+    // MARK: - 保活
 
     /// 大廳心跳（防閒置）
     @discardableResult
@@ -321,18 +166,6 @@ final class LiqiActionSender {
             heartbeatCount += 1
         }
         return result
-    }
-
-    /// 登入保活
-    @discardableResult
-    func loginBeat(contract: String) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.loginBeat(contract: contract))
-    }
-
-    /// 對局內廣播表情
-    @discardableResult
-    func sendEmoji(emoId: Int, exceptSelf: Bool = false) async -> LiqiSendResult {
-        await send(LiqiRequestBuilder.emoji(emoId: emoId, exceptSelf: exceptSelf))
     }
 
     // MARK: - 防閒置（自動心跳）

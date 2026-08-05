@@ -1,6 +1,6 @@
 //
 //  LiqiParser.swift
-//  akagi
+//  Naki
 //
 //  Created by Suoie on 2025/11/30.
 //  雀魂 Protobuf 消息解析器 - 純 Swift 實現
@@ -21,7 +21,7 @@ private let xorKeys: [UInt8] = [0x84, 0x5e, 0x4e, 0x42, 0x39, 0xa2, 0x1f, 0x60, 
 /// bytes 的 hex 前綴（診斷用）。
 ///
 /// **一律寫在 log 呼叫的括號裡面**：`liqiLog` 收 `@autoclosure`，trace 關掉時
-/// 這個函式根本不會被呼叫。寫在呼叫之前先算好（p4-3 之前的寫法）就沒有這個保護——
+/// 這個函式根本不會被呼叫。寫在呼叫之前先算好就沒有這個保護——
 /// 每個 ActionPrototype 都會白做兩次 30 byte 的 `String(format:)` 迴圈。
 func liqiHexPreview(_ data: Data, limit: Int = 30, separator: String = " ") -> String {
     let head = data.prefix(limit).map { String(format: "%02x", $0) }.joined(separator: separator)
@@ -51,7 +51,7 @@ func liqiDecode(_ data: Data) -> Data {
 
 /// 雀魂協議解析器
 ///
-/// ## p4-1：失敗不再偽裝成資料
+/// ## 失敗不偽裝成資料
 ///
 /// 解不開的欄位一律**不寫進結果**，同時往 `faults` 記一筆帶上下文的
 /// `LiqiParseFault`（解析點、liqi.json 欄位編號、bytes 長度、原因）。
@@ -67,8 +67,6 @@ class LiqiParser {
     /// 送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.parseRaw`，
     /// 所以遊戲自己送的與 Naki 自己送的（msgId 60000+）都會登記在這裡；
     /// `LiqiResponseStore` 拿得到方法名正是因為如此。
-    /// p4-2 之前 `LiqiActionSender` 另存一份 `pendingMethods`，沒有任何配對路徑
-    /// 讀它——只是第二份會漂的事實，已刪除。
     private var pendingRequests: [Int: String] = [:]
 
     /// 當前消息 ID
@@ -1303,13 +1301,10 @@ class LiqiParser {
         return op
     }
 
-    // `parseTileList` 已於 p4-1 刪除。
-    //
-    // 它做三層 heuristic：短 bytes 直接當字串 → 拆 protobuf blocks → 逐 byte 掃 ASCII
-    // 找 `[0-9][mpsz]`。三層都是在猜格式，而 `docs/protocol/liqi.json` 早就寫清楚
-    // 這些欄位是 `repeated string`——一個 block 就是一張牌。逐 byte 掃描最糟：
+    // tiles／hands／doras 一律照 `docs/protocol/liqi.json` 逐 block 解
+    // （這些欄位是 `repeated string`，一個 block 就是一張牌），解不出來就記 fault。
+    // 不要退回猜格式的 heuristic，尤其是逐 byte 掃 ASCII 找 `[0-9][mpsz]`：
     // 任何一段二進位資料都可能「掃出」幾張牌，掃出來的東西與真手牌無法區分。
-    // 現在 tiles／hands／doras 一律照 schema 逐 block 解，解不出來就記 fault。
 
     /// 檢查字符串是否為有效的牌表示
     private func isTileString(_ str: String) -> Bool {

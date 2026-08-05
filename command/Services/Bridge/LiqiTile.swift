@@ -4,15 +4,11 @@
 //
 //  牌的表示法：雀魂 ⇄ MJAI 的轉換，以及 MJAI 的排序。
 //
-//  ## p4-2：轉換與排序各只剩一份
+//  ## 轉換與排序各只有一份
 //
-//  以前牌碼轉換有兩份（`MajsoulBridge.MS_TILE_TO_MJAI` 這張 37 項字典 +
-//  `LiqiTileCode` 的規則式轉換），排序表另外硬編在 `MajsoulBridge.comparePai`。
-//  兩份轉換規則沒有任何測試證明它們一致——`MS_TILE_TO_MJAI` 是查表（漏一個 key
-//  就回 nil），`LiqiTileCode` 是規則（多接受了幾種寫法），差異只會在真的遇到
-//  邊界牌碼時才暴露，而那時看到的症狀是「某張牌的推薦沒出現」。
-//
-//  現在只有本檔知道牌長什麼樣。
+//  牌長什麼樣、怎麼排，全專案只有本檔知道。另立第二份（例如一張查表 + 一份規則式
+//  轉換）沒有任何測試能證明兩者一致：查表漏一個 key 就回 nil、規則式多接受幾種寫法，
+//  差異只會在真的遇到邊界牌碼時才暴露，而那時看到的症狀是「某張牌的推薦沒出現」。
 //
 //  ## 兩套表示法
 //
@@ -106,8 +102,4 @@ nonisolated enum LiqiTile {
         (mjaiOrderIndex[a] ?? mjaiOrder.count) < (mjaiOrderIndex[b] ?? mjaiOrder.count)
     }
 
-    /// 依 `mjaiOrder` 排序
-    static func sorted(_ tiles: [String]) -> [String] {
-        tiles.sorted(by: compare)
-    }
 }

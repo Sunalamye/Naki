@@ -26,7 +26,7 @@ class MJAIEventStream {
 
     /// 消費者世代編號：每次 `startConsumer` 建新 Task 就 +1
     ///
-    /// #p0-4: 舊 task 結束時的清理閉包（`consumerTask = nil`）是排在 MainActor 上**之後**才跑的。
+    /// 舊 task 結束時的清理閉包（`consumerTask = nil`）是排在 MainActor 上**之後**才跑的。
     /// 連續兩次 `startConsumer` 時，第一次的 task 因 `continuation.finish()` 結束，它的清理
     /// 排在第二次 `startConsumer` 返回之後 → 把**新** task 的引用清成 nil。
     /// 新 task 不會因為失去引用而取消（Task 不是 refcount 驅動的），於是後續
@@ -39,7 +39,7 @@ class MJAIEventStream {
 
     /// 目前是否有被追蹤（因此 `stopConsumer()` 真的能取消）的 consumer
     ///
-    /// 這是 p0-4 的可觀測不變式：`startConsumer` 之後必須是 true，
+    /// 這是可觀測的不變式：`startConsumer` 之後必須是 true，
     /// 而且不能被上一代 task 的清理閉包在事後打成 false。
     var hasActiveConsumer: Bool { consumerTask != nil }
 
@@ -56,11 +56,7 @@ class MJAIEventStream {
     /// 事件歷史數量
     var eventCount: Int { eventHistory.count }
 
-    /// deinit 標 `nonisolated`——理由與 `NativeBotController`／`GameStore` 同一條：
-    /// app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，MainActor 隔離的 class
-    /// 連隱含 deinit 都走 `swift_task_deinitOnExecutor`；在 NakiTests 的 host 進程裡釋放
-    /// 這種物件會 `pointer being freed was not allocated` 而 SIGABRT，整個 test host 掛掉重啟。
-    /// 本 class 的 deinit 不需要碰 MainActor 狀態。
+    /// MainActor class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit { }
 
     // MARK: - Game Lifecycle
@@ -127,10 +123,10 @@ class MJAIEventStream {
         print("[MJAIEventStream] 啟動消費者, 有 \(historySnapshot.count) 個歷史事件")
 
         // 3. 創建新的 AsyncStream
-        // #5: 用 makeStream 同步取得 continuation，避免以往在 build 閉包內把 continuation
-        //     指派丟進延遲的 Task { @MainActor }。那個跨 Task hop 會讓 startConsumer 返回到
-        //     該 Task 執行之間的 emit() yield 到舊/nil continuation → 消費者啟動後最初幾個 live
-        //     事件遺失。這裡在 @MainActor 上同步保存 continuation，emit() 立即可用、不漏事件。
+        //    用 makeStream 同步取得 continuation。若改成在 build 閉包裡把 continuation 指派
+        //    丟進 Task { @MainActor }，那個跨 Task hop 會讓「startConsumer 返回」到「該 Task
+        //    執行」之間的 emit() yield 到舊/nil continuation → 消費者啟動後最初幾個 live 事件
+        //    遺失。在 @MainActor 上同步保存 continuation，emit() 立即可用、不漏事件。
         let (stream, continuation) = AsyncStream<[String: Any]>.makeStream()
 
         // 先 yield 所有歷史事件（消費者啟動後會依序重放）
@@ -142,7 +138,7 @@ class MJAIEventStream {
         self.continuation = continuation
 
         // 4. 啟動新的消費者 Task
-        //    #p0-4: 先取新世代編號並讓 Task 捕獲它；清理時只有「還是這一代」才把
+        //    先取新世代編號並讓 Task 捕獲它；清理時只有「還是這一代」才把
         //    consumerTask 清成 nil，否則上一代的清理會誤殺剛建好的這一代。
         consumerGeneration &+= 1
         let generation = consumerGeneration
@@ -196,7 +192,7 @@ class MJAIEventStream {
         return nil
     }
 
-    /// #3: 獲取 start_game 事件中的三麻旗標（用於重連重建時保持一致；預設四麻）
+    /// 獲取 start_game 事件中的三麻旗標（用於重連重建時保持一致；預設四麻）
     func getIs3P() -> Bool {
         for event in eventHistory {
             if (event["type"] as? String) == "start_game" {

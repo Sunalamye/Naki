@@ -14,9 +14,8 @@ import MCPKit
 
 /// 把 JSON-RPC 回應交回 HTTP 那一層。
 ///
-/// p3-3 之前這是 `var sendResponse: ((NWConnection, Int, String, String) -> Void)?`
-/// ——一個「一定會被設定、沒設定就整個 MCP 靜默失效」的 optional closure。
-/// 改成協定之後，`MCPHandler` 沒有 responder 就建不起來。
+/// 做成協定而不是 optional closure：`MCPHandler` 沒有 responder 就建不起來。
+/// 換回「一定會被設定」的 `var` closure，漏設定會讓整個 MCP 靜默失效。
 @MainActor
 protocol MCPHTTPResponder: AnyObject {
     func sendMCPResponse(connection: NWConnection, status: Int, body: String, contentType: String)
@@ -39,7 +38,7 @@ final class MCPHandler {
     // MARK: - Initialization
 
     /// - Parameters:
-    ///   - dependencies: MCP 工具層的全部能力（p3-3：一次注入，取代 9 個 closure）
+    ///   - dependencies: MCP 工具層的全部能力（一次注入）
     ///   - responder: 把回應寫回 socket 的那一層
     init(dependencies: NakiMCPDependencies, responder: MCPHTTPResponder) {
         self.context = DefaultNakiMCPContext(dependencies: dependencies)
@@ -92,13 +91,28 @@ final class MCPHandler {
     /// `initialize` 的回應內容。
     ///
     /// 抽成 static 是為了讓「serverInfo.version == App 版本」可以被單測比對，
-    /// 不必起一個真的 server。版本讀 `NakiAppVersion`——先前寫死 `2.1.0`，
-    /// App 早就是 2.6.0，MCP client 拿到的版本是假的。
+    /// 不必起一個真的 server。版本一律讀 `NakiAppVersion`；寫死字串的話 MCP client
+    /// 拿到的版本會在下次升版時默默變成假的。
     ///
     /// 內容本身已搬到 `NakiMCPProtocol`（協定語意的單一來源），這裡保留同名
     /// 入口讓既有呼叫端與測試不必跟著改。
     nonisolated static func initializeResult(requestedVersion: String? = nil) -> [String: Any] {
         NakiMCPProtocol.initializeResult(requestedVersion: requestedVersion)
+    }
+
+    /// 參數落 log 前遮蔽憑證值——`lobby_login_beat` 的 contract 曾原文
+    /// 進 `all.log`（CLAUDE.md：不得提交 credential）
+    nonisolated static let sensitiveArgKeys: Set<String> = [
+        "contract", "token", "secret", "password", "apiKey"
+    ]
+
+    nonisolated static func loggableArgs(_ arguments: [String: Any]) -> String {
+        let parts = arguments.keys.sorted().map { key -> String in
+            guard sensitiveArgKeys.contains(key) else { return "\(key): \(arguments[key]!)" }
+            let length = (arguments[key] as? String)?.count ?? 0
+            return "\(key): <redacted \(length) chars>"
+        }
+        return "[\(parts.joined(separator: ", "))]"
     }
 
     /// 執行工具並回覆
@@ -107,7 +121,7 @@ final class MCPHandler {
                          id: Any?,
                          era: NakiMCPProtocol.Era,
                          connection: NWConnection) {
-        context.log("MCP tools/call: \(name) with args: \(arguments)")
+        context.log("MCP tools/call: \(name) with args: \(Self.loggableArgs(arguments))")
 
         Task {
             let result = await MCPToolRegistry.shared.execute(
@@ -141,7 +155,7 @@ final class MCPHandler {
     ///   - arguments: 工具參數
     ///   - completion: 完成回調，返回 MCPToolResult
     func callTool(name: String, arguments: [String: Any] = [:], completion: @escaping (MCPToolResult) -> Void) {
-        context.log("callTool: \(name) with args: \(arguments)")
+        context.log("callTool: \(name) with args: \(Self.loggableArgs(arguments))")
 
         Task {
             let result = await MCPToolRegistry.shared.execute(
@@ -154,11 +168,6 @@ final class MCPHandler {
                 completion(result)
             }
         }
-    }
-
-    /// 構建 Help 內容（向後兼容 HTTP `/help`；與 `get_help` 共用同一份內容）
-    func buildHelpContent() -> [String: Any] {
-        NakiHelpContent.build(serverPort: serverPort)
     }
 
     // MARK: - Response Methods
@@ -203,11 +212,4 @@ final class MCPHandler {
                 contentType: "application/json")
         }
     }
-}
-
-// MARK: - Backwards Compatibility
-
-extension MCPHandler {
-    /// 舊版 ToolResult 類型別名（向後兼容）
-    typealias ToolResult = MCPToolResult
 }

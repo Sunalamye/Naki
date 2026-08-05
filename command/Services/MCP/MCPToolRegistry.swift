@@ -13,6 +13,11 @@ import MCPKit
 
 /// MCP 工具註冊表
 /// 管理所有已註冊的工具，提供工具查找和定義生成
+///
+/// ⚠️ 這是 MCPKit 同名 `public` 類別的 fork。App module 內的宣告會**遮蔽**上游那一份，
+/// 所以 `import MCPKit` 之下所有不加模組前綴的 `MCPToolRegistry` 都指向本檔。
+/// 唯一的實質差異是 `allToolDefinitions()` 多回一個 `outputSchema` 欄位；
+/// 其餘照抄上游。要改行為就改這裡，改上游不會生效。
 final class MCPToolRegistry {
 
     /// 單例
@@ -167,7 +172,7 @@ extension MCPToolRegistry {
     ///   `show_recommendations` / `hide_highlight`（2026-08-02 移除）：
     ///   6 個固定回 unavailable 的相容失敗樁。它們的參數契約源自 Laya 牌物件，
     ///   從來沒有接到現行的 `window.__nakiHighlight` WebGL hook，也不打算接——
-    ///   App 內建的自動推薦高亮由 `WebViewModel.syncGameHighlight()` 直接驅動，
+    ///   App 內建的自動推薦高亮由 `WebSession.syncHighlight()` 直接驅動，
     ///   MCP 不需要第二個入口。留著只是讓 `tools/list` 多 6 個永遠失敗的工具，
     ///   還會讓人誤以為「Unity 下高亮不可能」。推薦資料請讀 `bot_status` / `game_hand`。
     func registerBuiltInTools() {
@@ -195,7 +200,7 @@ extension MCPToolRegistry {
         register(GameDiscardTool.self)
         register(GameActionTool.self)
         register(GameActionVerifyTool.self)
-        // 局間確認 / 投票結束（p2-5）— 都送 .lq.FastTest.* 走 game-gateway
+        // 局間確認 / 投票結束 — 都送 .lq.FastTest.* 走 game-gateway
         register(GameConfirmNewRoundTool.self)
         register(GameVoteEndTool.self)
 

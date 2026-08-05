@@ -19,14 +19,13 @@ enum AutoPassOutcome: Equatable {
 
 /// 送出「過」，並且**只在送出成功之後**才消化 oplist。
 ///
-/// 這段原本直接寫在 `WebViewModel.checkAndRetriggerAutoPlay` 的 `.sendPass` 分支，
-/// 順序是「先 `markHandled` 再 `await pass()`」。只要送出失敗（沒有 game-gateway、
-/// JS 端沒有 OPEN 的雀魂連線、`callJavaScript` 丟例外），這批機會就在**沒有送出
-/// 任何 request** 的情況下被消化掉，重試框架再也看不到它，對局只能等伺服器
-/// 逾時代打。和牌路徑早就改成「成功才收工」，這裡補上同一個語意。
+/// 順序不可以顛倒成「先 `markHandled` 再 `await pass()`」：只要送出失敗（沒有
+/// game-gateway、JS 端沒有 OPEN 的雀魂連線、`callJavaScript` 丟例外），這批機會就在
+/// **沒有送出任何 request** 的情況下被消化掉，引擎再也看不到它，對局只能等伺服器
+/// 逾時代打。和牌路徑是同一個語意。
 ///
-/// 抽成獨立型別的理由是**可單測**：`WebViewModel` 要有 WebPage 和整套 UI，
-/// 測試裡建不出來。把送出通道、oplist 儲存體、「是否仍是當前執行」全部做成參數後，
+/// 做成無依賴的獨立型別是為了**可單測**。
+/// 把送出通道、oplist 儲存體、「是否仍是當前執行」全部做成參數後，
 /// 「失敗保留 pending、成功才 handled」就有機械驗收依據。
 enum AutoPassDispatcher {
 

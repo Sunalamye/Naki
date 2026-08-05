@@ -4,18 +4,10 @@
 //
 //  WebSocket → MJAI → Bot → `GameStore` 這條線的協調器。
 //
-//  p3-4 的兩個改動：
-//
-//  1. **不再持有 view model。** 先前是 `weak var viewModel: WebViewModel?`，
-//     所有狀態寫入都經 `viewModel?.store.xxx`，bot 生命週期則是
-//     `viewModel?.createNativeBot(...)` / `viewModel?.deleteNativeBot()`
-//     ——view model 在中間只做轉發，卻讓「誰擁有 bot」這件事變成 optional chain。
-//     現在 coordinator 直接持有 `NativeBotController`、直接寫 `GameStore`。
-//  2. **兩條 WebView path 共用同一份。** 先前 `NakiWebCoordinator`（WebPage）與
-//     `LegacyWebViewCoordinator`（WKWebView）各抄一份 MJAI pipeline，
-//     差別只有 log 前綴、`is3P` 的取法（一份讀 bridge 帶下來的旗標、
-//     一份自己數 `names.count`）與少了 `systemLog`。抄兩份的代價是
-//     「哪一份先修好」——p2-2 才剛把 `SerialEventIntake` 補到 Legacy 上。
+//  兩條 WebView path（WebPage / WKWebView）共用這一份 MJAI pipeline，而且
+//  coordinator 直接持有 `NativeBotController`、直接寫 `GameStore`，中間沒有轉發層。
+//  在這裡加 path-specific 分支（log 前綴、`is3P` 的取法、要不要 `systemLog`）
+//  就會退回「同一個 bug 存在兩份、而且只會修好其中一份」。
 //
 
 import Foundation
@@ -23,8 +15,7 @@ import MortalSwift
 
 /// Bot 有新結果時要被通知的一方（正式路徑是 `NakiRuntime`：同步高亮 + 叫醒引擎）。
 ///
-/// 用協定而不是 closure：coordinator 不該認得 `WebSession` 或 `AutoPlayEngine`
-/// （它已經因為持有 view model 而認得過一次整個 App）。
+/// 用協定而不是 closure：coordinator 不該認得 `WebSession` 或 `AutoPlayEngine`。
 @MainActor
 protocol BotResponseObserving: AnyObject {
     /// 模型剛跑完推論，快照已經寫進 `GameStore`
@@ -32,7 +23,7 @@ protocol BotResponseObserving: AnyObject {
     /// Bot 被刪除，本局資料已清空
     func botDidReset()
 
-    // 對局流程生命週期（p2-5）：coordinator 看到 MJAI 事件邊界時通知，
+    // 對局流程生命週期：coordinator 看到 MJAI 事件邊界時通知，
     // `NakiRuntime` 轉給 `AutoPlayEngine` 決定要不要自動送 confirmNewRound。
     /// 一局結束（`end_kyoku`：ActionHule / ActionNoTile / ActionLiuJu）
     func roundDidEnd()
@@ -40,13 +31,6 @@ protocol BotResponseObserving: AnyObject {
     func roundDidBegin()
     /// 整場對局結束（`end_game`：NotifyGameEndResult / NotifyGameTerminate）
     func gameDidEnd()
-}
-
-/// 生命週期回調預設 no-op：只有需要接自動確認的一方（`NakiRuntime`）才實作。
-extension BotResponseObserving {
-    func roundDidEnd() {}
-    func roundDidBegin() {}
-    func gameDidEnd() {}
 }
 
 /// WebSocket → MJAI → Bot → `GameStore`。
@@ -153,7 +137,7 @@ final class NakiWebCoordinator {
     func process(event: [String: Any]) async throws -> [String: Any]? {
         // event 帶著它那批 oplist 的 sequence（MajsoulBridge 在 parse 時標的）。
         // react 內部會在推薦真的刷新時把它綁到 controller.lastRecommendationsOplistSequence，
-        // GameStore.apply 再從 controller 讀——所以這裡不需要自己傳 sequence（p5 #1）。
+        // GameStore.apply 再從 controller 讀——所以這裡不需要自己傳 sequence。
         let response = try await bot.react(event: event)
 
         // 一次寫完整份快照（`GameStore.apply` 是牌局資料唯一的寫入點）。
@@ -183,7 +167,7 @@ final class NakiWebCoordinator {
             }
 
             // 三麻旗標：優先用 bridge 依 seatList 判定後帶下來的 `is3P`；
-            // 沒有的話退回數 `names`（Legacy 協調器先前唯一的判法）。
+            // 沒有的話退回數 `names`。
             let is3P = (event["is3P"] as? Bool) ?? ((event["names"] as? [String])?.count == 3)
 
             bridgeLog("[協調器] start_game: 為玩家 \(playerId) 開始新遊戲 (is3P=\(is3P))")

@@ -4,7 +4,7 @@
 //
 //  局間結算 → 送 `confirmNewRound` 的送出與收工策略。
 //
-//  背景（p2-5）：對局跑到局間結算會停在結算窗口等人點確認，整局無法自動打完。
+//  背景：對局跑到局間結算會停在結算窗口等人點確認，整局無法自動打完。
 //  舊實作（note/dev-notes/2025-12-03-auto-confirm-game-end.md）靠點 Laya 的
 //  `uiscript.UI_GameEnd` 按鈕——Unity WebGL 下 `uiscript` 不存在，整條已死。
 //  協定層的正解是送 `.lq.FastTest.confirmNewRound`（`ReqCommon`，空 payload）。
@@ -86,7 +86,7 @@ enum AutoConfirmDispatcher {
             if let sent = outcome.sent, sent.success {
                 if let response = outcome.response {
                     if !response.hasError {
-                        // p5 #5：`send()` 的 await 期間對局可能已結束（`gameDidEnd` 清了
+                        // `send()` 的 await 期間對局可能已結束（`gameDidEnd` 清了
                         // pending）或下一局已由別的路徑開始。此時 RESPONSE 雖然無 error，
                         // 也不能當成「我這次確認推進了下一局」——那會讓狀態機基於誤判收工。
                         // 在途的 bytes 收不回（grace 已把機率壓到很低），但至少不誤認。

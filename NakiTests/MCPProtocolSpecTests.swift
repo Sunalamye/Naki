@@ -540,6 +540,21 @@ final class MCPProtocolSpecTests: XCTestCase {
         }
     }
 
+    // MARK: - 參數落 log 遮蔽
+
+    /// `lobby_login_beat` 的 contract 是登入憑證，不得原文進 all.log
+    func testToolCallLogMasksCredentialArguments() {
+        let line = MCPHandler.loggableArgs(["contract": "AAAA-SECRET-BBBB", "type": 8])
+        XCTAssertFalse(line.contains("AAAA-SECRET-BBBB"))
+        XCTAssertTrue(line.contains("contract: <redacted 16 chars>"))
+        XCTAssertTrue(line.contains("type: 8"))
+    }
+
+    func testLoggableArgsKeepsNonSensitiveArgsVerbatim() {
+        XCTAssertEqual(MCPHandler.loggableArgs([:]), "[]")
+        XCTAssertEqual(MCPHandler.loggableArgs(["code": "abc"]), "[code: abc]")
+    }
+
     // MARK: - Helper
 
     private func modernBody(method: String) -> String {

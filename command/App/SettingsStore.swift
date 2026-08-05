@@ -2,12 +2,10 @@
 //  SettingsStore.swift
 //  Naki
 //
-//  p3-4：使用者設定的單一持有者（`NakiEnvironment.settings`）。
+//  使用者設定的單一持有者（`NakiEnvironment.settings`）。
 //
-//  先前這些值散在三處：`UserDefaults.standard` 的字串 key（兩個 view model 各寫一次）、
-//  View 的 `@AppStorage("HidePlayerNames")`、以及「這條 path 支不支援自動送出」
-//  這種只有 view model 知道的能力旗標。View 因此必須認得 view model 才問得到
-//  「選單上要不要有『自動』」，而 key 字串在三個檔案裡各寫一次。
+//  持久化 key、設定值與「這條 path 支不支援自動送出」的能力旗標都住在這裡：
+//  View 問「選單上要不要有『自動』」不必認得頁面 service，key 字串也只有一份定義。
 //
 
 import Foundation
@@ -17,17 +15,16 @@ import SwiftUI
 ///
 /// 邊界：
 /// - 自動打牌**模式**不在這裡。它的持久化權威是 `AutoPlayModeStore`、收斂權威是
-///   `AutoPlayAvailability.commit`，而「現在生效的是哪一個」住在 `GameStore`（p3-3）。
+///   `AutoPlayAvailability.commit`，而「現在生效的是哪一個」住在 `GameStore`。
 ///   這裡只放「這條 path 允不允許 `.auto` 這個選項」。
 /// - 牌局資料不在這裡（`GameStore`）。
 @Observable
 @MainActor
 final class SettingsStore {
 
-    /// 隱藏玩家名稱的持久化 key。
+    /// 隱藏玩家名稱的持久化 key —— **唯一定義點**。
     ///
-    /// 先前這個字串在 `WebViewModel`、`LegacyWebViewModel`、`AdvancedSettingsSheet`
-    /// 各寫一次（其中一份是 `WebViewModel.hidePlayerNamesKey` static、另外兩份是字面值）。
+    /// UI 的 Toggle 與 `WebSession` 都讀這個 static，不要在別處再寫一次字面值。
     nonisolated static let hidePlayerNamesKey = "HidePlayerNames"
 
     /// 在遊戲解析封包前把暱稱改寫成 Player 1–4（實作見 `naki-websocket.js` 的 `__nakiHideNames`）。
@@ -48,9 +45,8 @@ final class SettingsStore {
 
     /// 延遲 stepper 的持久化 key。
     ///
-    /// p2-6：延遲控制在 p1-3 被整個移除（當時它寫進去的值零讀取點，是假控制）。
-    /// 這次做回來並接真——不是取代 `ActionDelayModel` 的隨機分布（那是防偵測的刻意
-    /// 設計），而是當它的**縮放係數**：stepper 的秒數乘在整個抽樣值上，1.0s 等於現行行為。
+    /// 它不取代 `ActionDelayModel` 的隨機分布（那是防偵測的刻意設計），而是當它的
+    /// **縮放係數**：stepper 的秒數乘在整個抽樣值上，1.0s 等於現行行為。
     /// 讀取端是 `AutoPlayEngine`（經 `Context.actionDelayScale`）→ `ActionDelayModel.delay(for:scale:)`。
     ///
     /// 持久化機制與 mode 同一套（單一 UserDefaults key、重啟還原）；差別是它沒有需要
@@ -86,7 +82,7 @@ final class SettingsStore {
     /// 使用者設定的自動打牌基準延遲（秒）。UI 顯示成 `1.0s`。
     ///
     /// 寫入即持久化：stepper 的 Binding 直接讀寫這一份，`AutoPlayEngine` 每一輪
-    /// 從 `actionDelayScale` 讀新值——這正是 p1-3 抓到那批假控制欠缺的「讀取端」。
+    /// 從 `actionDelayScale` 讀新值——少了這個讀取端，stepper 就只是個假控制。
     var actionDelaySeconds: Double = SettingsStore.loadActionDelaySeconds() {
         didSet {
             let clamped = Self.clampActionDelay(actionDelaySeconds)

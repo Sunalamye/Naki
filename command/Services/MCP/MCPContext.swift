@@ -5,12 +5,9 @@
 //  Created by Claude on 2025/12/05.
 //  Naki 專用的 MCP 上下文擴展
 //
-//  2026-08-02（p3-3）：整層改吃 `NakiMCPDependencies`（一個 struct，一次注入）。
-//  先前這裡有 9 個 `var xxxCallback: (...)?`，加上內部包一個 `WebViewMCPContext`
-//  再轉發 4 個——真正的問題不是行數，是**沒有人擁有那些 closure**：
-//  它們由 `WebViewModel.startDebugServer()` 就地建立、經 DebugServer 與 MCPHandler
-//  兩層純轉發抵達這裡，型別上看不出 MCP 依賴 view model，漏接只會在 live 呼叫時
-//  變成 `xxx_callback_not_configured`。
+//  整層吃 `NakiMCPDependencies`（一個 struct，一次注入）。不要改回逐項的
+//  `var xxxCallback: (...)?`：那種形狀沒有人擁有那些 closure，型別上看不出 MCP
+//  依賴誰，漏接只會在 live 呼叫時變成 `xxx_callback_not_configured`。
 //
 
 import Foundation
@@ -67,7 +64,7 @@ protocol NakiMCPContext: MCPContext {
 @MainActor
 final class DefaultNakiMCPContext: NakiMCPContext {
 
-    /// 這一層需要的全部能力（p3-3：一次注入，之後不可換）
+    /// 這一層需要的全部能力（一次注入，之後不可換）
     private let dependencies: NakiMCPDependencies
 
     /// 實際綁到的 port（`get_status` / `get_help` 要輸出它）
@@ -78,8 +75,7 @@ final class DefaultNakiMCPContext: NakiMCPContext {
         self.serverPort = serverPort
     }
 
-    /// app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，NakiTests 沒開；
-    /// 沒有這行的話單測釋放這個實例會 SIGABRT 把 test host 打掉（見 CLAUDE.md）。
+    /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit {}
 
     // MARK: - MCPContext Implementation

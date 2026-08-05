@@ -5,18 +5,17 @@
 //  遊戲畫面內高亮：由「模式 + 推薦 + 手牌 + oplist」算出要送給
 //  `window.__nakiHighlight` 的那一行 JS。
 //
-//  p3-4：從 `WebViewModel.swift` 的檔尾搬出來（`WebViewModel` 已刪除）。
-//  搬家不改行為——`GameHighlightScriptTests` 逐條鎖著輸出字串。
+//  輸出字串由 `GameHighlightScriptTests` 逐條鎖著。
 //
 
 import Foundation
 
 /// 由「模式 + 推薦 + 手牌 + oplist」算出要送給 `window.__nakiHighlight` 的一行 JS。
 ///
-/// 抽成 `nonisolated` 純函式的唯一理由是**可驗收**：p1-4 的驗收條件之一是
-/// 「`.off` 時遊戲內高亮清空、切回 auto 恢復」。原本這段邏輯埋在需要 `WebPage`
-/// 的 `syncGameHighlight()` 裡，除了真的開一局之外沒有任何辦法確認它有沒有做到；
-/// 現在至少「送出去的腳本是什麼」可以逐條鎖住（真的染對顏色仍需 live 驗證）。
+/// 抽成 `nonisolated` 純函式的唯一理由是**可驗收**：「`.off` 時遊戲內高亮清空、
+/// 切回 auto 恢復」這件事，只要腳本產生還綁著 `WebPage`，除了真的開一局之外
+/// 就沒有辦法確認。與頁面解耦之後「送出去的腳本是什麼」才鎖得住
+/// （真的染對顏色仍需 live 驗證）。
 nonisolated enum GameHighlightScript {
 
     /// 清空所有標記
@@ -32,8 +31,8 @@ nonisolated enum GameHighlightScript {
                      tehaiTiles: [String],
                      snapshot: LiqiOperationSnapshot?) -> String {
 
-        // `.off` 的語意是「不顯示推薦」。以前這裡沒讀 mode，於是關閉模式下遊戲畫面
-        // 仍然照常染色——使用者關掉的東西還在動，是 AUDIT §13 那類「介面與行為不符」。
+        // `.off` 的語意是「不顯示推薦」。這裡不讀 mode 的話，關閉模式下遊戲畫面
+        // 仍會照常染色——使用者關掉的東西還在動，是 AUDIT §13 那類「介面與行為不符」。
         // 回 clear 而不是「什麼都不送」：上一輪留在畫面上的標記也要收掉。
         guard mode.showRecommendation else { return clear }
 

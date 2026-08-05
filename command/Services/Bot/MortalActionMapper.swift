@@ -25,7 +25,7 @@ struct MortalActionMapper {
     /// 上游 `PlayerState.ActionIndex` 在 0.5.1 仍把它們命名為 `reserved34/35/36`
     /// 並註解成「保留 (3麻用)」——那是事實錯誤，`ObsEncoder` 一直都在用它們表示
     /// 打出紅五萬／紅五筒／紅五索（`applyAkaToCandidates`：手上只有紅五時，
-    /// 普通五的格子是 0、紅五的格子才是 1）。上游 p0-1 已改名為
+    /// 普通五的格子是 0、紅五的格子才是 1）。上游已改名為
     /// `akaDiscardMan5/Pin5/Sou5`，但本專案 pin 的是 0.5.x，還沒有那組符號，
     /// 所以在這裡自己定名，不再讓 34–36 被當成不存在的格子。
     enum AkaDiscardIndex {
@@ -101,7 +101,7 @@ struct MortalActionMapper {
         // 這三格以前落到最後的 `default: return nil`，於是「唯一合法的打牌是紅五」
         // （立直後摸進紅五、手上沒有普通五）那一手會產生**空推薦**：側欄什麼都不顯示，
         // 自動打牌因為 `recommendations.isEmpty` 而不動，一路等到伺服器逾時代打。
-        // 見 MortalSwift p0-1：mask 一直都會設 34–36，是下游沒有接。
+        // MortalSwift 的 mask 一直都會設 34–36，是下游沒有接。
         switch index {
         case AkaDiscardIndex.man5:
             return Recommendation(tile: "5mr", probability: probability, actionType: .discard)

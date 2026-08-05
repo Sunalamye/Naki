@@ -4,17 +4,12 @@
 //
 //  Liqi wire 格式的單一事實來源：varint、protobuf block、envelope 的**解與編**。
 //
-//  ## p4-2：同一份協定知識不再三份
+//  ## 同一份協定知識只有一份
 //
-//  以前 envelope 長什麼樣這件事寫在三個地方：`LiqiParser.parse`（拆）、
-//  `LiqiEncoder.encodeEnvelope`（組）、`naki-websocket.js` 的
-//  `parseEnvelopeBody`／`attributeSend`／`sendRaw`（JS 端各自再拆一次）。
-//  三份沒有任何機制保證一致——實際上就漂了一項：舊的 `encodeEnvelope`
-//  連 NOTIFY 都寫 2 bytes msgId，而 `parse` 讀 NOTIFY 時是從 offset 1 開始，
-//  也就是說**自己編出來的 notify 自己解不開**。
-//
-//  Swift 側現在只有本檔知道 envelope 的形狀，`LiqiParser` 與 `LiqiEncoder`
+//  Swift 側只有本檔知道 envelope 的形狀，`LiqiParser` 與 `LiqiEncoder`
 //  都經過這裡，`LiqiEnvelopeTests` 用 round-trip 把「解」與「編」鎖成同一份定義。
+//  拆成「拆一份、組一份」沒有任何機制保證一致，會漂成**自己編出來的 notify 自己解不開**
+//  （NOTIFY 沒有 msgId；組的那份多寫 2 bytes，拆的那份從 offset 1 開始）。
 //  JS 那份刻意保留（跨語言邊界，同步成本高於重複成本），但 canonical 在這裡，
 //  該檔檔頭已註明。
 //
@@ -62,8 +57,8 @@ enum LiqiWireType: UInt8 {
 /// protobuf varint 的解與編。
 ///
 /// `nonisolated`：`LiqiResponseRecord`（nonisolated struct）要用它解 `Error.code`。
-/// p4-2 之前那裡自己重寫了一份 varint 迴圈，兩份實作的溢位上限還不一樣
-/// （35 bits vs 63 bits）——同一個格式兩份規則，是最典型的靜默漂移來源。
+/// varint 全專案只有這一份實作——同一個格式兩份規則（例如溢位上限一邊 35 bits、
+/// 一邊 63 bits）是最典型的靜默漂移來源。
 nonisolated enum LiqiWire {
 
     /// 解一個 protobuf varint
@@ -124,13 +119,6 @@ struct ProtobufBlock {
 
     var stringValue: String? {
         return String(data: data, encoding: .utf8)
-    }
-
-    var varintValue: Int? {
-        guard wireType == 0, let (value, _) = parseVarint(data, offset: 0) else {
-            return nil
-        }
-        return value
     }
 }
 

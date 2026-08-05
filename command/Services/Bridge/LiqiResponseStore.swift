@@ -51,8 +51,8 @@ nonisolated struct LiqiResponseRecord {
     /// 為了找出四個錯誤碼手工解了四次，而每一次都是「`sendRaw` 回 success:true
     /// 但伺服器其實拒絕了」，肉眼完全看不出來。
     ///
-    /// p4-2：varint 的解法走 `LiqiWire.decodeVarint`（全專案唯一一份）。
-    /// 這裡本來自己重寫了一份迴圈，溢位上限還跟主實作不一樣（35 vs 63 bits）。
+    /// varint 一律走 `LiqiWire.decodeVarint`（全專案唯一一份），不要在這裡自己寫迴圈：
+    /// 兩份實作的溢位上限會漂開。
     var errorCode: Int? {
         guard let b64 = fields["field1"] as? String,
               let data = Data(base64Encoded: b64),

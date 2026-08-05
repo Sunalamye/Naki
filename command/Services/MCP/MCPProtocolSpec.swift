@@ -51,10 +51,7 @@ enum NakiMCPProtocol {
     // MARK: - `_meta` key（規格保留字，不可自己改寫）
 
     nonisolated static let metaProtocolVersion = "io.modelcontextprotocol/protocolVersion"
-    nonisolated static let metaClientInfo = "io.modelcontextprotocol/clientInfo"
-    nonisolated static let metaClientCapabilities = "io.modelcontextprotocol/clientCapabilities"
     nonisolated static let metaServerInfo = "io.modelcontextprotocol/serverInfo"
-    nonisolated static let metaLogLevel = "io.modelcontextprotocol/logLevel"
 
     // MARK: - HTTP header（Streamable HTTP；比對一律小寫）
 

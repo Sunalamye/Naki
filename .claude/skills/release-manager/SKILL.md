@@ -78,3 +78,13 @@ NEVER force push、NEVER 推別人的 main。
 ---
 
 **Release Manager v2.0** — 硬化版，MortalSwift-dependency-first + 上次踩坑固化
+
+## ⚠️ 2026-08-05 新坑（未修，發布前必查）
+
+| 坑 | 症狀 | 修法（擇一，使用者尚未拍板） |
+|----|------|------|
+| LookInsideServer.framework 被連進 target，Release ad-hoc 簽名（`-`）與該 framework 的 LookInside Team ID 不符 | **Release 版啟動即 SIGABRT**（dyld: different Team IDs 拒載）；Debug 正常，所以 build/test 全綠也看不出來 | ① framework embed 改 Debug-only（正解）② 打包時 `codesign -f -s -` 重簽 ③ 打包腳本剝掉該 framework |
+
+**當前 `dist/Naki.zip`／`Naki.dmg`（2026-08-05 深夜版）就是這個會閃退的包，不可發佈**；
+修好前 release.sh 的 preflight 應加「啟動一次 Release .app 並 curl /status」的 smoke test
+——「build 成功」不代表「啟動成功」，這次就是活例。

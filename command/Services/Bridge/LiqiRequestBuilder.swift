@@ -4,9 +4,8 @@
 //
 //  把語意動作（打牌／碰／建房／心跳…）組成 Liqi payload 欄位。
 //
-//  p4-2 之前這一層與送出器、牌碼轉換、MCP 呈現層擠在同一個 `LiqiActionSender.swift`
-//  裡（880 行、四種職責）。本檔是其中的**純資料**部分：無狀態、無 I/O、無 log，
-//  輸出可以在單元測試裡做位元組層級對拍。
+//  本檔是**純資料**：無狀態、無 I/O、無 log，輸出可以在單元測試裡做位元組層級對拍。
+//  在這裡加進送出、log 或任何 WebView 呼叫，就失去對拍的能力。
 //
 //      LiqiRequestBuilder（本檔，組 payload 欄位）
 //          → LiqiEncoder.encodeRequest（配 msgId、組 envelope，見 LiqiEnvelope）
@@ -398,7 +397,7 @@ enum LiqiRequestBuilder {
     /// 只提供 builder 與 MCP 工具，**不接進任何自動路徑**。
     ///
     /// 注意：liqi.json 的 `voteGameEnd` 用 `ReqVoteGameEnd { bool yes = 1 }`，
-    /// **不是** p2-5 task 表寫的 `ReqCommon`——以協定為準。proto3 會省略 false，
+    /// **不是** `ReqCommon`——以協定為準。proto3 會省略 false，
     /// 所以 `yes=false` 的 payload 是空的。
     /// - Parameter yes: 是否投贊成票
     static func voteGameEnd(yes: Bool = true) -> LiqiRequestSpec {

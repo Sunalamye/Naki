@@ -364,7 +364,7 @@ final class LiqiActionSenderTests: XCTestCase {
             return LiqiRawSendResult(success: true, detail: "socket=0 bytes=26")
         }
 
-        let result = await sender.startRoom()
+        let result = await sender.send(LiqiRequestBuilder.startRoom())
 
         XCTAssertEqual(captured.count, 1)
         XCTAssertTrue(result.success)
@@ -404,7 +404,7 @@ final class LiqiActionSenderTests: XCTestCase {
             return LiqiRawSendResult(success: true, detail: nil)
         }
 
-        let result = await sender.discard(tile: "0m", moqie: true)
+        let result = await sender.send(LiqiRequestBuilder.discard(tile: "0m", moqie: true))
         let expected = LiqiEncoder.base64String(
             LiqiRequestBuilder.discard(tile: "0m", moqie: true).encoded(msgId: result.msgId))
 
@@ -418,7 +418,7 @@ final class LiqiActionSenderTests: XCTestCase {
         var logs: [String] = []
         sender.logHandler = { logs.append($0) }
 
-        let result = await sender.pon()
+        let result = await sender.send(LiqiRequestBuilder.pon())
 
         XCTAssertFalse(result.success)
         XCTAssertEqual(result.detail, "no_send_handler")

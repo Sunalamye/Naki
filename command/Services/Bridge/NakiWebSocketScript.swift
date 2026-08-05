@@ -4,12 +4,11 @@
 //
 //  `window.__nakiWebSocket` 這一層 JS 片段的唯一來源。
 //
-//  由來（AUDIT P0-2）：`WebPage.callJavaScript` 與 `WKWebView.callAsyncJavaScript`
-//  都是**函式體語意**——沒寫 `return` 就恆回 nil。同一段 forceReconnect 腳本在專案裡
-//  被抄了三份，其中 `WebViewModel` 那份漏了 `return`，於是 `closedCount` 恆為 0：
-//  連線其實已經關掉了，UI 卻永遠顯示「沒有活躍的連接」。
+//  `WebPage.callJavaScript` 與 `WKWebView.callAsyncJavaScript` 都是**函式體語意**
+//  ——漏寫 `return` 不會報錯，只會恆回 nil。forceReconnect 少了 `return`，
+//  `closedCount` 就恆為 0：連線其實已經關掉了，UI 卻永遠顯示「沒有活躍的連接」。
 //
-//  字串集中在這裡，就不會再出現「兩種寫法、其中一種漏 return」的分岔。
+//  字串集中在這裡，就不會出現「兩種寫法、其中一種漏 return」的分岔。
 //
 
 import Foundation
@@ -36,9 +35,8 @@ enum NakiWebSocketScript {
   /// 把 `sendRaw` 的 JS 回傳值解析成送出結果。
   ///
   /// JS 端回 `{success:true, bytes, socketId}` 或 `{success:false, reason}`，
-  /// 經 `JSON.stringify` 過橋。兩個 view model 的 `sendHandler` 原本各有一份幾乎相同的
-  /// 解析（p2-1 收斂）；分兩份的代價是「JS 回報的失敗原因有沒有被保留」這種細節
-  /// 可以在其中一份悄悄失傳。
+  /// 經 `JSON.stringify` 過橋。這份解析全專案只有一份：分兩份的代價是
+  /// 「JS 回報的失敗原因有沒有被保留」這種細節可以在其中一份悄悄失傳。
   ///
   /// 失敗時的 detail 一律是可辨識的短碼，不是自由文字——它會被寫進 log 供事後對照。
   static func sendResult(from result: Any?) -> LiqiRawSendResult {

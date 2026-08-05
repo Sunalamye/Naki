@@ -13,8 +13,9 @@
 //
 //  `LiqiParser.parseOperation` 已經把它解成字典（key: seat / operationList /
 //  timeAdd / timeFixed），`MajsoulBridge` 解析每個 ActionPrototype 時把最近一次
-//  存進本檔的 `LiqiOperationStore.shared`，供 `LiqiActionSender` 與
-//  `WebViewModel` 的自動打牌重試框架判斷「現在到底能做什麼」。
+//  存進本檔的 `LiqiOperationStore.shared`，供
+//  `AutoPlayEngine` → `AutoPlayGate` / `AutoPlayDecisionResolver` → `LiqiActionSender`
+//  這條決策鏈判斷「現在到底能做什麼」。
 //
 //  驗收語彙（2026-08-01）：
 //  - 欄位編號取自 docs/protocol/liqi.json；repo snapshot 與當日 live CDN byte-identical。
@@ -64,6 +65,11 @@ nonisolated enum LiqiOperationType: UInt32, CaseIterable {
     ///
     /// runtime 已驗證 ron(9) 走 `inputOperation` 並收到 RESPONSE／ActionHule；pon(3)
     /// 走 `inputChiPengGang`。chi／minkan 與三種槓仍需各別驗證。
+    ///
+    /// ⚠️ 榮和刻意**不**歸在 `.chiPengGang`，儘管 `isCallOpportunity` 把它算成副露機會：
+    /// 它是回應他家打牌沒錯，但送出走 `inputOperation`。所以要決定 pass 的通道時，
+    /// 必須從快照裡實際那個機會操作的 `channel` 取值（`AutoPlayEngine.sendPass` 即如此），
+    /// 不能因為「這是副露機會」就假設 `.chiPengGang`。
     var channel: LiqiActionChannel {
         switch self {
         case .chi, .pon, .minkan:
@@ -73,7 +79,12 @@ nonisolated enum LiqiOperationType: UInt32, CaseIterable {
         }
     }
 
-    /// 是否屬於「回應他家打牌」的機會（用來決定 pass 要送哪個方法）
+    /// 是否屬於「回應他家打牌」的機會（用來決定 pass 要送哪個方法）。
+    ///
+    /// ⚠️ 榮和刻意算在內：它確實是他家打牌後的回應窗口，沒人回應對局會停到伺服器代打。
+    /// 代價是「沒有推薦 → 送過」那條路徑會把和牌送成棄和——這曾經是漏和的成因，
+    /// 所以 `AutoPlayGate` 必須先檢查 `horaOperation` 才准走 pass。
+    /// 與 `channel` 對榮和的分類刻意不對稱（那裡是 `.selfOperation`），改任一邊都要同時看另一邊。
     var isCallOpportunity: Bool {
         switch self {
         case .chi, .pon, .minkan, .ron:
@@ -247,7 +258,8 @@ nonisolated struct LiqiOperationSnapshot: Equatable {
 /// 最近一次可用操作的儲存體（thread-safe）
 ///
 /// - 寫入端：`MajsoulBridge.parseAction`（每個 ActionPrototype）
-/// - 讀取端：`WebViewModel` 自動打牌重試框架 / `LiqiActionSender`
+/// - 讀取端：`AutoPlayEngine` 一路到 `AutoPlayGate` / `AutoPlayDecisionResolver` /
+///   `AutoPlayActionExecutor` / `LiqiActionSender`，以及 MCP 的 `game_*` / `bot_*` 工具
 ///
 /// `pending` 只在「有快照且尚未被 `markHandled`」時回值，
 /// 送出動作後標記已處理即可避免重試迴圈重複送同一個動作。

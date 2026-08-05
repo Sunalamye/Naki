@@ -129,9 +129,7 @@ final class JSInjectionState {
 
     static let shared = JSInjectionState()
 
-    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 會給這個 class 一個 isolated deinit，
-    /// 單元測試釋放它時會 SIGABRT（見 CLAUDE.md）。singleton 實務上不會釋放，
-    /// 但測試可能建臨時實例，所以照樣補上。
+    /// MainActor class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit { }
 
     private(set) var report: JSInjectionReport = .notAttempted
@@ -508,9 +506,8 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         }
 
         // 轉不成 MJAI 事件（心跳、大廳 RPC、未知 notify…）：用**剛才那一次**解析的結果
-        // 寫診斷 log。p4-2 之前這裡 `let parser = LiqiParser()` 把同一個 frame 再解一次，
-        // 而新實例沒有 pendingRequests，所有 RESPONSE 必然回 nil——那份「為了 log」
-        // 的第二次解析從來沒解出過任何 response，只是白解一次順便產生一份錯的結果。
+        // 寫診斷 log。不要在這裡新建 `LiqiParser` 重解一次——新實例沒有 `pendingRequests`，
+        // 所有 RESPONSE 必然回 nil，等於為了寫一行 log 而產生一份錯的解析結果。
         guard let parsed = majsoulBridge.lastParsed else {
             if let failure = majsoulBridge.lastEnvelopeFailure {
                 wsLog("[Liqi] envelope 解不開：\(failure)")
@@ -578,7 +575,7 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     /// Naki 自己呼叫 `__nakiWebSocket.forceReconnect()` 關掉連線。
     ///
     /// 關閉數本身已經由 `NakiWebSocketScript.forceReconnect` 的回傳值交給呼叫端
-    /// （p0-2），這裡不是為了取值，是為了**歸因**：緊接著進來的那幾筆
+    /// 這裡不是為了取值，是為了**歸因**：緊接著進來的那幾筆
     /// `websocket_close` 是預期內的，不是斷線。少了這一行，log 上主動重連與
     /// 網路掉線長得一模一樣。
     private func handleForceReconnect(_ data: [String: Any]) {
@@ -606,6 +603,6 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
 
 /// MCP 的協定層快照需要「現在登入的是誰」。
 ///
-/// 只暴露這一個唯讀值（p3-3）：`GameSnapshotAction` 因此不必認得 `WebSocketMessageHandler`、
+/// 只暴露這一個唯讀值：`GameSnapshotAction` 因此不必認得 `WebSocketMessageHandler`、
 /// 更不必認得 `NakiWebCoordinator`——那是 View 層。
 extension WebSocketMessageHandler: NakiAccountIdSource {}

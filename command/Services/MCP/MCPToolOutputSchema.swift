@@ -11,7 +11,7 @@ import Foundation
 ///
 /// 為什麼不是寫在各個工具型別上：`MCPTool` 協定來自 MCPKit（另一個 repo），
 /// 這一輪不動它。schema 放在這裡由 `MCPToolRegistry.allToolDefinitions()` 掛上去，
-/// 對 client 而言完全等價，而且 38 個工具的輸出契約能一眼看完。
+/// 對 client 而言完全等價，而且全部工具的輸出契約在同一個檔案裡一眼看完。
 ///
 /// **宣告原則**：規格對 `outputSchema` 是 MUST——宣告了就必須符合。
 /// 所以這裡只寫「讀程式碼可以確定一定會有」的欄位，其餘用 `additionalProperties: true`

@@ -2,9 +2,9 @@
 //  LiqiParseFault.swift
 //  Naki
 //
-//  p4-1：解析失敗顯式化。
+//  解析失敗顯式化。
 //
-//  在這之前，`LiqiParser` 有三種把失敗偽裝成正常資料的手法：
+//  失敗一旦被偽裝成正常資料，症狀就不會出現在解析層。三種典型手法：
 //
 //  1. **預設值**：`parsePackedInt32` 解不出 4 個合理分數就回
 //     `[25000, 25000, 25000, 25000]`——呼叫端無法分辨「真的是起手分」與
@@ -28,7 +28,7 @@ import Foundation
 ///
 /// 猜出來的東西不是不能用，但**必須看得見**：`LiqiParser` 會把它寫進解析結果，
 /// 呼叫端可以據此降級處理，log 也查得到。沒有第三種狀態——
-/// 「不知道是不是猜的」正是 p4-1 要消掉的東西。
+/// 「不知道是不是猜的」正是這個型別要消掉的東西。
 nonisolated enum LiqiParseConfidence: String, Sendable {
     /// 照 `docs/protocol/liqi.json` 的欄位編號與型別解出來的
     case exact
@@ -77,15 +77,6 @@ nonisolated struct LiqiParseFault: Sendable, Equatable {
         self.severity = severity
     }
 
-    /// 同一個失敗換上不同的嚴重度（呼叫端升級解析器報上來的 degraded 用）
-    func escalated(to severity: Severity) -> LiqiParseFault {
-        LiqiParseFault(site: site,
-                       fieldId: fieldId,
-                       byteCount: byteCount,
-                       reason: reason,
-                       severity: severity)
-    }
-
     /// 單行敘述（log 與 UI 橫幅共用）
     var text: String {
         var head = site
@@ -126,11 +117,10 @@ final class LiqiParseFaultState {
     /// 保留幾筆近期失敗（只給診斷看，不影響行為）
     static let historyLimit = 20
 
-    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 會給這個 class 一個 isolated deinit，
-    /// 單元測試釋放它會 SIGABRT（見 CLAUDE.md「專案結構的坑」）。
+    /// MainActor class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit { }
 
-    /// 各前提 domain 目前未解決的 blocking 失敗（p5 #4）。
+    /// 各前提 domain 目前未解決的 blocking 失敗。
     ///
     /// 不同前提是各自獨立的：`ResAuthGame.seat_list`（座位／start_game／Bot 沒建）與
     /// `ActionNewRound.scores`（分數／start_kyoku）是兩回事。用單一 slot 時，A 失敗後
@@ -180,15 +170,7 @@ final class LiqiParseFaultState {
         }
     }
 
-    /// 事情恢復正常了→ 收掉所有常駐錯誤。
-    ///
-    /// 只清 blocking，不清 `recent`：橫幅該消失，但「這局中間曾經解錯過」
-    /// 仍然要查得到。
-    func clearBlocking() {
-        blockingByDomain.removeAll()
-    }
-
-    /// 只清「由指定前提失敗造成」的 blocking（p5 #4）。
+    /// 只清「由指定前提失敗造成」的 blocking。
     ///
     /// 恢復某個里程碑時，只移除 site 屬於這個里程碑的 domain。若 authGame 失敗
     /// （座位缺、Bot 沒建）留下 blocking，一個 scores 合法的 `ActionNewRound` 只清

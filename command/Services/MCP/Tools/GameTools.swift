@@ -11,8 +11,8 @@
 //  或 `success:false`），不是「偶爾失敗」。
 //
 //  新分工：
-//  - 狀態（state / hand / ops）→ Swift 協定層（`WebViewModel.protocolGameSnapshot()`，
-//    資料來自 MajsoulBridge → NativeBotController + LiqiOperationStore）
+//  - 狀態（state / hand / ops）→ Swift 協定層（`NakiMCPContext.getGameSnapshot()`，
+//    資料來自 MajsoulBridge → GameStore + LiqiOperationStore）
 //  - 動作（discard / action / action_verify）→ Liqi protobuf（`LiqiActionSender`）
 //
 

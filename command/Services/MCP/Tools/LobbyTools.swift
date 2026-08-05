@@ -128,7 +128,7 @@ struct StartMatchTool: MCPTool {
             throw MCPToolError.notAvailable("Naki context")
         }
 
-        // spec 的組裝在 `StartMatchAction`（p3-3）：工具只負責參數驗證與輸出格式，
+        // spec 的組裝在 `StartMatchAction`：工具只負責參數驗證與輸出格式，
         // 不再自己拼 protobuf 欄位——那是「同一個請求兩個地方組」的漂移來源。
         let result = await nakiContext.startMatch(
             matchMode: UInt32(matchMode),

@@ -223,7 +223,7 @@ class LogManager {
     ///
     /// 這個判斷是 `log(_:category:level:)` 的 `@autoclosure` 閘門：回 false 時
     /// 呼叫端的字串插值（hex preview、`\(data)`、`\(blocks.count)`…）根本不會求值。
-    /// p4-3 之前 `LiqiParser` 每解一個 protobuf 欄位就格式化一行字串，
+    /// 沒有這道閘門時 `LiqiParser` 每解一個 protobuf 欄位就格式化一行字串，
     /// 一局 `liqi.log` 191KB 全部是這種訊息，而每一行的組裝都在 MainActor 上。
     func isEnabled(_ level: LogLevel) -> Bool {
         if level >= .info { return true }
@@ -309,8 +309,8 @@ class LogManager {
 
     /// 寫入文件（透過 serial queue 序列化，避免多執行緒共用單一 FileHandle 造成資料競爭）
     ///
-    /// p4-3：**格式化整段搬進 queue**。原本 `ISO8601DateFormatter()`（每次新建一個）、
-    /// 兩次字串插值與兩次 UTF-8 轉換都發生在呼叫端，也就是 MainActor 上——
+    /// **格式化整段在 queue 裡做**。放在呼叫端的話，`ISO8601DateFormatter()`（每次新建
+    /// 一個）、兩次字串插值與兩次 UTF-8 轉換都會發生在 MainActor 上——
     /// 對 `.trace` 這種一則訊息數十行的等級，這才是主執行緒真正的開銷來源，
     /// 「寫檔在背景」只是把最後那次 `write(2)` 挪走而已。
     /// 現在 MainActor 只付一次 closure 排入的錢，字串在背景才組。

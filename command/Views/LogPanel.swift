@@ -1,6 +1,6 @@
 //
 //  LogPanel.swift
-//  akagi
+//  Naki
 //
 //  Created by Suoie on 2025/11/30.
 //  日誌面板視圖 - 顯示即時日誌

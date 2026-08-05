@@ -4,16 +4,10 @@
 //
 //  自動打牌模式，以及它唯一的持久化入口。
 //
-//  取代原本那個名為「自動打牌控制器」、實際上只是 mode 容器的 class（2026-08-02 刪除）。
-//  它 166 行裡只有 `state.mode` 有人讀：
-//  - 8 個動作 case 沒有任何建構點；
-//  - `notifyMyTurn` / `notifyTurnEnd` / `setWebPage` 零呼叫，注入的 `webPage` 從未被使用；
-//  - `state.actionDelay` 只被 UI Stepper 寫、沒有任何人讀（真正的送出延遲由
-//    `ActionDelayModel` 依動作類型隨機決定，那是刻意設計）；
-//  - `ObservableObject` / `@Published` 沒有任何 View 訂閱（它是 ViewModel 的 private var）。
-//
 //  真正的自動打牌流程在 `AutoPlayGate`（觸發閘門）、`AutoPlayDecisionResolver`（送出決策）
 //  與 `LiqiActionSender`（送出）；mode 只是這條流程的一個開關值。
+//
+//  送出延遲不在這裡：由 `ActionDelayModel` 依動作類型隨機決定，模式本身不帶延遲設定。
 //
 
 import Foundation
@@ -28,9 +22,9 @@ enum AutoPlayMode: String, CaseIterable {
 
     /// 是否顯示推薦（側欄 `RecommendationView` 與遊戲內 `__nakiHighlight` 共用同一個閘門）
     ///
-    /// 這個旗標曾經**沒有任何讀取者**：`.off` 只擋得住自動送出，側欄照列推薦、
-    /// WebGL 高亮照染，於是「關閉」在畫面上跟「推薦」看起來一樣。
-    /// 現在兩個顯示面都讀它（`RecommendationView`、`WebViewModel.syncGameHighlight`）。
+    /// 兩個顯示面都必須讀它（`RecommendationView`、`GameHighlightScript.make()`）：
+    /// 漏掉任一邊，`.off` 就只擋得住自動送出，該面照列推薦／照染高亮，
+    /// 於是「關閉」在畫面上跟「推薦」看起來一樣。
     ///
     /// 注意語意邊界：`.off` 關的是**顯示與送出**，不是推論——
     /// Bot 仍在背景跟著牌局更新狀態，否則切回 `.recommend` 會是一片空白。
@@ -57,15 +51,13 @@ enum AutoPlayMode: String, CaseIterable {
 
 /// 哪些模式在「這條 WebView 路徑」上真的能執行。
 ///
-/// 背景（p2-2）：自動送出的完整保護鏈（1 秒輪詢的 `AutoPlayGate`、forceHora／sendPass
-/// 寬限、executionId 去抖、hora 送出重試）只長在 `WebViewModel`（WebPage，macOS/iOS 26+）
-/// 那條路上。`LegacyWebViewModel`（iOS 17–25 的 WKWebView）雖然已經共用 resolver 與
-/// executor，但沒有那層閘門與重試，而且**整條路無法在本機驗證**——macOS deployment target
-/// 是 26，跑不到 Legacy；沒有 iOS 17–25 實機就沒有任何對局證據。
+/// Legacy 路徑（iOS 17–25 的 WKWebView）的自動送出一律關閉，因為**整條路無法在本機
+/// 驗證**——macOS deployment target 是 26，跑不到 Legacy；沒有 iOS 17–25 實機就沒有
+/// 任何對局證據。在那個證據出現以前，推薦顯示保留，動作由使用者自己下。
 ///
-/// 在那個證據出現以前，Legacy 的自動送出一律關閉（AUDIT 的建議之一）：
-/// 推薦顯示保留，動作由使用者自己下。這裡是那個決策的唯一定義點，
-/// UI（picker 選項）與 ViewModel（模式收斂）都讀它，不各寫一份判斷。
+/// 起點的值是 `LegacyWebBackend.supportsAutoPlay == false`；收斂規則只定義在這裡，
+/// picker 選項（`ContentView`）與模式收斂（`NakiRuntime.setAutoPlayMode`）都讀它，
+/// 不各寫一份判斷。
 enum AutoPlayAvailability {
 
     /// Legacy 路徑不提供自動送出的原因，直接顯示在設定頁上。
@@ -92,9 +84,9 @@ enum AutoPlayAvailability {
 
     /// 「決定採用某個模式」時該發生的全部事情：收斂 → 寫進存檔 → 回傳生效值。
     ///
-    /// 兩條 path 的 `setAutoPlayMode` 與啟動時的沿用都走這一個函式，
-    /// 所以「選了什麼、記住什麼、實際跑什麼」不可能各說各話——這正是先前
-    /// Legacy 只改記憶體不寫存檔（重啟就沖掉）造成的問題。
+    /// `NakiRuntime.setAutoPlayMode` 與啟動時的沿用都走這一個函式，
+    /// 所以「選了什麼、記住什麼、實際跑什麼」不可能各說各話。繞過它只改記憶體，
+    /// 使用者的選擇重啟就會被沖掉。
     ///
     /// - Returns: 實際生效（可能已降級）的模式。
     @discardableResult
@@ -111,13 +103,11 @@ enum AutoPlayAvailability {
 
 /// `AutoPlayMode` 的單一持久化來源。
 ///
-/// 以前同一個設定散在兩個 key：ViewModel 讀寫 `naki.autoPlayMode`，
-/// ContentView 的 `@AppStorage("AutoPlayMode")` 讀寫 `AutoPlayMode`。
-/// 兩邊各存各的，UI picker 顯示的模式與 ViewModel 實際採用的模式可以不一致
-/// （例如 Legacy 路徑改了模式根本沒寫進任何 key，重啟就被沖掉）。
-/// 這裡收斂成 `naki.autoPlayMode` 一個 key，舊 key 做一次性遷移後刪除。
+/// 全 App 只有 `naki.autoPlayMode` 一個 key。這個設定曾經散在兩個 key，
+/// 兩邊各存各的，UI picker 顯示的模式與實際採用的模式因此可以不一致；
+/// `legacyKey` 只剩一次性遷移的用途，遷移後刪除，不要再新增第二個讀寫點。
 nonisolated enum AutoPlayModeStore {
-    /// 目前唯一的 key（ViewModel 與 ContentView 的 `@AppStorage` 共用）
+    /// 目前唯一的 key（`NakiRuntime` 與 `ContentView` 的 `@AppStorage` 共用）
     static let key = "naki.autoPlayMode"
 
     /// 被合併掉的舊 key（ContentView 舊版 `@AppStorage("AutoPlayMode")`）

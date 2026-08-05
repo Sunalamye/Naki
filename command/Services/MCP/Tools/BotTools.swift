@@ -242,9 +242,8 @@ struct BotSyncTool: MCPTool {
         }
         context.log("MCP: Force reconnecting to rebuild Bot state")
 
-        // 腳本、回傳值解讀與訊息措辭都在 `ForceReconnectAction`（p3-3）。
-        // 先前這裡自己跑一次 JS 並自己解讀結果，與 `WebViewModel.forceReconnect()`
-        // 是兩份會各自漂移的實作——p0-2 修的正是其中一份漏了 `return`。
+        // 腳本、回傳值解讀與訊息措辭都在 `ForceReconnectAction`：工具不自己跑 JS，
+        // 否則 UI 與 MCP 會變成兩份各自漂移的實作。
         let outcome = await nakiContext.forceReconnect()
         context.log("MCP: forceReconnect result: \(outcome.statusMessage)")
         return outcome.dictionary

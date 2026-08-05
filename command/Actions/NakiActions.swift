@@ -2,27 +2,22 @@
 //  NakiActions.swift
 //  Naki
 //
-//  p3-3：副作用的型別化入口（Action 層）
+//  副作用的型別化入口（Action 層）
 //
-//  由來：Naki 的副作用（送 Liqi、重連、截圖、改模式、執行 JS）原本以 **9 個裸 closure**
-//  四跳注入：
+//  Naki 的副作用（送 Liqi、重連、截圖、改模式、執行 JS）一律包成 Action：
+//  `@MainActor struct` + `callAsFunction` + 一個真實 init（吃 service）
+//  + 一個 `#if DEBUG` 的 stub init（吃 closure）。closure 只存在於型別內部一個
+//  private 欄位，**不是跨層傳遞的貨幣**。
 //
-//      WebViewModel → DebugServer → MCPHandler → DefaultNakiMCPContext → tool
+//  換回裸 closure 逐層注入會同時失去三件事：
 //
-//  每一跳都是 `var x: ((A) -> B)?`，於是：
-//
-//  1. **型別簽章看不出依賴。** `DebugServer` 的欄位長得像 HTTP server 的設定，
-//     實際上是整個 MCP 工具層的依賴表；漏接一個就是執行期的
-//     `xxx_callback_not_configured`，編譯期一句話都不會說。
-//  2. **沒有 stub 點。** closure 由 `WebViewModel.startDebugServer()` 就地寫死，
-//     要測「送出失敗時 MCP 回什麼」得先有 WebPage + 真的 HTTP server。
-//  3. **Preview 拉不起來。** View 直接呼叫 `viewModel?.forceReconnect()`，
-//     沒有 view model 就等於沒有那顆按鈕的行為，Preview 只能看靜態畫面。
-//
-//  這一層的形狀是 SwiftUI 社群的 Action 模式：`@MainActor struct` + `callAsFunction`
-//  + 一個真實 init（吃 service）+ 一個 `#if DEBUG` 的 stub init（吃 closure）。
-//  結果是**依賴出現在型別上**、**測試與 Preview 有注入點**，而 closure 只存在於
-//  型別內部一個 private 欄位，不再是跨層傳遞的貨幣。
+//  1. **依賴出現在型別上。** 一串 `var x: ((A) -> B)?` 會讓 `DebugServer` 的欄位
+//     長得像 HTTP server 的設定，實際上是整個 MCP 工具層的依賴表；漏接一個就是
+//     執行期的 `xxx_callback_not_configured`，編譯期一句話都不會說。
+//  2. **測試有 stub 點。** 否則要測「送出失敗時 MCP 回什麼」得先有真的頁面
+//     ＋真的 HTTP server。
+//  3. **Preview 拉得起來。** View 呼叫的是 Action 本身而不是某個可為 nil 的物件，
+//     沒接線時仍有按鈕行為可看，不是只剩靜態畫面。
 //
 //  邊界：Action 只包「做這件事」；決策（要不要做、做哪一個）仍在
 //  `AutoPlayGate` / `AutoPlayDecisionResolver` / `AutoPlayEngine`，
@@ -82,7 +77,7 @@ struct ExecuteJavaScriptAction {
   ///
   /// 函式體語意（要值就寫 `return`）由 session 統一，平台差異（WebPage 的
   /// `callJavaScript` vs WKWebView 的 IIFE 包裝）在 `WebSessionBackend` 內部。
-  /// 兩條 path 先前各自把同一段橋接抄進 `debugServer.executeJavaScript` 的 closure 裡。
+  /// 兩條 path 共用這一份，不各自把同一段橋接抄一次。
   init(session: WebSession) {
     self.init(run: { [weak session] script in
       guard let session else {
@@ -168,7 +163,7 @@ struct CaptureScreenshotAction {
     await capture()
   }
 
-  /// 整個視窗轉 PNG（原本是 `WebViewModel.windowScreenshot`）
+  /// 整個視窗轉 PNG
   static func windowScreenshot() -> Result<Data, Error> {
     #if os(macOS)
       guard
@@ -327,11 +322,7 @@ struct TriggerAutoPlayAction {
   /// 這條 path 不提供自動送出時的實作
   static let unavailable = TriggerAutoPlayAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = {}
   }
@@ -439,7 +430,7 @@ struct GameSnapshotAction {
 
 /// 強制重連的結果。
 ///
-/// 「關閉了幾條連線」是 p0-2 的重點：`WebPage.callJavaScript` 是函式體語意，
+/// 「關閉了幾條連線」要小心：`WebPage.callJavaScript` 是函式體語意，
 /// 腳本漏 `return` 會讓這個數字恆為 0——連線其實已經關掉，UI 卻說「沒有活躍的連接」。
 enum ForceReconnectOutcome {
   /// 走 `__nakiWebSocket.forceReconnect()`，關閉了 n 條連線
@@ -489,9 +480,9 @@ enum ForceReconnectOutcome {
 
 /// 強制斷線重連以重建 Bot 狀態。
 ///
-/// p0-2 的 helper（`NakiWebSocketScript.forceReconnect` + `closedCount(from:)`）直接
-/// 演化成這個型別：那兩個 static 解決的是「腳本字串只有一份」，但**呼叫它的三個地方**
-/// （WebViewModel、MCP `bot_sync`、UI 按鈕）仍各自寫一次 do/catch 與結果解讀。
+/// 腳本字串（`NakiWebSocketScript.forceReconnect`）與回傳值解讀（`closedCount(from:)`）
+/// 各只有一份還不夠：呼叫它的每個地方（MCP `bot_sync`、UI 按鈕）都得走這個型別，
+/// 否則 do/catch 與結果解讀又會變成各寫一次、各自漂移。
 @MainActor
 struct ForceReconnectAction {
 
@@ -527,11 +518,7 @@ struct ForceReconnectAction {
   /// Preview／未接線
   static let unavailable = ForceReconnectAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = { .failed("not_wired") }
   }
@@ -572,11 +559,7 @@ struct SetAutoPlayModeAction {
   /// Preview／未接線：什麼都不做
   static let noop = SetAutoPlayModeAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = { _ in }
   }
@@ -607,7 +590,7 @@ struct DeleteBotAction {
     self.perform = perform
   }
 
-  /// 真實實作：bot 的擁有者是 coordinator（p3-4 之前是 view model）
+  /// 真實實作：bot 的擁有者是 coordinator
   init(coordinator: NakiWebCoordinator) {
     self.init(perform: { [weak coordinator] in coordinator?.deleteBot() })
   }
@@ -615,11 +598,7 @@ struct DeleteBotAction {
   /// Preview／未接線
   static let noop = DeleteBotAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = {}
   }
@@ -655,11 +634,7 @@ struct ToggleDebugServerAction {
   /// Preview／未接線
   static let noop = ToggleDebugServerAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = {}
   }
@@ -698,11 +673,7 @@ struct ReloadPageAction {
   /// Preview／未接線
   static let noop = ReloadPageAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = {}
   }
@@ -741,11 +712,7 @@ struct SetHidePlayerNamesAction {
   /// Preview／未接線
   static let noop = SetHidePlayerNamesAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = { _ in }
   }
@@ -765,8 +732,7 @@ struct SetHidePlayerNamesAction {
 
 /// 交出這條 path 對應的 WebView。
 ///
-/// 這是 p3-4 之前 `viewModel.makeWebView()` 的位置。View 因此不需要知道
-/// 有 WebPage 與 WKWebView 兩種實作，也不需要 `as?` 撈具體型別——
+/// View 因此不需要知道有 WebPage 與 WKWebView 兩種實作，也不需要 `as?` 撈具體型別——
 /// 那個轉型一失敗就只剩一個永遠轉圈的 `ProgressView`，沒有任何錯誤訊息。
 @MainActor
 struct WebViewAction {
@@ -787,11 +753,7 @@ struct WebViewAction {
   /// Preview／未接線：不建立任何 WebView（Preview 不該真的連上雀魂）
   static let placeholder = WebViewAction()
 
-  /// Preview／未接線的預設值。
-  ///
-  /// `nonisolated` 的理由是 `@Entry`：`NakiEnvironment` 的預設值在 `EnvironmentKey`
-  /// 的 **nonisolated** `defaultValue` 裡求值，那裡叫不動 `@MainActor` 的 init。
-  /// 直接寫進 stored property（而不是轉呼叫私有 init）也是同一個原因。
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.build = { AnyView(ProgressView("正在初始化...")) }
   }

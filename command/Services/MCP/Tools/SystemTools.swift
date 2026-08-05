@@ -29,7 +29,7 @@ struct GetStatusTool: MCPTool {
         let injection = await JSInjectionState.shared.report
 
         // 同一個道理：封包解析失敗到「這局不會運作」時，`game_*` / `bot_*` 的內容
-        // 是不完整的。與其讓查詢端自己去比對 log，不如在 status 就講清楚（p4-1）。
+        // 是不完整的。與其讓查詢端自己去比對 log，不如在 status 就講清楚。
         let parseFaults = LiqiParseFaultState.shared.statusPayload
 
         // 帶上檔案日誌路徑：`/logs` 只回記憶體裡的近期條目，跨重啟或回查上一局要直接讀檔。
@@ -87,7 +87,7 @@ struct GetHelpTool: MCPTool {
 
 // MARK: - Help 內容
 
-/// `get_help` 與 `MCPHandler.buildHelpContent()` 共用的說明內容（避免兩邊不同步）
+/// `get_help` 的說明內容
 enum NakiHelpContent {
 
     static func build(serverPort: UInt16) -> [String: Any] {

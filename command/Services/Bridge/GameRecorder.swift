@@ -46,16 +46,8 @@ final class GameRecorder {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    /// deinit 標 `nonisolated`——與 `NativeBotController`／`MJAIEventStream` 同一條理由：
-    /// MainActor 隔離 class 的隱含 deinit 走 `swift_task_deinitOnExecutor`，在 NakiTests
-    /// host 裡釋放會 SIGABRT。`MJAIEventStream` 持有本物件，單測釋放 stream 就會連帶釋放它。
+    /// MainActor class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit { }
-
-    /// 目前是否正在錄
-    var isRecording: Bool { gameId != nil }
-
-    /// 這局已累積幾個事件
-    var bufferedCount: Int { buffer.count }
 
     func startGame() {
         // 上一局若沒收到 end_game，這裡直接丟棄——見類型註解

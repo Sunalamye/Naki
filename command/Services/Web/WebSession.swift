@@ -2,11 +2,10 @@
 //  WebSession.swift
 //  Naki
 //
-//  p3-4：雀魂頁面這一側的全部職責，一個 service。
+//  雀魂頁面這一側的全部職責，一個 service。
 //
-//  取代 `WebViewModel`（1,423 行 / 9 種職責）與 `LegacyWebViewModel` 的重疊部分。
-//  p3-1～p3-3 已經把牌局狀態（`GameStore`）、自動打牌狀態機（`AutoPlayEngine`）、
-//  MCP 依賴（`NakiMCPDependencies` + Action 層）搬走；剩下的就是這裡：
+//  牌局狀態住在 `GameStore`、自動打牌狀態機住在 `AutoPlayEngine`、MCP 依賴住在
+//  `NakiMCPDependencies` + Action 層；這裡只有頁面本身：
 //
 //    · WebPage／WKWebView 的生命週期（建立、載入、重載、交出 View）
 //    · JS 注入（`WebSocketInterceptor.createUserScript()` 與 bridge message handler）
@@ -18,20 +17,19 @@
 //  ## 為什麼「函式體語意」要收在這裡
 //
 //  `WebPage.callJavaScript` 的腳本是**函式體**（取值要自己寫 `return`），
-//  `WKWebView.evaluateJavaScript` 的腳本是**運算式**。先前兩條 path 各自把這件事
-//  處理在自己的 view model 裡（Legacy 用 `"(function() { \(script) })()"` 包 IIFE），
-//  於是「同一段腳本在兩條 path 上要不要寫 return」這件事沒有一個地方講得清楚——
-//  p0-2 的 `closedCount` 恆為 0 就是其中一份漏了 `return`。
+//  `WKWebView.evaluateJavaScript` 的腳本是**運算式**。兩條 path 各自處理這件事的話，
+//  「同一段腳本在這條 path 上要不要寫 return」就沒有一個地方講得清楚——漏寫 `return`
+//  不會報錯，只會讓取回來的值恆為 nil（`closedCount` 恆為 0 就是這樣來的）。
 //
-//  現在只有一種語意：**傳進 `callJavaScript` 的字串一律是函式體，要值就寫 `return`**。
+//  只有一種語意：**傳進 `callJavaScript` 的字串一律是函式體，要值就寫 `return`**。
 //  IIFE 包裝內聚在 `LegacyWebBackend` 裡，呼叫端看不到平台差別。
 //
 //  ## 平台分歧
 //
-//  全專案唯一的 `#available(macOS 26.0, iOS 26.0, *)` 在 `WebSession.init`。
-//  兩個 backend 之外沒有第二個判斷點——先前 `WebViewModelFactory` 與
-//  `AdaptiveNakiWebView` 各判一次，靠註解要求一致，改一處忘另一處會得到
-//  「WebPage VM + Legacy View」的組合，`as?` 靜靜失敗、畫面只剩「正在初始化…」。
+//  全專案唯一的 `#available(macOS 26.0, iOS 26.0, *)` 在 `WebSession.init`；
+//  `AdaptiveNakiWebView` 只轉發 `WebViewAction` 交出來的 View，不自己判版本。
+//  **不要在別處再判一次**：兩個判斷點挑出不相配的 backend 與 View 是靜默失敗
+//  ——沒有編譯錯誤也沒有執行期例外，畫面只停在「正在初始化…」。
 //
 
 import SwiftUI
@@ -178,10 +176,8 @@ final class WebSession {
 
     /// View 出現時的首次載入（重複呼叫無效果）。
     ///
-    /// 刻意由 View 觸發而不是在 `init` 裡就 `load`：先前主路徑就是
-    /// `NakiWebView.task { await viewModel?.loadMajsoul() }`，Legacy 路徑則是
-    /// `updateNSView` 裡的 `webView.url == nil` 檢查。兩者都等到頁面真的要顯示了才載入，
-    /// 這裡保持同一個時機（差別只是兩條 path 現在共用同一個進入點）。
+    /// 刻意由 View 的 `.task` 觸發而不是在 `init` 裡就 `load`：頁面要等真的顯示了
+    /// 才開始載入，兩條 path 共用這一個進入點。
     func loadMajsoulIfNeeded() {
         guard !hasRequestedInitialLoad else { return }
         loadMajsoul()
@@ -194,8 +190,8 @@ final class WebSession {
 
     /// 這條 path 對應的 SwiftUI View（`AdaptiveNakiWebView` 只轉發，不判版本）。
     ///
-    /// 首次載入掛在這裡的 `.task` 上：兩條 path 先前各自在自己的 representable
-    /// 裡處理（一個 `.task`、一個 `updateNSView` 的 url 檢查），現在只有一份。
+    /// 首次載入掛在這裡的 `.task` 上：兩條 path 共用這一份，backend 的 representable
+    /// 只負責把既有的頁面物件放進 SwiftUI，不自己決定要不要載入。
     func makeView() -> AnyView {
         AnyView(backend.makeView().task { [weak self] in self?.loadMajsoulIfNeeded() })
     }
@@ -206,8 +202,8 @@ final class WebSession {
     ///
     /// 手段由 backend 決定（WebPage 關掉所有雀魂 WebSocket，伺服器會以
     /// authGame + syncGame 重建；Legacy 只能整頁重載）。**結果的解讀與狀態列措辭
-    /// 只有這一份**：UI 按鈕、MCP `bot_sync` 與這裡先前各寫一次，
-    /// 其中 MCP 那份還自己重跑一次 JS（p3-3 → `ForceReconnectAction`）。
+    /// 只有這一份**：UI 按鈕與 MCP `bot_sync` 都經 `ForceReconnectAction` 走到這裡，
+    /// 不各自跑一次 JS、也不各自解讀 outcome。
     @discardableResult
     func forceReconnect() async -> ForceReconnectOutcome {
         guard backend.isReady else {
@@ -280,7 +276,7 @@ extension WebSession: WebNavigationSink {
 
     func webDidStartNavigation() {
         // 牌局側的重置（WS handler、event stream、bot）交給 coordinator，
-        // 這裡只管頁面與狀態列——p3-4 之前這兩件事混在同一個 view model 方法裡。
+        // 這裡只管頁面與狀態列。
         lifecycle?.webNavigationDidStart()
         hasAppliedHideNames = false
         store.statusMessage = "正在加載雀魂..."

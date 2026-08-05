@@ -123,11 +123,6 @@ enum LiqiEncoder {
         encodeLengthDelimited(field: field, bytes: Array(value.utf8))
     }
 
-    /// 巢狀 message 欄位（wire type 2）
-    static func encodeMessageField(field: Int, message: [UInt8]) -> [UInt8] {
-        encodeLengthDelimited(field: field, bytes: message)
-    }
-
     // MARK: - Payload 組裝
 
     /// 依序把欄位串成 payload bytes（不含 envelope）

@@ -4,12 +4,10 @@
 //
 //  「送出一筆 Liqi request」在 MCP 工具面的呈現層。
 //
-//  p4-2 把它從 `LiqiActionSender.swift` 搬出來，並且**搬到 MCP 目錄底下**：
-//  它唯一的用途是把送出結果轉成工具回傳的 JSON，而且會寫 `eventLog`。
-//  留在協定層的後果不只是檔案變長——協定層一旦開始寫 log，
-//  「送出」與「怎麼把送出講給人聽」就綁死，單元測試也跟著要吃 log 副作用。
-//  現在協定層（`LiqiActionSender` / `LiqiRequestBuilder` / `LiqiEncoder`）
-//  完全不呼叫任何 log 函式，log 一律發生在呼叫端（本檔與各 `*Tools.swift`）。
+//  這一份刻意住在 MCP 目錄而不是協定層：它會寫 `eventLog`，而協定層
+//  （`LiqiActionSender` / `LiqiRequestBuilder` / `LiqiEncoder`）**完全不呼叫任何 log
+//  函式**。協定層一旦開始寫 log，「送出」與「怎麼把送出講給人聽」就綁死，
+//  單元測試也跟著要吃 log 副作用。log 一律發生在呼叫端（本檔與各 `*Tools.swift`）。
 //
 
 import Foundation
@@ -19,7 +17,7 @@ import Foundation
 /// 「送出 + （可選）等待回應」的完整結果，供 MCP 工具轉成 JSON。
 ///
 /// 三種狀態要分清楚：
-/// - `unavailableReason != nil`：連送都沒送（沒有 WebViewModel / 沒有送出通道）
+/// - `unavailableReason != nil`：連送都沒送（這條 path 不提供送出通道）
 /// - `sent?.success == false`：送出被 JS 端拒絕（沒有 OPEN 的雀魂連線等）
 /// - `sent?.success == true && response == nil`：**送出去了，但沒等到回應**
 ///   （可能是伺服器沒回、也可能是等待時間不夠；不可當成失敗，也不可當成成功）

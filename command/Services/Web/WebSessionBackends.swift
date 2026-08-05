@@ -2,9 +2,9 @@
 //  WebSessionBackends.swift
 //  Naki
 //
-//  p3-4：`WebSessionBackend` 的兩份實作 —— **全專案唯一的平台差異**。
+//  `WebSessionBackend` 的兩份實作 —— **全專案唯一的平台差異**。
 //
-//  這裡（而不是 view model、不是 View、不是 Action）是 WebPage 與 WKWebView
+//  這裡（而不是 `WebSession`、不是 View、不是 Action）是 WebPage 與 WKWebView
 //  分道揚鑣的唯一地點。上層看到的只有 `WebSession`：同一組方法、同一種
 //  JS 語意（函式體）、同一種導覽事件。
 //
@@ -29,6 +29,8 @@ final class WebPageBackend: WebSessionBackend {
     private let decider = NakiNavigationDecider()
     private let presenter = NakiDialogPresenter()
 
+    /// 設定它會**啟動一條長駐 Task**：`WebPage.navigations` 是 async sequence，
+    /// 沒有 delegate callback 可掛，只能一直 for-await。每次重設都會先取消舊的那一條。
     weak var sink: (any WebNavigationSink)? {
         didSet { startObservingNavigations() }
     }
@@ -47,8 +49,6 @@ final class WebPageBackend: WebSessionBackend {
             navigationDecider: decider,
             dialogPresenter: presenter)
 
-        // 註：先前這行在 `webPage` 被建立**之前**執行，optional chaining 對 nil
-        // 直接短路，一行都沒生效。
         #if DEBUG
             page.isInspectable = true
         #endif
@@ -178,7 +178,7 @@ final class NakiDialogPresenter: WebPage.DialogPresenting {
 /// **`supportsAutoPlay` 是 false**：這條路沒有主路徑的整層保護，而且 macOS
 /// deployment target 是 26，本機根本跑不到它——沒有 iOS 17–25 實機就沒有任何
 /// 對局證據。在那個證據出現以前，讓它自動送牌等於拿使用者的帳號賭一條沒驗過的路
-/// （p2-2 路線 A；理由字串在 `AutoPlayAvailability.autoUnavailableReason`）。
+/// （理由字串在 `AutoPlayAvailability.autoUnavailableReason`）。
 @MainActor
 final class LegacyWebBackend: NSObject, WebSessionBackend, WKNavigationDelegate, WKUIDelegate {
 
@@ -214,8 +214,7 @@ final class LegacyWebBackend: NSObject, WebSessionBackend, WKNavigationDelegate,
     /// `evaluateJavaScript` 是**運算式**語意，所以這裡把函式體包成 IIFE。
     ///
     /// 這個包裝是 Legacy path 的內部細節：呼叫端一律寫函式體（要值就 `return`），
-    /// 與 WebPage path 完全一致。先前它長在 `LegacyWebViewModel.executeJavaScript`
-    /// 裡，而「這條 path 的腳本要不要自帶 return」只寫在註解。
+    /// 與 WebPage path 完全一致，不必知道自己跑在哪一條 path 上。
     func callJavaScript(_ functionBody: String) async throws -> Any? {
         let wrapped = "(function() { \(functionBody) })()"
         return try await withCheckedThrowingContinuation { continuation in
@@ -298,9 +297,9 @@ final class LegacyWebBackend: NSObject, WebSessionBackend, WKNavigationDelegate,
 
 /// Legacy path 的 View —— **只負責把既有的 `WKWebView` 放進 SwiftUI**。
 ///
-/// 先前這個 representable 還兼任「建立 WKWebView、組 configuration、把 webView
-/// 塞回 view model（`viewModel as? LegacyWebViewModel`）、決定要不要載入雀魂」。
-/// 那個 `as?` 一失敗就什麼都不會發生，而且沒有任何錯誤訊息。
+/// 建立 WKWebView、組 configuration、決定要不要載入雀魂都在 `LegacyWebBackend`
+/// 與 `WebSession`。讓 representable 兼任那些事的話，失敗會是靜默的：
+/// 什麼都不會發生，而且沒有任何錯誤訊息。
 struct LegacyNakiWebView: View {
 
     let webView: WKWebView
