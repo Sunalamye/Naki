@@ -494,6 +494,12 @@ struct AdvancedSettingsSheet: View {
     @Environment(\.naki) private var naki
     @Environment(\.dismiss) private var dismiss
 
+    /// 「測試連線」的結果（只活在這張 sheet 裡；nil＝還沒測）
+    @State private var cloudTestResult: String?
+    @State private var cloudTestRunning = false
+    /// 測試連線取回的模型清單（供模型欄的下拉選擇；空＝還沒取到）
+    @State private var cloudModels: [CloudModelInfo] = []
+
     var body: some View {
         #if os(macOS)
         macOSSettingsContent
@@ -559,6 +565,90 @@ struct AdvancedSettingsSheet: View {
                 set: { naki.actions.setHidePlayerNames($0) })
     }
 
+    // ☁️ 雲端推論設定：讀寫都是 `SettingsStore` 那一份（key 進 Keychain，
+    // 見 `SettingsStore.cloudAPIKey`）。改動在**下一個決策點**生效並 reset 斷路器。
+    private var cloudEnabled: Binding<Bool> {
+        Binding(get: { naki.settings.cloudInferenceEnabled },
+                set: { naki.settings.cloudInferenceEnabled = $0 })
+    }
+    private var cloudServerURL: Binding<String> {
+        Binding(get: { naki.settings.cloudServerURL },
+                set: { naki.settings.cloudServerURL = $0 })
+    }
+    private var cloudAPIKey: Binding<String> {
+        Binding(get: { naki.settings.cloudAPIKey },
+                set: { naki.settings.cloudAPIKey = $0 })
+    }
+    private var cloudModel4P: Binding<String> {
+        Binding(get: { naki.settings.cloudModel4P },
+                set: { naki.settings.cloudModel4P = $0 })
+    }
+    private var cloudModel3P: Binding<String> {
+        Binding(get: { naki.settings.cloudModel3P },
+                set: { naki.settings.cloudModel3P = $0 })
+    }
+
+    /// 模型欄：手動輸入為底、伺服器清單為加速器，兩者並存。
+    ///
+    /// 為什麼不是純下拉：`/v3/models` 是**認證端點**（沒貼有效 key 前拿不到
+    /// 清單），而自架伺服器可能根本沒有這個端點——純下拉在這兩種情境會把
+    /// 使用者卡死。所以自由輸入永遠可用，「測試連線」成功後箭頭選單才亮起。
+    @ViewBuilder
+    private func cloudModelRow(placeholder: String, text: Binding<String>,
+                               game: String, accessibilityId: String) -> some View {
+        HStack {
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier(accessibilityId)
+            Menu {
+                Button("伺服器預設（清空）") { text.wrappedValue = "" }
+                ForEach(cloudModels.filter { $0.game.isEmpty || $0.game == game },
+                        id: \.id) { model in
+                    Button(model.desc.isEmpty ? model.id : "\(model.id) — \(model.desc)") {
+                        text.wrappedValue = model.id
+                    }
+                }
+            } label: {
+                Image(systemName: "chevron.down.circle")
+            }
+            .disabled(cloudModels.isEmpty)
+            .help(cloudModels.isEmpty ? "先按「測試連線」取得模型清單" : "從伺服器清單選擇")
+            .accessibilityIdentifier("\(accessibilityId)-picker")
+        }
+    }
+
+    /// 測試連線：`/healthz`（無認證，驗伺服器活不活）＋有 key 時再打
+    /// `/v3/models`（驗 key、列可用模型）。對局開始前就能發現問題，
+    /// 不必等到第一手。
+    private func runCloudConnectionTest() {
+        let baseURL = naki.settings.cloudServerURL
+        let key = naki.settings.cloudAPIKey
+        cloudTestRunning = true
+        cloudTestResult = nil
+        Task {
+            defer { cloudTestRunning = false }
+            do {
+                let health = try await AkagiApiClient.health(baseURL: baseURL)
+                guard !key.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    cloudTestResult = "伺服器 \(health.status)（未填 key，略過模型查詢）"
+                    return
+                }
+                guard let client = AkagiApiClient(baseURL: baseURL, key: key) else {
+                    cloudTestResult = "URL 無法解析"
+                    return
+                }
+                let models = try await client.models()
+                cloudModels = models   // 餵給模型欄的下拉（見 cloudModelRow）
+                let ids = models.map { "\($0.id)(\($0.game))" }.joined(separator: ", ")
+                cloudTestResult = "伺服器 \(health.status)；可用模型：\(ids.isEmpty ? "無" : ids)"
+                    + (models.isEmpty ? "" : "——可用模型欄旁的箭頭直接選")
+            } catch {
+                cloudTestResult = "失敗：\(error.localizedDescription)"
+            }
+        }
+    }
+
     private var settingsForm: some View {
         VStack(alignment: .leading, spacing: 20) {
 
@@ -577,6 +667,56 @@ struct AdvancedSettingsSheet: View {
                 }
             } label: {
                 Label("畫面", systemImage: "eye.slash")
+            }
+
+            // ☁️ 雲端推論（docs/cloud-inference-plan.md；key 在 Keychain）
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("啟用雲端推論", isOn: cloudEnabled)
+                        .accessibilityIdentifier("cloud-inference-toggle")
+
+                    Text("啟用後，每個決策點會把**本局至今的對局事件（含自家手牌）**上傳到下方伺服器換取決策；伺服器失敗時自動退回內建本地模型，對局不會停擺。API key 存在 Keychain，不會出現在 log 或設定檔。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    TextField("伺服器 URL", text: cloudServerURL)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("cloud-server-url-field")
+
+                    SecureField("API Key（自行取得後貼上）", text: cloudAPIKey)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("cloud-api-key-field")
+
+                    cloudModelRow(placeholder: "四麻模型（空＝伺服器預設）",
+                                  text: cloudModel4P, game: "4p",
+                                  accessibilityId: "cloud-model-4p-field")
+                    cloudModelRow(placeholder: "三麻模型（空＝伺服器預設）",
+                                  text: cloudModel3P, game: "3p",
+                                  accessibilityId: "cloud-model-3p-field")
+
+                    HStack {
+                        Button(cloudTestRunning ? "測試中…" : "測試連線") {
+                            runCloudConnectionTest()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(cloudTestRunning)
+                        .accessibilityIdentifier("cloud-test-button")
+
+                        if let result = cloudTestResult {
+                            Text(result)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .accessibilityIdentifier("cloud-test-result")
+                        }
+                    }
+
+                    Text("三麻提醒：雲端 3p 模型是目前唯一的真三麻路徑；雲端失敗退回的本地模型仍是四麻模型，側欄的決策來源會如實顯示。")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            } label: {
+                Label("雲端推論", systemImage: "icloud.and.arrow.up")
             }
 
             // Bot 管理

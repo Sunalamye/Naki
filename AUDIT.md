@@ -653,3 +653,43 @@ soak 的異常統計因此變成累計而非單次。
 看起來像 import 問題。`GameRecorder.swift` 與 `ReplayTools.swift` 都踩到。
 
 MCP 工具要 `import MCPKit`（型別在獨立 module，不在 Naki target）。
+
+## 20. 雲端推論 overlay（2026-08-04）
+
+Akagi `/v3/react` 雲端推論接入完成。設計與偏差說明見
+`docs/cloud-inference-plan.md`（實作狀態表）與 `docs/cloud-inference-decisions.md`
+（D1–D10 保守決策）。本節只記**驗證差距與完成判準**。
+
+### 20.0 2026-08-05 修訂：protocol 版取代 overlay 版
+
+使用者決策推翻 D1：抽出 `MahjongBot` protocol（`BundledCoreMLBot`／
+`CloudBot`／`MortalActionMapper`），雲端重建在抽象上；並修掉 overlay 版的
+重連重放缺陷（歷史決策不再重打 API）。詳見 decisions D11／D12。
+
+### 20.1 已驗證
+
+- macOS Debug／Release build 通過；NakiTests 全迴歸 470 tests 通過
+  （含 28 元件測試＋10 CloudBot 整合測試＋指紋回歸）。
+- **replay 決策指紋與改動前舊 Release binary 完全一致**：
+  `ReplayFingerprintTests` 重放 `20260803-020304` 實錄（230 事件、32 決策），
+  指紋 `6d31018603457caf` 與 baseline 吻合——protocol 抽象沒有改變任何決策。
+  另一局 fixture（58 決策）已被 log 輪替清掉、無法重放（D12；跑一次測試＝
+  一次啟動，會吃保留 8 次的額度）。
+- CloudBot 的閘門／覆蓋／fallback／斷路器／立直兩段／重放抑制全路徑有
+  mock HTTP 整合測試。
+- **真 server live 驗證通過（2026-08-05 晚間，真 key＋官方伺服器）**：
+  live 對局中連續多手「☁️ 雲端決策生效（cloud:4p-akg-v8）」、
+  `/bot/status` 的 `decisionSource`/`cloudHost` 如實回報；副露窗口的 pass
+  以真實列呈現（none 59.1% vs chi_0 40.9%，#190 語意正確）；重連重放抑制
+  實際觸發（379／538 個歷史事件未重問伺服器）；log 中 key 只出現後四碼。
+  判準 (a)(b) 達成；(c) 拔網 fallback 未主動測（斷路器已有整合測試覆蓋）。
+
+### 20.2 未驗證
+
+1. **立直兩段式 live 時序**：雲端回裸 reach → 第二段解出捨牌 → executor 以
+   該捨牌宣言（`ReqSelfOperation type=7` 帶正確 tile）。2s×2 是否擠進雀魂
+   回合計時器無實測數據。
+2. **iOS target 編譯**：本機無 iOS 26 SDK（環境限制，先於本次改動）。
+3. **三麻雲端**：`model_3p` 路徑只有單測（補位到 4 家），無 live 對局。
+
+雲端推論（四麻）已可宣稱可用；立直兩段式在 live 遇到前不得宣稱該路徑已驗。

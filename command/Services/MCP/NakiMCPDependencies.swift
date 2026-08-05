@@ -88,6 +88,10 @@ enum NakiStatePayload {
       "botStatus": [
         "isActive": store.botStatus.isActive,
         "playerId": store.botStatus.playerId,
+        // ☁️ 這批推薦由誰算出（"local" / "cloud:<model>"）；cloudHost 非 null
+        // ＝對局事件正在送往該主機。純增量欄位，既有讀者不受影響。
+        "decisionSource": store.botStatus.decisionSource,
+        "cloudHost": store.botStatus.cloudHost ?? NSNull(),
       ],
       "gameState": [
         "bakaze": store.gameState.bakazeDisplay,

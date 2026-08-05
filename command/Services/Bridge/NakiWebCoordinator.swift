@@ -263,6 +263,9 @@ final class NakiWebCoordinator {
 
         do {
             try createBot(playerId: playerId, is3P: is3P)
+            // ☁️ 重放歷史事件期間抑制雲端呼叫：歷史決策不重問伺服器
+            // （否則重連要付 N 決策 × 2s 逾時預算＋額度）
+            bot.prepareForResyncReplay(eventCount: eventStream.eventCount)
             store.statusMessage = "Bot 已重新同步 (Player \(playerId))"
             startEventConsumer()
             bridgeLog("[協調器] Bot 重新同步成功")

@@ -77,6 +77,20 @@ struct BotStatusView: View {
                         .cornerRadius(4)
                 }
 
+                // ☁️ 雲端推論常駐指示（pluggable-bots-plan 安全節第 3 條）：
+                // 只要對局資料正在送往外部主機，就必須一直看得到；
+                // decisionSource 同時揭露 fallback——退回本地時這行如實變回 local
+                if let host = botStatus.cloudHost {
+                    HStack(spacing: 4) {
+                        Image(systemName: "icloud.and.arrow.up")
+                            .font(.caption)
+                        Text("對局資料送往 \(host)（\(botStatus.decisionSource)）")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.orange)
+                    .accessibilityIdentifier("cloud-inference-indicator")
+                }
+
                 // 三麻：明講不支援，而不是讓使用者以為 AI 正常運作
                 if botStatus.is3P {
                     SanmaUnsupportedNotice()

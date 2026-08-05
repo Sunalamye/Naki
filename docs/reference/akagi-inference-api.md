@@ -1,7 +1,7 @@
 # Akagi 推論伺服器 API 參考
 
-**資料日期**：2026-08-01
-**來源**：[`src/bot/api.rs`](https://github.com/shinkuan/Akagi/blob/v3/src/bot/api.rs)（657 行）與 [`src/bot/native.rs`](https://github.com/shinkuan/Akagi/blob/v3/src/bot/native.rs)，v3 分支逐行讀出
+**資料日期**：2026-08-01 首讀；2026-08-04 以當日 clone 重驗全文（無過時內容）並新增文末「請求塑形與雙段語意」一節
+**來源**：[`src/bot/api.rs`](https://github.com/shinkuan/Akagi/blob/v3/src/bot/api.rs)（657 行）、[`src/bot/native.rs`](https://github.com/shinkuan/Akagi/blob/v3/src/bot/native.rs)（1905 行）與 [`src/config/bot.rs`](https://github.com/shinkuan/Akagi/blob/v3/src/config/bot.rs)，v3 分支逐行讀出
 
 這份是**外部參考**，不是 Naki 的實作規格。目的：要自架 inference server 或設計 Naki 的遠端推論時，有一份已經在生產環境跑的協定可以對照，而不是從零猜。
 
@@ -254,4 +254,70 @@ BREAKER_BASE * 2^(failures-1)，上限 BREAKER_MAX
 | 認證 | Bearer | 自架可省，跨網路要留 |
 | 平台 | 單一 binary | macOS + iOS，**遠端是 iOS 唯一的外部 AI 路徑** |
 
-實作計畫見 [`pluggable-bots-plan.md`](../pluggable-bots-plan.md)。
+實作計畫見 [`pluggable-bots-plan.md`](../pluggable-bots-plan.md)；Naki 端的具體接入設計見 [`cloud-inference-plan.md`](../cloud-inference-plan.md)。
+
+---
+
+## 2026-08-04 補充：請求塑形與雙段語意（`native.rs` 再讀）
+
+以下是客戶端**必須**做對、但只讀 `api.rs` 看不到的部分。全部出自 `native.rs` 的 `accumulate` / `build_api_events` / `to_api_event` / `resolve_reaction` / `reach_discard`。
+
+### 事件流是「每局視窗」，不是全對局
+
+- `start_game` 清空重來；`start_kyoku` 清掉上一局尾巴，**但保留開頭的 `start_game` 當 `events[0]`**（API 硬性要求）。
+- server 有 **512 事件上限**；一局的量遠低於此，per-kyoku 視窗就是為了保持在上限之下。
+- API 關閉時也持續累積，所以局中途開啟能立刻上傳「本局至今」。
+
+### 上傳前的 censor 與塑形（`to_api_event`）
+
+| 事件 | 處理 |
+|------|------|
+| `start_kyoku.tehais` | 只露自己的手牌，其他座位一律 13 張 `"?"` |
+| 別家 `tsumo.pai` | 換成 `"?"`（自己的照送）|
+| `reach` | 剝掉任何非 spec 的預測 `pai` 欄位，送裸 `{"type":"reach","actor":N}` |
+| 三麻 `start_game.names` | 補空字串到長度 4 |
+| 三麻 `start_kyoku.scores` / `tehais` | 補 0 分／13 張 `"?"` 的幽靈第四家到長度 4 |
+| 其餘公開事件 | 原樣（已是 API 形狀）|
+
+### 立直是兩段式
+
+server 對立直回**不含捨牌**的裸 `{"type":"reach"}`（捨牌是第二個決策）。客戶端要把 reach 附到事件流尾**再打一次 `/v3/react`** 拿 `dahai`；第二次失敗就用本地模型的立直捨牌，連本地都沒有就整個放棄 API 反應、退回本地完整決策——**沒有捨牌的 reach 會讓自動打牌卡死**。這正是 react 逾時壓 2 秒的原因（兩次呼叫要擠進同一回合）。
+
+### `reaction: null` 的語意
+
+HTTP 成功但 `reaction` 為 `null` ＝ server 認為該座位無合法動作。若本地閘門明明判定有動作，代表**事件流不同步**——此時打本地決策並記 warn，絕不能默默 pass 掉真回合。注意：null reaction 算 server 可達，**不觸發**斷路器；只有 transport／HTTP 錯誤才算失敗。
+
+### 防禦性細節
+
+- 收到 reaction 後強制把 `actor` 蓋成自己的座位（server 應該已設對，但防禦性覆寫）。
+- **client 建構失敗 tombstone**：同一組建不出 client 的設定（如壞 proxy URL）只警告一次，記住失敗四元組 `(base_url, key, proxy, model)`，使用者改任何一項才重試——否則每個決策都重試又重跳 toast。
+- 卡片標題標示實際服務者（`Akagi · <model>` vs `Akagi · Local`），fallback 在畫面上可見。
+
+### 設定形狀（`config/bot.rs` 的 `NativeApiConfig`）
+
+```
+enabled: bool            # 總開關；is_active() = enabled && base_url 非空 && key 非空
+base_url: string         # 預設 https://mjapi.shinkuan.me
+key: string              # 32 字元英數 Bearer key
+model_4p / model_3p      # 分開兩欄；空字串 ⇒ 不送 model 欄位、server 用該遊戲預設
+proxy_enabled / proxy    # 開關與值分離，關掉不清值
+```
+
+四麻／三麻模型分兩欄、依 `start_game` 的 `num_players` 選用——**雲端 server 有真三麻模型**（`/v3/models` 的 `game: "3p"`），這是本地 bundled 模型沒有的能力。
+
+---
+
+## 附：key 的取得管道（2026-08-05 查證）
+
+Naki 依 decisions D6 刻意不做 redeem／購買流程，所以 key 從外部取得。查證結果
+（GitHub repo README＋issues＋discussions 全搜、官網 akagi.shinkuan.me 文件）：
+
+- **官方付款通道只有一條**：Akagi App 內購（PayPal，portable build 免安裝可跑）。
+  沒有網頁商店——`mjapi.shinkuan.me` 根路徑對瀏覽器直接回 Cloudflare 阻擋頁。
+- **預付序號**的公開販售管道不存在於任何官方文件；唯一出口是
+  [Discord](https://discord.gg/Z2wjXUK8bN)。
+- 拿到序號後**不需要 Akagi App**：`POST /v3/redeem` 無認證，一條 curl 兌換，
+  回應的 `key` 只在新發時出現一次。
+- PayPal 受限地區（如台灣帳號）：先試結帳頁的訪客信用卡選項，不行走 Discord。
+- portable build 註明的文件 repo `shinkuan/AkagiV3` **不存在**，實際 repo 是
+  `shinkuan/Akagi`；官方文件站是 `akagi.shinkuan.me/zh-tw/docs`。

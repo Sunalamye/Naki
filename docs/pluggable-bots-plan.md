@@ -2,6 +2,7 @@
 
 **資料日期**：2026-08-01
 **參考**：[Akagi mjai_bot 協定](https://github.com/shinkuan/Akagi/blob/v3/mjai_bot/README.md)
+**後續**：「換模型」層（雲端推論）已於 2026-08-05 **實作完成**，見 [`cloud-inference-plan.md`](cloud-inference-plan.md) 實作狀態節。本計畫的**第 1 層（`MahjongBot` 抽象）也已落地**，與草案的差異：`react(events:)` 回型別化 `BotReaction{action?, recommendations, source}`（非 opaque `meta`——Naki 的 UI 在同 process）；雲端是裝飾器 `CloudBot(local: any MahjongBot)` 而非平行引擎；引擎讀手牌經唯讀 closure（手牌是遊戲狀態，權威留在 controller）。決策指紋已驗證重構零行為變化（`ReplayFingerprintTests`）。剩餘未做：第 2 階段真批次化與第 6 階段 `SubprocessTransport`。
 
 Akagi 用「Python 子行程 + JSONL over stdin/stdout」。**那套不能直接搬**，因為 Naki 同時出 macOS 與 iOS，而 iOS 不允許 app 啟動任意子行程。這份文件是針對 Naki 實際限制的設計。
 

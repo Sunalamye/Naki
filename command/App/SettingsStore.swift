@@ -113,6 +113,79 @@ final class SettingsStore {
         Self.actionDelayScale(forSeconds: actionDelaySeconds)
     }
 
+    // MARK: - 雲端推論（docs/cloud-inference-plan.md）
+
+    /// 三個非機密欄位走 UserDefaults（與本檔既有 pattern 同款）；
+    /// **API key 走 Keychain**（`CloudKeyStore`）——credential 不落入
+    /// 可能被 bug report 附上的 plist。
+    nonisolated static let cloudEnabledKey = "naki.cloud.enabled"
+    nonisolated static let cloudBaseURLKey = "naki.cloud.baseURL"
+    nonisolated static let cloudModel4PKey = "naki.cloud.model4p"
+    nonisolated static let cloudModel3PKey = "naki.cloud.model3p"
+
+    /// 預設伺服器（Akagi 官方；與其 `DEFAULT_API_BASE_URL` 一致）。
+    /// 預填省得使用者打字；沒貼 key 之前 `isActive` 恆為 false，不會連線。
+    nonisolated static let defaultCloudBaseURL = "https://mjapi.shinkuan.me"
+
+    /// 啟用雲端推論。開著但 URL/key 缺任一 ⇒ 實際仍是本地（`CloudInferenceConfig.isActive`）。
+    var cloudInferenceEnabled: Bool = UserDefaults.standard
+        .bool(forKey: SettingsStore.cloudEnabledKey)
+    {
+        didSet {
+            guard cloudInferenceEnabled != oldValue else { return }
+            UserDefaults.standard.set(cloudInferenceEnabled, forKey: Self.cloudEnabledKey)
+        }
+    }
+
+    /// 推論伺服器 base URL。
+    var cloudServerURL: String = UserDefaults.standard
+        .string(forKey: SettingsStore.cloudBaseURLKey) ?? SettingsStore.defaultCloudBaseURL
+    {
+        didSet {
+            guard cloudServerURL != oldValue else { return }
+            UserDefaults.standard.set(cloudServerURL, forKey: Self.cloudBaseURLKey)
+        }
+    }
+
+    /// Bearer API key。讀寫都在 Keychain；這份只是 UI 綁定用的記憶體鏡像。
+    var cloudAPIKey: String = CloudKeyStore.load() {
+        didSet {
+            guard cloudAPIKey != oldValue else { return }
+            CloudKeyStore.save(cloudAPIKey)
+        }
+    }
+
+    /// 四麻模型 id；空字串 ⇒ 伺服器預設。
+    var cloudModel4P: String = UserDefaults.standard
+        .string(forKey: SettingsStore.cloudModel4PKey) ?? ""
+    {
+        didSet {
+            guard cloudModel4P != oldValue else { return }
+            UserDefaults.standard.set(cloudModel4P, forKey: Self.cloudModel4PKey)
+        }
+    }
+
+    /// 三麻模型 id；空字串 ⇒ 伺服器預設。
+    /// 雲端是 Naki 目前**唯一**的真三麻推論路徑（本地 fallback 仍是四麻模型，
+    /// 三麻局 fallback 時 `decisionSource` 會如實顯示降級）。
+    var cloudModel3P: String = UserDefaults.standard
+        .string(forKey: SettingsStore.cloudModel3PKey) ?? ""
+    {
+        didSet {
+            guard cloudModel3P != oldValue else { return }
+            UserDefaults.standard.set(cloudModel3P, forKey: Self.cloudModel3PKey)
+        }
+    }
+
+    /// 給 `NativeBotController.cloudConfigProvider` 的值快照（每決策點重讀）。
+    var cloudConfig: CloudInferenceConfig {
+        CloudInferenceConfig(enabled: cloudInferenceEnabled,
+                             baseURL: cloudServerURL,
+                             apiKey: cloudAPIKey,
+                             model4P: cloudModel4P,
+                             model3P: cloudModel3P)
+    }
+
     /// 目前這條 WebView 路徑是否提供自動送出。
     ///
     /// 不是使用者設定，而是「設定選單上有沒有這個選項」的依據：

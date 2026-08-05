@@ -23,13 +23,30 @@ class NativeBotController {
 
     // MARK: - Properties
 
-    /// Bot 實例 (actor)
-    private var bot: MortalBot?
+    /// 推論引擎（protocol 抽象；具體型別由 `createBot` 決定：
+    /// `BundledCoreMLBot` 或包了雲端的 `CloudBot`）
+    private var bot: (any MahjongBot)?
 
     /// #2: 世代序號（generation token）。每次 createBot/deleteBot 遞增，用於使 inflight 的
     /// react 結果失效：react 在 `await bot.react` 暫停期間若換了 bot（start_game / 重連），
     /// 恢復後檢查世代不符即丟棄本次結果，避免舊局的推論污染新局。
     private var generation = 0
+
+    // MARK: - 雲端推論（docs/cloud-inference-plan.md；引擎抽象見 MahjongBot.swift）
+    //
+    // 2026-08-05 protocol 重構之後，雲端整段住在 `CloudBot` 裝飾器裡；
+    // controller 只負責兩件事：createBot 時決定要不要包 CloudBot、
+    // 把引擎回報的 `BotReaction.source` 轉給 UI／MCP。
+    // Replay／單測建的 controller 沒有 provider ⇒ 純本地引擎，
+    // 決策指紋天然穩定（`ReplayFingerprintTests` 鎖住）。
+
+    /// 雲端設定來源（`NakiRuntime` 注入 `SettingsStore.cloudConfig`）。
+    /// `CloudBot` 在每個決策點經它重讀設定；nil ⇒ 不包裝、雲端永遠關。
+    var cloudConfigProvider: (() -> CloudInferenceConfig?)?
+
+    /// 這批推薦由誰算出："local" 或 "cloud:<model>"（來自 `BotReaction.source`）。
+    /// fallback 原則——可以更弱，但必須讓人看得出來（UI 與 /bot/status 都讀它）。
+    private(set) var lastDecisionSource = "local"
 
     /// 玩家 ID (0-3)
     private(set) var playerId: UInt8 = 0
@@ -136,15 +153,23 @@ class NativeBotController {
         self.playerId = playerId
         self.is3P = is3P
 
-        // 使用內建的 Core ML 模型
-        // MortalSwift v0.3.0 使用 Int 作為 playerId
-        // ⚠️ #3 已知風險：MortalBot 建構子不吃 sanma/is3P，且僅內建單一四麻模型
-        //    (bundledModelURL = "mortal", version 4, obs 1012ch)。is3P 只用於本控制器狀態
-        //    （GameState.is3P / 模型名稱標籤 / 自風 playerCount），實際推論仍為四麻。
-        //    真三麻需 MortalSwift 提供三麻模型與 sanma 建構參數。
-        bot = try MortalBot(playerId: Int(playerId), version: 4, useBundledModel: true)
+        // 內建引擎經 handProvider 讀 controller 的手牌——手牌是**遊戲**狀態，
+        // 權威在 `updateInternalState`（UI/MCP 匯出也讀同一份），引擎只讀不寫。
+        // ⚠️ #3 已知風險不變：內建仍是單一四麻 Core ML 模型（見 BundledCoreMLBot）。
+        let local = try BundledCoreMLBot(playerId: playerId, is3P: is3P,
+                                         hand: { [weak self] in
+                                             (self?.tehai ?? [], self?.tsumo)
+                                         })
+        // 有雲端設定來源就包一層 CloudBot（設定未啟用時它是純轉發）；
+        // Replay／單測沒有 provider ⇒ 純本地，決策指紋天然穩定
+        if let provider = cloudConfigProvider {
+            bot = CloudBot(local: local, playerId: playerId, is3P: is3P,
+                           configProvider: provider)
+        } else {
+            bot = local
+        }
 
-        botLog("[NativeBotController] Bot 創建成功: playerId=\(playerId), is3P=\(is3P), gen=\(generation)")
+        botLog("[NativeBotController] Bot 創建成功: playerId=\(playerId), is3P=\(is3P), gen=\(generation), engine=\(bot?.identity.name ?? "?")")
     }
 
     /// 刪除 Bot 實例
@@ -193,7 +218,6 @@ class NativeBotController {
         // 只有在推薦真的刷新時才拿它更新 provenance（p5 #1）。
         let eventOplistSeq = event[MJAIEventKey.oplistSequence] as? UInt64
         let eventActor = event["actor"] as? Int ?? -1
-        let isMyMeld = (eventType == "chi" || eventType == "pon" || eventType == "daiminkan") && eventActor == Int(playerId)
         let isMyDahai = eventType == "dahai" && eventActor == Int(playerId)
         let isEndEvent = eventType == "hora" || eventType == "ryukyoku" || eventType == "end_kyoku" || eventType == "end_game"
 
@@ -215,62 +239,45 @@ class NativeBotController {
             botLog("[NativeBotController] 局/遊戲結束，清空推薦")
         }
 
-        // 轉換為 JSON 字串
-        let jsonData = try JSONSerialization.data(withJSONObject: event)
-        guard let jsonString = String(data: jsonData, encoding: .utf8) else {
-            botLog("[NativeBotController] ERROR: Failed to convert event to JSON")
-            throw NativeBotError.invalidEvent
-        }
-
         botLog("[NativeBotController] Calling bot.react with: \(eventType)")
 
-        // ⭐ 呼叫 Bot 處理事件 (async 版本，自動在背景執行 Core ML 推理)
-        let responseString: String?
+        // ⭐ 引擎推論。protocol 之後只剩這一個呼叫點：JSON 編解碼、mask 掃描、
+        //    副露特例都在引擎（BundledCoreMLBot）裡；雲端代理在 CloudBot 裡。
+        //    單元素批次的理由見 `MahjongBot.react(events:)` 註解。
+        let reaction: BotReaction?
         do {
-            responseString = try await bot.react(mjaiEvent: jsonString)
+            reaction = try await bot.react(events: [event])
         } catch {
             botLog("[NativeBotController] ERROR: bot.react threw error: \(error)")
             throw error
         }
 
         // #2: `await bot.react` 已返回。若期間換了 bot（start_game / 重連 deleteBot+createBot），
-        //     世代不符 → 直接丟棄本次結果，不寫回任何共享狀態、也不讀「新」bot 的 mask/推薦，
+        //     世代不符 → 直接丟棄本次結果，不寫回任何共享狀態，
         //     避免舊局 inflight 推論污染新局。
         guard gen == generation else {
             botLog("[NativeBotController] 丟棄過期 react 結果 (gen=\(gen) != 現世代=\(generation))，不污染新局")
             return nil
         }
 
-        guard let responseStr = responseString else {
+        guard let reaction else {
             botLog("[NativeBotController] bot.react returned nil (no action needed)")
-            // 無需動作時，如果是自己的碰/吃，仍需更新推薦（碰/吃後需要打牌）
-            if isMyMeld {
-                botLog("[NativeBotController] 自己碰/吃後，需要選擇打牌")
-                // 碰/吃後 Bot 內部狀態已更新，mask 應該包含可打的牌
-                // 使用當前 mask 來更新推薦
-                await updateRecommendationsFromCurrentMask()
-                lastRecommendationsOplistSequence = eventOplistSeq   // 推薦刷新 → 綁定 provenance
-            }
-            // 注意：不再清空 lastRecommendations
+            // 注意：不清空 lastRecommendations
             // 讓推薦保持到下一次需要做決定時（provenance 也一起保持不動）
             // 只有在新的推薦產生時才會更新
             return nil
         }
 
-        botLog("[NativeBotController] bot.react returned: \(responseStr)")
+        // 引擎刷新了推薦（有動作，或自家副露後的捨牌建議）→ 套用並綁定 provenance
+        lastRecommendations = reaction.recommendations
+        lastDecisionSource = reaction.source
+        lastRecommendationsOplistSequence = eventOplistSeq   // 推薦刷新 → 綁定 provenance（p5 #1）
 
-        // 解析回應
-        guard let responseData = responseStr.data(using: .utf8),
-              let response = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
-            botLog("[NativeBotController] ERROR: Failed to parse response JSON")
-            lastRecommendations = []
-            lastRecommendationsOplistSequence = nil
+        guard let response = reaction.action else {
+            // 副露後的推薦刷新：無動作要回（log 由引擎的「副露後推論」一行負責）
             return nil
         }
 
-        // 更新推薦列表（Bot 已選擇動作，顯示所有可用選項及其機率）
-        await updateRecommendations()
-        lastRecommendationsOplistSequence = eventOplistSeq   // 推薦刷新 → 綁定 provenance
         // 只記筆數不足以事後判斷「Mortal 為什麼沒選和牌」——必須看得到它到底有哪些選項，
         // 以及協定層同時給了哪些可用操作。兩者不一致就是 Mortal 的狀態與實際牌局脫節。
         let recSummary = lastRecommendations.prefix(6)
@@ -485,284 +492,20 @@ class NativeBotController {
     // 是錯的——`ObsEncoder` 會在「手上只有紅五」時把 34–36 設 1、把 4/13/22 設 0
     // （見 MortalSwift p0-1）。照 prefix(34) 掃，那一手會被判成「沒有牌可打」。
     //
-    // 現在可用動作改由協定層 oplist 導出（見上方 `availableActions`），
-    // 掃 mask 的路徑只剩 `actionIndexToRecommendation`，該處已含 34–36。
+    // 現在可用動作改由協定層 oplist 導出（見上方 `availableActions`）。
+    // 掃 mask 的路徑（推薦生成、副露特例與紅五 34–36）已隨 2026-08-05
+    // protocol 重構搬進 `BundledCoreMLBot`／`MortalActionMapper`；
+    // 紅五回歸鎖 `AkaDiscardActionIndexTests` 跟著指向 mapper。
 
-    /// 更新推薦列表 (async 因為 MortalBot 是 actor)
-    private func updateRecommendations() async {
-        guard let bot = bot else {
-            lastRecommendations = []
-            return
-        }
 
-        // ⭐ 獲取 mask 和機率 (await 因為是 actor)
-        // Use getLastMask() which was saved BEFORE the action was committed
-        let mask = await bot.getLastMask()
-        let probs = await bot.getLastProbs()
 
-        // 建立推薦列表，使用實際機率
-        var recommendations: [Recommendation] = []
+    // MARK: - 雲端推論（重連重放抑制）
 
-        for (index, isAvailable) in mask.enumerated() where isAvailable == 1 {
-            let probability = index < probs.count ? Double(probs[index]) : 0.0
-            if let action = actionIndexToRecommendation(index, probability: probability) {
-                recommendations.append(action)
-            }
-        }
-
-        // 按機率排序（高到低）
-        lastRecommendations = recommendations.sorted { $0.probability > $1.probability }
-    }
-
-    /// 使用當前 mask 更新推薦（用於碰/吃後，需要打牌的情況）
-    /// 這個方法會嘗試執行推理來獲取真正的概率
-    private func updateRecommendationsFromCurrentMask() async {
-        guard let bot = bot else {
-            lastRecommendations = []
-            return
-        }
-
-        // ⭐ 碰/吃後，libriichi 不會立即返回 RIICHI_ACTION_REQUIRED
-        // 需要根據手牌狀態自己生成可打牌的推薦
-
-        // 首先嘗試使用當前 mask
-        var mask = await bot.getMask()
-        let validCount = mask.filter { $0 == 1 }.count
-
-        botLog("[NativeBotController] updateRecommendationsFromCurrentMask: mask has \(validCount) valid actions")
-
-        // 如果 mask 沒有有效動作，根據手牌生成可打牌 mask
-        if validCount == 0 {
-            botLog("[NativeBotController] Mask is empty after meld, generating from tehai")
-
-            // 根據手牌生成可打牌的 mask (使用 PlayerState.actionSpace)
-            mask = [UInt8](repeating: 0, count: PlayerState.actionSpace)
-
-            // 走訪手牌，標記可以打的牌
-            for tile in tehai {
-                if let actionIndex = tileToDiscardActionIndex(tile) {
-                    mask[actionIndex] = 1
-                }
-            }
-
-            let newValidCount = mask.filter { $0 == 1 }.count
-            botLog("[NativeBotController] Generated mask from tehai with \(newValidCount) valid actions")
-
-            if newValidCount == 0 {
-                botLog("[NativeBotController] Still no valid actions, tehai count: \(tehai.count)")
-                lastRecommendations = []
-                return
-            }
-        }
-
-        // 對**當前狀態**重新推論。
-        //
-        // 這裡曾經是「拿 lastProbs，取不到就用均勻分布」。但副露之後 MJAI 不會再送
-        // 事件，react 沒被呼叫過，lastProbs 停在副露前那一次——手牌早就變了。
-        // 於是實際走的一律是均勻分布那條路，等於「拿 mask 裡第一個合法的牌」，
-        // 完全沒有模型參與。使用者的體感是「有時候不會丟最推薦的牌」，
-        // 真相是**那時候根本沒有推薦**。
-        //
-        // 側欄還把它顯示得跟真推薦一模一樣，看不出差別——正是 AUDIT §13
-        // 「不能運作又不說」要防的那類問題。
-        var probs: [Float] = []
-        do {
-            _ = try await bot.inferCurrentState()
-            probs = await bot.getLastProbs()
-            mask = await bot.getLastMask()
-        } catch {
-            botLog("[NativeBotController] 副露後推論失敗: \(error)")
-        }
-
-        let currentValidCount = mask.filter { $0 == 1 }.count
-        let hasValidProbs = probs.contains(where: { $0 > 0 })
-
-        if !hasValidProbs {
-            // 推論真的失敗才退回均勻分布，而且要在 log 裡講清楚這不是模型的判斷
-            guard currentValidCount > 0 else {
-                lastRecommendations = []
-                return
-            }
-            let uniformProb = Float(1.0) / Float(currentValidCount)
-            probs = [Float](repeating: 0, count: PlayerState.actionSpace)
-            for (index, isAvailable) in mask.enumerated() where isAvailable == 1 {
-                if index < probs.count { probs[index] = uniformProb }
-            }
-            eventLog("[Bot] ⚠️ 副露後推論失敗，退回均勻分布 (\(currentValidCount) 個動作)"
-                   + "——這批推薦不是模型的判斷")
-        }
-
-        // 建立推薦列表
-        var recommendations: [Recommendation] = []
-
-        for (index, isAvailable) in mask.enumerated() where isAvailable == 1 {
-            let probability = index < probs.count ? Double(probs[index]) : 0.0
-            if let action = actionIndexToRecommendation(index, probability: probability) {
-                recommendations.append(action)
-            }
-        }
-
-        // 按機率排序（高到低）
-        lastRecommendations = recommendations.sorted { $0.probability > $1.probability }
-        let summary = lastRecommendations.prefix(6)
-            .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
-            .joined(separator: " ")
-        eventLog("[Bot] 副露後推論: \(lastRecommendations.count) items [\(summary)]")
-    }
-
-    /// MortalSwift action space 中「打出紅五」的三個索引。
-    ///
-    /// 上游 `PlayerState.ActionIndex` 在 0.5.1 仍把它們命名為 `reserved34/35/36`
-    /// 並註解成「保留 (3麻用)」——那是事實錯誤，`ObsEncoder` 一直都在用它們表示
-    /// 打出紅五萬／紅五筒／紅五索（`applyAkaToCandidates`：手上只有紅五時，
-    /// 普通五的格子是 0、紅五的格子才是 1）。上游 p0-1 已改名為
-    /// `akaDiscardMan5/Pin5/Sou5`，但本專案 pin 的是 0.5.1，還沒有那組符號，
-    /// 所以在這裡自己定名，不再讓 34–36 被當成不存在的格子。
-    private enum AkaDiscardIndex {
-        static let man5 = 34
-        static let pin5 = 35
-        static let sou5 = 36
-    }
-
-    /// 將 Tile 轉換為對應的打牌動作索引
-    private func tileToDiscardActionIndex(_ tile: Tile) -> Int? {
-        switch tile {
-        // 紅五走專屬索引：普通五與紅五在 mask 裡是**兩個不同的動作**，
-        // 都塞回 4/13/22 會讓「手上只有紅五」與「兩張都有」看起來一樣。
-        case .man(5, true): return AkaDiscardIndex.man5
-        case .pin(5, true): return AkaDiscardIndex.pin5
-        case .sou(5, true): return AkaDiscardIndex.sou5
-        case .man(let num, _): return num - 1           // 0-8 for 1m-9m
-        case .pin(let num, _): return 9 + (num - 1)     // 9-17 for 1p-9p
-        case .sou(let num, _): return 18 + (num - 1)    // 18-26 for 1s-9s
-        case .east: return 27
-        case .south: return 28
-        case .west: return 29
-        case .north: return 30
-        case .white: return 31
-        case .green: return 32
-        case .red: return 33
-        case .unknown: return nil
-        }
-    }
-
-    /// 判斷丟 5 牌時是否應該丟紅寶牌
-    /// 邏輯：如果手牌中只有紅寶牌（沒有普通的 5），才丟紅寶牌
-    /// 如果有普通的 5，優先丟普通的（保留紅寶牌的價值）
-    ///
-    /// 註（2026-08-02）：接上 34–36 之後，這個判斷在**正常 mask 下應該永遠回 false**——
-    /// 「手上只有紅五」時 encoder 會關掉普通五的格子（4/13/22）、只留 34–36，
-    /// 走不到這裡。保留它是為了 mask 與手牌不一致時仍給得出合理答案，
-    /// 不是因為它還在承擔紅五的判斷。（這個推論來自 encoder 原始碼，**未 live 驗證**。）
-    private func shouldDiscardRedDora(suit: String) -> Bool {
-        // 收集手牌 + 自摸牌中所有指定花色的 5
-        var allTiles = tehai
-        if let t = tsumo { allTiles.append(t) }
-
-        var hasRed = false
-        var hasNormal = false
-
-        for tile in allTiles {
-            switch (tile, suit) {
-            case (.man(5, let red), "m"):
-                if red { hasRed = true } else { hasNormal = true }
-            case (.pin(5, let red), "p"):
-                if red { hasRed = true } else { hasNormal = true }
-            case (.sou(5, let red), "s"):
-                if red { hasRed = true } else { hasNormal = true }
-            default:
-                continue
-            }
-        }
-
-        // 只有在「有紅寶牌」且「沒有普通牌」的情況下才丟紅寶牌
-        return hasRed && !hasNormal
-    }
-
-    /// mask 索引 → 推薦。
-    ///
-    /// 刻意不是 `private`：34–36（打紅五）是 live 才會遇到、又剛好靜默失敗的一組索引，
-    /// 必須能直接對它寫回歸測試，不然只能等下一次「持紅五時 bot 停手」再重現一次。
-    func actionIndexToRecommendation(_ index: Int, probability: Double) -> Recommendation? {
-        typealias AI = PlayerState.ActionIndex
-
-        // 打出紅五（34/35/36）。
-        //
-        // 這三格以前落到最後的 `default: return nil`，於是「唯一合法的打牌是紅五」
-        // （立直後摸進紅五、手上沒有普通五）那一手會產生**空推薦**：側欄什麼都不顯示，
-        // 自動打牌因為 `recommendations.isEmpty` 而不動，一路等到伺服器逾時代打。
-        // 見 MortalSwift p0-1：mask 一直都會設 34–36，是下游沒有接。
-        switch index {
-        case AkaDiscardIndex.man5:
-            return Recommendation(tile: "5mr", probability: probability, actionType: .discard)
-        case AkaDiscardIndex.pin5:
-            return Recommendation(tile: "5pr", probability: probability, actionType: .discard)
-        case AkaDiscardIndex.sou5:
-            return Recommendation(tile: "5sr", probability: probability, actionType: .discard)
-        default:
-            break
-        }
-
-        // 打牌動作 (0-33)
-        if index >= AI.discardStart && index <= AI.discardEnd {
-            // 萬子 (0-8 -> 1m-9m)
-            if index <= 8 {
-                let num = index + 1
-                if num == 5 {
-                    let tileStr = shouldDiscardRedDora(suit: "m") ? "5mr" : "5m"
-                    return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
-                }
-                return Recommendation(tile: "\(num)m", probability: probability, actionType: .discard)
-            }
-            // 筒子 (9-17 -> 1p-9p)
-            else if index <= 17 {
-                let num = index - 8
-                if num == 5 {
-                    let tileStr = shouldDiscardRedDora(suit: "p") ? "5pr" : "5p"
-                    return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
-                }
-                return Recommendation(tile: "\(num)p", probability: probability, actionType: .discard)
-            }
-            // 索子 (18-26 -> 1s-9s)
-            else if index <= 26 {
-                let num = index - 17
-                if num == 5 {
-                    let tileStr = shouldDiscardRedDora(suit: "s") ? "5sr" : "5s"
-                    return Recommendation(tile: tileStr, probability: probability, actionType: .discard)
-                }
-                return Recommendation(tile: "\(num)s", probability: probability, actionType: .discard)
-            }
-            // 字牌 (27-33 -> E/S/W/N/P/F/C)
-            else {
-                let honorTiles = ["E", "S", "W", "N", "P", "F", "C"]
-                let honorIndex = index - 27
-                if honorIndex < honorTiles.count {
-                    return Recommendation(tile: honorTiles[honorIndex], probability: probability, actionType: .discard)
-                }
-            }
-        }
-
-        // 其他動作
-        switch index {
-        case AI.riichi:
-            return Recommendation(tile: "reach", probability: probability, actionType: .riichi)
-        case AI.chiLow:
-            return Recommendation(tile: "chi_0", probability: probability, actionType: .chi)
-        case AI.chiMid:
-            return Recommendation(tile: "chi_1", probability: probability, actionType: .chi)
-        case AI.chiHigh:
-            return Recommendation(tile: "chi_2", probability: probability, actionType: .chi)
-        case AI.pon:
-            return Recommendation(tile: "pon", probability: probability, actionType: .pon)
-        case AI.kan:
-            return Recommendation(tile: "kan", probability: probability, actionType: .kan)
-        case AI.hora:
-            return Recommendation(tile: "hora", probability: probability, actionType: .hora)
-        case AI.pass:
-            return Recommendation(tile: "none", probability: probability, actionType: .none)
-        default:
-            return nil
-        }
+    /// 重連重放歷史事件前呼叫（`NakiWebCoordinator.resyncBot`）：
+    /// 接下來 `eventCount` 個事件只走本地引擎，不打雲端 API——
+    /// 歷史決策早就做完了，重放時重問伺服器是純浪費（N 決策 × 2s 預算＋額度）。
+    func prepareForResyncReplay(eventCount: Int) {
+        (bot as? CloudBot)?.suppressCloud(forNextEvents: eventCount)
     }
 
     private func resetState() {
@@ -780,6 +523,9 @@ class NativeBotController {
         scores = [25000, 25000, 25000, 25000]
         doraMarkers = []
         // 可用動作是 oplist 的投影，不在本 class 持有，因此沒有東西要重置。
+        // ☁️ 雲端狀態（視窗／client／斷路器）住在 CloudBot，隨 deleteBot 一起釋放；
+        // 這裡只歸零決策來源標記。
+        lastDecisionSource = "local"
     }
 
     // MARK: - State Export
@@ -810,6 +556,10 @@ class NativeBotController {
             is3P: is3P
         )
         status.applyAvailableActions(availableActions)
+        // ☁️ 決策來源與資料去向：cloudHost 非 nil＝對局事件正在送往該主機
+        // （UI 常駐顯示的依據，pluggable-bots-plan 安全節）
+        status.decisionSource = lastDecisionSource
+        status.cloudHost = bot?.cloudHost
         return status
     }
 

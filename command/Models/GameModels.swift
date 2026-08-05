@@ -139,6 +139,16 @@ struct BotStatus: Equatable {
     /// 是否為三麻
     var is3P: Bool = false
 
+    /// 這批推薦由誰算出："local" 或 "cloud:<model>"（雲端 overlay 寫入）。
+    /// fallback 原則——可以更弱，但必須讓人看得出來：雲端失敗退回本地時
+    /// 這裡會如實變回 "local"，UI 與 `/bot/status` 都讀同一份。
+    var decisionSource: String = "local"
+
+    /// 雲端推論啟用中時的目的主機；nil＝純本地。
+    /// 非 nil 代表**對局事件（含自家手牌）正在送往這個主機**——
+    /// UI 必須常駐顯示（pluggable-bots-plan 安全節第 3 條）。
+    var cloudHost: String? = nil
+
     // MARK: - Available Actions
     //
     // 這六個欄位的唯一真實來源是協定層 oplist（見 `BotAvailableActions`）。

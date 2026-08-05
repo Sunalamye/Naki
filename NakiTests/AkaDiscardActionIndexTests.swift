@@ -29,11 +29,11 @@ final class AkaDiscardActionIndexTests: XCTestCase {
 
     /// 34/35/36 必須解成紅五萬／紅五筒／紅五索的打牌，不是 nil
     func testAkaDiscardIndexesDecodeToRedFives() {
-        let controller = NativeBotController()
+        let mapper = MortalActionMapper()
 
         let expected: [(Int, String)] = [(34, "5mr"), (35, "5pr"), (36, "5sr")]
         for (index, tile) in expected {
-            guard let rec = controller.actionIndexToRecommendation(index, probability: 0.9) else {
+            guard let rec = mapper.actionIndexToRecommendation(index, probability: 0.9) else {
                 return XCTFail("index \(index) 應解成打 \(tile)，實際是 nil（推薦會整批消失）")
             }
             XCTAssertEqual(rec.actionType, .discard, "index \(index) 應是打牌")
@@ -44,7 +44,7 @@ final class AkaDiscardActionIndexTests: XCTestCase {
 
     /// 一般打牌索引不受影響（確認上面不是把所有索引都改掉的假綠燈）
     func testNormalDiscardIndexesUnchanged() {
-        let controller = NativeBotController()
+        let mapper = MortalActionMapper()
 
         let expected: [(Int, String)] = [
             (0, "1m"), (8, "9m"),
@@ -53,7 +53,7 @@ final class AkaDiscardActionIndexTests: XCTestCase {
             (27, "E"), (33, "C")
         ]
         for (index, tile) in expected {
-            let rec = controller.actionIndexToRecommendation(index, probability: 0.5)
+            let rec = mapper.actionIndexToRecommendation(index, probability: 0.5)
             XCTAssertEqual(rec?.displayTile, tile, "index \(index)")
             XCTAssertEqual(rec?.actionType, .discard, "index \(index)")
         }
@@ -64,25 +64,25 @@ final class AkaDiscardActionIndexTests: XCTestCase {
     /// 「回 nil」在這條路上不是錯誤而是**沉默**：recommendations 少一筆，
     /// 少到零就變成「AI 沒有意見」，看不出是解碼漏了。
     func testNoDiscardIndexIsSilentlyDropped() {
-        let controller = NativeBotController()
+        let mapper = MortalActionMapper()
         for index in 0...36 {
-            XCTAssertNotNil(controller.actionIndexToRecommendation(index, probability: 0.1),
+            XCTAssertNotNil(mapper.actionIndexToRecommendation(index, probability: 0.1),
                             "打牌索引 \(index) 被解成 nil → 該手推薦會缺一筆")
         }
     }
 
     /// 非打牌動作仍走原本的對應
     func testNonDiscardActionsStillMap() {
-        let controller = NativeBotController()
+        let mapper = MortalActionMapper()
         typealias AI = PlayerState.ActionIndex
 
-        XCTAssertEqual(controller.actionIndexToRecommendation(AI.riichi, probability: 0.5)?.actionType,
+        XCTAssertEqual(mapper.actionIndexToRecommendation(AI.riichi, probability: 0.5)?.actionType,
                        .riichi)
-        XCTAssertEqual(controller.actionIndexToRecommendation(AI.pon, probability: 0.5)?.actionType,
+        XCTAssertEqual(mapper.actionIndexToRecommendation(AI.pon, probability: 0.5)?.actionType,
                        .pon)
-        XCTAssertEqual(controller.actionIndexToRecommendation(AI.hora, probability: 0.5)?.actionType,
+        XCTAssertEqual(mapper.actionIndexToRecommendation(AI.hora, probability: 0.5)?.actionType,
                        .hora)
-        XCTAssertEqual(controller.actionIndexToRecommendation(AI.pass, probability: 0.5)?.actionType,
+        XCTAssertEqual(mapper.actionIndexToRecommendation(AI.pass, probability: 0.5)?.actionType,
                        Recommendation.ActionType.none)
     }
 }

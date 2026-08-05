@@ -80,6 +80,13 @@ final class NakiRuntime {
         // ① 牌局側：coordinator 擁有 bot / event stream / WS handler，直接寫 store
         coordinator = NakiWebCoordinator(store: store)
 
+        // ①-b 雲端推論設定注入：bot 在**每個決策點**經這個 closure 重讀設定
+        //（修 key、換模型局中即生效）。只有這一條線；ReplayTools 自建的
+        // controller 沒有 provider，replay 因此永遠走本地、決策指紋穩定。
+        coordinator.bot.cloudConfigProvider = { [weak settings = settings] in
+            settings?.cloudConfig
+        }
+
         // ② 頁面側：JS bridge 的收件人就是 coordinator 的 WS handler
         session = WebSession(store: store,
                              settings: settings,
