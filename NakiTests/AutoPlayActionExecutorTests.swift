@@ -376,4 +376,112 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         XCTAssertNil(store.pending, "受理才消化這批 oplist")
         LiqiResponseStore.shared.reset()
     }
+
+    // MARK: - 第 3 層：伺服器有沒有**真的執行**（權威回音）
+
+    /// 可控的回音觀測面：`echoed = false` 模擬伺服器丟單（RESPONSE 說好、動作沒發生）。
+    @MainActor
+    private final class StubEcho: SelfActionEchoObserving {
+        var count: UInt64 = 0
+        var echoed: Bool
+        private(set) var waitCalls = 0
+        init(echoed: Bool) { self.echoed = echoed }
+        func waitForEcho(after baseline: UInt64, timeoutMs: Int) async -> Bool {
+            waitCalls += 1
+            return echoed
+        }
+        nonisolated deinit {}
+    }
+
+    /// 2026-08-06 東家開局事故的回歸鎖：sendRaw ✅、RESPONSE 無 error，
+    /// 但伺服器**沒有廣播我方動作**＝它根本沒執行 → 不算成功、保留 oplist 重送。
+    @MainActor
+    func testAcceptedButNoAuthoritativeEchoIsNotConfirmed() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test")
+        let echo = StubEcho(echoed: false)
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
+            tsumoTile: "5m", sender: injectResponseForSend(hasError: false), store: store,
+            awaitResponseMs: 500, echoTimeoutMs: 300, echo: echo)
+
+        XCTAssertEqual(result?.success, false, "沒有權威回音＝伺服器沒執行，不能算打成")
+        XCTAssertEqual(result?.detail, "no_echo")
+        XCTAssertNotNil(store.pending, "保留 oplist，交給重試框架再送（重送前會驗 isStillValid，不會雙送）")
+        LiqiResponseStore.shared.reset()
+    }
+
+    /// 回音到達 → 三層全綠 → 才消化 oplist
+    @MainActor
+    func testAuthoritativeEchoConfirmsAndConsumesOplist() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test")
+        let echo = StubEcho(echoed: true)
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
+            tsumoTile: "5m", sender: injectResponseForSend(hasError: false), store: store,
+            awaitResponseMs: 500, echoTimeoutMs: 300, echo: echo)
+
+        XCTAssertEqual(result?.success, true)
+        XCTAssertEqual(result?.detail, "confirmed")
+        XCTAssertNil(store.pending)
+        LiqiResponseStore.shared.reset()
+    }
+
+    /// 「過」不驗回音：伺服器不會為 cancel 廣播我方動作，等它必然逾時 →
+    /// 每次副露放棄都會白等一個 timeout 並誤判成失敗。
+    @MainActor
+    func testPassSkipsEchoVerification() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .chi)], source: "test")
+        let echo = StubEcho(echoed: false)
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .none, tile: "none", snapshot: snapshot, recommendations: [],
+            sender: injectResponseForSend(hasError: false), store: store,
+            awaitResponseMs: 500, echoTimeoutMs: 300, echo: echo)
+
+        XCTAssertEqual(result?.success, true, "過不需要權威回音")
+        XCTAssertEqual(echo.waitCalls, 0, "根本不該去等回音")
+        LiqiResponseStore.shared.reset()
+    }
+
+    /// 停用（echoTimeoutMs = 0）時完全不碰回音層——舊語意與既有測試不受影響
+    @MainActor
+    func testEchoLayerDisabledByDefault() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test")
+        let echo = StubEcho(echoed: false)
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
+            tsumoTile: "5m", sender: injectResponseForSend(hasError: false), store: store,
+            awaitResponseMs: 500, echoTimeoutMs: 0, echo: echo)
+
+        XCTAssertEqual(result?.success, true)
+        XCTAssertEqual(echo.waitCalls, 0)
+        LiqiResponseStore.shared.reset()
+    }
+
+    // MARK: - 哪些事件算回音
+
+    /// 和牌的權威回音是 `ActionHule`，而 bridge 把它轉成**不帶 actor 的 `end_kyoku`**
+    /// ——2026-08-06 live 首次誤報就是這條沒接上（和牌其實成功，卻被判丟單重送）。
+    @MainActor
+    func testEchoRecognisesOwnActionsAndRoundEnd() {
+        XCTAssertTrue(SelfActionEchoTracker.isEcho(type: "dahai", actor: 2, seat: 2))
+        XCTAssertTrue(SelfActionEchoTracker.isEcho(type: "kita", actor: 2, seat: 2))
+        XCTAssertTrue(SelfActionEchoTracker.isEcho(type: "end_kyoku", actor: nil, seat: 2),
+                      "局已結束＝送出結果已定案，重送必錯")
+        XCTAssertFalse(SelfActionEchoTracker.isEcho(type: "dahai", actor: 1, seat: 2),
+                       "別家的動作不是我方回音")
+        XCTAssertFalse(SelfActionEchoTracker.isEcho(type: "tsumo", actor: 2, seat: 2),
+                       "摸牌是發牌不是回應，算進去會把「剛好摸到牌」誤判成送出成功")
+    }
 }

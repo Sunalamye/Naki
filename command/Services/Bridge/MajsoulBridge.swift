@@ -437,6 +437,15 @@ class MajsoulBridge {
             }
         }
 
+        // 送出層第 3 層驗證的事實來源（見 `SelfActionEchoTracker`）
+        for event in results {
+            guard let type = event["type"] as? String,
+                  SelfActionEchoTracker.isEcho(type: type,
+                                               actor: event["actor"] as? Int,
+                                               seat: seat) else { continue }
+            SelfActionEchoTracker.shared.record()
+        }
+
         return results.isEmpty ? nil : results
     }
 

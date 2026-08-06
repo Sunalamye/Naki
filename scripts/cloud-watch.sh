@@ -63,7 +63,9 @@ while True:
     else:
         pending_attempt = None   # 任何後續事件＝伺服器有回應牌局在走
 
-    if "null reaction" in line:
+    if "沒有權威回音" in line:
+        notify("送出可能被丟單", line.strip()[-140:])
+    elif "null reaction" in line:
         notify("事件流脫節", line.split("null reaction", 1)[-1].strip()[:160])
     elif "雲端推論失敗" in line or "雲端推論不可用" in line:
         notify("雲端失敗（已退避）", line.strip()[-120:])

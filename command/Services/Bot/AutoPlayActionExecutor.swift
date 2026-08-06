@@ -53,6 +53,8 @@ enum AutoPlayActionExecutor {
         sender: LiqiActionSender,
         store: LiqiOperationStore,
         awaitResponseMs: Int = 0,
+        echoTimeoutMs: Int = 0,
+        echo: (any SelfActionEchoObserving)? = nil,
         log: (String) -> Void = { _ in },
         event: (String) -> Void = { _ in }
     ) async -> LiqiSendResult? {
@@ -127,9 +129,10 @@ enum AutoPlayActionExecutor {
             return nil
         }
 
-        // ② 送出，並依 awaitResponseMs 決定驗到第幾層
+        // ② 送出，並依 awaitResponseMs / echoTimeoutMs 決定驗到第幾層
         let result = await sendAndVerify(action: action, spec: spec,
-                                         sender: sender, awaitResponseMs: awaitResponseMs, event: event)
+                                         sender: sender, awaitResponseMs: awaitResponseMs,
+                                         echoTimeoutMs: echoTimeoutMs, echo: echo, event: event)
 
         // ③ 只有**確認**才消化 oplist；失敗／拒絕／逾時都保留給重試框架
         //    （重試迴圈開頭的 isStillValid 會在 oplist 換批時停手，所以逾時重試不會雙送）。
@@ -145,8 +148,13 @@ enum AutoPlayActionExecutor {
         spec: LiqiRequestSpec,
         sender: LiqiActionSender,
         awaitResponseMs: Int,
+        echoTimeoutMs: Int = 0,
+        echo: (any SelfActionEchoObserving)? = nil,
         event: (String) -> Void
     ) async -> LiqiSendResult {
+
+        // baseline 必須在送出前取，否則會把別批的回音算成自己的
+        let echoBaseline = echo?.count ?? 0
 
         guard awaitResponseMs > 0 else {
             return await sender.send(spec)   // 舊語意（測試預設）
@@ -172,7 +180,16 @@ enum AutoPlayActionExecutor {
                                       success: false,
                                       detail: "server_rejected:\(response.errorCode.map(String.init) ?? "?")")
             }
-            // 第 2 層達成：伺服器受理
+            // 第 3 層：伺服器受理不等於執行（2026-08-06 東家開局丟單，見
+            // `SelfActionEchoTracker`）。不消化 oplist 就會由重試框架重送，
+            // 而它每次都重驗 `isStillValid`，所以不會雙送。
+            // 「過」跳過：伺服器不為 cancel 廣播我方 action，等它必然逾時。
+            if let echo, echoTimeoutMs > 0, action != .none,
+               await !echo.waitForEcho(after: echoBaseline, timeoutMs: echoTimeoutMs) {
+                event("⚠️ \(action.rawValue) 已受理但 \(echoTimeoutMs)ms 內沒有權威回音（疑似丟單）→ 保留 oplist 重送")
+                return LiqiSendResult(method: raw.method, msgId: raw.msgId, byteCount: raw.byteCount,
+                                      success: false, detail: "no_echo")
+            }
             return LiqiSendResult(method: raw.method, msgId: raw.msgId, byteCount: raw.byteCount,
                                   success: true, detail: "confirmed")
         }

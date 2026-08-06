@@ -160,6 +160,9 @@ final class AutoPlayEngine {
         /// 0＝只驗第 1 層（sendRaw）。正式路徑 800ms：實測 RESPONSE 約 100ms 到，800ms 有餘裕；
         /// 「送成功但伺服器拒絕（error 1004/1023/…）」不再被靜默當成功、能自動重送。
         var actionAwaitResponseMs: Int = 800
+        /// 第 3 層：受理後等我方權威動作廣播的毫秒數；0＝停用（測試預設）。
+        /// 700ms 來自實測——正常回音 < 100ms，丟單那次是 16 秒，門檻不必精算。
+        var actionEchoTimeoutMs: Int = 0
         /// 「過」最多送幾次（伺服器逾時會代打，不必跟和牌一樣拚）
         var passAttempts: Int = 5
         /// 閘門判定「模型判斷不做副露」時的送出策略；nil＝`AutoPassDispatcher` 的預設
@@ -203,7 +206,7 @@ final class AutoPlayEngine {
         /// 「成功清 pending／失敗保留」在單測裡不必碰 `LiqiResponseStore` 單例。
         var confirmSend: (() async -> LiqiToolSendOutcome)?
 
-        static let live = Timing()
+        static let live = Timing(actionEchoTimeoutMs: 700)
     }
 
     // MARK: - 依賴
@@ -216,6 +219,8 @@ final class AutoPlayEngine {
     /// 「為什麼這樣打／為什麼沒打」——必須進 events.log
     private let event: (String) -> Void
     private let timing: Timing
+    /// 我方權威動作回音的觀測面（第 3 層驗證；`timing.actionEchoTimeoutMs == 0` 時不使用）
+    private let echo: (any SelfActionEchoObserving)?
 
     // MARK: - 狀態
 
@@ -264,12 +269,14 @@ final class AutoPlayEngine {
     init(store: LiqiOperationStore,
          sender: LiqiActionSender,
          timing: Timing = .live,
+         echo: (any SelfActionEchoObserving)? = SelfActionEchoTracker.shared,
          context: @escaping () -> Context,
          log: @escaping (String) -> Void = { _ in },
          event: @escaping (String) -> Void = { _ in }) {
         self.store = store
         self.sender = sender
         self.timing = timing
+        self.echo = echo
         self.context = context
         self.log = log
         self.event = event
@@ -732,6 +739,8 @@ final class AutoPlayEngine {
                 sender: sender,
                 store: store,
                 awaitResponseMs: timing.actionAwaitResponseMs,
+                echoTimeoutMs: timing.actionEchoTimeoutMs,
+                echo: echo,
                 log: { self.note($0, to: .log) },
                 event: { self.note($0, to: .event) })
 
