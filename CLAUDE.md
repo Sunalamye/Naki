@@ -41,7 +41,7 @@ curl -X POST http://127.0.0.1:8765/js \
 
 | Property | Current value |
 |----------|---------------|
-| App version | 2.7.2（`MARKETING_VERSION`；MCP `serverInfo.version`／`get_status.appVersion`／Debug 首頁都讀 `NakiAppVersion` 這一份） |
+| App version | 2.8.0（`MARKETING_VERSION`；MCP `serverInfo.version`／`get_status.appVersion`／Debug 首頁都讀 `NakiAppVersion` 這一份） |
 | macOS target | 26.0 |
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |

@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.7.2-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.8.0-green" alt="Version">
   <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
   <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-required-red" alt="Architecture">
@@ -123,9 +123,13 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 ### 其他
 
 - **協定層表情工具** — MCP 可發送表情並讀取收到的廣播；舊自動回覆路徑在 Unity 下不可用
-- **隱藏玩家名稱** — 進階設定裡的開關。在遊戲解析封包之前把暱稱改寫成 `Player 1`–`Player 4`，
-  不靠任何 UI hook（Unity 客戶端沒有可以 hook 的 UI 層）。只對開啟之後才開始的對局生效；
-  斷線重連與終局結算畫面仍會顯示原名
+- **隱藏玩家名稱** — 進階設定裡的開關，兩層一起生效：
+  - **協定層** 在遊戲解析封包之前把暱稱改寫成 `Player 1`–`Player 4`。只對開啟之後才開始的
+    對局生效
+  - **渲染層**（2.8.0 新增）直接讓遊戲畫面上的名字不顯示，**開關當下就生效**，不必等下一局。
+    Unity 客戶端沒有可 hook 的 UI 層，所以靠自我校準認出名字那一層：開啟時逐一試遮並比對
+    畫面，選出「遮掉會讓四家位置同時變化、但變動像素很少」的那一個。認不出來就什麼都不遮，
+    不會誤遮其他 UI
 - **MCP Server** — 讓 Claude Code 之類的 AI 助手直接操作遊戲
 - **本機 Debug API** — 只綁 loopback，同網段的其他裝置連不到
 
@@ -326,6 +330,8 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 | 表情協定收送 | ⚠️ 現行 tools／Liqi 路徑存在；本次未做 live 收送 round-trip |
 | iOS 17–25 相容路徑 | ⚠️ 只驗過編譯與單元測試，未實機跑過對局 |
 | 雲端推論（可選） | ✅ 四麻 live 對局已驗（決策代理、fallback、重連抑制）；⚠️ 立直兩段式 live 時序未驗 |
+| 送出結果驗證 | ✅ 三層判準（sendRaw／RESPONSE／**伺服器回音**）；live 已攔到真實丟單並自動補送成功 |
+| 隱藏玩家名稱（渲染層） | ✅ live 對局已驗（四家名字消失，稱號／分數／手牌／按鈕不受影響）；⚠️ 終局結算畫面未驗 |
 | 三麻 | ⚠️ 見下：改為雲端-only（本地模型不啟動）；拔北自動打有 live 成功紀錄，整局驗收未完成 |
 | 牌譜回放分析 | ❌ 尚未開始 |
 
