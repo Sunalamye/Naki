@@ -109,6 +109,7 @@ OptionalOperationList
 ## Unity 與 Liqi 必知事實
 
 - `Laya`、`GameMgr`、`uiscript`、`view.DesktopMgr`、`cfg`、`app.NetAgent` 不存在。
+- `unityInstance`／`Module`／`SendMessage` 也不存在（instance 存在 script scope）。但攔 `WebAssembly.instantiate*`（頁面覆蓋不掉的入口）就能拿到 **wasm heap**；`naki-core.js` 已這樣做，唯讀存進 `window.__nakiHeap()`。暱稱在 heap 裡是標準 IL2CPP `System.String`，可讀可改——但**改了畫面不會變**（TextMeshPro 已烘成 mesh），所以隱藏名字不能走這條。
 - 狀態與動作一律走 Liqi；不可用 DOM tile、Laya sprite 或座標點擊。
 - JS 仍可做 WebSocket、WebGL、resource 與頁面 probe；不是整層 JS 都失效。
 - request envelope：`[type][msgId LE][protobuf{field1=method,field2=payload}]`。
@@ -160,7 +161,12 @@ MCP 已沒有手動高亮工具（6 個 `highlight_*` 失敗樁於 2026-08-02 �
 
 位置校準、推薦溫度、旋轉 Laya 高亮三組無效控制已從 UI 移除，底層仍依賴不存在的 `uiscript`，不可掛回 UI。
 
-隱藏玩家名稱已用協定層重做：`naki-websocket.js` 的 `__nakiHideNames` 在遊戲解析封包前，就地把 `ResAuthGame` 的 nickname bytes 覆寫成等長 ASCII。等長是硬性條件——改長度就要連動所有外層 protobuf 長度前綴。範圍只有 authGame RESPONSE；syncGame 重連與 NotifyGameEndResult 結算畫面仍顯示原名。node 合成 frame 測過（等長、關閉不動、非 authGame 不動、垃圾 bytes 不丟例外），**沒有 live 對局驗證**。
+隱藏玩家名稱是**兩層**：
+
+- **協定層**（`naki-websocket.js` 的 `__nakiHideNames`）在遊戲解析封包前，就地把 `ResAuthGame` 的 nickname bytes 覆寫成等長 ASCII。等長是硬性條件——改長度就要連動所有外層 protobuf 長度前綴。範圍只有 authGame RESPONSE；syncGame 重連與 NotifyGameEndResult 結算畫面不在內。只對「開啟之後才開始的對局」生效。node 合成 frame 測過，**沒有 live 對局驗證**。
+- **渲染層**（`naki-core.js` 的 `setNameMask`）在 draw 時把名字那個 draw 的 `_Color` alpha 設 0，**即時生效**，中途開關也有效。難點是認出「哪個 draw 是名字」——shader、貼圖、字數全部試過且都不穩（字數在人機場直接失效，「電腦（簡單）」由客戶端產生）。成立的判準是**幾何**：四家分坐四方，遮掉名字會讓變動像素散在 ≥3 個象限且總量很少。開啟時自我校準（逐一試遮 + `readPixels` 比對），認不到就什麼都不遮。**已 live 驗證**（銅之間・四人東：四家名字消失，稱號／分數／局數／手牌／按鈕／頭像完好）。詳見 `docs/unity-heap-access.md`。
+
+UI 文字 draw 的識別特徵是 `_TextureSampleAdd`，不是 `_Tint`／`_Color`——3D 牌的 shader 也有 `_Tint`，用它當條件會把整桌的牌混進候選。
 
 ## 專案結構的坑
 

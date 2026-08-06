@@ -243,17 +243,25 @@ final class WebSession {
 
     // MARK: - 隱藏玩家名稱
 
-    /// 走協定層：`naki-websocket.js` 在遊戲解析封包之前，就地把 `ResAuthGame`
-    /// 的 nickname bytes 換成等長 ASCII。之所以不走 UI 層，是因為舊的
-    /// `__nakiPlayerNames.hide()` 依賴 `uiscript.UI_DesktopInfo`，Unity 客戶端沒有。
+    /// 兩層一起開：
     ///
-    /// 只對「開啟之後才開始的對局」生效——名牌在 authGame 當下就設定完了。
+    /// - **協定層**（`__nakiHideNames`）在遊戲解析封包前改 `ResAuthGame` 的 nickname
+    ///   bytes。只對「開啟之後才開始的對局」生效——名牌在 authGame 當下就設定完了。
+    /// - **渲染層**（`__nakiNameMask`）把名字字型圖層的 draw alpha 設 0，**即時生效**，
+    ///   中途開關也有效；認不到圖層就什麼都不遮（`locked: false`），不會遮錯東西。
+    ///
+    /// 兩層並存而不是二擇一：協定層連斷線重連後的 syncGame 也蓋得掉（名字根本沒進
+    /// 客戶端），渲染層負責「現在就要看不到」。
     func setHidePlayerNames(_ hide: Bool) {
         settings.hidePlayerNames = hide
         Task {
             do {
                 let result = try await backend.callJavaScript(
-                    "return window.__nakiHideNames?.setEnabled(\(hide)) ?? false")
+                    """
+                    const proto = window.__nakiHideNames?.setEnabled(\(hide)) ?? null;
+                    const mask = window.__nakiHighlight?.setNameMask(\(hide)) ?? null;
+                    return JSON.stringify({ proto: proto, mask: mask });
+                    """)
                 bridgeLog("[WebSession] 隱藏玩家名稱: \(hide), 結果: \(String(describing: result))")
             } catch {
                 bridgeLog("[WebSession] 設定隱藏名稱錯誤: \(error.localizedDescription)")

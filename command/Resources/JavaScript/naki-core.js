@@ -153,6 +153,54 @@
         // 的狀態查詢。這兩個值只會由 `useProgram` / `bindTexture` 改變，攔下來自己記
         // 就完全不必查——draw 熱路徑上的同步查詢歸零。
         var currentProgram = null;
+
+        // ── 名字圖層遮蔽（`nameMask`）──
+        // 暱稱文字有自己的字型 atlas。鎖定那張貼圖後，把它的 draw alpha 設 0 就
+        // 只有名字消失（實測「暫無稱號」、分數、局數、手牌、按鈕都不受影響）。
+        // 協定層的 `__nakiHideNames` 只能在 authGame 那刻改 bytes、中途開沒用；
+        // 這一層即時生效。認不到圖層就什麼都不遮——寧可不遮，不要遮錯。
+        // 名字圖層的判準（實測 live 得到）：
+        //
+        //   1. **那一幀只有一個 draw 用這張貼圖** —— 四家名字批次成單一 draw；
+        //      共用字型 atlas 的貼圖同幀會有好幾個（實測 78/84/132/216 四個）。
+        //   2. **字數接近協定算出的總字數** —— `naki-websocket.js` 解 authGame 時
+        //      量四家暱稱共幾個字。用接近而非相等：協定與畫面會差一兩個字
+        //      （實測 24 vs 22），要求相等永遠對不上。
+        //
+        // **刻意不「鎖定」某個 texture 物件**：動態字型 atlas 會被重建，鎖住物件
+        // 就會在重建後失效（實測鎖定後只遮到 2 次）。改成每幀重新判定，
+        // 用上一幀的結論遮這一幀——UI 幀間是穩定的，而且對重建免疫。
+        var nameMaskOn = false;
+        var nameTargets = new Map();    // 上一幀判定要遮的貼圖
+        var nameMasked = 0;
+        var NAME_MIN_COUNT = 42;        // 批次文字下界（一般 UI 圖片 6～36）
+        // 校準用：把每幀的大文字 draw 依繪製順序編號，一次只遮一個，
+        // 從外面截圖比對就能指認哪一個是名字（判準猜不出來就用量的）。
+        var nameProbe = -1;             // 校準中：只遮這個序號（-1＝不遮）
+        var nameOrder = 0;              // 本幀已見的大文字 draw 序號
+        var nameProbeLog = [];          // 累積中的本幀
+        var nameProbeLast = [];         // 上一幀（讀的是這份，才不會讀到半幀）
+        var nameProbeTex = [];          // 上一幀 序號 → texture
+
+        // 自我校準：逐一遮掉候選、讀回畫面比對，看哪一個讓「四個分散的小區塊」消失。
+        //
+        // 判準只有畫面本身。shader、貼圖、index 數都試過而且都不可靠——字數指紋在
+        // 人機場直接失效（「電腦（簡單）」由客戶端產生，封包裡沒有），貼圖用量與
+        // index 數又分不出同為 132 的另一個 draw。名字唯一固定的特徵是**幾何**：
+        // 四家座位分散在畫面四周，遮掉它會讓變動像素「散佈很廣、總量很少」，
+        // 其他 UI 文字都集中在一處。這與版面縮放、人數、名字長度都無關。
+        // 目標會失效：換局／重載後貼圖被重建，鎖定的那張就再也不會被畫。
+        // 沒人看著就會靜默不遮，所以用「連續幾幀一個都沒遮到」當觸發重新校準。
+        var nameIdle = 0;
+        var nameHitThisFrame = false;
+        var NAME_IDLE_FRAMES = 120;     // 約 2 秒
+
+        var calib = null;               // { step, base, results, total }
+        var calibResult = null;         // 選中的候選（校準完才有）
+        var calibLog = null;            // 每個候選的量測值（驗收看得到才敢信）
+        var CAL_STRIDE = 4;             // 讀回畫面的取樣間隔（省 CPU）
+        var CAL_RETRY_FRAMES = 600;     // 校準不出來時的重試間隔（約 10 秒）
+        var calibCooldown = 0;
         var activeUnit = 0;
         var texture2D = [];        // activeUnit -> 綁在 TEXTURE_2D 的 texture
 
@@ -173,7 +221,12 @@
             // 顏色 uniform 名稱依 shader 而異：手牌是 _Tint、其他 UI 是 _Color
             var color = gl.getUniformLocation(prog, '_Tint')
                      || gl.getUniformLocation(prog, '_Color');
-            var L = color ? { st: st, color: color } : null;
+            // UI／文字 shader 的識別特徵：字型 atlas 是 alpha-only，Unity 用
+            // `_TextureSampleAdd` 把 RGB 補成 1。3D 牌的 shader 沒有這個 uniform——
+            // 少了這一格，名字判定會把整桌的牌一起算進候選（實測 606-index 的牌
+            // draw 全部混進來）。
+            var ui = !!gl.getUniformLocation(prog, '_TextureSampleAdd');
+            var L = color ? { st: st, color: color, ui: ui } : null;
             locCache.set(prog, L);
             return L;
         }
@@ -243,6 +296,84 @@
             return wrapper;
         }
 
+        /// 讀回這一幀的畫面（稀疏取樣）。回傳 Uint8Array 或 null。
+        function grabFrame(gl) {
+            var w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+            if (!w || !h) return null;
+            var buf = new Uint8Array(w * h * 4);
+            try { gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf); }
+            catch (e) { return null; }
+            return { buf: buf, w: w, h: h };
+        }
+
+        /// 比較兩幀，回傳變動像素數與外接框（取樣座標）。
+        function frameDelta(a, b) {
+            var w = a.w, h = a.h, n = 0;
+            var x0 = w, x1 = -1, y0 = h, y1 = -1;
+            var quad = [0, 0, 0, 0];    // 四象限各有幾個變動像素
+            for (var y = 0; y < h; y += CAL_STRIDE) {
+                var row = y * w * 4;
+                for (var x = 0; x < w; x += CAL_STRIDE) {
+                    var i = row + x * 4;
+                    var d = Math.abs(a.buf[i] - b.buf[i])
+                          + Math.abs(a.buf[i + 1] - b.buf[i + 1])
+                          + Math.abs(a.buf[i + 2] - b.buf[i + 2]);
+                    if (d > 40) {
+                        n++;
+                        if (x < x0) x0 = x; if (x > x1) x1 = x;
+                        if (y < y0) y0 = y; if (y > y1) y1 = y;
+                        quad[(y < h / 2 ? 0 : 2) + (x < w / 2 ? 0 : 1)]++;
+                    }
+                }
+            }
+            var quads = 0;
+            quad.forEach(function (c) { if (c > 2) quads++; });
+            return { n: n, spanX: x1 - x0, spanY: y1 - y0, quads: quads, w: w, h: h };
+        }
+
+        /// 校準的一步：讀回剛畫完的這一幀，記錄差異，然後排下一個候選。
+        function calibStep(gl) {
+                var f = grabFrame(gl);
+                if (!f) { calib = null; nameProbe = -1; return; }
+                if (calib.step === 0) {
+                    calib.base = f;
+                    calib.total = nameProbeLast.length;
+                    if (!calib.total) { calib = null; return; }
+                    nameProbe = 0;
+                    calib.step = 1;
+                    return;
+                }
+                var ord = calib.step - 1;
+                var d = frameDelta(calib.base, f);
+                // 名字的幾何特徵：四家分坐四方 ⇒ 變動像素**散在至少 3 個象限**，
+                // 而且總量很少（每個名牌只有十幾個字）。少了象限這一條，大廳畫面
+                // 也會選出候選——那裡只有自己的名字，集中在單一角落。
+                var spread = d.spanX / f.w;
+                var ok = d.n > 8 && spread > 0.4 && d.quads >= 3;
+                calib.results.push({ ord: ord, n: d.n, spread: spread, quads: d.quads,
+                                     score: ok ? spread / d.n : 0 });
+                if (calib.step > calib.total) {
+                    var best = null;
+                    calib.results.forEach(function (r) {
+                        if (r.score > 0 && (!best || r.score > best.score)) best = r;
+                    });
+                    nameProbe = -1;
+                    nameTargets.clear();
+                    if (best) {
+                        var tex = nameProbeTex[best.ord];
+                        if (tex) nameTargets.set(tex, best.ord);
+                        calibResult = best;
+                    } else {
+                        calibCooldown = CAL_RETRY_FRAMES;   // 沒有合格候選（例如在大廳）
+                    }
+                    calibLog = calib.results;
+                    calib = null;
+                    return;
+                }
+                nameProbe = calib.step;
+                calib.step++;
+        }
+
         function install(gl) {
             if (installed) return;
             installed = true;
@@ -290,6 +421,35 @@
                     if (!L) return origDraw(mode, count, type, offset);
 
                     var color = null;
+
+                    // 〇、名字圖層：用上一幀的判定遮這一幀（見上方註解）
+                    if (L.ui && count >= NAME_MIN_COUNT) {
+                        var ord = nameOrder++;
+                        var tx = texture2D[activeUnit];
+                        if (nameProbeLog.length < 40) {
+                            nameProbeLog.push({ ord: ord, count: count });
+                            nameProbeTex[ord] = tx;
+                        }
+                        if (tx) {
+                            if (nameProbe >= 0 && ord === nameProbe) {
+                                var cv = gl.getUniform(prog, L.color);
+                                gl.uniform4f(L.color, cv[0], cv[1], cv[2], 0);
+                                var cr = origDraw(mode, count, type, offset);
+                                gl.uniform4f(L.color, cv[0], cv[1], cv[2], cv[3]);
+                                nameMasked++;
+                                return cr;
+                            }
+                            if (nameMaskOn && nameTargets.has(tx)) {
+                                nameHitThisFrame = true;
+                                var pv = gl.getUniform(prog, L.color);
+                                gl.uniform4f(L.color, pv[0], pv[1], pv[2], 0);
+                                var rr = origDraw(mode, count, type, offset);
+                                gl.uniform4f(L.color, pv[0], pv[1], pv[2], pv[3]);
+                                nameMasked++;
+                                return rr;
+                            }
+                        }
+                    }
 
                     // 一、手牌：用 UV 認出是哪張牌
                     if (L.st && count === 6 && targetCount) {
@@ -346,7 +506,25 @@
                     return origRAF(function (t) {
                         totalFrames++;
                         if (!popupColor) baselineFrames++;
-                        return cb(t);
+                        nameOrder = 0;
+                        if (nameProbeLog.length) { nameProbeLast = nameProbeLog; nameProbeLog = []; }
+                        if (nameMaskOn && !calib) {
+                            if (calibCooldown > 0) {
+                                calibCooldown--;
+                            } else if (!nameTargets.size) {
+                                calib = { step: 0, base: null, results: [], total: 0 };
+                            } else {
+                                nameIdle = nameHitThisFrame ? 0 : nameIdle + 1;
+                                if (nameIdle > NAME_IDLE_FRAMES) {
+                                    nameTargets.clear(); nameIdle = 0;
+                                }
+                            }
+                        }
+                        nameHitThisFrame = false;
+                        var r = cb(t);
+                        // 讀回畫面必須在遊戲畫完之後，所以校準跑在 cb 後面
+                        if (calib) calibStep(gl);
+                        return r;
                     });
                 };
             });
@@ -427,8 +605,67 @@
                          baselineFrameMin: BASELINE_FRAME_MIN };
             },
             /// 除錯用：列出當前這一幀在手牌區畫出的牌（依 UV 反推）
-            decode: function (st) { return tileFromST(st); }
+            decode: function (st) { return tileFromST(st); },
+
+            /// 名字圖層遮蔽開關。回傳 `locked=false` 代表還沒認出名字圖層——
+            /// 此時什麼都不會遮，呼叫端應顯示「未生效」而不是假裝成功。
+            setNameMask: function (on) {
+                nameMaskOn = !!on;
+                if (nameMaskOn) {
+                    var g = context(); if (g) install(g);
+                    calibCooldown = 0;
+                }
+                return { enabled: nameMaskOn, installed: installed,
+                         calibrating: !!calib, targets: nameTargets.size };
+            },
+            nameMaskStatus: function () {
+                return { enabled: nameMaskOn, installed: installed,
+                         masked: nameMasked, targets: nameTargets.size,
+                         calibrating: !!calib, picked: calibResult, idle: nameIdle,
+                         trials: calibLog, frames: totalFrames };
+            },
+
+            /// 驗收用：只遮第 `ord` 個 UI 文字 draw（-1 關閉）。校準跑的就是這件事，
+            /// 開放出來才能從外面用截圖獨立確認「遮的是不是名字」。
+            maskProbe: function (ord) {
+                nameProbe = (ord === undefined || ord === null) ? -1 : ord | 0;
+                if (nameProbe >= 0) { var gp = context(); if (gp) install(gp); }
+                return { probe: nameProbe, draws: nameProbeLast.slice(0, 16) };
+            },
+
+
         };
+    })();
+
+    /// wasm 記憶體捕獲。
+    ///
+    /// 遊戲的 Unity instance 存在 script scope（`onUnityReady` 內的區域變數），事後撈不到；
+    /// 而攔 `onUnityReady`／`createUnityInstance` 也沒用——頁面用**函式宣告**定義它們，
+    /// 會直接覆蓋我們掛的 accessor。`WebAssembly.instantiate*` 是頁面覆蓋不掉的入口，
+    /// 而且 wasm 線性記憶體就從那裡出來。純唯讀捕獲，不改參數也不改回傳。
+    (function () {
+        function keep(memory) {
+            if (!memory || window.__nakiWasmMemory) return;
+            window.__nakiWasmMemory = memory;
+            window.__nakiHeap = function () { return new Uint8Array(memory.buffer); };
+            console.log('[Naki] 已捕獲 wasm memory:', memory.buffer.byteLength);
+        }
+        function scan(result, imports) {
+            try {
+                if (imports && imports.env && imports.env.memory) keep(imports.env.memory);
+                var inst = result && (result.instance || result);
+                if (inst && inst.exports && inst.exports.memory) keep(inst.exports.memory);
+            } catch (e) {}
+            return result;
+        }
+        ['instantiate', 'instantiateStreaming'].forEach(function (name) {
+            var orig = WebAssembly[name];
+            if (typeof orig !== 'function') return;
+            WebAssembly[name] = function (src, imports) {
+                var p = orig.apply(this, arguments);
+                return (p && p.then) ? p.then(function (r) { return scan(r, imports); }) : scan(p, imports);
+            };
+        });
     })();
 
     console.log('[Naki] 核心模組已載入');

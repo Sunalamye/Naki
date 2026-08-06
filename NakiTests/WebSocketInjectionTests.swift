@@ -244,6 +244,24 @@ final class WebSocketInjectionTests: XCTestCase {
         XCTAssertFalse(source.contains("new Set()"), "簽章集合改用 Map 保插入序當 LRU")
     }
 
+    /// 名字遮蔽的讀回畫面只能發生在校準，不能進每幀的 draw 迴圈。
+    ///
+    /// `readPixels` 是同步 GPU 讀回，一幀數百個 draw 各讀一次會直接卡死畫面。
+    /// 校準本身也只在開啟遮蔽或目標失效時跑幾幀。
+    func testNameMaskReadbackStaysOutOfDrawLoop() throws {
+        let source = try WebSocketInterceptor.loadJavaScript(named: "naki-core")
+
+        let parts = source.components(separatedBy: "hookMethod(gl, 'drawElements'")
+        XCTAssertEqual(parts.count, 2, "找不到 drawElements hook（或裝了不只一份）")
+        XCTAssertFalse(parts[1].hasPrefix("\n") && parts[1].contains("readPixels")
+                       && !parts[1].contains("function calibStep"),
+                       "readPixels 只能在校準路徑出現，不能進 draw 迴圈")
+
+        // 校準的判準要留在原始碼裡，驗收才查得到「為什麼選這個 draw」
+        XCTAssertTrue(source.contains("quads"), "少了象限判準：大廳只有自己的名字也會被選中")
+        XCTAssertTrue(source.contains("NAME_IDLE_FRAMES"), "少了失效重校：換局後貼圖重建會靜默不遮")
+    }
+
     /// hook 必須拆得掉：`install()` 以前是單向的，連「關掉之後跑得一樣快嗎」都驗不了。
     func testHighlightHookIsReversible() throws {
         let source = try WebSocketInterceptor.loadJavaScript(named: "naki-core")
