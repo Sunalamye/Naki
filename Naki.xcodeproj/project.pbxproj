@@ -137,9 +137,11 @@
 				ViewModels/GameStore.swift,
 				Views/BotStatusView.swift,
 				Views/ContentView.swift,
+				Views/DecisionSidebar.swift,
 				Views/LogPanel.swift,
 				Views/NakiWebViewHost.swift,
 				Views/RecommendationView.swift,
+				Views/TileImage.swift,
 			);
 			target = EC30765D2EDAFD2300216E0C /* Naki */;
 		};
@@ -199,9 +201,11 @@
 				ViewModels/GameStore.swift,
 				Views/BotStatusView.swift,
 				Views/ContentView.swift,
+				Views/DecisionSidebar.swift,
 				Views/LogPanel.swift,
 				Views/NakiWebViewHost.swift,
 				Views/RecommendationView.swift,
+				Views/TileImage.swift,
 			);
 			target = ECAAD4312EE1BAB60056F965 /* Naki-MUITests */;
 		};
@@ -279,9 +283,11 @@
 				ViewModels/GameStore.swift,
 				Views/BotStatusView.swift,
 				Views/ContentView.swift,
+				Views/DecisionSidebar.swift,
 				Views/LogPanel.swift,
 				Views/NakiWebViewHost.swift,
 				Views/RecommendationView.swift,
+				Views/TileImage.swift,
 			);
 			target = ECAAD41B2EE1BAB40056F965 /* Naki-M */;
 		};

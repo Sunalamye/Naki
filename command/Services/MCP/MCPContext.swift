@@ -100,6 +100,15 @@ final class DefaultNakiMCPContext: NakiMCPContext {
         dependencies.log(message)
     }
 
+    /// 診斷輸出：進 `LogManager`，不動狀態列。
+    ///
+    /// 每次 MCP 呼叫都會產生的那幾行（request received／tools\/call／callTool）
+    /// 用這條。走 `log` 的話它們會把狀態列洗成 `callTool: game_state with args: []`，
+    /// 而那是 2026-08-09 人機場實測時畫面底部實際長期停著的內容。
+    func trace(_ message: String) {
+        dependencies.trace(message)
+    }
+
     // MARK: - NakiMCPContext Implementation
 
     func getBotStatus() -> [String: Any]? {

@@ -163,20 +163,47 @@ struct CaptureScreenshotAction {
     await capture()
   }
 
-  /// 整個視窗轉 PNG
+  /// 視窗內容轉 PNG。**有 sheet 時截 sheet。**
+  ///
+  /// 先前 `windows.first` 多半挑中主視窗，所以進階設定（attached sheet，屬於
+  /// 另一個 `NSWindow`）怎麼截都是它後面的遊戲畫面——設定頁等於無法用這支 API 驗。
+  /// 改成「有 sheet 就截 sheet」：那才是使用者當下在看的東西。
+  ///
+  /// **已知限制：截不到 toolbar。** `contentView` 不含 titlebar／toolbar 區域，而模式
+  /// 切換、延遲 stepper、MCP／連線指示與雲端開關全在那裡。試過的兩條路都不行：
+  ///
+  /// - 改截 theme frame（`contentView.superview`）：位置有了，但 `cacheDisplay`
+  ///   畫不出 NSToolbar 裡的 SwiftUI hosting view，整排控制項變成白色空塊——
+  ///   那比缺一塊更糟，看起來像 UI 壞了。
+  /// - `CGWindowListCreateImage`：macOS 26 SDK 已標記 unavailable，替代的
+  ///   ScreenCaptureKit 需要螢幕錄製授權；為了截自己的視窗要求那個權限不成比例。
+  ///
+  /// **第二個限制：SwiftUI 的部分內容 `cacheDisplay` 畫不出來。** 截設定 sheet 時
+  /// TextField、按鈕與警示文字有出來，但 GroupBox 背景與多數標籤是空白的。
+  /// 同一個成因（AppKit 的離屏快取拿不到 SwiftUI 的託管層），只是 toolbar 剛好整排都中。
+  /// 所以這支 API 對**遊戲畫面與決策側欄**是可靠的（那是一般的 SwiftUI 內容區），
+  /// 對 sheet 只能當粗略參考，對 toolbar 無效。
+  ///
+  /// **不要繞道 `screencapture` 用螢幕座標補**：那會拍到視窗以外的東西
+  /// （實測就截到了同座標上的另一個 App），而且視窗一移動座標就失效。
   static func windowScreenshot() -> Result<Data, Error> {
     #if os(macOS)
-      guard
-        let window = NSApplication.shared.windows.first(where: {
-          $0.isVisible && $0.contentView != nil
-        }),
-        let content = window.contentView,
-        content.bounds.width > 0, content.bounds.height > 0,
-        let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds)
-      else {
+      let app = NSApplication.shared
+      let base =
+        app.mainWindow
+        ?? app.keyWindow
+        ?? app.windows.first(where: { $0.isVisible && $0.contentView != nil })
+      guard let target = base?.attachedSheet ?? base else {
         return .failure(NakiActionError.notAvailable("no visible window"))
       }
-      content.cacheDisplay(in: content.bounds, to: rep)
+      guard
+        let view = target.contentView,
+        view.bounds.width > 0, view.bounds.height > 0,
+        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+      else {
+        return .failure(NakiActionError.notAvailable("no drawable window content"))
+      }
+      view.cacheDisplay(in: view.bounds, to: rep)
       guard let png = rep.representation(using: .png, properties: [:]) else {
         return .failure(NakiActionError.notAvailable("png encoding"))
       }
@@ -185,6 +212,7 @@ struct CaptureScreenshotAction {
       return .failure(NakiActionError.notAvailable("window screenshot (macOS only)"))
     #endif
   }
+
 }
 
 // MARK: - SendActionAction

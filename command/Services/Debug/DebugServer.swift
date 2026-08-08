@@ -216,7 +216,7 @@ class DebugServer: MCPHTTPResponder {
 
             // 上限保護：避免無限等待 / 記憶體爆掉
             if accumulated.count > self.maxRequestSize {
-                self.log("Request exceeds max size (\(accumulated.count) > \(self.maxRequestSize)), rejecting")
+                self.trace("Request exceeds max size (\(accumulated.count) > \(self.maxRequestSize)), rejecting")
                 self.sendResponse(connection: connection, status: 400, body: "Request Entity Too Large")
                 return
             }
@@ -226,7 +226,7 @@ class DebugServer: MCPHTTPResponder {
 
             // 完全沒收到資料的錯誤 → 直接關閉
             if let error = error, accumulated.isEmpty {
-                self.log("Connection error: \(error)")
+                self.trace("Connection error: \(error)")
                 connection.cancel()
                 return
             }
@@ -327,7 +327,8 @@ class DebugServer: MCPHTTPResponder {
             return
         }
 
-        log("Request: \(method) \(path)")
+        // 每個 request 一行，但**不上狀態列**：這是診斷輸出，不是要對使用者說的話
+        trace("Request: \(method) \(path)")
 
         // 解析 POST body
         var body = ""
@@ -784,6 +785,11 @@ class DebugServer: MCPHTTPResponder {
     /// （實作在 `NakiMCPDependencies.log`，MCP context 走的也是那一份）。
     private func log(_ message: String) {
         dependencies.log(message)
+    }
+
+    /// 診斷輸出：進 `LogManager`，不動狀態列。
+    private func trace(_ message: String) {
+        dependencies.trace(message)
     }
 
     /// 添加外部日誌

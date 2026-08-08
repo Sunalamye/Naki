@@ -6,8 +6,8 @@
 //  `docs/reference/akagi-inference-api.md`（2026-08-04 以 v3 原始碼重驗）。
 //
 //  範圍（2026-08-04 定案）：只做 `/v3/react`、`/healthz`、`/v3/models`。
-//  `/v3/redeem` 與購買流程不做（key 由使用者自行取得貼上）；`/v3/key` 額度
-//  查詢 v1 不做。proxy 不做——少一整類「錯誤訊息回顯 proxy 密碼」的風險面。
+//  `/v3/redeem` 與購買流程不做（key 由使用者自行取得貼上）。`/v3/key` 額度
+//  查詢已補上（設定頁的方案／到期／今日用量）。proxy 不做——少一整類「錯誤訊息回顯 proxy 密碼」的風險面。
 //
 //  逾時：react 2 秒（雀魂回合計時器 ~5s，立直要兩次呼叫，兩次都要擠進同一
 //  回合——Akagi 生產環境的推導，沿用）；管理端點 8 秒（不在對局關鍵路徑）。
@@ -41,6 +41,62 @@ struct CloudModelInfo: Equatable {
     let id: String
     let game: String
     let desc: String
+}
+
+/// `GET /v3/key` 的回應：這把 key 的方案、到期與即時限額。
+///
+/// 上游（`Akagi/src/bot/api.rs` 的 `KeyStatus`）每個欄位都是 `#[serde(default)]`，
+/// 缺欄位不是錯誤——這裡跟著容忍，不因為伺服器少給一欄就讓整張狀態卡消失。
+///
+/// `rpm` 在伺服器端是浮點數（`10.0`），上游原始碼特別註明過不能當整數解，
+/// 這裡照樣用 `Double`。
+struct CloudKeyStatus: Equatable {
+    let plan: String
+    /// 伺服器原字串（ISO-8601）。解不出 `Date` 時仍然顯示得出來。
+    let expiresAtRaw: String
+    let expiresAt: Date?
+    let usageToday: Int
+    /// 每日請求上限（0＝伺服器沒給）
+    let rpd: Int
+    let rpm: Double
+    let topK: Int
+
+    /// 距到期還有幾天。`nil` = 伺服器沒給或格式不認得。
+    var daysRemaining: Int? {
+        guard let expiresAt else { return nil }
+        return Calendar.current.dateComponents([.day], from: Date(), to: expiresAt).day
+    }
+
+    var isExpired: Bool {
+        guard let expiresAt else { return false }
+        return expiresAt < Date()
+    }
+
+    /// 今日用量佔比（`rpd` 為 0 時回 nil——沒有分母就不要畫進度）
+    var usageFraction: Double? {
+        guard rpd > 0 else { return nil }
+        return min(1, Double(usageToday) / Double(rpd))
+    }
+
+    init(from object: [String: Any]) {
+        plan = object["plan"] as? String ?? ""
+        let raw = object["expires_at"] as? String ?? ""
+        expiresAtRaw = raw
+        expiresAt = Self.parseDate(raw)
+        usageToday = (object["usage_today"] as? NSNumber)?.intValue ?? 0
+        rpd = (object["rpd"] as? NSNumber)?.intValue ?? 0
+        rpm = (object["rpm"] as? NSNumber)?.doubleValue ?? 0
+        topK = (object["topk"] as? NSNumber)?.intValue ?? 0
+    }
+
+    /// 兩種寫法都接：帶小數秒與不帶。只認一種的話，伺服器改了格式就整欄變空。
+    private static func parseDate(_ raw: String) -> Date? {
+        guard !raw.isEmpty else { return nil }
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFractional.date(from: raw) { return d }
+        return ISO8601DateFormatter().date(from: raw)
+    }
 }
 
 /// `GET /healthz` 的回應。
@@ -157,6 +213,19 @@ final class AkagiApiClient {
                                   game: row["game"] as? String ?? "",
                                   desc: row["desc"] as? String ?? "")
         }
+    }
+
+    /// `GET /v3/key` — 這把 key 的方案、到期與即時限額。
+    ///
+    /// 這也是**驗證 key 到底有沒有效**最直接的方式：它是認證端點，key 不對就會回
+    /// 401/403。上游前端（`frontend/src/lib/nativeApi.ts`）也是拿它確認 key 可用。
+    ///
+    /// 原本的範圍決策把「額度查詢」排除在 v1 之外，但那讓設定頁只能回答
+    /// 「伺服器活著」與「有哪些模型」，答不出「我這把 key 還能用多久、今天用掉多少」。
+    func keyStatus() async throws -> CloudKeyStatus {
+        let object = try await get(path: "/v3/key", authorized: true,
+                                   timeout: Self.requestTimeout, what: "key")
+        return CloudKeyStatus(from: object)
     }
 
     /// `GET /healthz`（無認證）— 對局開始前就能告訴使用者伺服器活不活，

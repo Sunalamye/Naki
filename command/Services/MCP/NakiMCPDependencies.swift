@@ -63,6 +63,16 @@ struct NakiMCPDependencies {
     bridgeLog(message)
     store.statusMessage = message
   }
+
+  /// 只進 log，**不上狀態列**。
+  ///
+  /// 狀態列是「給使用者看的最後一句話」，而 HTTP request 這種每秒好幾筆的診斷輸出
+  /// 會把它整個蓋掉：2026-08-09 的人機場實測中，畫面底部長期停在
+  /// `Request: GET /screenshot`——使用者看到的是 Naki 在自言自語，而不是對局狀態。
+  /// 診斷仍然完整留在 `LogManager`（`GET /logs`／`get_logs` 讀得到）。
+  func trace(_ message: String) {
+    bridgeLog(message)
+  }
 }
 
 // MARK: - 狀態輸出（純導出，沒有副作用）

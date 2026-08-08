@@ -68,7 +68,7 @@ final class MCPHandler {
     /// 路由決策全部在 `NakiMCPRouter.plan`（純函式，單測對拍）；這裡只負責
     /// 執行決策：回 result、跑工具、或送錯誤。
     func handleRequest(body: String, headers: [String], connection: NWConnection) {
-        context.log("MCP request received")
+        context.trace("MCP request received")
 
         let plan = NakiMCPRouter.plan(body: body,
                                       headers: headers,
@@ -126,7 +126,7 @@ final class MCPHandler {
                          id: Any?,
                          era: NakiMCPProtocol.Era,
                          connection: NWConnection) {
-        context.log("MCP tools/call: \(name) with args: \(Self.loggableArgs(arguments))")
+        context.trace("MCP tools/call: \(name) with args: \(Self.loggableArgs(arguments))")
 
         Task {
             let result = await MCPToolRegistry.shared.execute(
@@ -160,7 +160,7 @@ final class MCPHandler {
     ///   - arguments: 工具參數
     ///   - completion: 完成回調，返回 MCPToolResult
     func callTool(name: String, arguments: [String: Any] = [:], completion: @escaping (MCPToolResult) -> Void) {
-        context.log("callTool: \(name) with args: \(Self.loggableArgs(arguments))")
+        context.trace("callTool: \(name) with args: \(Self.loggableArgs(arguments))")
 
         Task {
             let result = await MCPToolRegistry.shared.execute(

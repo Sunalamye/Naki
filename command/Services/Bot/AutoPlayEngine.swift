@@ -528,7 +528,10 @@ final class AutoPlayEngine {
             else {
                 return finish(gate: gate, outcome: .notSent(reason: "debounced"))
             }
-            note("觸發: \(top.actionType.rawValue) - \(top.displayTile) (延遲: \(delay)秒)", to: .log)
+            // 延遲取一位小數：這行會上狀態列，而 `Double` 直接內插會印成
+            // 「2.3470340873639475秒」——實測畫面上那串數字把訊息其餘部分擠掉了。
+            note("觸發: \(top.actionType.rawValue) - \(top.displayTile) "
+                 + "(延遲: \(String(format: "%.1f", delay))秒)", to: .log)
             return await perform(requested: top.actionType,
                                  requestedTile: top.displayTile,
                                  snapshot: snapshot,
