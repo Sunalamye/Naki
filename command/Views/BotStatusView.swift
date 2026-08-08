@@ -376,12 +376,9 @@ struct DoraIndicatorsView: View {
 
             HStack(spacing: 4) {
                 ForEach(Array(indicators.enumerated()), id: \.offset) { _, tile in
-                    let mahjongTile = MahjongTile(mjai: tile)
-                    Text(mahjongTile.unicode)
-                        .font(.title3)
-                        .foregroundColor(mahjongTile.isRed ? .red : .primary)
-                        // glyph 對 VoiceOver 無意義，改用共用牌名（紅牌名稱已含「紅」前綴，不僅靠顏色）
-                        .accessibilityLabel(mahjongTile.accessibleName)
+                    // 舊版是 Unicode glyph + 紅色染色；`TileImage` 用的是 App 實際的牌面資產，
+                    // 赤五也有自己的圖，不必再靠顏色去暗示。牌名同樣由它掛上。
+                    TileImage(mjai: tile, size: .tiny)
                 }
             }
         }

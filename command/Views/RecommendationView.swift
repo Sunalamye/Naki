@@ -36,17 +36,16 @@ struct RecommendationRow: View {
                 .foregroundColor(recommendation.actionType.color)
                 .cornerRadius(3)
 
-            // 牌面（放大顯示）。
+            // 牌面。
             // 只有打牌列有牌面可畫：立直推薦從不帶牌（宣言牌是同批的第一個打牌列，
             // executor 也是這樣取），走牌面分支只會 fallback 成 raw 標籤「reach」
             // ——2026-08-05 顯示掃描抓到的問題，改走 displayLabel 顯示「立直」。
             if recommendation.actionType == .discard {
-                // 固定字級 28/22 保留：此列為固定 40pt 寬版面，改用 Dynamic Type 會與機率條/百分比欄位錯位，風險高故僅補 a11y
-                Text(recommendation.tileUnicode)
-                    .font(.system(size: isTop ? 28 : 22))
-                    .foregroundColor(recommendation.isRed ? .red : .primary)
-                    // glyph 對 VoiceOver 無意義，改用共用牌名
-                    .accessibilityLabel(tileAccessibleName)
+                // `TileImage` 取代了原本的 Unicode glyph：那組字元被系統字型畫成黑白線稿，
+                // 在這個尺寸下必須先「認出」它才對得到牌桌上的牌，而赤五根本無從表示
+                // （`5mr` 與 `5m` 同一個 code point，只能整張染紅）。牌名與尺寸縮放
+                // 都由 `TileImage` 自己處理，所以這裡不再需要 a11y label 與紅色判斷。
+                TileImage(mjai: recommendation.displayTile, size: isTop ? .medium : .small)
             } else {
                 // ⭐ 使用 displayLabel 來顯示友好的標籤（如 吃①, 吃②, 吃③）
                 Text(recommendation.displayLabel)
@@ -126,11 +125,6 @@ struct RecommendationRow: View {
     }
 
     // MARK: - Accessibility
-
-    /// 牌的可讀名稱（VoiceOver 用），共用 MahjongTile.accessibleName
-    private var tileAccessibleName: String {
-        MahjongTile(mjai: recommendation.displayTile).accessibleName
-    }
 
     /// 排名可讀標籤，最佳（top）推薦補「最佳」文字線索（原本只靠黃底 + 粗體）
     private var rankAccessibilityLabel: String {
@@ -315,9 +309,7 @@ struct CompactRecommendationView: View {
                         .cornerRadius(3)
 
                     if top.actionType == .discard || top.actionType == .riichi {
-                        Text(top.tileUnicode)
-                            .font(.body)
-                            .foregroundColor(top.isRed ? .red : .primary)
+                        TileImage(mjai: top.displayTile, size: .tiny)
                     }
 
                     Text(top.percentageString)
