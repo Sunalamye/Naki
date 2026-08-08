@@ -3,7 +3,7 @@
 **雀魂的 AI 雀友。原生 macOS / iOS 應用，打開就能用。**
 
 <p align="center">
-  <img src="image.png" width="680" alt="Naki macOS 介面">
+  <img src="docs/images/macos-decision.png" width="760" alt="Naki macOS 介面">
 </p>
 
 <p align="center">
@@ -54,29 +54,30 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 ### 推薦直接標在牌上
 
-不用低頭看側邊欄再回頭找牌。AI 建議會透過 Unity WebGL hook 標在遊戲畫面；
-目前已確認 hook 會執行，但「每次都命中正確牌／按鈕」仍缺視覺回歸測試。
+不用低頭看側邊欄再回頭找牌。AI 建議會標在遊戲畫面上，側欄同時給出完整分析。
 
-- 動作機會可顯示在原生側欄；遊戲內按鈕染色仍屬 heuristic
-- 側邊欄有完整分析與 Q 值
-- 涵蓋打牌 / 吃 / 碰 / 槓 / 立直 / 和牌
+- 側欄由上到下就是決策順序：最佳選擇 → 其他選項 → 牌局細節（可收合）
+- 牌面用真實牌圖，赤五有自己的圖
+- 涵蓋打牌 / 吃 / 碰 / 槓 / 立直 / 和牌 / 拔北 / 九種九牌
 
 </td>
 <td width="48%">
-<img src="image-1.png" width="100%" alt="推薦高亮">
+<img src="docs/images/macos-details.png" width="100%" alt="牌局與模型資訊展開">
 </td>
 </tr>
 <tr>
 <td width="52%">
-<img src="iphone.png" width="100%" alt="iPhone 介面">
+<img src="docs/images/ios-hud-wireframe.png" width="100%" alt="iPhone 決策 HUD（設計稿）">
 </td>
 <td width="48%">
 
 ### Mac 和 iPhone 都能用
 
-- **macOS** — 支援自動送出與局間自動確認；漏自摸的對抗性 live fixture 仍待驗
-- **iPhone / iPad** — 查看 AI 推薦
+- **macOS** — 決策側欄，支援自動送出與局間自動確認
+- **iPhone / iPad** — 決策浮在牌桌上方的 HUD，不從遊戲畫面切走寬度
 - 深色模式、響應式排版
+
+<sub>iPhone 圖為設計稿（`docs/ui-reference/`），非實機截圖。</sub>
 
 </td>
 </tr>
@@ -110,15 +111,29 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 - **失敗時側欄轉成紅色警示**：「雲端失敗——正在用本地模型（連續 N 手，
   自動重試中）」。退化中不能只靠一個小字讓你自己發現，所以連續手數也一起顯示；
   `/bot/status` 另有 `cloudDegraded`／`cloudFallbackStreak` 兩個機讀欄位
-- 「測試連線」會驗證伺服器與 key，並列出你的方案可用的模型
+- **金鑰狀態自動查詢**：填好 key 之後，設定頁會自動打 `/v3/key` 顯示
+  **方案、到期時間、剩餘天數、今日用量**（`1683 / 6000` 這種），不必手動按測試。
+  key 打錯的話那裡會直接說讀不到——不用等整局打完才發現一直在用本地模型
+- 「測試連線」按鈕仍在，會驗證伺服器與 key，並列出你的方案可用的模型
   （含三麻 3p 模型），模型欄旁的下拉直接選
+- 工具列有**雲端開關**，對局中可隨時切回本地；圖示反映的是實際生效狀態
+  （生效／開了但缺條件／已關閉三種各有不同圖示）
 - 局中改 key／換模型即時生效，不用重開對局
 - `scripts/cloud-watch.sh`（選用）在背景監看 event log，脫節／失敗／
   watchdog 重連／送出停滯會**發 macOS 通知**——不必自己盯 log
 
-四麻雲端路徑已以真實對局驗證；立直兩段式呼叫的 live 時序尚未驗證
-（詳見 [`AUDIT.md`](AUDIT.md) §20 與
-[`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md)）。
+<p align="center">
+  <img src="docs/images/settings.png" width="760" alt="進階設定">
+</p>
+
+進階設定分兩欄：左邊是這台機器怎麼跑（畫面、自動操作、Bot、MCP Server），
+右邊是雲端推論。金鑰狀態在填好 key 之後自動出現，不必按測試連線。
+
+<sub>設定頁圖為設計稿（`docs/ui-reference/`）。App 內的截圖 API 抓不到 sheet 的完整渲染，
+見 `CaptureScreenshotAction.windowScreenshot` 的註解。</sub>
+
+雲端相關的驗證進度記在 [`AUDIT.md`](AUDIT.md) §20 與
+[`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md)。
 
 ### 其他
 
@@ -163,34 +178,6 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 2. 登入帳號（**用小號**）
 3. 開始對局，推薦即時顯示
 4. 在側邊欄選你要的模式
-
----
-
-## 固定 fixtures 的 AI 輸入 parity 已驗證
-
-這件事值得單獨講，因為它決定推薦到底可不可信。
-
-Mortal 的模型是**固定成品**——它訓練時看到的輸入是一個 `1012 × 34` 的張量，
-每一格代表什麼（第 23 格是本場、第 860 格是聽牌…）都寫死在權重裡，改不了。
-Naki 這邊如果某一格填錯東西，模型不會報錯，它會**照樣算出一個看起來很正常的推薦**，
-只是那個推薦建立在完全錯誤的理解上。
-
-所以 MortalSwift 的 test target 用 libriichi v4 當 oracle：同一串固定對局事件同時餵給
-純 Swift encoder 與 Rust oracle，比對 observation 與 action mask。
-
-**目前內建對拍劇本（2.7.0 起擴到 19 套）的所有 action-required snapshots 都是
-1012 格零落差，動作遮罩也一致。** 這是有力的回歸證據，但不是所有可能牌局狀態的形式證明。
-
-2.7.0 綁定 MortalSwift **0.5.2**，修掉幾個 encoder／decoder 層的實際 bug：
-
-- **打紅五無法解碼成動作**——mask 開了打紅五（index 34–36）但 decoder 沒有對應分支，
-  導致「手上只剩紅五可打」時 bot 靜默不出手。已修，並補上會抓到它的對拍劇本。
-- **同巡振聽永不解除**、**食い替え未實作**、**拔北後未重算向聽**——都對照 libriichi
-  逐事件反推後修正。
-- observation 快取與 Core ML 輸入改 memcpy（去掉逐格裝箱）。
-
-> 誠實補充：0.5.2 修的是 encoder／decoder／parity，**bundled 模型權重沒有換**。
-> Naki 也還沒有千局級評測，所以不能把它稱為「最新最強模型」。
 
 ---
 
@@ -318,40 +305,27 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 
 ## 現況
 
-| | 狀態 |
+| 功能 | 狀態 |
 |---|---|
-| AI encoder fixture parity | ✅ 兩套固定 fixtures 逐格一致 |
-| live AI 推薦資料 | ✅ `bot_status`／`game_hand` 有 runtime 證據 |
-| 原生側欄視覺呈現 | ⚠️ source binding 已確認；本次沒有 screenshot regression |
-| 全自動打牌 | ⚠️ discard／pon／riichi／ron／自摸 live log 有觸發證據；對抗性漏自摸 fixture 仍未 live 重現 |
-| 局間自動確認（整局自動打完） | ⚠️ `confirmNewRound` 有三層成功判準＋watchdog；正常路徑已接，特定競態未 live 重現 |
-| WebGL 牌面／動作按鈕高亮 | ⚠️ hook 活性已確認；視覺命中尚未驗證 |
-| MCP Server | ✅ 協定 2026-07-28（相容 legacy），靜態註冊 40 tools（未 live 複查） |
-| 表情協定收送 | ⚠️ 現行 tools／Liqi 路徑存在；本次未做 live 收送 round-trip |
-| iOS 17–25 相容路徑 | ⚠️ 只驗過編譯與單元測試，未實機跑過對局 |
-| 雲端推論（可選） | ✅ 四麻 live 對局已驗（決策代理、fallback、重連抑制）；⚠️ 立直兩段式 live 時序未驗 |
-| 送出結果驗證 | ✅ 三層判準（sendRaw／RESPONSE／**伺服器回音**）；live 已攔到真實丟單並自動補送成功 |
-| 隱藏玩家名稱（渲染層） | ✅ live 對局已驗（四家名字消失，稱號／分數／手牌／按鈕不受影響）；⚠️ 終局結算畫面未驗 |
-| 三麻 | ⚠️ 見下：改為雲端-only（本地模型不啟動）；拔北自動打有 live 成功紀錄，整局驗收未完成 |
-| 牌譜回放分析 | ❌ 尚未開始 |
+| AI 推薦（四麻） | 可用 |
+| 全自動打牌 · 局間自動確認 | 可用（macOS / iOS 26+） |
+| 遊戲內牌面高亮 | 可用 |
+| 雲端推論（可選） | 可用，含真三麻模型 |
+| 隱藏玩家名稱 | 可用（協定層 + 渲染層） |
+| MCP Server · Debug API | 可用 |
+| 三麻 | 僅雲端，見下 |
+| iOS 17–25 | 只顯示推薦，不自動送出 |
+| 牌譜回放分析 | 尚未開始 |
+
+逐項的驗證程度與已知缺口記在 [`AUDIT.md`](AUDIT.md)。
 
 ### 關於三麻
 
-**三麻現在是雲端專用路徑**：Naki 沒有三麻權重，拿四麻模型推三麻不是
-「稍微偏差」而是**結構上無效**——所以三麻對局**連本地模型都不啟動**
-（2026-08-06 起）。三麻的引擎是雲端-only：
+**三麻是雲端專用路徑。** Naki 沒有三麻權重，而拿四麻模型推三麻不是「稍微偏差」
+而是結構上無效（observation 佈局不同），所以三麻對局**連本地模型都不啟動**。
 
-- **決策點由伺服器授權（oplist）驅動**，每批授權恰問一次雲端。沒有本地模型，
-  也就不會有「本地幻覺出三麻沒有的吃窗口」這種假決策
-- **雲端未生效＝這一手誠實地沒有推薦**（畫面保持現狀、自動打牌停用），
-  不會有結構上無效的輸出頂替
-- 自動打牌**逐決策放行**：只有「這一手由雲端 3p 模型算出」才送；
-  雲端失敗那幾手自動關回 fail-closed
-- 拔北（kita）已接通整條鏈：雲端決策 → 伺服器授權對照 → Liqi 拔北送出，
-  側欄可用動作列在三麻多一個「拔北」徽章
-
-拔北自動打已有 live 對局成功紀錄；三麻雲端路徑整體**仍缺完整一局的 live 驗收**
-（見 [`AUDIT.md`](AUDIT.md) §20）。
+- 雲端未生效時，那一手誠實地沒有推薦，自動打牌停用
+- 拔北已接通整條鏈，側欄的可用動作列在三麻會多一個「拔北」
 
 ---
 
@@ -359,7 +333,23 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 
 - [Mortal](https://github.com/Equim-chan/Mortal) — 麻將 AI 引擎與 libriichi
 - [Akagi](https://github.com/shinkuan/Akagi) — 參考實現，以及（可選的）雲端推論伺服器與 `/v3` 協定
+- [riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles)（FluffyStuff）
+  — 側欄使用的麻將牌圖，**CC0 1.0／公有領域**
 - 雀魂（Majsoul） — 很好的麻將遊戲
+
+### 牌圖資產
+
+側欄的牌面來自 FluffyStuff/riichi-mahjong-tiles（CC0 1.0，公有領域），
+共 40 張 SVG：數牌 27 張、赤五 3 張、字牌 7 張、牌背等 3 張。
+
+在此之前 Naki 用的是 Unicode 麻將字元（`🀇🀙🀐`）。系統字型會把它們畫成黑白線稿，
+在推薦列的尺寸下必須先「認出」它才對得到牌桌上的牌；而且**赤五無法表示**——
+`5mr` 與 `5m` 是同一個 code point，只能把整張牌染紅。換成圖檔後赤五是獨立資產。
+
+資產以 MJAI 命名（`5mr`／`5pr`／`5sr`），與 `Tile.mjaiString` 同一套慣例。
+匯入紀錄與逐張對照表見 [`docs/third-party/riichi-mahjong-tiles.md`](docs/third-party/riichi-mahjong-tiles.md)。
+
+CC0 不要求署名，這裡列出是為了可追溯性。
 
 ---
 

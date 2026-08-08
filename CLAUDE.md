@@ -104,6 +104,7 @@ OptionalOperationList
 | action 送出 | `command/Services/Bot/AutoPlayActionExecutor.swift`（兩條 WebView path 共用的唯一動作 switch，9 種動作 + unknown；成功才 markHandled） |
 | AI | `command/Services/Bot/NativeBotController.swift` |
 | 自動打牌停滯回報 | `AutoPlayEngine.onStallChanged` → `GameStore.autoPlayStall` → `BotStatusView`（「該動而沒動」唯一上得了畫面的路；其餘失敗只走 log，且 log 對同一原因只印一行） |
+| 牌面圖像 | `command/Views/TileImage.swift`（MJAI → Asset Catalog；赤五是獨立資產 `5mr`，不再用 Unicode glyph 染紅。牌面圖案要疊 `Utility/front` 牌身，資產本身背景透明） |
 | WebGL highlighter | `command/Resources/JavaScript/naki-core.js` |
 | sendRaw | `command/Resources/JavaScript/naki-websocket.js` |
 
