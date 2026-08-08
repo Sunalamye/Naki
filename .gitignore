@@ -108,3 +108,7 @@ dist/
 
 # Video files
 *.mp4
+
+# skill 工作產物（html-artifact 鏡像、prompt-forge 紀錄）
+# 正本在 docs/ui-reference/；這裡是 byte-identical 副本，不需要進版本控制
+.swfd/
