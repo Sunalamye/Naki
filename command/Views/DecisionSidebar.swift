@@ -77,7 +77,12 @@ struct DecisionSidebar: View {
                 EmptyRecommendationView()
             }
 
-            Spacer(minLength: 0)
+            // 窄版不放 Spacer：HUD 是浮在牌桌上的，撐滿高度等於白白遮住遊戲。
+            // 實測空狀態時它佔掉畫面 49%，而內容只有摘要條加一行「等待遊戲數據」。
+            // 側欄版要 Spacer 把內容釘在頂端（它有固定寬度，撐滿是預期的）。
+            if !compact {
+                Spacer(minLength: 0)
+            }
         }
         .padding(compact ? 10 : 16)
     }
