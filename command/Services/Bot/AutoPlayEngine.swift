@@ -63,6 +63,25 @@ nonisolated struct AutoPlayCycle {
                    resolved: Recommendation.ActionType)?
 }
 
+/// 自動打牌停滯：伺服器已經給了決策機會，但連續幾拍都沒送出任何動作。
+///
+/// **為什麼需要這個型別**：引擎所有的失敗與略過都只走 log
+/// （`note(...)` 的兩個 sink 都是寫檔案的），而 `finish` 的去重讓同一個原因
+/// 只輸出一行——**故障越持久，log 裡的痕跡越少**。同時側欄的綠點讀的是
+/// `botStatus.isActive`（推論層），推論照跑它就照亮。
+///
+/// 結果是：一手都沒送出、log 只有一行、畫面顯示「運行中」。那不是「缺少錯誤訊號」，
+/// 是顯示了一個會被誤讀成正常的訊號——正好違反 `design-review-vs-akagi.md` P9
+/// 自己寫下的原則（「看起來一樣但其實不是決策」不行）。
+nonisolated struct AutoPlayStall: Equatable {
+    /// 最近一拍沒送出的原因（`AutoPlayCycle` 的 reason 字串）
+    let reason: String
+    /// 已經連續幾拍有機會卻沒動作
+    let consecutiveTicks: Int
+    /// 這段停滯是從哪一批 oplist 開始的
+    let sinceSequence: UInt64
+}
+
 /// 執行位的狀態。
 ///
 /// 「有沒有動作在跑」與「跑到哪一階段」是同一個值，而且只有 `occupy(...)` 能改它。
@@ -218,6 +237,15 @@ final class AutoPlayEngine {
     private let log: (String) -> Void
     /// 「為什麼這樣打／為什麼沒打」——必須進 events.log
     private let event: (String) -> Void
+
+    /// 停滯狀態變化時通知外界（UI 用）。log 之外的第二條通道——
+    /// 這是「自動打牌不動作」唯一能上得了畫面的路。
+    private let onStallChanged: (AutoPlayStall?) -> Void
+
+    /// 目前這段停滯已經連續幾拍
+    private var stallTicks = 0
+    /// 目前回報出去的停滯（用來去重，只在真的變化時通知）
+    private var reportedStall: AutoPlayStall?
     private let timing: Timing
     /// 我方權威動作回音的觀測面（第 3 層驗證；`timing.actionEchoTimeoutMs == 0` 時不使用）
     private let echo: (any SelfActionEchoObserving)?
@@ -272,7 +300,8 @@ final class AutoPlayEngine {
          echo: (any SelfActionEchoObserving)? = SelfActionEchoTracker.shared,
          context: @escaping () -> Context,
          log: @escaping (String) -> Void = { _ in },
-         event: @escaping (String) -> Void = { _ in }) {
+         event: @escaping (String) -> Void = { _ in },
+         onStallChanged: @escaping (AutoPlayStall?) -> Void = { _ in }) {
         self.store = store
         self.sender = sender
         self.timing = timing
@@ -280,6 +309,7 @@ final class AutoPlayEngine {
         self.context = context
         self.log = log
         self.event = event
+        self.onStallChanged = onStallChanged
     }
 
     /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
@@ -474,10 +504,23 @@ final class AutoPlayEngine {
             // 當前機會就放行——寧可偶爾送一次舊推薦（罕見競態），也不要因為 provenance 判不準
             // 就整局不自動打（strict 等號會這樣，實測會 0 觸發）。
             // `.forceHora`／`.sendPass` 是不看推薦內容的 server-authoritative 防護，不受此限。
-            if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence {
+            //
+            // **和牌機會同樣不受此限**，即使推薦非空。`.forceHora` 只在推薦為**空**時
+            // 觸發，於是「榮和視窗帶新 oplist 抵達、該批沒刷新推薦、上一個決策點的推薦
+            // 還在且序號較舊」這個組合會落在這裡被擋掉——每一拍都回 `notSent`，一路到
+            // 伺服器逾時。放行後照樣走 resolver，而 resolver 會把和牌排在 AI 推薦之上
+            // 並留下「決策覆蓋」的 log；stale 推薦頂多讓覆蓋前的那一列是舊的，
+            // 送出去的仍然是伺服器授權的和牌。漏和不可逆，這個方向的取捨沒有懸念。
+            if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence,
+               snapshot.horaOperation == nil {
                 return finish(gate: gate, outcome: .notSent(reason: "recommendations_stale"))
             }
-            let delay = actionDelay(for: top.actionType, scale: ctx.actionDelayScale)
+            let delay = actionDelay(for: top.actionType,
+                                    tile: top.displayTile,
+                                    // 摸切＝要打的正是這一巡摸到的那張
+                                    tsumogiri: ctx.tsumoTile != nil
+                                        && ctx.tsumoTile == top.displayTile,
+                                    scale: ctx.actionDelayScale)
             guard debounce.allows(key: "\(top.actionType.rawValue)-\(top.displayTile)",
                                   isPass: top.actionType == .none,
                                   window: delay + 0.5,
@@ -528,7 +571,12 @@ final class AutoPlayEngine {
         // 算的，就算是手動／MCP `bot_trigger` 也不該把它套到新機會——那動作不可逆，
         // 而 bot_trigger 可能由自動化呼叫。nil provenance 仍放行（與 auto path 一致，
         // 不重現 strict 等號的 0 觸發），只擋有正面 stale 證據的。
-        if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence {
+        //
+        // 和牌機會例外，理由與輪詢路徑同一條：擋下 stale 推薦是為了避免送出**錯的**
+        // 動作，但伺服器已經授權和牌時，resolver 無論如何都會把和牌排在推薦之上，
+        // 擋下來只會讓漏和變成唯一的結果。
+        if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence,
+           snapshot.horaOperation == nil {
             note("略過觸發: 推薦是為更早的機會算的（stale）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "recommendations_stale"))
         }
@@ -812,10 +860,17 @@ final class AutoPlayEngine {
     // MARK: - 參數
 
     private func actionDelay(for action: Recommendation.ActionType?,
+                             tile: String? = nil,
+                             tsumogiri: Bool = false,
                              scale: Double) -> TimeInterval {
-        // 固定時序是指紋：正式路徑一律由 `ActionDelayModel` 依動作類型抽樣，
+        // 固定時序是指紋：正式路徑一律由 `ActionDelayModel` 抽樣，
         // `scale` 只縮放分布不取代它。使用者的基準秒數係數走 `Context.actionDelayScale`。
-        timing.actionDelay?(action, scale) ?? ActionDelayModel.delay(for: action, scale: scale)
+        //
+        // `tile` 與 `tsumogiri` 是校準模型的兩個主要維度：真人對字牌／么九／中張的
+        // 思考長度不同，而摸切又明顯比手切快（不必從手上挑牌）。
+        timing.actionDelay?(action, scale)
+            ?? ActionDelayModel.delay(for: action, tile: tile,
+                                      tsumogiri: tsumogiri, scale: scale)
     }
 
     private func retryLimit(for action: Recommendation.ActionType) -> Int {
@@ -879,7 +934,42 @@ final class AutoPlayEngine {
         } else {
             lastNonSendReason = nil
         }
+        updateStall(reason: reason)
         return AutoPlayCycle(gate: gate, outcome: outcome, log: trace, overrode: overrode)
+    }
+
+    /// 幾拍沒動作才算停滯。
+    ///
+    /// 輪詢是一秒一拍，而 `callPassGrace` 本來就會讓副露機會等 2 秒推論，
+    /// 所以門檻要在那之上；伺服器給 300 秒思考時間，等到第 4 拍才出聲不會太晚。
+    private static let stallTickThreshold = 4
+
+    /// 更新停滯狀態。
+    ///
+    /// 判準是「**伺服器已經給了決策機會**（`store.pending != nil`）卻連續沒送出」。
+    /// 沒有 pending 就不是停滯——那多半只是還沒輪到自己，一直亮警告只會變成雜訊。
+    private func updateStall(reason: String?) {
+        guard let reason, let pending = store.pending else {
+            // 送出成功，或這一拍根本沒有決策機會 → 停滯結束
+            stallTicks = 0
+            if reportedStall != nil {
+                reportedStall = nil
+                onStallChanged(nil)
+            }
+            return
+        }
+
+        stallTicks += 1
+        guard stallTicks >= Self.stallTickThreshold else { return }
+
+        let stall = AutoPlayStall(reason: reason,
+                                  consecutiveTicks: stallTicks,
+                                  sinceSequence: pending.sequence)
+        // 只在真的變化時往外送（`consecutiveTicks` 每拍都變，所以這其實是每拍一次；
+        // 這是刻意的——UI 要能顯示「卡了幾秒」，而不是只有第一次。）
+        guard stall != reportedStall else { return }
+        reportedStall = stall
+        onStallChanged(stall)
     }
 
     // MARK: - 睡眠

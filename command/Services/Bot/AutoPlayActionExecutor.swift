@@ -124,6 +124,12 @@ enum AutoPlayActionExecutor {
             log("執行: 拔北")
             spec = LiqiRequestBuilder.babei()
 
+        case .ryukyoku:
+            // 九種九牌：ReqSelfOperation type=10（kyushu）。
+            // 同樣只有雲端推薦會走到這裡（resolver 已確認 oplist 有 kyushu）。
+            log("執行: 九種九牌")
+            spec = LiqiRequestBuilder.kyushu()
+
         case .unknown:
             event("❌ 未知動作類型，未送出，保留 oplist")
             return nil

@@ -258,6 +258,12 @@ struct Recommendation: Identifiable, Equatable {
         case hora = "hora"
         /// 拔北（三麻）。只有雲端 3p 模型會產出（本地 action space 46 無此槽位）。
         case kita = "kita"
+        /// 九種九牌（配牌時么九牌 ≥ 9 種可宣告流局）。
+        ///
+        /// rawValue 取 `ryukyoku` 對齊雲端 API 與 MJAI 的動作名；送到雀魂時是
+        /// `ReqSelfOperation type=10`（liqi 叫 kyushu）。與 `.kita` 同一個形狀：
+        /// 本地 action space 46 沒有這個槽位，只有雲端模型會產出。
+        case ryukyoku = "ryukyoku"
         case none = "none"
         case unknown = "unknown"
 
@@ -270,8 +276,23 @@ struct Recommendation: Identifiable, Equatable {
             case .kan: return "槓"
             case .hora: return "和"
             case .kita: return "拔北"
+            case .ryukyoku: return "九種九牌"
             case .none: return "過"
             case .unknown: return "?"
+            }
+        }
+
+        /// 這個動作在遊戲畫面上會不會標到某一張牌。
+        ///
+        /// `GameHighlightScript` 只對這幾種產生 mark——和了／過／拔北／九種九牌
+        /// 沒有對應的手牌可標，它們落在那個 switch 的 `default`。
+        /// `GameStore.highlightedTile` 必須用同一個判斷，否則會宣稱畫面上有一個
+        /// 其實不存在的標記（那個欄位的 doc 正是在防這件事）。
+        /// `GameHighlightScriptTests` 有一條測試把兩邊鎖在一起。
+        var marksTileOnBoard: Bool {
+            switch self {
+            case .discard, .riichi, .chi, .pon, .kan: return true
+            case .hora, .kita, .ryukyoku, .none, .unknown: return false
             }
         }
 
@@ -284,6 +305,7 @@ struct Recommendation: Identifiable, Equatable {
             case .kan: return .red
             case .hora: return .yellow
             case .kita: return .teal
+            case .ryukyoku: return .brown
             case .none: return .gray
             case .unknown: return .secondary
             }
@@ -375,6 +397,7 @@ struct Recommendation: Identifiable, Equatable {
         case .hora: return "和"
         case .riichi: return "立直"
         case .kita: return "拔北"
+        case .ryukyoku: return "九種九牌"
         case .none: return "過"
         case .discard: return tile?.mjaiString ?? label
         case .unknown: return label

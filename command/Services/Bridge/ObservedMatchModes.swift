@@ -25,6 +25,11 @@ import Foundation
 @MainActor
 final class ObservedMatchModes {
 
+    /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md
+    /// 「專案結構的坑」）。目前測試都透過 `.shared` 碰它所以沒炸過，但哪天有人
+    /// 直接建構一個，那一整批測試會從報告上**消失**而不是變紅。
+    nonisolated deinit { }
+
     static let shared = ObservedMatchModes()
 
     /// 一次觀察：某個時間點客戶端輪詢了哪些 mode

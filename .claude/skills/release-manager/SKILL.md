@@ -17,9 +17,27 @@ bash .claude/skills/release-manager/scripts/release.sh <version> --yes
 # version 不帶 v，例如 2.7.1
 ```
 
-腳本會 preflight（工作樹乾淨、版本沒撞 tag、gh 授權、MortalSwift pin 提示）→ build →
-package（DMG 含 /Applications 捷徑）→ bump 三處版本 → commit → tag → push origin main + tag →
-gh release。**push origin main 要用戶明示授權**（全域規則）；`--yes` 只跳互動確認，不代表授權 push。
+腳本會 preflight（工作樹乾淨、版本沒撞 tag、gh 授權、MortalSwift pin 提示）→ **test（NakiTests）**
+→ **bump 三處版本** → build（macOS Release + iOS 編譯驗證）→ package（DMG 含 /Applications 捷徑）
+→ commit → tag → push origin main + tag → gh release。
+**push origin main 要用戶明示授權**（全域規則）；`--yes` 只跳互動確認，不代表授權 push。
+
+2026-08-07 修正的三件事（順序不要再改回去）：
+
+- **bump 必須排在 build 之前。** 舊版是 build → package → bump，於是打包出去的 binary
+  帶的是**上一版**版本號。腳本自己當時還印著「版本此時還是舊號，稍後 bump」。
+  現在 build 之後會用 `PlistBuddy` 讀產物的 `CFBundleShortVersionString` 比對，
+  對不上就非零退出——同一個坑不靠人記得。
+- **測試是門禁。** 只跑 `-only-testing:NakiTests`：`-scheme Naki` 會連 `NakiUITests`
+  一起跑，而那個要啟真 App、綁 8765、載 live Majsoul WebGL（走 CDN），
+  拿它當發布門禁等於把發布綁在網路與 live 頁面上。
+- **iOS 要編一次。** `command/` 是兩個 target 共用的，而 `ContentView.swift` 的
+  `iOSLayout` 有一百多行只在 iOS 編譯；在此之前所有文件化的指令都只 build
+  `-scheme Naki`，那段程式碼一次都碰不到。`Naki-M.xcscheme` 已補進
+  `xcshareddata`（先前只靠 Xcode autocreate，clean clone 不一定有）。
+
+bump 之後有 `trap` 保護：任何一步失敗都會 `git checkout` 還原三個版本號檔案，
+不留下「版本已改、但沒 commit 也沒產物」的中間狀態（那會讓下次 preflight 擋下自己）。
 
 ## 發布前決策 gate（腳本不做，要先想清楚）
 

@@ -177,6 +177,23 @@ final class AkagiApiClient {
 
     // MARK: - 傳輸
 
+    /// 把伺服器訊息裡回顯的 API key 換成後四碼。
+    ///
+    /// 這條錯誤訊息會一路走到 `CloudBot` 的 `eventLog`，**落進磁碟**
+    /// （`~/Library/Logs/Naki/<timestamp>/events.log`），而 log 是使用者回報問題時
+    /// 會整包附上的東西。伺服器只要在錯誤裡回顯 key（`invalid key: xxxx` 這種很常見），
+    /// 完整憑證就寫進檔案了。
+    ///
+    /// Naki 這側管不到伺服器回什麼，但管得到「不要原樣寫下去」。Akagi 為 proxy URL
+    /// 寫過同一類防護（proxy URL 常帶 `user:pass@host`，而錯誤訊息會進 bug report），
+    /// Naki 用「不做 proxy」規避了那條線，這裡是同一個原則的另一個面向。
+    private func redactingKey(_ message: String) -> String {
+        let trimmed = key.trimmingCharacters(in: .whitespaces)
+        // 空 key（`/healthz` 那條路）不必遮，也不能遮——會把整串訊息切碎。
+        guard trimmed.count >= 8 else { return message }
+        return message.replacingOccurrences(of: trimmed, with: "***\(trimmed.suffix(4))")
+    }
+
     private func post(path: String, body: [String: Any],
                       timeout: TimeInterval, what: String) async throws -> [String: Any] {
         guard let url = URL(string: base + path) else { throw CloudAPIError.invalidURL }
@@ -213,15 +230,15 @@ final class AkagiApiClient {
         }
         guard (200..<300).contains(http.statusCode) else {
             // 伺服器約定：body 是 `{"error": "..."}`；解不出就取前 200 字。
-            let message: String
+            let raw: String
             if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let error = object["error"] as? String {
-                message = error
+                raw = error
             } else {
-                message = String(decoding: data.prefix(200), as: UTF8.self)
+                raw = String(decoding: data.prefix(200), as: UTF8.self)
             }
             let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
-            throw CloudAPIError.http(code: http.statusCode, message: message,
+            throw CloudAPIError.http(code: http.statusCode, message: redactingKey(raw),
                                      retryAfter: retryAfter)
         }
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

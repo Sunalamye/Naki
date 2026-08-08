@@ -297,6 +297,8 @@ extension WebSession: WebNavigationSink {
 
     func webDidFinishNavigation() {
         systemLog("[生命週期] 頁面載入完成")
+        // 載起來了就把失敗橫幅收掉——它不該在成功之後還掛著
+        store.pageLoadFailure = nil
         // JS 模組的開關是 closure 內的變數，reload 會歸零，必須重新套用
         applyHideNamesIfNeeded()
         if !store.isConnected {
@@ -306,5 +308,13 @@ extension WebSession: WebNavigationSink {
 
     func webDidFailNavigation(_ message: String) {
         store.statusMessage = "加載失敗: \(message)"
+
+        // `statusMessage` 會被下一個事件蓋掉，而頁面載不起來時 Naki 什麼都做不了
+        // ——這件事必須留下**查得到**的痕跡，並且掛在畫面上直到重新載入成功。
+        //
+        // 在此之前這裡只有上面那一行：沒有 log、沒有重試、沒有橫幅，
+        // 使用者看到的是一個空白頁面與一句稍縱即逝的狀態列文字。
+        systemLog("[WebSession] ❌ 頁面載入失敗：\(message)")
+        store.pageLoadFailure = message
     }
 }

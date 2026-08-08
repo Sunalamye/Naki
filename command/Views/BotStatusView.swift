@@ -17,6 +17,12 @@ struct BotStatusView: View {
     var botStatus: BotStatus
     var gameState: GameState
 
+    /// 自動打牌停滯中（伺服器給了機會卻連續沒動作）；nil = 正常。
+    ///
+    /// 沒有這個的話，「一手都沒送出」在畫面上與正常運作**長得一模一樣**——
+    /// 上面那個綠點讀的是 `botStatus.isActive`（推論層），推論照跑它就照亮。
+    var autoPlayStall: AutoPlayStall?
+
     /// 「重新載入」按鈕做的事（強制斷線重連）。
     ///
     /// 由外面交進來、可以 stub，而不是這個 View 自己去環境裡撈頁面 service：
@@ -110,6 +116,28 @@ struct BotStatusView: View {
                         .foregroundColor(.orange)
                         .accessibilityIdentifier("cloud-inference-indicator")
                     }
+                }
+
+                // 自動打牌停滯：伺服器給了決策機會，但連續幾拍都沒送出。
+                //
+                // 這條與上面的雲端警示是不同的事：雲端失敗至少還有本地決策，
+                // 而這裡是「該動而沒動」——在此之前它只存在於 log，
+                // 而 log 對同一個原因只印一行，卡越久痕跡越少。
+                if let stall = autoPlayStall {
+                    HStack(alignment: .top, spacing: 4) {
+                        Image(systemName: "pause.circle.fill")
+                            .font(.caption)
+                        Text("自動打牌停滯 \(stall.consecutiveTicks) 秒——伺服器已給機會但沒送出（\(stall.reason)）")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundColor(.red)
+                    .padding(6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.12))
+                    .cornerRadius(6)
+                    .accessibilityIdentifier("autoplay-stall-indicator")
                 }
 
                 // 三麻：明講不支援，而不是讓使用者以為 AI 正常運作；

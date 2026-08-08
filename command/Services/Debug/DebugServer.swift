@@ -73,6 +73,11 @@ struct DebugEndpoint {
 /// 就過不了；改成 server 自己持有可寫的 `var xxx: (...)?` 再轉發，漏接就只剩執行期才發現。
 class DebugServer: MCPHTTPResponder {
 
+    /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md
+    /// 「專案結構的坑」）。app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，
+    /// 沒標註的 class 一樣是隔離的。
+    nonisolated deinit { }
+
     // MARK: - Properties
 
     private var listener: NWListener?

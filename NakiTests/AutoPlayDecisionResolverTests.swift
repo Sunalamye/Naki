@@ -330,6 +330,52 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
     }
   }
 
+  /// 九種九牌：oplist 有 kyushu（type 10）時 ryukyoku 推薦可送。
+  ///
+  /// 補這一段之前，`CloudDecisionMapper` 遇到 `ryukyoku` 標籤會落 default 回 nil，
+  /// 於是整批推薦是 nil；三麻是雲端-only、沒有本地兜底，結果是本手無推薦、
+  /// 停擺到雀魂逾時代打。三麻拿掉 2–8m 不影響么九牌種類（仍 13 種），
+  /// 九種九牌照樣會出現。
+  func testRyukyokuSendsWhenOplistOffersKyushu() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.kyushu]),
+      recommendations: [Recommendation(tile: "ryukyoku", probability: 0.8, actionType: .ryukyoku)],
+      mode: .auto,
+      seat: 0,
+      isSanma: true,
+      cloudDecision: true)
+
+    XCTAssertEqual(decision, .send(action: .ryukyoku, tile: "ryukyoku"))
+  }
+
+  /// 九種九牌不在這批 oplist 裡就不送（isSupported fail-closed）
+  func testRyukyokuNotSentWithoutKyushuInOplist() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard]),
+      recommendations: [Recommendation(tile: "ryukyoku", probability: 0.8, actionType: .ryukyoku)],
+      mode: .auto,
+      seat: 0,
+      isSanma: true,
+      cloudDecision: true)
+
+    if case .send = decision {
+      XCTFail("oplist 沒有 kyushu 時不得宣告九種九牌，實際: \(decision)")
+    }
+  }
+
+  /// 四麻同樣會遇到九種九牌——這條不是三麻限定的。
+  func testRyukyokuAlsoWorksInFourPlayer() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.kyushu]),
+      recommendations: [Recommendation(tile: "ryukyoku", probability: 0.9, actionType: .ryukyoku)],
+      mode: .auto,
+      seat: 0,
+      isSanma: false,
+      cloudDecision: false)
+
+    XCTAssertEqual(decision, .send(action: .ryukyoku, tile: "ryukyoku"))
+  }
+
   /// 四麻不受影響——確認上面三條不是「把所有人都關掉」的假綠燈
   func testFourPlayerStillAutoSends() {
     let decision = AutoPlayDecisionResolver.resolve(

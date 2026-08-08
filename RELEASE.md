@@ -105,39 +105,22 @@ echo "<your-token>" | gh auth login --with-token
 | `ci` | CI/CD 相關 |
 | `chore` | 其他雜項 |
 
-## 快速發布腳本
+## 發布腳本
+
+**唯一的發布入口是 `.claude/skills/release-manager/scripts/release.sh`：**
 
 ```bash
-#!/bin/bash
-VERSION=$1
-
-if [ -z "$VERSION" ]; then
-  echo "Usage: ./release.sh <version>"
-  echo "Example: ./release.sh 1.2.0"
-  exit 1
-fi
-
-# 更新 README badge
-sed -i '' "s/Version-[0-9.]*-green/Version-$VERSION-green/" README.md
-
-# Commit 和 Tag
-git add README.md
-git commit -m "docs: Update README for v$VERSION"
-git tag -a "v$VERSION" -m "Release v$VERSION"
-git push origin master
-git push origin "v$VERSION"
-
-# 創建 Release
-gh release create "v$VERSION" \
-  --title "Naki v$VERSION" \
-  --generate-notes \
-  dist/Naki.dmg dist/Naki.zip
-
-echo "✅ Released v$VERSION"
+bash .claude/skills/release-manager/scripts/release.sh 2.9.0
 ```
 
-儲存為 `release.sh` 並執行：
-```bash
-chmod +x release.sh
-./release.sh 1.2.0
-```
+它會 preflight（工作樹乾淨、版本沒撞 tag、gh 授權、MortalSwift pin）→ 跑 NakiTests
+→ bump 三處版本 → build（macOS Release + iOS 編譯驗證）→ 讀產物的
+`CFBundleShortVersionString` 比對版本 → package → commit + tag → push → gh release。
+中途失敗會還原版本號改動。細節見 `release-manager` skill。
+
+> **這裡曾經放過一份「快速發布腳本」，已於 2026-08-07 移除。**
+> 那份會發出壞掉的 release：它**完全不 build**（直接上傳 `dist/` 裡的殘留檔案，
+> 而 `.gitignore` 忽略 `dist/`，所以那可能是上一版甚至根本不存在）、
+> 只改 README badge 而**不動 `MARKETING_VERSION`**（App 內顯示的版本不會變）、
+> 而且 push 到 `master`（這個 repo 的預設分支是 `main`）。
+> 需要發布就用上面那一支，不要另外抄一份。

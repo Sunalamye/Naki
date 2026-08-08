@@ -289,9 +289,9 @@ class WebSocketInterceptor {
 /// | type | data schema | Swift 行為 |
 /// |------|-------------|-----------|
 /// | `websocket_connect` | `socketId: Int`, `url: String`, `isMajsoul: Bool` | log 連線建立（`new WebSocket()` 當下，還沒 open） |
-/// | `websocket_connected` | `socketId: Int`, `url: String` | 記入 `connectedSockets`，狀態轉 connected |
+/// | `websocket_connected` | `socketId: Int`, `url: String`, `isMajsoul: Bool` | 雀魂線才記入 `connectedSockets`；**由空轉非空**才轉 connected |
 /// | `websocket_message` | `socketId: Int`, `direction: "send"｜"receive"`, `data: String`（binary 為 base64）, `type: "binary"｜"blob"｜"text"`, `size: Int` | 解 base64 → `MajsoulBridge` → MJAI 事件 |
-/// | `websocket_close` | `socketId: Int`, `code: Int`, `reason: String` | 從 `connectedSockets` 移除；全空則狀態轉 disconnected |
+/// | `websocket_close` | `socketId: Int`, `code: Int`, `reason: String`, `isMajsoul: Bool` | 雀魂線才從 `connectedSockets` 移除；全空則轉 disconnected |
 /// | `websocket_error` | `socketId: Int`, `error: String` | log |
 /// | `force_reconnect` | `closedCount: Int` | log：接下來那幾筆 `websocket_close` 是 Naki 自己關的 |
 ///
@@ -355,6 +355,11 @@ nonisolated struct UnknownBridgeTypeReporter {
 /// 契約表在 `BridgeMessageType`。
 class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
 
+    /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md
+    /// 「專案結構的坑」）。app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
+    /// 而測試 target 沒開，所以要單測這個型別就得補這一行。
+    nonisolated deinit { }
+
     // MARK: - Properties
 
     /// 雀魂協議橋接器
@@ -393,8 +398,15 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
             return
         }
 
-        let data = body["data"] as? [String: Any] ?? [:]
+        dispatch(type: type, data: body["data"] as? [String: Any] ?? [:])
+    }
 
+    /// 已解出 `type` / `data` 之後的分派。
+    ///
+    /// 與 `userContentController` 分開的唯一理由是**可測**：`WKScriptMessage` 沒有
+    /// 公開的 initializer，測試造不出來，於是連線狀態的轉換規則過去一條都驗不到
+    /// （`onWebSocketStatusChanged` 在 NakiTests 曾經零命中）。
+    func dispatch(type: String, data: [String: Any]) {
         // 認不得就出聲。舊版是 `default: break`——JS 改了 type、Swift 沒跟上時，
         // 訊息會安靜地掉進地上，表象只是「某個功能不動」，log 裡一個字都沒有。
         guard let messageType = BridgeMessageType(rawValue: type) else {
@@ -459,12 +471,31 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         wsLog("[WS] WebSocket connecting: \(socketId) - \(url)\(isMajsoul ? " (雀魂)" : "")")
     }
 
+    /// 某條 WebSocket 完成 open。
+    ///
+    /// **只有由空轉非空才報 connected**——與 `handleWebSocketClose` 的「全空才報
+    /// disconnected」對稱。這裡曾經無條件呼叫回調，而回調做的是
+    /// `MajsoulBridge.reset()`（清掉 oplist、parser 的 msgId 對照表、doras、
+    /// lastDiscard）加上重建 Bot。
+    ///
+    /// 雀魂一個分頁會反覆開關 route 探測與大廳連線，對局那條 `game-gateway` 從頭到尾
+    /// 沒動；於是**對局進行中**每開一條就重置一次。2026-08-06 的 log 裡同一個 session
+    /// 重置 9 次、其中 5 次在對局中，緊接著就是 `skip:noOplist`——自動打牌在那個窗口
+    /// 沒有決策來源。
     private func handleWebSocketConnected(_ data: [String: Any]) {
         guard let socketId = data["socketId"] as? Int else { return }
 
-        connectedSockets.insert(socketId)
         wsLog("[WS] WebSocket connected: \(socketId)")
-        onWebSocketStatusChanged?(true)
+
+        // 非雀魂的連線只記 log，不進集合：`connectedSockets` 的語意是「還連著幾條
+        // 雀魂線」，混進第三方 socket 會讓「連上雀魂」這個狀態失去意義。
+        guard data["isMajsoul"] as? Bool ?? false else { return }
+
+        let wasEmpty = connectedSockets.isEmpty
+        connectedSockets.insert(socketId)
+        if wasEmpty {
+            onWebSocketStatusChanged?(true)
+        }
     }
 
     private func handleWebSocketMessage(_ data: [String: Any]) {
@@ -558,8 +589,13 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     private func handleWebSocketClose(_ data: [String: Any]) {
         guard let socketId = data["socketId"] as? Int else { return }
 
-        connectedSockets.remove(socketId)
         wsLog("[WS] WebSocket closed: \(socketId)")
+
+        // 與 `handleWebSocketConnected` 同一個判準：沒進過集合的就不該影響狀態，
+        // 否則第三方 socket 關閉會在雀魂線全斷之後再多報一次 disconnected。
+        guard data["isMajsoul"] as? Bool ?? false else { return }
+
+        connectedSockets.remove(socketId)
 
         if connectedSockets.isEmpty {
             onWebSocketStatusChanged?(false)

@@ -15,9 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "EC30765D2EDAFD2300216E0C"
-               BuildableName = "Naki.app"
-               BlueprintName = "Naki"
+               BlueprintIdentifier = "ECAAD41B2EE1BAB40056F965"
+               BuildableName = "Naki-M.app"
+               BlueprintName = "Naki-M"
                ReferencedContainer = "container:Naki.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -29,26 +29,6 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
       <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FADE000000000000000000A1"
-               BuildableName = "NakiTests.xctest"
-               BlueprintName = "NakiTests"
-               ReferencedContainer = "container:Naki.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FADE000000000000000000B1"
-               BuildableName = "NakiUITests.xctest"
-               BlueprintName = "NakiUITests"
-               ReferencedContainer = "container:Naki.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
@@ -65,9 +45,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "EC30765D2EDAFD2300216E0C"
-            BuildableName = "Naki.app"
-            BlueprintName = "Naki"
+            BlueprintIdentifier = "ECAAD41B2EE1BAB40056F965"
+            BuildableName = "Naki-M.app"
+            BlueprintName = "Naki-M"
             ReferencedContainer = "container:Naki.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -82,9 +62,9 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "EC30765D2EDAFD2300216E0C"
-            BuildableName = "Naki.app"
-            BlueprintName = "Naki"
+            BlueprintIdentifier = "ECAAD41B2EE1BAB40056F965"
+            BuildableName = "Naki-M.app"
+            BlueprintName = "Naki-M"
             ReferencedContainer = "container:Naki.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

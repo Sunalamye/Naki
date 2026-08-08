@@ -206,7 +206,12 @@ class LogManager {
         }
     }
 
-    deinit {
+    /// `nonisolated`：app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，
+    /// 而 NakiTests target 沒開——隔離的 deinit 在 test host 釋放會 SIGABRT，
+    /// 那一整批測試會從報告上消失而不是變紅（見 CLAUDE.md「專案結構的坑」）。
+    /// 這個型別是全專案唯一帶實質 deinit 的，所以後果比其他幾個嚴重：
+    /// 崩的時候檔案 handle 也沒關成。
+    nonisolated deinit {
         // 關閉 FileHandle（先等排入佇列的寫入完成，避免關閉時仍有 in-flight 寫入）
         let handles: [FileHandle] =
             [fileHandle, eventHandle].compactMap { $0 } + Array(categoryHandles.values)

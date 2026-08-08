@@ -101,8 +101,9 @@ OptionalOperationList
 | oplist／sender | `command/Services/Bridge/LiqiOperationStore.swift`、`LiqiActionSender.swift` |
 | decision | `command/Services/Bot/AutoPlayDecisionResolver.swift` |
 | 自動打牌狀態機 | `command/Services/Bot/AutoPlayEngine.swift`（單一 Task 迴圈：輪詢＋延遲＋重試都用 `Task.sleep`；執行狀態是 enum，進出只有 `occupy(...)` 一個作用域） |
-| action 送出 | `command/Services/Bot/AutoPlayActionExecutor.swift`（兩條 WebView path 共用的唯一 7-case switch；成功才 markHandled） |
+| action 送出 | `command/Services/Bot/AutoPlayActionExecutor.swift`（兩條 WebView path 共用的唯一動作 switch，9 種動作 + unknown；成功才 markHandled） |
 | AI | `command/Services/Bot/NativeBotController.swift` |
+| 自動打牌停滯回報 | `AutoPlayEngine.onStallChanged` → `GameStore.autoPlayStall` → `BotStatusView`（「該動而沒動」唯一上得了畫面的路；其餘失敗只走 log，且 log 對同一原因只印一行） |
 | WebGL highlighter | `command/Resources/JavaScript/naki-core.js` |
 | sendRaw | `command/Resources/JavaScript/naki-websocket.js` |
 
@@ -116,21 +117,32 @@ OptionalOperationList
 - normal ActionPrototype 需 XOR；sync restore payload 不再 XOR。
 - FastTest 對局 request 走 `/game-gateway`，lobby request 走 `/gateway`。
 - `sendRaw` 成功只代表 WebSocket 接受 bytes；真正成功要看同 msgId RESPONSE／權威 action。
-- field number 只查 `docs/protocol/liqi.json`。2026-08-01 repo snapshot 與 live CDN byte-identical。
+- field number 只查 `docs/protocol/liqi.json`。⚠️ **「與 live CDN byte-identical」不代表
+  schema 正確**：那個 CDN 資源（`res/proto/liqi.json`）是 Laya 時代的遺留檔，resource
+  prefix `v0.11.243.w` 落後 client `4.0.45` 好幾版；雀魂遷 Unity 後真正的 descriptor 改放
+  asset bundle 的 `Protol/*_pb.lua`，那個 JSON 不再更新。實證：repo 這份的
+  `ReqSelfOperation` 缺 `auto_operation`。`scripts/check-liqi-drift.sh` 比對的是同一個
+  過期基準，**結構上驗不到這種漂移**（見 task #16）。
 - MJAI 字牌 `E/S/W/N/P/F/C`；雀魂字牌 `1z`–`7z`。
 
 ## 平台差距
 
 `WebSession.init` 的 `#available`：OS 26+ 用 `WebPageBackend`（WebPage），iOS 17–25 用 `LegacyWebBackend`（WKWebView）。macOS deployment target 是 26，所以 macOS 不走 Legacy。p3-4 之後**兩條 path 只差三件事**：怎麼執行 JS（WebPage 原生函式體 vs WKWebView 的 IIFE 包裝）、怎麼重連（關 WebSocket vs 整頁重載）、交出哪個 View。其餘（bot、event stream、autoplay engine、MCP、狀態）全部共用一份。
 
-兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（7-case switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、bounded retry 15 次）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
+兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（動作 switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、bounded retry 15 次）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
 
 ## 自摸問題的 current truth
 
 resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests 通過；但 integration 還有兩個 P0：
 
-1. 主動作仍要求 recommendations 非空（`AutoPlayGate.proceed`）。空推薦 + type 8 靠 `forceHora` 補救，但那條沒有 live fixture。
-2. hora sender 沒把 `LiqiSendResult` 回給外層；呼叫後可能不論失敗都 `markHandled`。
+1. ~~主動作仍要求 recommendations 非空~~ **2026-08-07 修**：擋住伺服器授權和牌的其實有
+   **三道**關卡，各自開了例外——`AutoPlayGate` 的 `notMyDiscardTurn`（榮和視窗的 oplist
+   沒有 discard，而 stale 推薦是 discard）、`AutoPlayEngine` 輪詢路徑的 stale guard
+   （自摸視窗）、手動路徑的 stale guard（MCP `bot_trigger`）。fixture F 三條 + 一條反向鎖
+   （沒有和牌機會時 stale 推薦仍然擋下），三次獨立 mutation 各自驗過。
+   **仍缺 live fixture。**
+2. ~~hora sender 沒把 `LiqiSendResult` 回給外層~~ 已收斂到 `AutoPlayActionExecutor`
+   （回傳 `LiqiSendResult?`，只有 `success == true` 才 `markHandled`）。仍缺 live 驗證。
 
 其他 failure path 已收斂成同一語意（`AutoPassDispatcher` + 轉換失敗不標記）：沒有送出成功就不消化 oplist。這只有單測，沒有 live 驗證。
 
@@ -147,7 +159,11 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI，且 13 個專項 tests �
 - observation `1012 × 34`，action mask 46。
 - libriichi parity 是兩套固定 fixtures 的逐格測試；Debug／Release 各 47 tests 通過，不是全狀態證明。
 - 0.5.x 沒換 model blobs；沒有千局級 strength benchmark。不得稱「最新最強模型」。
-- `is3P` 不會換模型；三麻仍送進四麻 model，不應宣稱支援。
+- **三麻走雲端-only**（2026-08-05 D15）：`NativeBotController` 在 `is3P` 時建的是
+  `CloudBot(local: nil, …)`，bundled 四麻模型連建構都不呼叫。雲端不可用時那一手
+  誠實無推薦，**不會**退回四麻模型（obs 1012×34 對三麻是結構性無效）。
+  自動送出另有三層 fail-closed（gate 逐決策看 `cloudDecision`、resolver 降級、
+  `runManualCycle` 自己擋）。三麻仍**沒有 live 對局驗證**。
 
 ## WebGL 高亮
 
@@ -199,6 +215,24 @@ MCP 工具結果現在同時回 `structuredContent`（真的 JSON 物件）與 `
 - `docs/majsoul-config-tables.md`：由 live manifest fresh parse 的 config 附錄。
 - `docs/protocol/liqi.json`：協定欄位 schema。
 - `AUDIT.md`：當前驗證差距與完成判準，不是歷史日誌。
+- `docs/design-review-vs-akagi.md`：對照 Akagi v3 的**架構**檢討（2026-08-01）。
+- `docs/akagi-audit-p0-decisions.md`：掃 Akagi 89 個 issue 對照出的**具體 bug**與修法
+  取捨（2026-08-07），含兩個被推翻的判斷。
+
+## 文件與程式碼的一致性
+
+**查 Naki 現況不可拿 `CLAUDE.md` 與 `AUDIT.md` 自證。** 這兩份都漂開過，而且不只一次：
+
+| 曾經寫錯的 | 實際 | 發現於 |
+|---|---|---|
+| iOS target 編不了（無 SDK） | 三個 build 全 `BUILD SUCCEEDED` | 2026-08-07 |
+| executor 是「7-case switch」 | 9 種動作 + unknown | 2026-08-07 |
+| 三麻仍送進四麻 model | 已改雲端-only，本地模型根本不建構 | 2026-08-07 |
+| liqi.json「與 CDN byte-identical」＝已驗證 | 那個 CDN 基準本身就過期 | 2026-08-07 |
+
+回答「目前是什麼狀態」一律以**執行中的 Naki loopback API、原始碼、或當場跑一次
+build/test** 為準；文件只用來解釋「為什麼是這樣」。改了行為就順手改文件——
+上面每一條都是「改了程式碼、沒改文件」累積出來的。
 
 ## 驗收回報
 

@@ -87,6 +87,9 @@ enum AutoPlayGate {
             // 伺服器提供和牌時，絕不因為「模型沒意見」而放過。
             // 這裡曾經是漏和的成因，而且更糟的是榮和被歸類為 isCallOpportunity，
             // 會走到下面主動送「過」——等於自己棄和。
+            //
+            // 推薦**非空**時的對應保護不在這裡，而在 `AutoPlayEngine` 的 stale guard
+            // ——那條路要留給 resolver 覆蓋，才會留下「AI 想打什麼、被改成什麼」的 log。
             if snapshot.horaOperation != nil { return .forceHora }
 
             // 「此刻推薦是空的」≠「模型決定不做」。
@@ -109,6 +112,12 @@ enum AutoPlayGate {
         // 已換成別家回合或只剩吃碰機會時重新觸發，會送出遲到或重複的打牌。
         if first.actionType == .discard,
            !snapshot.contains(.discard), !snapshot.contains(.riichi) {
+            // 但這批機會裡有伺服器授權的和牌時，「跳過」就是棄和。
+            //
+            // 典型形狀：榮和視窗（`[pon, ron]`）帶新 oplist 抵達，而推薦還停在上一巡
+            // 打牌算出來的 discard。推薦不適用於這批機會是事實，但結論該是「改用伺服器
+            // 授權的動作」，不是「什麼都不做」——後者每一拍都重來一次，直到逾時。
+            if snapshot.horaOperation != nil { return .forceHora }
             return .skip(.notMyDiscardTurn)
         }
 

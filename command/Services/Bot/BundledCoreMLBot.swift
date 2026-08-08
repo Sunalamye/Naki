@@ -43,6 +43,27 @@ final class BundledCoreMLBot: MahjongBot {
     /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit {}
 
+    /// 模型是否已確認載入（只驗一次，之後不再付 actor hop）
+    private var modelVerified = false
+
+    /// 確認 bundled Core ML 模型真的在。
+    ///
+    /// `MortalBot` 的建構子在模型檔缺失時**不會 throw**：它建出一個
+    /// `hasModel == false` 的實例，而那個實例的推論退化成「選 mask 裡第一個合法
+    /// 動作」——同時 `identity.isLocal` 照舊為 true、`/bot/status` 照舊回 `local`、
+    /// 側欄照舊顯示推薦。看起來一樣，但那不是決策。
+    ///
+    /// 這是 AUDIT §14.5「副露後均勻分布假推薦」的同一個形狀，換了觸發條件。
+    ///
+    /// 檢查放在這裡而不是 `init`：`hasModel` 是 actor-isolated（`MortalBot` 是 actor），
+    /// 而 `init` 與它的呼叫端 `NativeBotController.createBot` 都是同步的。第一次
+    /// `react` 是最早能 await 到它的地方。
+    private func verifyModelLoaded() async throws {
+        guard !modelVerified else { return }
+        guard await bot.hasModel else { throw NativeBotError.bundledModelMissing }
+        modelVerified = true
+    }
+
     var identity: BotIdentity {
         BotIdentity(name: "mortal-bundled",
                     displayName: "Mortal (4P)",
@@ -57,6 +78,8 @@ final class BundledCoreMLBot: MahjongBot {
     // MARK: - React
 
     func react(events: [[String: Any]]) async throws -> BotReaction? {
+        try await verifyModelLoaded()
+
         var last: BotReaction?
         for event in events {
             if let reaction = try await react(event: event) {

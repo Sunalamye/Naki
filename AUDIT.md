@@ -689,7 +689,10 @@ Akagi `/v3/react` 雲端推論接入完成。設計與偏差說明見
 1. **立直兩段式 live 時序**：雲端回裸 reach → 第二段解出捨牌 → executor 以
    該捨牌宣言（`ReqSelfOperation type=7` 帶正確 tile）。2s×2 是否擠進雀魂
    回合計時器無實測數據。
-2. **iOS target 編譯**：本機無 iOS 26 SDK（環境限制，先於本次改動）。
+2. ~~**iOS target 編譯**：本機無 iOS 26 SDK~~ **2026-08-07 推翻**：`xcodebuild -showsdks`
+   有 iOS SDK 26.0 + Simulator SDK 26.0，`Naki-M` Debug/Release 都 `BUILD SUCCEEDED`。
+   `Naki-M.xcscheme` 已補進 `xcshareddata`（先前只靠 Xcode autocreate，clean clone
+   不一定有），`release.sh` 也加了 iOS 編譯步驟。
 3. **三麻雲端**：`model_3p` 路徑只有單測（補位到 4 家），無 live 對局。
 
 ### 20.3 live 事故記錄（2026-08-05 深夜，兩起，皆已修待驗）

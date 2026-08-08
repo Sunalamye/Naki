@@ -311,10 +311,36 @@ final class CloudDecisionMapperTests: XCTestCase {
         }
     }
 
+    /// 九種九牌：宣告流局也是一個真實的決策，不能當雜訊略過。
+    ///
+    /// 補這一段之前它落 default 回 nil，而三麻是雲端-only、沒有本地兜底，
+    /// 於是整手無推薦、停擺到雀魂逾時代打。
+    func test_ryukyokuReaction_mapsToRyukyoku() {
+        let recs = CloudDecisionMapper.recommendations(
+            reaction: ["type": "ryukyoku", "actor": 0],
+            candidates: [], reachDiscard: nil)
+
+        XCTAssertEqual(recs?.first?.actionType, .ryukyoku)
+    }
+
+    /// 粗標籤那條路也要接上（`candidates` 用的是另一個 switch）
+    func test_ryukyokuCandidateLabel_mapsToRyukyoku() {
+        let recs = CloudDecisionMapper.recommendations(
+            reaction: ["type": "dahai", "actor": 0, "pai": "1m", "tsumogiri": true],
+            candidates: [CloudCandidate(action: "dahai:1m", prob: 0.7),
+                         CloudCandidate(action: "ryukyoku", prob: 0.3)],
+            reachDiscard: nil)
+
+        XCTAssertTrue(recs?.contains { $0.actionType == .ryukyoku } ?? false,
+                      "九種九牌要以真實的一列呈現，不是被略過")
+    }
+
+    /// 這條測的是「未知標籤不硬猜」。**測資本身會過期**：每接上一個新動作，
+    /// 就要換一個還沒接上的型別（kita 於 2026-08-05 接上、ryukyoku 於 2026-08-07
+    /// 接上，兩次都是在這裡換掉測資）。
     func test_unknownReactionType_isUnmappable() {
-        // kita 已於 2026-08-05 接上（三麻自動打鏈），改用真正未知的型別
         XCTAssertNil(CloudDecisionMapper.recommendations(
-            reaction: ["type": "ryukyoku"],
+            reaction: ["type": "future_action_not_yet_supported"],
             candidates: [], reachDiscard: nil),
             "未知動作不硬映射，退回本地")
     }
@@ -323,10 +349,10 @@ final class CloudDecisionMapperTests: XCTestCase {
         let recs = CloudDecisionMapper.recommendations(
             reaction: ["type": "dahai", "actor": 0, "pai": "1m", "tsumogiri": true],
             candidates: [CloudCandidate(action: "dahai:1m", prob: 0.7),
-                         CloudCandidate(action: "ryukyoku", prob: 0.2),
-                         CloudCandidate(action: "future_label", prob: 0.1)],
+                         CloudCandidate(action: "future_label", prob: 0.2),
+                         CloudCandidate(action: "another_unknown", prob: 0.1)],
             reachDiscard: nil)
-        XCTAssertEqual(recs?.count, 1, "ryukyoku 與未知標籤都略過")
+        XCTAssertEqual(recs?.count, 1, "未知標籤一律略過，不猜")
     }
 
     // MARK: 拔北（三麻，2026-08-05）
@@ -438,6 +464,40 @@ final class AkagiApiClientTests: XCTestCase {
         }
     }
 
+    /// 伺服器把 key 回顯在錯誤訊息裡——這條錯誤會一路落進磁碟 log
+    /// （`events.log`，使用者回報問題時整包附上的那份）。
+    ///
+    /// 上面那條測的是「mock 不回顯時安全」，證明不了這個情境。
+    func test_httpError_redactsKeyEchoedBackByServer() async {
+        CloudMockURLProtocol.reset(script: [
+            (401, #"{"error":"invalid key: SECRETKEY"}"#, [:]),
+        ])
+        do {
+            _ = try await makeClient().react(model: nil, playerId: 0, events: [])
+            XCTFail("非 2xx 必須拋錯")
+        } catch {
+            let text = error.localizedDescription
+            XCTAssertFalse(text.contains("SECRETKEY"),
+                           "伺服器回顯的 key 必須被遮掉，否則會寫進磁碟 log：\(text)")
+            XCTAssertTrue(text.contains("TKEY"), "保留後四碼供比對：\(text)")
+        }
+    }
+
+    /// 非 JSON 的錯誤 body 走「取前 200 字」那條 fallback，同樣要遮。
+    func test_httpError_redactsKeyInNonJSONBody() async {
+        CloudMockURLProtocol.reset(script: [
+            (500, "Internal error while validating token SECRETKEY for tenant", [:]),
+        ])
+        do {
+            _ = try await makeClient().react(model: nil, playerId: 0, events: [])
+            XCTFail("非 2xx 必須拋錯")
+        } catch {
+            let text = error.localizedDescription
+            XCTAssertFalse(text.contains("SECRETKEY"),
+                           "fallback 路徑同樣不得原樣寫出 key：\(text)")
+        }
+    }
+
     func test_models_parsesWrappedList() async throws {
         CloudMockURLProtocol.reset(script: [
             (200, #"{"models":[{"id":"4p-ot2","game":"4p","desc":"d"},{"id":"3p-ot2","game":"3p","desc":"e"}]}"#, [:]),
@@ -466,5 +526,47 @@ final class AkagiApiClientTests: XCTestCase {
         XCTAssertEqual(request.url?.path, "/healthz")
         XCTAssertNil(header(request, "Authorization"),
                      "無認證端點不得送 Authorization header")
+    }
+}
+
+// MARK: - 生效條件
+
+@MainActor
+final class CloudInferenceConfigTests: XCTestCase {
+
+    private func config(enabled: Bool = true,
+                        baseURL: String = "https://api.example.com",
+                        apiKey: String = "K") -> CloudInferenceConfig {
+        CloudInferenceConfig(enabled: enabled, baseURL: baseURL, apiKey: apiKey,
+                             model4P: "", model3P: "")
+    }
+
+    /// `missingRequirements` 與 `isActive` 必須是同一個判定的兩種說法。
+    /// 漂開的話設定畫面會說「已生效」而實際走本地模型（或反過來）。
+    func testMissingRequirementsAgreesWithIsActive() {
+        let cases: [CloudInferenceConfig] = [
+            config(),
+            config(enabled: false),
+            config(baseURL: ""),
+            config(apiKey: ""),
+            config(enabled: false, baseURL: "", apiKey: ""),
+            config(baseURL: "   ", apiKey: "  ")
+        ]
+        for c in cases {
+            XCTAssertEqual(c.missingRequirements.isEmpty, c.isActive,
+                           "enabled=\(c.enabled) url='\(c.baseURL)' key='\(c.apiKey)'")
+        }
+    }
+
+    /// 最常見的狀態：key 貼好了、開關沒開。畫面要講得出缺的正是那個開關。
+    func testKeyPastedButToggleOffNamesTheToggle() {
+        let missing = config(enabled: false).missingRequirements
+
+        XCTAssertEqual(missing.count, 1)
+        XCTAssertTrue(missing[0].contains("開關"), "要指名缺的是開關，實際：\(missing)")
+    }
+
+    func testAllThreeMissingAreAllReported() {
+        XCTAssertEqual(config(enabled: false, baseURL: "", apiKey: "").missingRequirements.count, 3)
     }
 }

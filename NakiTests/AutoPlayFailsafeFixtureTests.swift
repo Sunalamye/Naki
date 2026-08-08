@@ -266,6 +266,170 @@ final class AutoPlayFailsafeFixtureTests: XCTestCase {
 
     // MARK: - 注入式（只有 DEBUG build 有這些入口）
 
+    // MARK: - Fixture F：stale 推薦 ＋ 伺服器給和牌
+
+    /// 榮和視窗帶著新 oplist 抵達，但那一批沒有刷新推薦——上一個決策點留下的
+    /// 推薦還在、序號較舊。
+    ///
+    /// 舊行為：`.forceHora` 只在推薦**為空**時觸發，所以這裡落到 `.proceed`，
+    /// 而 `.proceed` 進 resolver 之前的 stale guard 直接 return `notSent`。
+    /// resolver 的「伺服器和牌凌駕 AI」永遠走不到，每一拍都被擋，一路到伺服器逾時。
+    /// **漏和不可逆。**
+    ///
+    /// 拿掉 `AutoPlayEngine` stale guard 的 `snapshot.horaOperation == nil` 條件，
+    /// 這條會轉紅。
+    @MainActor
+    func testFixtureF_staleRecommendationDoesNotBlockServerHora() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var captured: [String] = []
+        sender.sendHandler = { base64 in
+            captured.append(base64)
+            return self.ok()
+        }
+
+        // 上一個決策點（序號較小）
+        let stale = store.record(seat: 0,
+                                 operations: [LiqiOperation(type: .discard)],
+                                 source: "previous")
+        store.markHandled(stale.sequence)
+
+        // 榮和視窗到達，序號更大
+        let ron = store.record(seat: 0,
+                               operations: [LiqiOperation(type: .pon),
+                                            LiqiOperation(type: .ron)],
+                               timeFixed: 300,
+                               contextTile: "5p",
+                               source: "ActionDiscardTile")
+        XCTAssertGreaterThan(ron.sequence, stale.sequence)
+
+        let run = await AutoPlayFailsafePipeline(
+            store: store,
+            sender: sender,
+            recommendations: [Recommendation(tile: "1m", probability: 0.62, actionType: .discard)],
+            recommendationsOplistSequence: stale.sequence).run()
+
+        XCTAssertEqual(run.outcome, .sent(action: .hora, tile: "5p", attempts: 1),
+                       "伺服器授權的和牌不得因為推薦過期而放掉")
+        XCTAssertEqual(captured.count, 1)
+        XCTAssertTrue(hex(captured.first).hasSuffix(ronPayloadSuffix),
+                      "送出的必須是榮和，實際 bytes=\(hex(captured.first))")
+        XCTAssertNil(store.pending)
+    }
+
+    /// 自摸視窗（`[discard, tsumo]`）＋ stale 的 discard 推薦，走**輪詢**路徑。
+    ///
+    /// 這個形狀跟榮和那條走的是不同關卡：oplist 裡有 discard，所以閘門的
+    /// `notMyDiscardTurn` 不觸發，一路到 `.proceed`——擋住它的是 `AutoPlayEngine`
+    /// 自己的 stale guard。兩個關卡的例外要分別鎖，否則補了一邊另一邊仍會漏自摸。
+    ///
+    /// 拿掉 `AutoPlayEngine` 輪詢路徑 stale guard 的 `horaOperation == nil` 條件，
+    /// 這條會轉紅。
+    @MainActor
+    func testFixtureF_staleRecommendationDoesNotBlockServerTsumoOnPollPath() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var captured: [String] = []
+        sender.sendHandler = { base64 in
+            captured.append(base64)
+            return self.ok()
+        }
+
+        let stale = store.record(seat: 0,
+                                 operations: [LiqiOperation(type: .discard)],
+                                 source: "previous")
+        store.markHandled(stale.sequence)
+
+        store.record(seat: 0,
+                     operations: [LiqiOperation(type: .discard),
+                                  LiqiOperation(type: .tsumo)],
+                     timeFixed: 300,
+                     contextTile: "3s",
+                     source: "ActionDealTile")
+
+        let run = await AutoPlayFailsafePipeline(
+            store: store,
+            sender: sender,
+            recommendations: [Recommendation(tile: "1m", probability: 0.62, actionType: .discard)],
+            recommendationsOplistSequence: stale.sequence).run()
+
+        XCTAssertEqual(run.outcome, .sent(action: .hora, tile: "3s", attempts: 1),
+                       "自摸視窗不得因為推薦過期而放掉")
+        XCTAssertTrue(hex(captured.first).hasSuffix(tsumoPayloadSuffix),
+                      "送出的必須是自摸，實際 bytes=\(hex(captured.first))")
+        XCTAssertNil(store.pending)
+    }
+
+    /// 同樣的前提走手動觸發（MCP `bot_trigger`）：那條路有各自的 stale guard，
+    /// 例外必須一起開，否則使用者手動也救不回來。
+    @MainActor
+    func testFixtureF_staleRecommendationDoesNotBlockServerHoraOnManualTrigger() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var captured: [String] = []
+        sender.sendHandler = { base64 in
+            captured.append(base64)
+            return self.ok()
+        }
+
+        let stale = store.record(seat: 0,
+                                 operations: [LiqiOperation(type: .discard)],
+                                 source: "previous")
+        store.markHandled(stale.sequence)
+
+        store.record(seat: 0,
+                     operations: [LiqiOperation(type: .discard),
+                                  LiqiOperation(type: .tsumo)],
+                     timeFixed: 300,
+                     contextTile: "3s",
+                     source: "ActionDealTile")
+
+        let run = await AutoPlayFailsafePipeline(
+            store: store,
+            sender: sender,
+            recommendations: [Recommendation(tile: "1m", probability: 0.62, actionType: .discard)],
+            recommendationsOplistSequence: stale.sequence).runManualTrigger()
+
+        XCTAssertEqual(run.outcome, .sent(action: .hora, tile: "3s", attempts: 1))
+        XCTAssertTrue(hex(captured.first).hasSuffix(tsumoPayloadSuffix),
+                      "手動觸發同樣不得漏掉自摸，實際 bytes=\(hex(captured.first))")
+    }
+
+    /// **反向鎖**：例外只開給和牌。沒有和牌機會時，stale 推薦照舊擋下來——
+    /// 這道防線本來是防「拿舊推薦回應新機會」送出錯的動作，不能連它一起拆掉。
+    @MainActor
+    func testFixtureF_staleRecommendationIsStillBlockedWithoutHora() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var captured: [String] = []
+        sender.sendHandler = { base64 in
+            captured.append(base64)
+            return self.ok()
+        }
+
+        let stale = store.record(seat: 0,
+                                 operations: [LiqiOperation(type: .discard)],
+                                 source: "previous")
+        store.markHandled(stale.sequence)
+
+        let fresh = store.record(seat: 0,
+                                 operations: [LiqiOperation(type: .discard)],
+                                 timeFixed: 300,
+                                 contextTile: "7p",
+                                 source: "ActionDealTile")
+
+        let run = await AutoPlayFailsafePipeline(
+            store: store,
+            sender: sender,
+            recommendations: [Recommendation(tile: "1m", probability: 0.62, actionType: .discard)],
+            recommendationsOplistSequence: stale.sequence).run()
+
+        XCTAssertEqual(run.outcome, .notSent(reason: "recommendations_stale"),
+                       "沒有和牌機會時，stale 推薦仍然不得送出")
+        XCTAssertTrue(captured.isEmpty, "一個 request 都不該送出")
+        XCTAssertEqual(store.pending?.sequence, fresh.sequence, "沒送出就不能消化")
+    }
+
     #if DEBUG
 
     /// Fixture D：碰＋榮和同時可用、寬限期已過、模型仍然沒有意見。

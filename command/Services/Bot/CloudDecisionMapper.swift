@@ -16,7 +16,9 @@
 //  標籤詞彙來自 Akagi v3 `label_pais_candidate`：`dahai:<pai>`、`reach`、
 //  `pon`、`chi_low|chi_mid|chi_high`、`kan`、`hora`、`ryukyoku`、`nukidora`、
 //  `none`。`nukidora`（拔北）對應 `.kita`（2026-08-05 三麻自動打鏈）；
-//  `ryukyoku` 無對應 ActionType，略過該列。未知標籤一律略過，不猜。
+//  `ryukyoku`（九種九牌）對應 `.ryukyoku`（2026-08-07 補齊；在此之前它落 default
+//  回 nil，而三麻雲端-only 沒有本地兜底，於是整手無推薦、停擺到雀魂逾時代打）。
+//  未知標籤一律略過，不猜。
 //
 
 import Foundation
@@ -96,6 +98,10 @@ enum CloudDecisionMapper {
             // 拔北（三麻）。伺服器 schema 是 `{"type":"kita","actor":N,"pai":"N"}`
             return [Recommendation(tile: "kita", probability: prob, actionType: .kita)]
 
+        case "ryukyoku":
+            // 九種九牌。送到雀魂是 `ReqSelfOperation type=10`（liqi 叫 kyushu）。
+            return [Recommendation(tile: "ryukyoku", probability: prob, actionType: .ryukyoku)]
+
         default:
             // 未知動作型別不硬映射——回 nil 讓本地決策生效。
             return nil
@@ -128,6 +134,8 @@ enum CloudDecisionMapper {
         case "nukidora":
             // Akagi 的粗標籤用 nukidora，reaction 事件型別用 kita——同一個動作
             return Recommendation(tile: "kita", probability: prob, actionType: .kita)
+        case "ryukyoku":
+            return Recommendation(tile: "ryukyoku", probability: prob, actionType: .ryukyoku)
         case "none":
             return Recommendation(tile: "none", probability: prob, actionType: .none)
         default:

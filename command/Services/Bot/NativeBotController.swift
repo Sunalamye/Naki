@@ -341,6 +341,20 @@ class NativeBotController {
         case "dahai":
             handleDahaiDict(event)
 
+        case "nukidora":
+            // 拔北（三麻）。對手牌的效果與 dahai 完全一樣——打出一張北風牌，
+            // 補摸由後續的 `tsumo` 事件帶——所以共用同一份處理。
+            //
+            // 事件名用 bridge 實際產出的 `nukidora`（`MajsoulBridge` 的 ActionBaBei）。
+            // 送雲端時會由 `KyokuStreamAccumulator` 轉成伺服器 schema 的 `kita`，
+            // 那是另一條路，不影響這裡。
+            //
+            // 沒有這個 case 的時候它落 default：那張北不會從 `tehai` 移除，補摸又加
+            // 一張，於是**每拔一次北就多累積一張幽靈北**。不影響推論（三麻本地引擎
+            // 是 nil、雲端自行重建狀態），但 `/game/hand`、`tehaiCount`、MCP 匯出
+            // 與側欄手牌顯示全都會是錯的。
+            handleDahaiDict(event)
+
         case "reach", "reach_accepted":
             // 立直相關
             botLog("[NativeBotController] reach/reach_accepted event")
@@ -575,6 +589,8 @@ enum NativeBotError: Error, LocalizedError {
     case botNotInitialized
     case invalidEvent
     case reactionFailed(String)
+    /// bundled Core ML 模型沒載進來
+    case bundledModelMissing
 
     var errorDescription: String? {
         switch self {
@@ -584,6 +600,8 @@ enum NativeBotError: Error, LocalizedError {
             return "無效的事件格式"
         case .reactionFailed(let message):
             return "Bot 處理失敗: \(message)"
+        case .bundledModelMissing:
+            return "內建模型未載入（app bundle 裡找不到 mortal.mlmodelc）"
         }
     }
 }

@@ -131,4 +131,38 @@ final class GameHighlightScriptTests: XCTestCase {
 
         XCTAssertTrue(script.contains("[0.45,1.0,0.5]"), "副露面板應被染色，實際: \(script)")
     }
+
+    // MARK: - 與 `GameStore.highlightedTile` 的一致性
+
+    /// `ActionType.marksTileOnBoard` 必須與這支腳本**實際會不會標一張牌**一致。
+    ///
+    /// 兩邊漂開的後果是 `GameStore.highlightedTile` 宣稱畫面上有一個其實不存在的
+    /// 標記（`/game/state`、MCP、側欄都讀那個欄位）。這條測試把它們鎖在一起，
+    /// 所以日後新增動作型別時，漏改任何一邊都會轉紅。
+    func testMarksTileOnBoardMatchesActualScriptOutput() {
+        for action in Recommendation.ActionType.allCases {
+            // 副露類要有 oplist 組合才標得出東西，其餘用手牌。
+            let snap: LiqiOperationSnapshot?
+            switch action {
+            case .chi:  snap = snapshot([.chi], combination: ["1m|2m"])
+            case .pon:  snap = snapshot([.pon], combination: ["3m|3m"])
+            case .kan:  snap = snapshot([.minkan], combination: ["4m|4m|4m"])
+            default:    snap = nil
+            }
+
+            let script = GameHighlightScript.make(
+                mode: .auto,
+                recommendations: [rec(action, action == .discard || action == .riichi ? "5m" : "")],
+                tehaiTiles: ["1m", "5m", "9p"],
+                snapshot: snap)
+
+            // `set(...)` 代表真的送了 mark；`clear()` 代表什麼都沒標。
+            let producedMark = script.contains("__nakiHighlight?.set(")
+                && !script.contains(".set([], null)")
+
+            XCTAssertEqual(producedMark, action.marksTileOnBoard,
+                           "\(action.rawValue)：marksTileOnBoard=\(action.marksTileOnBoard) "
+                           + "但腳本\(producedMark ? "有" : "沒有")產生 mark。實際: \(script)")
+        }
+    }
 }

@@ -115,6 +115,7 @@ class MajsoulBridge {
         LiqiResponseStore.shared.reset()
         // 頁面重新載入＝重新開始：上一次載入留下的解析失敗不該掛在新頁面上
         faultState.reset()
+        reportedUnknownActions.removeAll()
         bridgeLog("[MajsoulBridge] 完整重置 (accountId 已清除)")
     }
 
@@ -150,6 +151,58 @@ class MajsoulBridge {
         for fault in liqiParser.faults {
             faultState.record(fault)
         }
+    }
+
+    /// 取一則 action 的 `seat`，並確認它落在這一局的座位範圍內。
+    ///
+    /// `seat` 是沒有上界的 parsed varint，而它會原樣變成 MJAI 事件的 `actor`。
+    /// 下游 MortalSwift 拿它算 `(seat - playerId + 4) % 4` 之後**直接索引**固定
+    /// 4 格的 `kawa`：
+    ///
+    /// - 負值 → 負索引 → Swift 陣列越界是 trap，接不住，整個 App 當場結束。
+    /// - 範圍外的正值（例如三麻收到 seat=3）→ 被 `% 4` 折回 0 → 不崩，但把別人的
+    ///   動作**靜默記到自己頭上**，污染 observation 而且畫面上完全看不出來。
+    ///
+    /// 兩種都比「丟掉這一個事件」糟。丟棄記成 degraded：UI 會掛出可查的說明，
+    /// 而不是靜默或崩潰。
+    private func actorSeat(_ data: [String: Any], site: String) -> Int? {
+        guard let actor = data["seat"] as? Int else { return nil }
+
+        let playerCount = is3P ? 3 : 4
+        guard (0..<playerCount).contains(actor) else {
+            let fault = LiqiParseFault(site: site,
+                                       fieldId: 1,
+                                       byteCount: 0,
+                                       reason: "座位超出範圍（seat=\(actor)，本局 \(playerCount) 家）"
+                                           + " → 丟棄這一個事件",
+                                       severity: .degraded)
+            faultState.record(fault)
+            eventLog("[MajsoulBridge] ⚠️ \(fault.text)")
+            return nil
+        }
+        return actor
+    }
+
+    /// 已經回報過的未知 action（同一個名字只記一次，避免每局洗版）
+    private var reportedUnknownActions: Set<String> = []
+
+    /// 記一筆「收到了但不認得的 action」。
+    ///
+    /// 靜默丟棄是最糟的選項：表象只是「某個情況下 Naki 不給推薦」，log 裡什麼都沒有。
+    /// `liqi.json` 有 24 個 `Action*` 而這裡處理 9 個——沒處理的多屬活動場，
+    /// 而活動場正是雀魂最常改動的部分。
+    private func recordUnknownAction(_ name: String) {
+        guard reportedUnknownActions.insert(name).inserted else { return }
+
+        let fault = LiqiParseFault(
+            site: "ActionPrototype.\(name)",
+            fieldId: 2,
+            byteCount: 0,
+            reason: "收到未處理的 action「\(name)」→ 這個事件不進 MJAI 事件流。"
+                + "若它會改變牌局狀態，Naki 之後的推薦會與實際牌局不一致",
+            severity: .degraded)
+        faultState.record(fault)
+        eventLog("[MajsoulBridge] ⚠️ \(fault.text)")
     }
 
     /// 記一筆「這一局不會運作」的失敗（UI 會掛出常駐錯誤）
@@ -405,7 +458,7 @@ class MajsoulBridge {
             results.append(["type": "end_kyoku"])
 
         case "ActionBaBei":
-            if let actor = data["seat"] as? Int {
+            if let actor = actorSeat(data, site: "ActionBaBei.seat") {
                 results.append([
                     "type": "nukidora",
                     "actor": actor,
@@ -414,7 +467,20 @@ class MajsoulBridge {
             }
 
         default:
-            break
+            // **不要改回 `break`。**
+            //
+            // 這裡曾經是整套 `LiqiParseFault` 機制唯一逃得掉的路徑：未知的 action
+            // 完全靜默丟棄——不記 fault、不上報、不掛橫幅。表象只是「某個情況下
+            // Naki 不給推薦」，而 log 裡一個字都沒有。
+            //
+            // 這不是理論問題：`liqi.json` 有 24 個 `Action*`，這裡處理 9 個。
+            // 沒處理的多屬活動場（`ActionChangeTile`／`ActionSelectGap`／
+            // `ActionUnveilTile`…），而活動場正是雀魂最常改動的部分
+            // （Akagi #47 就是「活動場輪到自己當莊時讀牌與 autoplay 失效」）。
+            //
+            // degraded 而非 blocking：多數未知 action 與牌局進行無關，
+            // 擋掉整局太重；但它必須留下可查的記錄。
+            recordUnknownAction(name)
         }
 
         // 處理寶牌
@@ -521,6 +587,21 @@ class MajsoulBridge {
             return nil
         }
 
+        // `chang` 直接拿去索引 `BAKAZE_NAMES`（4 個元素），`ju` 會變成 `oya` 與
+        // `kyoku` 進 MJAI 事件流。兩者都是沒有上界的 parsed varint——畸形封包、
+        // 或 XOR 規則變了導致解出近似隨機 bytes 時，值可以是任意數。
+        // `BAKAZE_NAMES[chang % 4]` 對負 `chang` 會取到負索引，而 Swift 的陣列越界
+        // 是 trap 不是可捕捉的錯誤：整個 App 當場結束，連 log 都留不下。
+        //
+        // 開不出這一局遠比崩掉好——後續事件會在 log 裡大聲報錯，那是可以查的。
+        guard (0..<4).contains(chang), (0..<4).contains(ju) else {
+            recordBlockingFault(site: "ActionNewRound.chang/ju",
+                                fieldId: 1,
+                                reason: "場風或莊家座位超出範圍（chang=\(chang), ju=\(ju)）"
+                                    + " → 不發 start_kyoku，這一局不做推薦")
+            return nil
+        }
+
         let tiles = data["tiles"] as? [String] ?? []
         bridgeLog("[MajsoulBridge] parseNewRound: 場=\(chang), ju=\(ju), tiles.count=\(tiles.count)")
 
@@ -607,7 +688,7 @@ class MajsoulBridge {
 
     /// 解析摸牌
     private func parseDealTile(_ data: [String: Any]) -> [String: Any]? {
-        guard let actor = data["seat"] as? Int else { return nil }
+        guard let actor = actorSeat(data, site: "ActionDealTile.seat") else { return nil }
 
         let tile = data["tile"] as? String ?? ""
         let mjaiTile = tile.isEmpty ? "?" : (LiqiTile.mjai(fromMajsoul: tile) ?? "?")
@@ -634,7 +715,7 @@ class MajsoulBridge {
     private func parseDiscardTile(_ data: [String: Any]) -> [[String: Any]]? {
         var results: [[String: Any]] = []
 
-        guard let actor = data["seat"] as? Int,
+        guard let actor = actorSeat(data, site: "ActionDiscardTile.seat"),
               let tile = data["tile"] as? String,
               let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) else {
             return nil
@@ -673,7 +754,7 @@ class MajsoulBridge {
 
     /// 解析吃碰槓
     private func parseChiPengGang(_ data: [String: Any]) -> [String: Any]? {
-        guard let actor = data["seat"] as? Int,
+        guard let actor = actorSeat(data, site: "ActionChiPengGang.seat"),
               let opType = data["type"] as? Int else {
             bridgeLog("[MajsoulBridge] parseChiPengGang: 缺少 seat 或 type")
             return nil
@@ -696,8 +777,13 @@ class MajsoulBridge {
 
         bridgeLog("[MajsoulBridge] parseChiPengGang: 玩家=\(actor), opType=\(opType), tiles=\(tiles), froms=\(froms)")
 
-        // 如果 froms 為空，嘗試從 lastDiscard 獲取 target
-        var target = lastDiscard ?? ((actor + 3) % 4)
+        // 如果 froms 為空，嘗試從 lastDiscard 獲取 target。
+        //
+        // fallback 的「上家」必須用本局人數算：寫死 `% 4` 在三麻會算出座位 3
+        // ——那個座位不存在，而這個 target 會原樣進 MJAI 的 pon/daiminkan 事件，
+        // 三麻雲端-only 還會照原樣上傳給伺服器。
+        let playerCount = is3P ? 3 : 4
+        var target = lastDiscard ?? ((actor + playerCount - 1) % playerCount)
         var pai = ""
         var consumed: [String] = []
 
@@ -796,7 +882,7 @@ class MajsoulBridge {
 
     /// 解析暗槓/加槓
     private func parseAnGangAddGang(_ data: [String: Any]) -> [String: Any]? {
-        guard let actor = data["seat"] as? Int,
+        guard let actor = actorSeat(data, site: "ActionAnGangAddGang.seat"),
               let tile = data["tiles"] as? String,
               let opType = data["type"] as? Int else {
             return nil
@@ -884,6 +970,16 @@ class MajsoulBridge {
         let ju = gameState["ju"] as? Int ?? 0
         let ben = gameState["ben"] as? Int ?? 0
         let kyotaku = gameState["liqibang"] as? Int ?? 0
+
+        // 與 `parseNewRound` 同一條範圍檢查：`chang` 是要拿去索引 `BAKAZE_NAMES`
+        // 的 parsed varint，負值會變成負索引而 trap 掉整個 App。
+        guard (0..<4).contains(chang), (0..<4).contains(ju) else {
+            recordBlockingFault(site: "GameSnapshot.chang/ju",
+                                fieldId: 1,
+                                reason: "重連快照的場風或莊家座位超出範圍"
+                                    + "（chang=\(chang), ju=\(ju)）→ 不發 start_kyoku")
+            return nil
+        }
 
         let bakaze = BAKAZE_NAMES[chang % 4]
         let kyoku = ju + 1

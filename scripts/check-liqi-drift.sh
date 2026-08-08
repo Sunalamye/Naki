@@ -15,16 +15,34 @@
 #
 # ## 這支腳本驗不到什麼
 #
-# liqi.json 只有**訊息結構**（field number / 型別）。它沒有：
+# **最重要的一條：它比對的基準本身就已經過期。**
+#
+# `res/proto/liqi.json` 是 **Laya 時代的遺留資源**。雀魂的 web client 已經遷到
+# Unity WebGL，protobuf descriptor 改放在 asset bundle 裡的 `Protol/*_pb.lua`，
+# 那個 JSON 不再跟著更新——它的 resource prefix 是 `v0.11.243.w`，而 live client
+# 的 productVersion 是 4.0.45。
+#
+# 實證：repo（＝CDN）這一份的 `ReqSelfOperation` **沒有 `auto_operation` 欄位**，
+# 而那個欄位在 live client 上是存在的。
+#
+# 所以「repo 與 CDN byte-identical」只證明**兩邊是同一份過期檔案**，
+# 不證明 schema 正確。這支腳本綠燈 ≠ 沒有漂移；它只能抓到「CDN 那份自己變了」。
+#
+# 要真正偵測漂移，得比照 Akagi 從 Unity bundle chain 抽 descriptor
+# （client HTML → clientBundleSettings → warehouse → texture profile → bundle_info_so
+# → `Protol/*_pb.lua` + `docs/proto_config.bytes`）。那是一個獨立的工程，尚未做。
+#
+# 其餘驗不到的（本來就在範圍外）：
 #   - match_mode 這類「數值語意」（房間 id、錯誤碼）——那些要從流量學
 #   - 伺服器行為（哪個動作在哪個時機才會帶 operation）
-#
-# 所以這支通過只代表「欄位定義沒變」，不代表「協定行為沒變」。
 #
 set -uo pipefail
 
 REPO_JSON="$(cd "$(dirname "$0")/.." && pwd)/docs/protocol/liqi.json"
-API="http://127.0.0.1:8765"
+# port 可被覆寫：DebugServer 在 8765 被佔時會退到 8766+，而實際 port 只存在
+# 記憶體裡。寫死的話，舊 instance 佔著 8765 時腳本會**成功連到舊的那個**
+# （不是連不上），preflight 全過然後對舊 instance 開真的友人房。
+API="${NAKI_API:-http://127.0.0.1:8765}"
 UPDATE=0
 [ "${1:-}" = "--update" ] && UPDATE=1
 

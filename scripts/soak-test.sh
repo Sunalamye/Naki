@@ -24,7 +24,10 @@ set -uo pipefail
 
 GAMES="${1:-10}"
 
-API="http://127.0.0.1:8765"
+# port 可被覆寫：DebugServer 在 8765 被佔時會退到 8766+，而實際 port 只存在
+# 記憶體裡。寫死的話，舊 instance 佔著 8765 時腳本會**成功連到舊的那個**
+# （不是連不上），preflight 全過然後對舊 instance 開真的友人房。
+API="${NAKI_API:-http://127.0.0.1:8765}"
 OUT="${SOAK_OUT:-/tmp/naki-soak}"
 POLL=5
 # 開局後多久沒看到 start_game 就重試

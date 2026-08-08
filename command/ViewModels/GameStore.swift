@@ -57,6 +57,19 @@ final class GameStore {
     /// 這一巡摸到的牌（MJAI 表記）；不是自己的回合時為 nil
     var tsumoTile: String?
 
+    /// 頁面載入失敗的原因；nil = 沒有失敗（或已重新載入成功）。
+    ///
+    /// 頁面載不起來時 Naki 什麼都做不了，而在此之前這件事只寫進 `statusMessage`
+    /// ——那會被下一個事件蓋掉。使用者看到的是空白頁面與一句稍縱即逝的文字。
+    var pageLoadFailure: String?
+
+    /// 自動打牌停滯中（伺服器給了機會卻連續沒動作）；nil = 正常。
+    ///
+    /// 引擎所有的失敗與略過原本只走 log，而側欄的綠點讀的是 `botStatus.isActive`
+    /// （推論層）——推論照跑它就照亮。結果是「一手都沒送出、畫面顯示運行中」。
+    /// 這個欄位是那件事唯一能上畫面的路。
+    var autoPlayStall: AutoPlayStall?
+
     /// 目前在遊戲畫面內標記的那一張牌。
     ///
     /// `.off` 模式必須是 nil——否則它會宣稱畫面上有一個其實已經被 `clear()` 掉的標記。
@@ -151,7 +164,15 @@ final class GameStore {
 
     /// 依目前模式重算「標了哪一張」。模式一改就要立刻反映，不能等下一次 Bot 回應。
     func updateHighlight(showRecommendation: Bool) {
-        highlightedTile = showRecommendation ? recommendations.first?.displayTile : nil
+        guard showRecommendation, let top = recommendations.first,
+              top.actionType.marksTileOnBoard else {
+            // 首選是和了／過／拔北／九種九牌時，`GameHighlightScript` 不產生任何 mark。
+            // 這裡若仍記一個 `"hora"`／`"none"`，就是宣稱畫面上有一個其實不存在的
+            // 標記——`.off` 那條早就補了，動作類型這條沒有。
+            highlightedTile = nil
+            return
+        }
+        highlightedTile = top.displayTile
     }
 
     /// Bot 被刪除（對局開始前重建、對局結束、重連、換頁）時清掉屬於這一局的資料。
@@ -168,5 +189,6 @@ final class GameStore {
         tehaiTiles = []
         tsumoTile = nil
         highlightedTile = nil
+        autoPlayStall = nil
     }
 }

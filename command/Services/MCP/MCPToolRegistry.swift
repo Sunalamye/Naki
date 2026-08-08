@@ -20,6 +20,10 @@ import MCPKit
 /// 其餘照抄上游。要改行為就改這裡，改上游不會生效。
 final class MCPToolRegistry {
 
+    /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md
+    /// 「專案結構的坑」）。
+    nonisolated deinit { }
+
     /// 單例
     static let shared = MCPToolRegistry()
 

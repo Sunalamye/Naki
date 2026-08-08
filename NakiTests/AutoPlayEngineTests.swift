@@ -459,6 +459,106 @@ final class AutoPlayEngineTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 120_000_000)
         XCTAssertEqual(sends, afterStop, "stop() 之後不可以再送出任何 request")
     }
+
+    // MARK: - 停滯回報（`onStallChanged`）
+
+    /// 引擎所有的失敗與略過原本只走 log，而 `finish` 對同一個原因只印一行
+    /// ——故障越持久，log 裡的痕跡越少。同時側欄綠點讀的是推論層狀態，照樣亮著。
+    /// 這條通道是「該動而沒動」唯一能上畫面的路。
+    @MainActor
+    func testStallIsReportedAfterConsecutiveTicksWithPendingOplist() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in LiqiRawSendResult(success: false, detail: "no channel") }
+
+        var reported: [AutoPlayStall?] = []
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(maxAttempts: 1),
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: [],
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: nil)
+            },
+            onStallChanged: { reported.append($0) })
+
+        // 伺服器給了打牌機會（不是和牌，所以不會走 forceHora），但模型沒有推薦，
+        // 而且已經過了寬限期 → 每一拍都「有機會卻沒送出」。
+        store.record(seat: 0,
+                     operations: [LiqiOperation(type: .discard)],
+                     timeFixed: 300, contextTile: "5p", source: "test")
+
+        let past = Date().addingTimeInterval(-30)   // 讓寬限期早就過了
+        for _ in 0..<5 { _ = await engine.runCycle(now: past) }
+
+        let stalls = reported.compactMap { $0 }
+        XCTAssertFalse(stalls.isEmpty, "連續沒送出必須回報停滯")
+        XCTAssertGreaterThanOrEqual(stalls.first?.consecutiveTicks ?? 0, 4,
+                                    "門檻要在 callPassGrace 之上，不能一拍就叫")
+        XCTAssertEqual(stalls.last?.sinceSequence, store.pending?.sequence)
+    }
+
+    /// 沒有決策機會時不算停滯——那多半只是還沒輪到自己，一直亮警告會變成雜訊。
+    @MainActor
+    func testNoStallWhenThereIsNoPendingOplist() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+
+        var reported: [AutoPlayStall?] = []
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(),
+            context: {
+                AutoPlayEngine.Context(mode: .auto, recommendations: [],
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: nil)
+            },
+            onStallChanged: { reported.append($0) })
+
+        for _ in 0..<8 { _ = await engine.runCycle() }
+
+        XCTAssertTrue(reported.compactMap { $0 }.isEmpty,
+                      "沒有 oplist 就不是停滯（還沒輪到自己）")
+    }
+
+    /// 送出成功要把停滯清掉，否則警告會一直掛著。
+    @MainActor
+    func testSuccessfulSendClearsStall() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var failNext = true
+        sender.sendHandler = { _ in
+            failNext ? LiqiRawSendResult(success: false, detail: "no channel")
+                     : LiqiRawSendResult(success: true, detail: "socket=0 bytes=26")
+        }
+
+        var reported: [AutoPlayStall?] = []
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: timing(maxAttempts: 1),
+            context: {
+                AutoPlayEngine.Context(mode: .auto,
+                                       recommendations: [Recommendation(tile: "5p", probability: 0.9,
+                                                                        actionType: .discard)],
+                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       recommendationsOplistSequence: store.pending?.sequence)
+            },
+            onStallChanged: { reported.append($0) })
+
+        store.record(seat: 0, operations: [LiqiOperation(type: .discard)],
+                     timeFixed: 300, contextTile: "5p", source: "test")
+
+        let start = Date()
+        for _ in 0..<5 { _ = await engine.runCycle(now: start) }
+        XCTAssertFalse(reported.compactMap { $0 }.isEmpty, "先要真的進入停滯")
+
+        // 送出成功那一拍要避開去抖：同一個「動作＋牌」在 window 內只准觸發一次，
+        // 而上面連跑五拍已經把它用掉了。推進時間讓 window 過期，測的才是
+        // 「送出成功會不會清掉停滯」而不是「去抖有沒有擋住」。
+        failNext = false
+        _ = await engine.runCycle(now: start.addingTimeInterval(30))
+
+        XCTAssertNil(reported.last ?? nil,
+                     "送出成功之後必須回報「停滯結束」（nil），實際：\(String(describing: reported.last))")
+    }
 }
 
 // MARK: - 結構鎖（p3-2 的驗收條件之一）

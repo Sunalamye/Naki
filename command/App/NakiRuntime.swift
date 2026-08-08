@@ -179,7 +179,10 @@ final class NakiRuntime {
                     recommendationsOplistSequence: self.store.recommendationsOplistSequence)
             },
             log: { [weak self] message in self?.debugServer?.addLog(message) },
-            event: { [weak self] message in self?.logAutoPlayEvent(message) })
+            event: { [weak self] message in self?.logAutoPlayEvent(message) },
+            // 「自動打牌不動作」上畫面的唯一一條路。其餘所有失敗訊息都只走 log，
+            // 而 log 有去重（同一個原因只印一行）——故障越久痕跡越少。
+            onStallChanged: { [weak self] stall in self?.store.autoPlayStall = stall })
 
         autoPlayEngine = engine
         engine.start()

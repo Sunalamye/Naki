@@ -11,6 +11,8 @@ note
 
 ## Build generated
 build/
+build-test/
+build-ios/
 DerivedData/
 
 ## Obj-C/Swift specific

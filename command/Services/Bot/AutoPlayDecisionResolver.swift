@@ -144,6 +144,10 @@ nonisolated struct AutoPlayDecisionResolver {
             // 拔北（三麻）：oplist type 11（babei）。只有雲端 3p 模型會產出
             // 這種推薦（本地 action space 46 沒有拔北槽位）。
             return snapshot.contains(.babei)
+        case .ryukyoku:
+            // 九種九牌：oplist type 10（kyushu）。與 `.kita` 同一個形狀——
+            // 本地 action space 沒有這個槽位，只有雲端模型會產出。
+            return snapshot.contains(.kyushu)
         case .none:
             // 「過」永遠可以送（前提是這批確實是副露機會）
             return snapshot.isCallOpportunity

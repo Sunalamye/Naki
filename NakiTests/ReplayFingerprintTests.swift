@@ -24,9 +24,17 @@ import XCTest
 final class ReplayFingerprintTests: XCTestCase {
 
     /// 20260803-013133 的錄影已被 log 輪替（保留 8 次啟動——**跑一次測試就是
-    /// 一次啟動**）清掉，baseline 留著但無法重放。倖存的一局已備份到
-    /// `note/replay-fixture-*.mjai.jsonl`（note/ 不受輪替影響、gitignored
-    /// 不進 repo——錄影含其他玩家暱稱）。
+    /// 一次啟動**）清掉，baseline 留著但無法重放。
+    ///
+    /// 倖存的一局在 `NakiTests/Fixtures/`，**在版控裡**。
+    ///
+    /// 它以前放在 `note/`，而 `.gitignore` 忽略整個 `note`——所以這條測試在這台
+    /// 機器以外的任何地方都是 `XCTSkip`，報告卻一直是綠的。它是 `MajsoulBridge`
+    /// （959 行的 Liqi→MJAI 核心）唯一接近的保護，等於在別人的機器上完全不存在。
+    ///
+    /// 進版控的前提是**匿名化**：原始錄影的 `start_game.names` 是四個真實玩家暱稱。
+    /// 名字不進 observation（Mortal 吃的是 1012×34 的牌局張量），所以換成 P1–P4
+    /// 不影響決策指紋——而這件事由這條測試自己驗證：改完之後指紋必須與 baseline 相同。
     private let fixtures: [(session: String, file: String)] = [
         ("20260803-020246", "20260803-020304.mjai.jsonl"),
     ]
@@ -40,10 +48,10 @@ final class ReplayFingerprintTests: XCTestCase {
             .appendingPathComponent("Library/Logs/Naki", isDirectory: true)
 
         for (session, file) in fixtures {
-            // 優先讀 note/ 的備份；退回 Logs 原位（老備份遺失時仍可跑）
+            // 優先讀版控裡的 fixture；退回 Logs 原位（新錄影還沒搬進來時仍可跑）
             let backup = repoRoot
-                .appendingPathComponent("note", isDirectory: true)
-                .appendingPathComponent("replay-fixture-\(file)")
+                .appendingPathComponent("NakiTests/Fixtures", isDirectory: true)
+                .appendingPathComponent("replay-\(file)")
             let original = logsRoot
                 .appendingPathComponent(session, isDirectory: true)
                 .appendingPathComponent("games", isDirectory: true)
@@ -51,12 +59,15 @@ final class ReplayFingerprintTests: XCTestCase {
             let recording = FileManager.default.fileExists(atPath: backup.path)
                 ? backup : original
             let baselineFile = repoRoot
-                .appendingPathComponent("note", isDirectory: true)
-                .appendingPathComponent("replay-baseline-pre-cloud-\(session).txt")
+                .appendingPathComponent("NakiTests/Fixtures", isDirectory: true)
+                .appendingPathComponent("baseline-\(session).txt")
 
             guard FileManager.default.fileExists(atPath: recording.path),
                   FileManager.default.fileExists(atPath: baselineFile.path) else {
-                throw XCTSkip("錄影或 baseline 不存在（本機驗證測試）: \(session)")
+                // 這裡**不再**是「本機驗證測試」：fixture 與 baseline 都在版控裡，
+                // 缺席代表有人刪了它們，而不是「這台機器剛好沒有」。
+                return XCTFail("fixture 或 baseline 不存在（兩者都應在 NakiTests/Fixtures/）: "
+                               + "\(recording.path) / \(baselineFile.path)")
             }
 
             let events = try GameRecorder.load(recording)

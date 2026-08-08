@@ -69,6 +69,21 @@ nonisolated enum LiqiWire {
         var pos = offset
 
         while pos < data.count {
+            // 溢位檢查必須在 `result |=` **之前**、而且是 `>=`。
+            //
+            // 舊版寫在 `shift += 7` 之後且用 `> 63`：第 9 個 byte 把 shift 推到 63，
+            // `63 > 63` 為 false 於是放行；第 10 個 byte 的 `<< 63` 正好打在 `Int` 的
+            // 符號位上，若那個 byte 的最高位是 0 就直接把**負數**回傳出去。
+            // 下游沒有一處預期負值：`BAKAZE_NAMES[chang % 4]` 在 Swift 對負數取模
+            // 仍是負數，於是變成 `[-1]`——陣列越界在 Swift 是 trap，不可 catch，
+            // 整個 App 當場結束。
+            //
+            // 這裡最多接受 9 bytes（63 bits）。liqi 的每個欄位都是小正數，
+            // 超過就是畸形輸入或解錯位（例如 XOR 規則變了解出近似隨機 bytes）。
+            if shift >= 63 {
+                return nil
+            }
+
             let byte = data[pos]
             result |= Int(byte & 0x7F) << shift
             shift += 7
@@ -76,11 +91,6 @@ nonisolated enum LiqiWire {
 
             if byte & 0x80 == 0 {
                 return (result, pos)
-            }
-
-            // 防止溢出
-            if shift > 63 {
-                return nil
             }
         }
 

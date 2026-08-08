@@ -142,6 +142,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 JSInjectionFailureBanner()
                 LiqiParseFailureBanner()
+                PageLoadFailureBanner()
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -377,6 +378,7 @@ struct ContentView: View {
                     BotStatusView(
                         botStatus: naki.store.botStatus,
                         gameState: naki.store.gameState,
+                        autoPlayStall: naki.store.autoPlayStall,
                         reloadBot: naki.actions.forceReconnect
                     )
 
@@ -429,6 +431,7 @@ struct GamePanel: View {
                 BotStatusView(
                     botStatus: naki.store.botStatus,
                     gameState: naki.store.gameState,
+                    autoPlayStall: naki.store.autoPlayStall,
                     reloadBot: naki.actions.forceReconnect
                 )
 
@@ -619,6 +622,30 @@ struct AdvancedSettingsSheet: View {
     /// 測試連線：`/healthz`（無認證，驗伺服器活不活）＋有 key 時再打
     /// `/v3/models`（驗 key、列可用模型）。對局開始前就能發現問題，
     /// 不必等到第一手。
+    /// 「現在到底有沒有在用雲端」——把 `enabled && url && key` 這個三段條件
+    /// 直接寫成一句話。
+    ///
+    /// 缺哪一項就講哪一項：使用者最常見的狀態是「key 貼了、開關沒開」，而那個開關
+    /// 排在 key 欄位上方，捲下來填完就不會再往上看。
+    @ViewBuilder
+    private var cloudEffectiveStateRow: some View {
+        let missing = naki.settings.cloudConfig.missingRequirements
+
+        if missing.isEmpty {
+            Label("雲端推論已生效——對局中會以雲端決策為準", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundColor(.green)
+                .accessibilityIdentifier("cloud-effective-state")
+        } else {
+            Label("雲端推論尚未生效，仍在用內建本地模型。還缺："
+                  + missing.joined(separator: "、"),
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundColor(.orange)
+                .accessibilityIdentifier("cloud-effective-state")
+        }
+    }
+
     private func runCloudConnectionTest() {
         let baseURL = naki.settings.cloudServerURL
         let key = naki.settings.cloudAPIKey
@@ -639,7 +666,12 @@ struct AdvancedSettingsSheet: View {
                 let models = try await client.models()
                 cloudModels = models   // 餵給模型欄的下拉（見 cloudModelRow）
                 let ids = models.map { "\($0.id)(\($0.game))" }.joined(separator: ", ")
-                cloudTestResult = "伺服器 \(health.status)；可用模型：\(ids.isEmpty ? "無" : ids)"
+                let base = "伺服器 \(health.status)；可用模型：\(ids.isEmpty ? "無" : ids)"
+                // 「連得上」不等於「有在用」。不附這一句的話，開關沒開時這則成功訊息
+                // 反而會強化「已經配置好了」的錯覺——這是本來就要修的那個問題的幫兇。
+                cloudTestResult = naki.settings.cloudInferenceEnabled
+                    ? base
+                    : base + "（但開關未開，對局仍走本地模型）"
                     + (models.isEmpty ? "" : "——可用模型欄旁的箭頭直接選")
             } catch {
                 cloudTestResult = "失敗：\(error.localizedDescription)"
@@ -708,6 +740,12 @@ struct AdvancedSettingsSheet: View {
                                 .accessibilityIdentifier("cloud-test-result")
                         }
                     }
+
+                    // 生效條件是 `enabled && url && key` 三者，而它們是三個分開的控制、
+                    // 開關還排在 key 欄位**上方**。沒有這一行，「貼完 key 就走」會得到
+                    // 一個看起來已配置、行為卻完全是本地模型的設定——而畫面上任何地方
+                    // 都不會說。這是 Akagi #221 的形狀，Naki 當初照抄了它的判定條件。
+                    cloudEffectiveStateRow
 
                     Text("三麻提醒：雲端 3p 模型是目前唯一的真三麻路徑；雲端失敗退回的本地模型仍是四麻模型，側欄的決策來源會如實顯示。")
                         .font(.caption2)
@@ -836,6 +874,42 @@ struct AdvancedSettingsSheet: View {
 /// ——在這個狀態下 Naki 收不到任何封包、送不出任何動作，
 /// 側欄的推薦、`/game/*`、`/bot/*` 全部不可信，所以必須一直掛著。
 ///
+/// 頁面載不起來時的常駐橫幅。
+///
+/// 在此之前這件事只寫進 `store.statusMessage`——那會被下一個事件蓋掉，
+/// 使用者看到的是一個空白頁面加一句稍縱即逝的文字。頁面沒載起來 Naki 什麼都做不了，
+/// 這個狀態必須掛著直到重新載入成功（`webDidFinishNavigation` 會清掉）。
+struct PageLoadFailureBanner: View {
+
+    @Environment(\.naki) private var naki
+
+    var body: some View {
+        if let reason = naki.store.pageLoadFailure {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "wifi.exclamationmark")
+                    .imageScale(.large)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("頁面載入失敗：Naki 讀不到牌局")
+                        .fontWeight(.semibold)
+                    Text(reason)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Button("重新載入") { naki.actions.reloadPage() }
+                    .buttonStyle(.bordered)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.15))
+            .accessibilityIdentifier("page-load-failure-banner")
+        }
+    }
+}
+
 /// 資料來源是 `JSInjectionState.shared`（`@Observable`），
 /// 由 `WebSocketInterceptor.createUserScript()` 在建立 WebView 時寫入。
 struct JSInjectionFailureBanner: View {

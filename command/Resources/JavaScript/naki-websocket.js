@@ -49,7 +49,17 @@
 
     // 追蹤所有 WebSocket 連接
     const wsConnections = new Map();
-    let wsIdCounter = 0;
+
+    // socketId 要跨 frame 唯一。
+    //
+    // 注入是 `forMainFrameOnly: false`，每個 frame 都跑一次這份 IIFE，而
+    // `wsIdCounter` 是各自的區域變數、`__nakiWebSocketLoaded` 的去重也是 per-frame。
+    // 兩個 frame 各開一條就都叫 socket 1，但 Swift 側的 `connectedSockets` 是**共用**
+    // 的一個 Set——iframe 那條關閉時會把主 frame 的同號連線一起移除。
+    //
+    // 給每個 frame 一個隨機的號段起點就避開了。不用 crypto：這只是要避免碰撞，
+    // 不是安全用途；乘 1e6 讓每個 frame 有一百萬個號可用，實務上不可能撞。
+    let wsIdCounter = Math.floor(Math.random() * 1e6) * 1e6;
 
     /**
      * 檢測是否為雀魂 WebSocket
@@ -103,7 +113,10 @@
             // 同一個 open 事件以前送兩份（`websocket_open` + `websocket_connected`），
             // 名義上是「兩種格式確保兼容」，實際上 Swift 兩個 case 都在、其中一個只是
             // 多印一行 log。留一份就好。
-            sendToSwift('websocket_connected', { socketId: wsId, url: url });
+            //
+            // `isMajsoul` 必須跟著送：Swift 端拿它決定要不要把這條算進「已連上雀魂」。
+            // 頁面上任何 WebSocket 都會走到這裡，混進來會讓那個狀態失去意義。
+            sendToSwift('websocket_connected', { socketId: wsId, url: url, isMajsoul: isMajsoul });
         });
 
         // 監聽關閉
@@ -112,7 +125,8 @@
             sendToSwift('websocket_close', {
                 socketId: wsId,
                 code: event.code,
-                reason: event.reason
+                reason: event.reason,
+                isMajsoul: isMajsoul
             });
             wsConnections.delete(ws);
         });

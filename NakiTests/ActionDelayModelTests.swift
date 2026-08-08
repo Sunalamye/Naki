@@ -7,6 +7,9 @@
 //  重點不是「某次算出幾秒」——那是隨機的。要驗的是**分布的性質**：
 //  有沒有變異（固定值就是指紋）、有沒有上限、驗證模式有沒有真的拉長。
 //
+//  2026-08-07 起模型改成對照真人牌譜校準的混合分布（routine 快切群 + 真思考群，
+//  手切／摸切分開、依牌種不同）。這批測試同步改成驗那些性質。
+//
 
 import XCTest
 
@@ -71,14 +74,59 @@ final class ActionDelayModelTests: XCTestCase {
         }
     }
 
-    /// 要有右偏的尾巴（偶發思考停頓），否則只是一個乾淨的均勻區間
-    func testHasOccasionalLongPause() {
-        let xs = samples(.discard, count: 2000)
-        let base = ActionDelayModel.discard.high
-        let long = xs.filter { $0 > base }.count
-        XCTAssertGreaterThan(long, 0, "完全沒有思考停頓，分布是純均勻的")
-        // 停頓應該是少數；太多就不像人而像卡頓
-        XCTAssertLessThan(Double(long) / Double(xs.count), 0.30)
+    /// 要有右偏的尾巴。log-normal 本身就右偏，另外還有 2% 的長考。
+    ///
+    /// 沒有這條尾巴，分布會缺一塊而變得可分——真人確實會偶爾停下來重數牌河。
+    func testHasRightSkewedTail() {
+        let xs = samples(.discard, count: 3000).sorted()
+        let median = xs[xs.count / 2]
+        let mean = self.mean(xs)
+
+        XCTAssertGreaterThan(mean, median,
+                             "均值必須大於中位數（右偏）；對稱或左偏都不像人")
+        let long = xs.filter { $0 > median * 3 }.count
+        XCTAssertGreaterThan(long, 0, "完全沒有長尾")
+        XCTAssertLessThan(Double(long) / Double(xs.count), 0.15, "長尾太肥會像卡頓")
+    }
+
+    /// **摸切明顯比手切快**——真人不必從手上挑牌。
+    /// 這是校準模型最主要的一個維度，前一版完全沒有（兩者同一個分布）。
+    func testTsumogiriIsFasterThanTedashi() {
+        func sampleMean(tsumogiri: Bool) -> Double {
+            var g = SeededGenerator(seed: 42)
+            return mean((0..<3000).map { _ in
+                ActionDelayModel.delay(for: .discard, tile: "5m",
+                                       tsumogiri: tsumogiri, using: &g)
+            })
+        }
+        XCTAssertLessThan(sampleMean(tsumogiri: true), sampleMean(tsumogiri: false),
+                          "摸切要比手切快，否則兩者是同一個分布換名字")
+    }
+
+    /// 牌種要有差異：中張思考最久，字牌最快（實測如此）。
+    func testTileClassAffectsThinkTime() {
+        func sampleMean(_ tile: String) -> Double {
+            var g = SeededGenerator(seed: 42)
+            return mean((0..<3000).map { _ in
+                ActionDelayModel.delay(for: .discard, tile: tile, using: &g)
+            })
+        }
+        XCTAssertLessThan(sampleMean("E"), sampleMean("5m"),
+                          "字牌應比中張快")
+        XCTAssertLessThan(sampleMean("1m"), sampleMean("5m"),
+                          "么九應比中張快")
+    }
+
+    /// 牌種分類本身
+    func testTileClassification() {
+        XCTAssertEqual(ActionDelayModel.tileClass(of: "E"), .honor)
+        XCTAssertEqual(ActionDelayModel.tileClass(of: "C"), .honor)
+        XCTAssertEqual(ActionDelayModel.tileClass(of: "1m"), .terminal)
+        XCTAssertEqual(ActionDelayModel.tileClass(of: "9s"), .terminal)
+        XCTAssertEqual(ActionDelayModel.tileClass(of: "5p"), .middle)
+        XCTAssertEqual(ActionDelayModel.tileClass(of: "5mr"), .middle)
+        // 認不出來時當中張——那是思考最久的一類，最保守
+        XCTAssertEqual(ActionDelayModel.tileClass(of: "???"), .middle)
     }
 
     /// 驗證模式要真的把窗口拉長，否則截圖仍然來不及
@@ -119,21 +167,23 @@ final class ActionDelayModelTests: XCTestCase {
 
     /// 同輸入、不同 scale → 每一筆延遲**逐筆**按係數縮放（比例正確，不是換成固定值）。
     ///
-    /// 用和牌（區間＋思考停頓上限 (1.6+4.0)×2.0=11.2s < 12s 上限）避免觸頂，
-    /// 所以在 0.5／1.0／2.0 三檔可以要求精確比例。同一顆種子 ⇒ 抽樣值相同 ⇒
-    /// `scaled[i] == factor × base[i]`。
+    /// 用和牌（中位數約 1.2s，最短的一個分布）降低觸頂機率；觸頂的樣本會被
+    /// `maximum` 截掉而破壞比例，所以下面跳過任何一邊已經觸頂的 index。
     func testScaleScalesEachSampleProportionally() {
         let base = samples(.hora, scale: 1.0, count: 300)
         let half = samples(.hora, scale: 0.5, count: 300)
         let doubled = samples(.hora, scale: 2.0, count: 300)
 
         XCTAssertEqual(base.count, 300)
-        for i in 0..<base.count {
+        var compared = 0
+        for i in 0..<base.count where doubled[i] < ActionDelayModel.maximum {
             XCTAssertEqual(half[i], base[i] * 0.5, accuracy: 1e-9,
                            "scale=0.5 應把每一筆延遲縮成一半")
             XCTAssertEqual(doubled[i], base[i] * 2.0, accuracy: 1e-9,
                            "scale=2.0 應把每一筆延遲拉成兩倍")
+            compared += 1
         }
+        XCTAssertGreaterThan(compared, 250, "絕大多數樣本不該觸頂，否則這條測不到比例")
     }
 
     /// 分布整體隨 scale 平移：均值單調上升，且 stepper 拉大真的變慢（driver 的驗收語意）。

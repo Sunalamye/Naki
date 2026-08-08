@@ -158,4 +158,44 @@ final class LiqiEnvelopeTests: XCTestCase {
         XCTAssertEqual(LiqiWire.decodeVarint(data, offset: 1)?.value, 150)
         XCTAssertEqual(LiqiWire.decodeVarint(data, offset: 1)?.newOffset, 3)
     }
+
+    // MARK: - 溢位
+
+    /// **絕不回傳負數。**
+    ///
+    /// 舊版的溢位保護寫在 `shift += 7` 之後、而且是 `> 63`：第 9 個 byte 把 shift
+    /// 推到 63，`63 > 63` 為 false 於是放行；第 10 個 byte 的 `<< 63` 正好打在 `Int`
+    /// 的符號位上，那個 byte 的最高位是 0 時就直接把負數回傳出去。
+    ///
+    /// 下游沒有一處預期負值——`BAKAZE_NAMES[chang % 4]` 對負 `chang` 會取到負索引，
+    /// 而 Swift 的陣列越界是 trap，接不住，整個 App 當場結束。
+    func testTenByteVarintIsRejectedInsteadOfOverflowingToNegative() {
+        // 9 個帶續位元的 byte 把 shift 推到 63，第 10 個 byte（0x01，最高位 0）
+        // 在舊實作裡會讓 `1 << 63` 設定符號位。
+        let overflowing = Data([0x83, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01])
+
+        let decoded = LiqiWire.decodeVarint(overflowing, offset: 0)
+
+        XCTAssertNil(decoded, "超過 63 bit 的 varint 必須被拒絕，不能解成負數")
+        if let value = decoded?.value {
+            XCTAssertGreaterThanOrEqual(value, 0, "無論如何都不得回傳負值（實際 \(value)）")
+        }
+    }
+
+    /// 只有續位元、永遠不結束的 varint 也要收斂成 nil（而不是把 shift 一直加下去）。
+    func testUnterminatedVarintIsRejected() {
+        let unterminated = Data(repeating: 0xFF, count: 12)
+
+        XCTAssertNil(LiqiWire.decodeVarint(unterminated, offset: 0))
+    }
+
+    /// 邊界的另一側：9 bytes 之內的大值仍然要正常解出來，
+    /// 修溢位不能把合法輸入一起擋掉。
+    func testLargeButValidVarintStillDecodes() {
+        for value in [Int(Int32.max), 1 << 40, (1 << 62) - 1] {
+            let encoded = LiqiWire.encodeVarint(UInt64(value))
+            XCTAssertLessThanOrEqual(encoded.count, 9, "測資本身必須在 9 bytes 內")
+            XCTAssertEqual(LiqiWire.decodeVarint(Data(encoded), offset: 0)?.value, value)
+        }
+    }
 }

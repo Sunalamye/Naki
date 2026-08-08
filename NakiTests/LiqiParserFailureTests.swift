@@ -485,4 +485,167 @@ final class LiqiParserFailureTests: XCTestCase {
         XCTAssertNil(state.blocking)
         XCTAssertEqual(state.totalCount, 0)
     }
+
+    // MARK: - E. 索引用的欄位必須先驗範圍
+
+    /// `chang` 會直接拿去索引 `BAKAZE_NAMES`（4 個元素）。
+    ///
+    /// 它是沒有上界的 parsed varint，而 Swift 的陣列越界是 **trap**：不是可捕捉的
+    /// 錯誤，是整個 App 當場結束——連 fault 都記不下來，log 裡什麼都沒有。
+    /// 所以範圍檢查必須在索引之前，而且失敗要走既有的 blocking 路徑。
+    func testOutOfRangeChangBlocksInsteadOfIndexingOutOfBounds() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        let payload = LiqiEncoder.encodeFields([
+            .varint(field: 1, value: 7),        // chang：合法只有 0..<4
+            .varint(field: 2, value: 0),
+            .varint(field: 3, value: 0),
+            .bytes(field: 6, value: packed([25000, 25000, 25000, 25000])),
+            .varint(field: 8, value: 0)
+        ])
+        let events = bridge.parse(actionPrototypeFrame(name: "ActionNewRound", data: payload))
+
+        XCTAssertNil(events?.first { ($0["type"] as? String) == "start_kyoku" },
+                     "chang 超出範圍不得開這一局")
+        XCTAssertEqual(state.blocking?.site, "ActionNewRound.chang/ju")
+        XCTAssertNotNil(state.bannerSummary, "使用者要看得到這一局為什麼沒有推薦")
+    }
+
+    /// `ju` 同理：它會變成 `oya` 與 `kyoku` 進 MJAI 事件流。
+    func testOutOfRangeJuBlocksTheRound() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        let payload = LiqiEncoder.encodeFields([
+            .varint(field: 1, value: 0),
+            .varint(field: 2, value: 9),        // ju
+            .varint(field: 3, value: 0),
+            .bytes(field: 6, value: packed([25000, 25000, 25000, 25000])),
+            .varint(field: 8, value: 0)
+        ])
+        let events = bridge.parse(actionPrototypeFrame(name: "ActionNewRound", data: payload))
+
+        XCTAssertNil(events?.first { ($0["type"] as? String) == "start_kyoku" })
+        XCTAssertEqual(state.blocking?.site, "ActionNewRound.chang/ju")
+    }
+
+    /// action 的 `seat` 會原樣變成 MJAI 的 `actor`，而下游 MortalSwift 拿它算
+    /// `(seat - playerId + 4) % 4` 之後直接索引固定 4 格的 `kawa`。
+    ///
+    /// 範圍外的正值不會崩——會被 `% 4` 折回去，把別人的動作**靜默記到自己頭上**，
+    /// 污染 observation 而且畫面上完全看不出來。那比丟掉一個事件糟得多。
+    func testOutOfRangeSeatDropsTheEventAndRecordsDegradedFault() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        _ = bridge.parse(actionPrototypeFrame(
+            name: "ActionNewRound",
+            data: newRoundPayload(scores: .bytes(field: 6,
+                                                 value: packed([25000, 25000, 25000, 25000])))))
+
+        let payload = LiqiEncoder.encodeFields([
+            .varint(field: 1, value: 9),        // seat：四麻合法只有 0..<4
+            .string(field: 2, value: "1m")
+        ])
+        let events = bridge.parse(actionPrototypeFrame(name: "ActionDealTile", data: payload))
+
+        XCTAssertNil(events?.first { ($0["type"] as? String) == "tsumo" },
+                     "座位超出範圍的摸牌事件必須被丟棄，不能原樣送進事件流")
+        XCTAssertGreaterThan(state.totalCount, 0, "丟棄要留下可查的記錄，不能靜默")
+        XCTAssertNil(state.blocking, "丟一個事件是 degraded，不該讓整局停擺")
+    }
+
+    /// 未知的 action 不得靜默丟棄。
+    ///
+    /// 這裡曾經是整套 `LiqiParseFault` 機制唯一逃得掉的路徑（`default: break`）。
+    /// `liqi.json` 有 24 個 `Action*` 而 bridge 處理 9 個，沒處理的多屬活動場——
+    /// 而活動場正是雀魂最常改動的部分。靜默丟棄的表象只是「某個情況下不給推薦」，
+    /// log 裡一個字都沒有。
+    func testUnknownActionIsRecordedInsteadOfSilentlyDropped() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        let payload = LiqiEncoder.encodeFields([.varint(field: 1, value: 0)])
+        _ = bridge.parse(actionPrototypeFrame(name: "ActionSelectGap", data: payload))
+
+        XCTAssertGreaterThan(state.totalCount, 0, "未知 action 必須留下記錄")
+        XCTAssertNil(state.blocking,
+                     "多數未知 action 與牌局進行無關，擋掉整局太重——degraded 就好")
+    }
+
+    /// 同一個未知 action 只記一次，否則每局都會洗版。
+    func testUnknownActionIsReportedOnlyOnce() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        let payload = LiqiEncoder.encodeFields([.varint(field: 1, value: 0)])
+        for _ in 0..<5 {
+            _ = bridge.parse(actionPrototypeFrame(name: "ActionSelectGap", data: payload))
+        }
+        let afterSameAction = state.totalCount
+
+        _ = bridge.parse(actionPrototypeFrame(name: "ActionUnveilTile", data: payload))
+        XCTAssertGreaterThan(state.totalCount, afterSameAction,
+                             "不同的未知 action 要各記一次")
+    }
+
+    // MARK: - F. 產出層：MJAI 事件的欄位正確性
+
+    /// 鳴牌的 `target` 必須指向**放銃者**，不是自己。
+    ///
+    /// `MajsoulBridge` 是 959 行的 Liqi→MJAI 核心，而它產出的事件是否正確
+    /// 幾乎沒有直接測試——唯一接近的 `ReplayFingerprintTests` 驗的是決策指紋
+    /// （整條鏈的雜湊），指紋對不上時看不出是哪個欄位錯了。
+    ///
+    /// Akagi #69 就是這個欄位錯成 `target == actor`。
+    func testPonTargetPointsAtDiscarderNotSelf() {
+        let (bridge, _) = makeBridge()
+        authenticate(bridge)
+        _ = bridge.parse(actionPrototypeFrame(
+            name: "ActionNewRound",
+            data: newRoundPayload(scores: .bytes(field: 6,
+                                                 value: packed([25000, 25000, 25000, 25000])))))
+
+        // 座位 2 碰座位 1 打出的牌（liqi ActionChiPengGang：
+        // 1=seat, 2=type, 3=tiles, 4=froms）
+        let payload = LiqiEncoder.encodeFields([
+            .varint(field: 1, value: 2),
+            .varint(field: 2, value: 1),           // 1 = pon
+            .string(field: 3, value: "3m"),
+            .string(field: 3, value: "3m"),
+            .string(field: 3, value: "3m"),
+            .bytes(field: 4, value: packed([2, 2, 1]))   // 前兩張自己的，第三張來自座位 1
+        ])
+        let events = bridge.parse(actionPrototypeFrame(name: "ActionChiPengGang", data: payload))
+
+        let pon = events?.first { ($0["type"] as? String) == "pon" }
+        XCTAssertNotNil(pon, "應產生 pon 事件")
+        XCTAssertEqual(pon?["actor"] as? Int, 2)
+        XCTAssertEqual(pon?["target"] as? Int, 1,
+                       "target 要指向放銃者；等於 actor 就是 Akagi #69 那個 bug")
+        XCTAssertEqual(pon?["pai"] as? String, "3m", "pai 是被鳴的那一張")
+        XCTAssertEqual((pon?["consumed"] as? [String])?.count, 2,
+                       "consumed 是自己手上的兩張")
+    }
+
+    /// 摸牌與打牌的 actor 要如實反映座位，不得被折回自己。
+    func testDealAndDiscardCarryCorrectActor() {
+        let (bridge, _) = makeBridge()
+        authenticate(bridge)
+        _ = bridge.parse(actionPrototypeFrame(
+            name: "ActionNewRound",
+            data: newRoundPayload(scores: .bytes(field: 6,
+                                                 value: packed([25000, 25000, 25000, 25000])))))
+
+        let discard = LiqiEncoder.encodeFields([
+            .varint(field: 1, value: 3),
+            .string(field: 2, value: "7p")
+        ])
+        let events = bridge.parse(actionPrototypeFrame(name: "ActionDiscardTile", data: discard))
+
+        let dahai = events?.first { ($0["type"] as? String) == "dahai" }
+        XCTAssertEqual(dahai?["actor"] as? Int, 3)
+        XCTAssertEqual(dahai?["pai"] as? String, "7p")
+    }
 }

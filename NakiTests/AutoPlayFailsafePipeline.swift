@@ -50,6 +50,12 @@ struct AutoPlayFailsafePipeline {
     var retryDelay: TimeInterval = 0
     /// 副露機會等推論的寬限期，取正式路徑的同一個常數
     var callPassGrace: TimeInterval = AutoPlayEngine.Timing.live.callPassGrace
+    /// 推薦是為哪一批 oplist 算的。
+    ///
+    /// `nil` = 沿用當前 pending（同源，不 stale），既有 fixture 都走這條。
+    /// 明確給一個比 pending 小的值，就能擺出「推薦是為更早的機會算的」這個前提——
+    /// 那正是漏和缺口的觸發條件。
+    var recommendationsOplistSequence: UInt64?
 
     // MARK: - 輸出（型別本體在產品端）
 
@@ -98,8 +104,10 @@ struct AutoPlayFailsafePipeline {
                                        isSanma: false,
                                        tsumoTile: nil,
                                        isReady: true,
-                                       // 推薦對應當前 oplist（p5 #1）——fixture 走正常同源路徑
-                                       recommendationsOplistSequence: store.pending?.sequence)
+                                       // 預設推薦對應當前 oplist（p5 #1）——fixture 走正常同源路徑；
+                                       // 明確注入較小的序號才會踩到 stale 那條分支。
+                                       recommendationsOplistSequence:
+                                        recommendationsOplistSequence ?? store.pending?.sequence)
             })
     }
 }

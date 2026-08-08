@@ -27,6 +27,11 @@ protocol MCPHTTPResponder: AnyObject {
 /// 負責處理所有 MCP JSON-RPC 請求，使用 MCPToolRegistry 管理工具
 final class MCPHandler {
 
+    /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md
+    /// 「專案結構的坑」）。沒有這一行，`let handler = MCPHandler(...)` 這種最自然的
+    /// 測試寫法會讓 test host abort，那一整批測試從報告上消失而不是變紅。
+    nonisolated deinit { }
+
     // MARK: - Properties
 
     /// 執行上下文
