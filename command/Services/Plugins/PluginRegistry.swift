@@ -37,6 +37,57 @@ nonisolated struct PluginManifest: Decodable, Sendable, Equatable {
     let license: String?
     let homepage: String?
     let description: String?
+    /// 選用的設定 schema（§7.10a）：key → 欄位定義。型別只有 string/number/boolean。
+    let settings: [String: PluginSettingField]?
+    /// 禁改名單解除（§8.2/§11 #5）：列出的 method 即使在禁改名單也放行 rewrite。
+    let rewriteAllow: [String]?
+}
+
+/// 設定 schema 的單一欄位（§7.10a）。`default` 型別依 `type` 而定。
+nonisolated struct PluginSettingField: Decodable, Sendable, Equatable {
+    let type: String            // "string" | "number" | "boolean"
+    let description: String?
+    let defaultValue: PluginSettingValue
+
+    enum CodingKeys: String, CodingKey { case type, description, defaultValue = "default" }
+
+    /// schema 有效性：型別是三種之一，且 default 與 type 相符。
+    var isValid: Bool {
+        switch type {
+        case "string":  if case .string = defaultValue { return true }; return false
+        case "number":  if case .number = defaultValue { return true }; return false
+        case "boolean": if case .boolean = defaultValue { return true }; return false
+        default: return false
+        }
+    }
+}
+
+/// 設定值（string/number/boolean 三型）。
+nonisolated enum PluginSettingValue: Decodable, Sendable, Equatable {
+    case string(String)
+    case number(Double)
+    case boolean(Bool)
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        // 順序重要：Bool 不會從數字解出，Double 不會從字串解出。
+        if let b = try? c.decode(Bool.self) { self = .boolean(b) }
+        else if let d = try? c.decode(Double.self) { self = .number(d) }
+        else if let s = try? c.decode(String.self) { self = .string(s) }
+        else {
+            throw DecodingError.dataCorruptedError(
+                in: c, debugDescription: "settings default 必須是 string/number/boolean")
+        }
+    }
+
+    /// 給 JSONSerialization 用的原生值
+    var jsonValue: Any {
+        switch self {
+        case .string(let s): return s
+        case .number(let d): return d
+        case .boolean(let b): return b
+        }
+    }
 }
 
 // MARK: - 載入失敗
@@ -160,6 +211,16 @@ nonisolated enum PluginRegistry {
                                     failure: .idMismatch("manifest '\(manifest.id)' ≠ 目錄 '\(dirName)'"))
         }
 
+        // settings schema 有效性（§7.10a）：型別必須是 string/number/boolean 且 default 相符。
+        // 無效 ⇒ 整個插件不載入（與其它 manifest 錯誤同語意）。
+        if let schema = manifest.settings {
+            for (key, field) in schema where !field.isValid {
+                return PluginDescriptor(id: manifest.id, directory: directory, manifest: nil,
+                                        entrySource: nil,
+                                        failure: .manifestInvalid("settings.\(key) schema 無效（type 或 default 不合）"))
+            }
+        }
+
         // entry 源碼
         let entryURL = directory.appendingPathComponent(manifest.entry)
         guard let source = try? String(contentsOf: entryURL, encoding: .utf8),
@@ -182,20 +243,16 @@ nonisolated enum PluginRegistry {
     /// script parse 失敗（但 bundled 的第一個 script 不受影響——這是驗收要求的隔離層級）。
     /// 插件間的語法隔離（每插件一個 WKUserScript）留待 Phase 2。
     static func buildInjectionScript(descriptors: [PluginDescriptor],
-                                     enabled: Set<String>) -> String? {
+                                     enabled: Set<String>,
+                                     overridesFor: (String) -> [String: Any] = { _ in [:] }) -> String? {
         let active = descriptors.filter { $0.isValid && enabled.contains($0.id) }
         guard !active.isEmpty else { return nil }
 
-        // grants：{ id: { capabilities, methods, priority, observeNakiTraffic } }
+        // grants：{ id: { capabilities, methods, priority, observeNakiTraffic, settings?, rewriteAllow? } }
         var grants: [String: Any] = [:]
         for d in active {
             guard let m = d.manifest else { continue }
-            grants[m.id] = [
-                "capabilities": m.capabilities,
-                "methods": m.methods,
-                "priority": m.priority ?? 100,
-                "observeNakiTraffic": m.observeNakiTraffic ?? false
-            ]
+            grants[m.id] = grantDict(for: m, overrides: overridesFor(m.id))
         }
 
         guard let grantsData = try? JSONSerialization.data(withJSONObject: grants, options: [.sortedKeys]),
@@ -217,14 +274,28 @@ nonisolated enum PluginRegistry {
 
     // MARK: - 熱插拔（runtime enable/disable，免 reload）
 
-    /// 單一插件的 grant JSON（capabilities / methods / priority / observeNakiTraffic）。
-    static func grantJSON(for manifest: PluginManifest) -> String? {
-        let grant: [String: Any] = [
+    /// 單一插件的 grant dict。`overrides` 是使用者對 settings 的覆寫值（key → 值）。
+    static func grantDict(for manifest: PluginManifest, overrides: [String: Any] = [:]) -> [String: Any] {
+        var grant: [String: Any] = [
             "capabilities": manifest.capabilities,
             "methods": manifest.methods,
             "priority": manifest.priority ?? 100,
             "observeNakiTraffic": manifest.observeNakiTraffic ?? false
         ]
+        if let allow = manifest.rewriteAllow { grant["rewriteAllow"] = allow }
+        if let schema = manifest.settings {
+            // settings 值 = 使用者覆寫 ?? default（§7.10a）
+            var resolved: [String: Any] = [:]
+            for (key, field) in schema {
+                resolved[key] = overrides[key] ?? field.defaultValue.jsonValue
+            }
+            grant["settings"] = resolved
+        }
+        return grant
+    }
+
+    static func grantJSON(for manifest: PluginManifest, overrides: [String: Any] = [:]) -> String? {
+        let grant = grantDict(for: manifest, overrides: overrides)
         guard let data = try? JSONSerialization.data(withJSONObject: grant, options: [.sortedKeys]),
               let s = String(data: data, encoding: .utf8) else { return nil }
         return s
@@ -232,10 +303,11 @@ nonisolated enum PluginRegistry {
 
     /// 熱**啟用**單一插件的 JS（`setGrant` 下發權威 grant，再跑插件源碼 → register 立即生效）。
     /// 函式體語意（fire-and-forget，不需 `return`）。插件源碼包在 try/catch，語法/執行錯不外溢。
-    static func enableScript(for descriptor: PluginDescriptor) -> String? {
+    static func enableScript(for descriptor: PluginDescriptor,
+                             overrides: [String: Any] = [:]) -> String? {
         guard let manifest = descriptor.manifest,
               let source = descriptor.entrySource,
-              let grantJSON = grantJSON(for: manifest) else { return nil }
+              let grantJSON = grantJSON(for: manifest, overrides: overrides) else { return nil }
         let idLit = jsStringLiteral(descriptor.id)
         return """
         if (window.__nakiPlugins && window.__nakiPlugins.setGrant) {

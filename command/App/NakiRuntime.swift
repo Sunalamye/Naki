@@ -87,8 +87,14 @@ final class NakiRuntime {
         //     預設 `enabledPluginIds` 空 ⇒ 沒有啟用插件 ⇒ injection 為 nil ⇒ 不加第二個 script。
         let descriptors = PluginRegistry.scan()
         pluginDescriptors = descriptors
+        let settingsStore = settings
         let pluginInjection = PluginRegistry.buildInjectionScript(
-            descriptors: descriptors, enabled: settings.enabledPluginIds)
+            descriptors: descriptors, enabled: settings.enabledPluginIds,
+            overridesFor: { id in
+                guard let schema = descriptors.first(where: { $0.id == id })?.manifest?.settings
+                else { return [:] }
+                return settingsStore.pluginSettingOverrides(pluginId: id, keys: Array(schema.keys))
+            })
 
         // ② 頁面側：JS bridge 的收件人就是 coordinator 的 WS handler
         session = WebSession(store: store,
@@ -393,7 +399,10 @@ final class NakiRuntime {
         if enabled {
             guard let descriptor = pluginDescriptors.first(where: { $0.id == id }),
                   descriptor.isValid else { return }
-            script = PluginRegistry.enableScript(for: descriptor)
+            let overrides = descriptor.manifest?.settings.map {
+                settings.pluginSettingOverrides(pluginId: id, keys: Array($0.keys))
+            } ?? [:]
+            script = PluginRegistry.enableScript(for: descriptor, overrides: overrides)
         } else {
             script = PluginRegistry.disableScript(id: id)
         }

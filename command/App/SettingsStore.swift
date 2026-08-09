@@ -103,6 +103,31 @@ final class SettingsStore {
         }
     }
 
+    /// 插件設定值（§7.10a）。key = `plugin.<id>.<key>`，值只有 String/Double/Bool。
+    /// 分開存（不進 `enabledPluginIds`），命名空間隔離避免插件之間互撞。
+    nonisolated static func pluginSettingKey(_ pluginId: String, _ key: String) -> String {
+        "plugin.\(pluginId).\(key)"
+    }
+
+    /// 讀某插件在給定 keys 上的使用者覆寫（沒設過的 key 不出現 → 呼叫端回退 default）。
+    func pluginSettingOverrides(pluginId: String, keys: [String]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for key in keys {
+            if let v = UserDefaults.standard.object(forKey: Self.pluginSettingKey(pluginId, key)) {
+                out[key] = v
+            }
+        }
+        return out
+    }
+
+    func pluginSettingValue(pluginId: String, key: String) -> Any? {
+        UserDefaults.standard.object(forKey: Self.pluginSettingKey(pluginId, key))
+    }
+
+    func setPluginSettingValue(pluginId: String, key: String, value: Any) {
+        UserDefaults.standard.set(value, forKey: Self.pluginSettingKey(pluginId, key))
+    }
+
     // MARK: - 雀魂區服
 
     nonisolated static let majsoulServerKey = "MajsoulServer"

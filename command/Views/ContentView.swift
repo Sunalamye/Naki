@@ -1920,21 +1920,36 @@ struct PluginsPageView: View {
     @ViewBuilder
     private func pluginRow(_ descriptor: PluginDescriptor) -> some View {
         if let manifest = descriptor.manifest {
-            Toggle(isOn: Binding(
-                get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
-                set: { on in naki.actions.setPluginEnabled(descriptor.id, on) }   // 熱插拔
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(manifest.name).font(.body)
-                    Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    if let license = manifest.license {
-                        Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(isOn: Binding(
+                    get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
+                    set: { on in naki.actions.setPluginEnabled(descriptor.id, on) }   // 熱插拔
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(manifest.name).font(.body)
+                        Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        if let license = manifest.license {
+                            Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
                 }
+                .accessibilityIdentifier("plugin-toggle-\(descriptor.id)")
+
+                // 插件設定（§7.10a）：有 schema 且已啟用才顯示；改值即時套用（熱重載）。
+                if let schema = manifest.settings, !schema.isEmpty,
+                   naki.settings.enabledPluginIds.contains(descriptor.id) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(schema.keys.sorted(), id: \.self) { key in
+                            if let field = schema[key] {
+                                pluginSettingControl(pluginId: descriptor.id, key: key, field: field)
+                            }
+                        }
+                    }
+                    .padding(.leading, 20)
+                }
             }
-            .accessibilityIdentifier("plugin-toggle-\(descriptor.id)")
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 Text(descriptor.id).font(.body)
@@ -1942,6 +1957,65 @@ struct PluginsPageView: View {
                     .font(.caption)
                     .foregroundColor(.red)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 單一設定欄位的控制項（string→TextField、number→TextField、boolean→Toggle）。
+    /// 改值 → 存 SettingsStore → 重新啟用該插件（熱重載，帶新設定值）。
+    @ViewBuilder
+    private func pluginSettingControl(pluginId: String, key: String, field: PluginSettingField) -> some View {
+        let label = field.description ?? key
+        switch field.type {
+        case "boolean":
+            Toggle(label, isOn: Binding(
+                get: {
+                    (naki.settings.pluginSettingValue(pluginId: pluginId, key: key) as? Bool)
+                        ?? { if case .boolean(let b) = field.defaultValue { return b }; return false }()
+                },
+                set: { v in
+                    naki.settings.setPluginSettingValue(pluginId: pluginId, key: key, value: v)
+                    naki.actions.setPluginEnabled(pluginId, true)   // 熱重載套用
+                }
+            ))
+            .font(.caption)
+        case "number":
+            HStack {
+                Text(label).font(.caption)
+                Spacer()
+                TextField("", value: Binding(
+                    get: {
+                        (naki.settings.pluginSettingValue(pluginId: pluginId, key: key) as? Double)
+                            ?? { if case .number(let d) = field.defaultValue { return d }; return 0 }()
+                    },
+                    set: { v in
+                        naki.settings.setPluginSettingValue(pluginId: pluginId, key: key, value: v)
+                        naki.actions.setPluginEnabled(pluginId, true)
+                    }
+                ), format: .number)
+                .frame(width: 100)
+                .font(.system(.caption, design: .monospaced))
+                #if os(iOS)
+                .keyboardType(.numbersAndPunctuation)
+                #endif
+            }
+        default:   // string
+            HStack {
+                Text(label).font(.caption)
+                Spacer()
+                TextField("", text: Binding(
+                    get: {
+                        (naki.settings.pluginSettingValue(pluginId: pluginId, key: key) as? String)
+                            ?? { if case .string(let s) = field.defaultValue { return s }; return "" }()
+                    },
+                    set: { v in
+                        naki.settings.setPluginSettingValue(pluginId: pluginId, key: key, value: v)
+                        naki.actions.setPluginEnabled(pluginId, true)
+                    }
+                ))
+                .frame(width: 160)
+                .font(.system(.caption, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
             }
         }
     }
