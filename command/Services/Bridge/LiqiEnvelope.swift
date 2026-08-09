@@ -284,11 +284,23 @@ struct LiqiEnvelope {
 
         // RESPONSE 的 field 1 是空字串，方法名只能靠 msgId 對照；
         // payload 缺席也合法（伺服器可以回一個空 Res）。
+        //
+        // payload 必須**按欄位號**取，不能按位置（`blocks[1]`）：官方伺服器會把空的
+        // field 1 寫出來（`0a 00`，wrapper 恆為兩個 block），但 canonical proto3
+        // encoder 重新序列化時會省略預設值欄位——mitmproxy 類改包工具（MajsoulMax）
+        // 改寫過的 response 只剩 field 2 一個 block。按位置取會靜默拿到空 payload，
+        // authGame 形同沒收到、整局偵測不到（issue #2）。遊戲自己的 decoder 按欄位
+        // 號讀所以不受影響，症狀是「遊戲能玩、只有 Naki 失明」。
         guard type != .response else {
-            let payload = blocks.count >= 2 ? blocks[1].data : Data()
+            let payload = blocks.first { $0.fieldId == 2 && $0.wireType == 2 }?.data ?? Data()
             return .success(LiqiEnvelope(type: type, msgId: msgId, method: nil, payload: payload))
         }
 
+        // NOTIFY／REQUEST 這裡**刻意**維持位置取法：method（field 1）在這兩型恆非空，
+        // canonical encoder 不會省略它，兩個 block 的位置序＝欄位序；且 REQUEST 是
+        // Naki 在頁內先看到、任何 proxy 改寫都在其後。若日後出現「notify 被改包工具
+        // 重寫且 payload 全為預設值」的案例，這裡會以 notEnoughBlocks 顯式失敗
+        // （不是 response 那種靜默空 payload），到時再比照 response 改按欄位號取。
         guard blocks.count >= 2 else {
             return .failure(.notEnoughBlocks(type: type, blocks: blocks.count, byteCount: body.count))
         }
