@@ -29,7 +29,7 @@ window.__nakiPlugins.register({
 });
 ```
 
-放進 Naki 的插件目錄、在設定頁啟用、**重新載入頁面**，就會跑起來。
+放進 Naki 的插件目錄（macOS：`~/Library/Application Support/Naki/Plugins/<id>/`，非 sandbox），在**插件頁面**（工具列拼圖圖示）打開開關即可——**熱插拔，開關當下即時生效、免重新載入頁面**（2026-08-10 起）。頁面 reload 後也會照開關狀態自動還原。
 
 ---
 

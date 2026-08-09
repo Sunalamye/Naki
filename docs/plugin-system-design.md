@@ -303,7 +303,8 @@ Naki 目前完全不從檔案系統讀 JS（§0 #11），這是全新的能力�
    - **必須是第二個 script**：現有 `buildInjection` 是全有或全無（§0 #12）。把插件混進那一批，一個壞插件就會讓整個 Naki 停擺。第二個 script 失敗只影響插件。
    - 順序：bundled 模組必須先跑（插件要用 `window.__nakiPlugins`）。同一個 `WKUserContentController` 內，先 `addUserScript` 的先執行。
 3. **開關**：`SettingsStore` 新增 `enabledPluginIds: Set<String>`（UserDefaults，沿用 `SettingsStore.swift:82-121` 的既有 pattern）。**預設空集合——所有插件預設關閉**。
-4. **生效時機**：`WKUserScript` 只在 document start 注入 ⇒ **開關插件必須重新載入頁面才生效**。UI 要直說這件事，不要做成即時開關的樣子（`ReloadPageAction` 已存在，`NakiRuntime.swift:379`）。
+4. **生效時機**：~~`WKUserScript` 只在 document start 注入 ⇒ 開關插件必須重新載入頁面才生效~~
+   **已改為熱插拔（2026-08-10 實作，live 驗證通過）**：`WKUserScript` 仍是「首次載入」的路徑（頁面 reload 後照 `enabledPluginIds` 還原），但**開關當下**走另一條——`naki-plugins.js` 提供 runtime `setGrant`/`disable`，Swift 端 `NakiRuntime.setPluginEnabled` 在 toggle 時用 `evaluateJavaScript` 對**當前活著的頁面**注入 enable（`setGrant` + 插件源碼 → `register`）或 disable。`evaluateJavaScript` 是 App 注入、跑在頁面 main world，不受頁面 CSP 阻擋，所以**免 reload 即時生效**。live 實證：`register`/`disable` 後 `list()` 立刻反映，且 `[Plugin] registered/disabled` 進 log。持久化仍寫 `enabledPluginIds`（下次啟動照舊）。
 5. **不做**：市集、推薦、自動更新。§6.5 的「使用者指定來源的一次性匯入」不是發現機制——Naki 不內建任何來源，抓取只發生在使用者確認的當下。
 
 ### 6.5 從 URL 匯入（gist 或任意 HTTPS 位置）★ 2026-08-09 拍板新增
