@@ -53,6 +53,41 @@ notes 怎麼寫見下面「release notes 是寫出來的」。
 bump 之後有 `trap` 保護：任何一步失敗都會 `git checkout` 還原三個版本號檔案，
 不留下「版本已改、但沒 commit 也沒產物」的中間狀態（那會讓下次 preflight 擋下自己）。
 
+## 發錯版本號怎麼收（2026-08-09 實作過一次）
+
+2.10.0 這批含新功能（區服選擇），一開始發成了 `2.9.1`。semver 上新功能是 MINOR
+不是 PATCH，所以撤掉重發。
+
+**「別刪已 push 的 tag」是預設，不是絕對。** 那條規則保護的是「別人手上的 ref 跟遠端
+對不上」，所以刪之前先確認那個前提不成立：
+
+```bash
+gh release view v<版本> --repo Sunalamye/Naki --json assets,createdAt \
+  --jq '(.assets[] | "\(.name): 下載 \(.downloadCount) 次")'
+gh repo view Sunalamye/Naki --json forkCount --jq .forkCount
+```
+
+**下載數全 0 且 forks 0** 才刪。有任何一個資產被下載過，就別刪——改用下一個版本號。
+
+撤除的順序（release 先於 tag，否則 GitHub 上會留一個指向不存在 tag 的 release）：
+
+```bash
+gh release delete v<版本> --repo Sunalamye/Naki --yes
+git push --delete origin v<版本>
+git tag -d v<版本>
+```
+
+**`chore: Release v<舊版本>` 那個 commit 留著不動。** 它已經 push 出去了，改寫已推送的
+歷史要 force push，而那是全域硬規則。版本號的真相由 tag 決定——歷史裡留一個沒有 tag
+的 release commit，比 force push 乾淨。重發之後版本序列會長成
+`2.9.0 → (2.9.1 無 tag) → 2.10.0`，那是誠實的紀錄。
+
+重發就是正常跑一次 `release.sh`：它會從 `2.9.1` bump 到 `2.10.0`，PREV_TAG 自動回到
+`v2.9.0`（因為 v2.9.1 已不存在），changelog 連結不會指向死 tag。
+
+**時間成本**：刪 tag 是幾秒鐘的事，但重發要完整跑一遍 test + 兩個 build + 打包，
+約 8–10 分鐘。「改個 tag 應該很快」在這裡不成立。
+
 ## release notes 是寫出來的，不是 `git log` 倒出來的
 
 2.9.0 的第一版 notes 是機械生成的，長這樣：14 條 raw commit 標題倒在最上面
@@ -126,7 +161,7 @@ NEVER force push、NEVER 推別人的 main。
 
 - Build fails → `xcodebuild -project Naki.xcodeproj -list`
 - gh not authorized → `gh auth login`（Sunalamye 帳號）
-- Tag exists → 換版本號，別 `-d` 刪已 push 的 tag
+- Tag exists → 換版本號。**已 push 的 tag 預設不刪**，除非下面那個判準成立
 - release binary 少 AI 修正 → 漏了決策 gate 2；push MortalSwift + re-pin 再重發
 
 ---
