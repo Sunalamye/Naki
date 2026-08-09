@@ -12,12 +12,26 @@
 set -euo pipefail
 
 VERSION="${1:-}"
-YES="${2:-}"
 REPO="Sunalamye/Naki"
+YES=""
+NOTES_FILE=""
 
 if [ -z "$VERSION" ]; then
-  echo "用法：bash release.sh <version> [--yes]（version 不帶 v，例如 2.7.1）"; exit 1
+  echo "用法：bash release.sh <version> [--yes] [--notes-file <path>]"
+  echo "  version 不帶 v，例如 2.7.1"
+  echo "  --notes-file  release notes 的 markdown 檔（**建議帶**，見下）"
+  exit 1
 fi
+
+shift
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --yes)        YES="--yes" ;;
+    --notes-file) shift; NOTES_FILE="${1:-}" ;;
+    *)            echo "❌ 未知參數：$1"; exit 1 ;;
+  esac
+  shift
+done
 if [[ "$VERSION" == v* ]]; then
   echo "❌ version 不要帶 v 前綴（腳本自己加）：傳 ${VERSION#v} 就好"; exit 1
 fi
@@ -65,25 +79,34 @@ fi
 # ── 1. Release notes（自 PREV_TAG）────────────────────────────
 echo "▶ Release notes"
 RANGE="HEAD"; [ -n "$PREV_TAG" ] && RANGE="$PREV_TAG..HEAD"
-COMMITS=$(git log $RANGE --pretty=format:"- %s" 2>/dev/null || echo "")
-NOTES=$(cat <<EOF
-## Naki v$VERSION
 
-$COMMITS
-
+# **notes 應該是寫出來的，不是 `git log` 倒出來的。**
+#
+# 2.9.0 的第一版就是機械生成的：14 條 raw commit 標題倒在最上面（第一條是
+# `chore: bump 2.9.0`），下載表格被壓到最底下。點進 release 頁的人要的是
+# 「這版對我有什麼差別」跟「檔案在哪」，而 commit 標題兩者都答不出來——
+# 它是寫給改程式碼的人看的。
+#
+# 所以：`--notes-file` 帶一份寫好的 markdown 進來。沒帶的話**不會**退回去列
+# commit，只產出下載表格與 changelog 連結——寧可少講，也不要用雜訊充版面。
+if [ -n "$NOTES_FILE" ]; then
+  [ -f "$NOTES_FILE" ] || { echo "❌ 找不到 notes 檔：${NOTES_FILE}"; exit 1; }
+  NOTES=$(cat "$NOTES_FILE")
+  echo "  用 ${NOTES_FILE}（$(wc -l < "$NOTES_FILE" | tr -d ' ') 行）"
+else
+  NOTES=$(cat <<EOF
 ### 下載
 
 | 平台 | 檔案 | 安裝 |
 |---|---|---|
-| macOS | \`Naki.dmg\`（或 \`Naki.zip\`） | 開啟後把 Naki 拖進 Applications |
-| iOS | \`Naki-M.ipa\` | **未簽名**，需要自行簽名側載（AltStore / Sideloadly 等） |
-
-macOS 版是 ad-hoc 簽名，首次開啟要在「系統設定 → 隱私權與安全性」放行。
-iOS 版沒有 App Store 發布管道，IPA 刻意不含開發者憑證。
+| macOS 26+ | \`Naki.dmg\`（或 \`Naki.zip\`） | 開啟後把 Naki 拖進 Applications。ad-hoc 簽名，首次開啟要到「系統設定 → 隱私權與安全性」放行 |
+| iOS 17+ | \`Naki-M.ipa\` | **未簽名**，用 AltStore / Sideloadly 之類的工具自行簽名側載 |
 
 **完整 changelog**: https://github.com/$REPO/compare/${PREV_TAG:-HEAD}...v$VERSION
 EOF
 )
+  echo "  ⚠️  沒有 --notes-file：只會有下載表格與 changelog 連結，沒有版本說明"
+fi
 
 # ── 2. Test gate ─────────────────────────────────────────────
 # 測試壞掉不該發布。刻意只跑 NakiTests：`-scheme Naki` 會連 NakiUITests 一起跑，
@@ -218,3 +241,8 @@ gh release create "v$VERSION" --repo "$REPO" --title "Naki v$VERSION" \
 
 echo "════════ ✅ Released ════════"
 echo "🔗 https://github.com/$REPO/releases/tag/v$VERSION"
+if [ -z "$NOTES_FILE" ]; then
+  echo
+  echo "📝 這個 release 只有下載表格，沒有版本說明。補上："
+  echo "   gh release edit v$VERSION --repo $REPO --notes-file <檔案>"
+fi
