@@ -116,6 +116,8 @@ final class BundledCoreMLBot: MahjongBot {
             if isMyMeld {
                 botLog("[BundledCoreMLBot] 自己碰/吃後，需要選擇打牌")
                 let recommendations = await recommendationsFromCurrentMask()
+                // forced 不在這條路量：這裡的 mask 有多層合成 fallback
+                //（空 mask 時由手牌重建），不是引擎決策當下的合法集快照
                 return BotReaction(action: nil, recommendations: recommendations,
                                    source: "local")
             }
@@ -135,15 +137,16 @@ final class BundledCoreMLBot: MahjongBot {
         }
 
         // 更新推薦列表（Bot 已選擇動作，顯示所有可用選項及其機率）
-        let recommendations = await recommendationsAfterAction()
+        let (recommendations, legalCount) = await recommendationsAfterAction()
         return BotReaction(action: response, recommendations: recommendations,
-                           source: "local")
+                           source: "local", forced: legalCount == 1)
     }
 
     // MARK: - 推薦生成（自 NativeBotController 原樣搬移）
 
-    /// 動作後的推薦列 (async 因為 MortalBot 是 actor)
-    private func recommendationsAfterAction() async -> [Recommendation] {
+    /// 動作後的推薦列與完整合法動作數 (async 因為 MortalBot 是 actor)
+    private func recommendationsAfterAction() async -> (list: [Recommendation],
+                                                        legalCount: Int) {
         // ⭐ 獲取 mask 和機率 (await 因為是 actor)
         // Use getLastMask() which was saved BEFORE the action was committed
         let mask = await bot.getLastMask()
@@ -159,8 +162,10 @@ final class BundledCoreMLBot: MahjongBot {
             }
         }
 
-        // 按機率排序（高到低）
-        return recommendations.sorted { $0.probability > $1.probability }
+        // legalCount 量在截斷前的 mask 上，不是 recommendations.count——
+        // mapper 對個別索引可回 nil，映射後的數量分不出「強制」與「只映射出一個」
+        return (recommendations.sorted { $0.probability > $1.probability },
+                mask.filter { $0 == 1 }.count)
     }
 
     /// 使用當前 mask 更新推薦（用於碰/吃後，需要打牌的情況）

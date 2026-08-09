@@ -96,6 +96,37 @@ final class CloudBotTests: XCTestCase {
         XCTAssertNil(bot.cloudHost)
     }
 
+    /// 強制手（完整合法集單元素，最常見＝立直後的摸切）：本地回答、零 API
+    /// 呼叫、斷路器與 fallback 可視化全不動；下一個非強制決策照常問雲端
+    ///（Akagi #227/#228）
+    func test_forcedMove_answersLocally_withoutAPICall() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"#
+                + #""candidates":[],"model":"4p-x"}"#, [:]),
+        ])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+
+        let forced = try await decide(
+            bot, local: local,
+            reaction: BotReaction(
+                action: ["type": "dahai", "actor": 0, "pai": "1m", "tsumogiri": true],
+                recommendations: [Recommendation(tile: "1m", probability: 1.0,
+                                                 actionType: .discard)],
+                source: "local", forced: true))
+        XCTAssertEqual(forced?.source, "local")
+        XCTAssertEqual(forced?.recommendations.first?.displayTile, "1m")
+        XCTAssertTrue(CloudMockURLProtocol.captured.isEmpty, "強制手不得花 API call")
+        XCTAssertEqual(bot.cloudFallbackStreak, 0, "本地回答強制手不是 fallback")
+        XCTAssertFalse(bot.cloudDegraded)
+
+        // 跳過只限強制手本身：下一個非強制決策照常問雲端
+        let normal = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(normal?.source, "cloud:4p-x")
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 1)
+    }
+
     func test_incompleteWindow_neverCallsAPI() async throws {
         CloudMockURLProtocol.reset(script: [])
         let local = StubEngine()
@@ -217,6 +248,58 @@ final class CloudBotTests: XCTestCase {
         XCTAssertEqual(result?.source, "local",
                        "第二段失敗＝整個決策退回本地（不做半雲半本地拼裝，decisions D3）")
         XCTAssertEqual(result?.recommendations.first?.displayTile, "1m")
+
+        // 非 429 的第二段失敗＝伺服器不穩：斷路器要開，退避視窗內不再打 API
+        XCTAssertTrue(bot.cloudDegraded, "500 跟進失敗必須開斷路器")
+        let second = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(second?.source, "local")
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 2,
+                       "退避視窗內不得再付一次逾時")
+    }
+
+    /// 立直兩段是毫秒內連發：第二段 429＝burst rate-limit，不是伺服器掛
+    ///（Akagi #227）。短暫等待重試一次，成功則雲端決策照用、不留退化痕跡。
+    func test_reachSecondCall429_retriesOnce_andKeepsCloudDecision() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (200, #"{"reaction":{"type":"reach","actor":0},"#
+                + #""candidates":[{"action":"reach","prob":0.9}],"model":"4p-x"}"#, [:]),
+            (429, #"{"error":"rate limited"}"#, ["Retry-After": "0"]),
+            (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"9p","tsumogiri":false},"#
+                + #""candidates":[{"action":"dahai:9p","prob":0.8}],"model":"4p-x"}"#, [:]),
+        ])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+        let result = try await decide(bot, local: local, reaction: localDahai("1m"))
+
+        XCTAssertEqual(result?.source, "cloud:4p-x")
+        let firstDiscard = result?.recommendations.first { $0.actionType == .discard }
+        XCTAssertEqual(firstDiscard?.displayTile, "9p", "重試成功＝第二段解出的捨牌照用")
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 3, "429 之後恰重試一次")
+        XCTAssertFalse(bot.cloudDegraded, "burst 429 不是伺服器掛，不得留下退化痕跡")
+    }
+
+    /// 二連 429：這一手退回本地（D3 不變），但斷路器不開——rate limit 的
+    /// 伺服器是可達的，開退避會把接下來幾手一起賠進去（Akagi #227 的損害鏈）
+    func test_reachSecondCallDouble429_fallsBackLocally_withoutTrippingBreaker() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (200, #"{"reaction":{"type":"reach","actor":0},"candidates":[],"model":"4p-x"}"#, [:]),
+            (429, #"{"error":"rate limited"}"#, ["Retry-After": "0"]),
+            (429, #"{"error":"rate limited"}"#, ["Retry-After": "0"]),
+            (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"#
+                + #""candidates":[],"model":"4p-x"}"#, [:]),
+        ])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+
+        let first = try await decide(bot, local: local, reaction: localDahai("1m"))
+        XCTAssertEqual(first?.source, "local", "二連 429＝這一手退回本地（D3）")
+        XCTAssertFalse(bot.cloudDegraded, "429 不得開斷路器")
+
+        let second = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(second?.source, "cloud:4p-x", "下一手照常問雲端——斷路器沒開的直接證據")
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 4)
     }
 
     // MARK: 重連重放抑制
