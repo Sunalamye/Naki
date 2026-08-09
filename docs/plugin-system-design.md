@@ -470,6 +470,18 @@ Naki 的 listener 在 `new WebSocket()` 當下就註冊（`naki-websocket.js:106
 
 **要求**：動工前先寫一個獨立 probe（可用 `POST /js` 在 live 頁面上跑），確認 (a) `stopImmediatePropagation` 真的擋得住遊戲的 handler、(b) 合成 `MessageEvent` 遊戲吃得下、(c) `ws.onmessage = fn` 這種寫法也涵蓋得到。probe 綠了才寫實作。
 
+**Probe 結果（2026-08-10，live 頁面、無對局）：通用機制綠，遊戲特定驗證待對局。**
+
+| 項 | 結果 | 說明 |
+|---|---|---|
+| (a) capture 階段 `stopImmediatePropagation` 擋後註冊 handler | ✅ `true` | 在 dummy `EventTarget` 上，capture 的 stop 擋掉了 bubble handler |
+| (b) 合成 `MessageEvent` 帶任意長度 ArrayBuffer | ✅ `true` | `new MessageEvent('message',{data:buf})` 的 `data.byteLength` 正確 |
+| (c) `onmessage = fn` 涵蓋 | ✅ `true` | dispatch 合成 event 後 onmessage 收得到 |
+
+**但這是 dummy `EventTarget`，不是真的遊戲 WebSocket + 遊戲 handler。** §7.5 要的 (a)「擋得住**遊戲的** handler」、(b)「**遊戲吃得下**」必須在**有對局**的真連線上驗——現在沒有對局（bot inactive）驗不到那一段。
+
+**決定：通用機制成立，但 Phase 4 動主路徑（做壞了 Naki 整個瞎掉）不在缺少「對局中真連線驗證」時硬做。** 完整實作要在有對局的 session 上重跑 probe（對真 handler）綠了才寫。v1 目前只支援等長 receive 改寫（§7.4），這是設計文件自己的 gate，不是省略。
+
 ### 7.6 msgId：與既有 60000 號段的相處
 
 有**兩處**現行邏輯以 60000 為界判斷「這一筆是遊戲自己送的」（§0 #14）：
