@@ -246,10 +246,40 @@ HTTP request、MCP `tools/call`、連線錯誤改走它。
 - `.help` 在 iPhone 沒有 UI 效果（`LogPanel` 早有 `#if os(macOS)` 慣例）
 - 狀態列是純顯示元件，不該吃掉牌桌的觸控
 
+### 2026-08-09 補：模擬器會收到「沒有人送出」的事件
+
+2.9.0 仍復現（存活 41 秒，堆疊與上面逐格相同）。同一輪測試裡另外抓到一件事，
+它讓「模擬器環境」這個方向具體了：
+
+**在完全沒有互動的情況下，SwiftUI 的 Button action 會被觸發。** 實證是新加的區服
+選擇畫面——`print` 顯示 `row tapped: jp` 與確認鈕的 `onConfirm` 各自執行，而那段時間
+只有 `simctl launch` 與 `sleep`，沒有任何點擊或按鍵指令。
+
+成因是模擬器的**硬體鍵盤直通**：`osascript ... activate` 把 Simulator 帶到前景之後，
+Mac 上的按鍵會送進模擬器，變成 iOS 的鍵盤事件，再經 SwiftUI 的鍵盤導覽移動焦點、
+觸發按鈕。關掉就不再發生：
+
+```bash
+defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+# 還原：defaults delete com.apple.iphonesimulator ConnectHardwareKeyboard
+```
+
+**這對崩潰的意義**：崩潰堆疊正是**在派送事件時**炸的（`sendEvent` →
+`_delayTouchesForEvent`）。模擬器上存在一條非預期的事件流，剛好解釋了「同一份程式碼、
+同一台模擬器，結果不一致」——輸入本身就不一致。使用者的判斷也是「那是模擬器的問題」。
+
+**但這不等於真機沒有。** 沒有排除的兩件事：`DecisionHUDTouchTests` 註解裡「使用者實際
+回報的崩潰觸發點」那句沒有註明是真機還是模擬器；而上面那條 accessibility 假設
+（真機不開 VoiceOver 可能碰不到）同樣仍未驗證。
+
+**方法上的教訓再加一條**：在模擬器上測 UI，先確認**輸入是乾淨的**。以為在測程式碼，
+其實在測一條自己送進去的幽靈事件流——而且它會偽裝成間歇性 bug。
+
 ### 下一步
 
 建立崩潰率再談因果：同一條測試連跑 10 次以上，記錄崩潰次數，然後才比較「有/無 HUD」
-或「有/無 `.animation`」。在那之前不要再宣稱任何根因。
+或「有/無 `.animation`」。跑之前先關掉硬體鍵盤直通，否則測的是被污染的輸入。
+在那之前不要再宣稱任何根因。
 
 ## 截圖 API 的能力邊界
 
