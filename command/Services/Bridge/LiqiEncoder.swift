@@ -207,8 +207,16 @@ nonisolated final class LiqiMsgIdAllocator: @unchecked Sendable {
 
     /// 配發區段下界（含）
     static let rangeStart: UInt16 = 60000
-    /// 配發區段上界（含）；配發到這個值之後回捲到 `rangeStart`
-    static let rangeEnd: UInt16 = 65500
+    /// 配發區段上界（含）；配發到這個值之後回捲到 `rangeStart`。
+    ///
+    /// **60000–63999 是 Naki 自送，64000–65500 保留給插件注入**（§7.6）。
+    /// 兩處以 60000 為界的守衛（`naki-websocket.js:400`、`LiqiParser` 的
+    /// `ObservedMatchSids`）一個字都不用改——插件送的仍然 `>= 60000`，仍不會
+    /// 被誤認成遊戲自己送的；同時 Naki 又能分辨「這筆是我送的（<64000）還是插件送的」。
+    static let rangeEnd: UInt16 = 63999
+    /// 插件注入的 msgId 區段（JS 端 naki-plugins.js 自己配發，不經這個 allocator）
+    static let pluginRangeStart: UInt16 = 64000
+    static let pluginRangeEnd: UInt16 = 65500
 
     private let lock = NSLock()
     private var current: UInt16

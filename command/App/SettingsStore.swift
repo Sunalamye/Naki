@@ -103,6 +103,19 @@ final class SettingsStore {
         }
     }
 
+    nonisolated static let pluginsMayModifyOutboundKey = "naki.plugins.mayModifyOutbound"
+
+    /// L3 總開關（§8.1）：插件能不能送出／改寫 Liqi request（用你的帳號送遊戲動作）。
+    /// **預設 false**——即使插件有 injectSend/rewriteSend capability，總開關關著就一律拒絕。
+    /// 這對應 CLAUDE.md「送 Liqi request 前先確認」；開啟前 UI 要一次性確認。
+    var pluginsMayModifyOutbound: Bool = UserDefaults.standard
+        .bool(forKey: SettingsStore.pluginsMayModifyOutboundKey) {
+        didSet {
+            guard pluginsMayModifyOutbound != oldValue else { return }
+            UserDefaults.standard.set(pluginsMayModifyOutbound, forKey: Self.pluginsMayModifyOutboundKey)
+        }
+    }
+
     /// 插件設定值（§7.10a）。key = `plugin.<id>.<key>`，值只有 String/Double/Bool。
     /// 分開存（不進 `enabledPluginIds`），命名空間隔離避免插件之間互撞。
     nonisolated static func pluginSettingKey(_ pluginId: String, _ key: String) -> String {

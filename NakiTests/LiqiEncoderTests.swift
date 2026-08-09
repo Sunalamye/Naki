@@ -288,12 +288,14 @@ final class LiqiEncoderTests: XCTestCase {
     }
 
     func testAllocatorWrapsAtRangeEnd() {
+        // 用常量而非寫死數字：§7.6 把 rangeEnd 由 65500 收窄為 63999（64000–65500 留給插件），
+        // 這個測試不該因為區段調整就假紅。
         let allocator = LiqiMsgIdAllocator(start: LiqiMsgIdAllocator.rangeEnd - 1)
 
-        XCTAssertEqual(allocator.next(), 65499)
-        XCTAssertEqual(allocator.next(), 65500)
-        XCTAssertEqual(allocator.next(), 60000, "到 65500 之後回捲")
-        XCTAssertEqual(allocator.next(), 60001)
+        XCTAssertEqual(allocator.next(), LiqiMsgIdAllocator.rangeEnd - 1)
+        XCTAssertEqual(allocator.next(), LiqiMsgIdAllocator.rangeEnd)
+        XCTAssertEqual(allocator.next(), LiqiMsgIdAllocator.rangeStart, "到 rangeEnd 之後回捲")
+        XCTAssertEqual(allocator.next(), LiqiMsgIdAllocator.rangeStart + 1)
     }
 
     func testAllocatorClampsOutOfRangeStart() {

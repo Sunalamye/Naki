@@ -90,6 +90,7 @@ final class NakiRuntime {
         let settingsStore = settings
         let pluginInjection = PluginRegistry.buildInjectionScript(
             descriptors: descriptors, enabled: settings.enabledPluginIds,
+            mayModifyOutbound: settings.pluginsMayModifyOutbound,
             overridesFor: { id in
                 guard let schema = descriptors.first(where: { $0.id == id })?.manifest?.settings
                 else { return [:] }
@@ -402,13 +403,24 @@ final class NakiRuntime {
             let overrides = descriptor.manifest?.settings.map {
                 settings.pluginSettingOverrides(pluginId: id, keys: Array($0.keys))
             } ?? [:]
-            script = PluginRegistry.enableScript(for: descriptor, overrides: overrides)
+            script = PluginRegistry.enableScript(for: descriptor, overrides: overrides,
+                                                mayModifyOutbound: settings.pluginsMayModifyOutbound)
         } else {
             script = PluginRegistry.disableScript(id: id)
         }
         guard let script else { return }
         Task { [weak self] in
             _ = try? await self?.session.callJavaScript(script)
+        }
+    }
+
+    /// L3 總開關（§8.1）：持久化 + 對當前頁面即時注入新值（免 reload）。
+    /// 呼叫端（UI）負責在開啟前做一次性確認對話。
+    func setPluginsMayModifyOutbound(_ on: Bool) {
+        settings.pluginsMayModifyOutbound = on
+        let js = "window.__nakiPluginsMayModifyOutbound = \(on ? "true" : "false");"
+        Task { [weak self] in
+            _ = try? await self?.session.callJavaScript(js)
         }
     }
 

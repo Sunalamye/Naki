@@ -244,6 +244,7 @@ nonisolated enum PluginRegistry {
     /// 插件間的語法隔離（每插件一個 WKUserScript）留待 Phase 2。
     static func buildInjectionScript(descriptors: [PluginDescriptor],
                                      enabled: Set<String>,
+                                     mayModifyOutbound: Bool = false,
                                      overridesFor: (String) -> [String: Any] = { _ in [:] }) -> String? {
         let active = descriptors.filter { $0.isValid && enabled.contains($0.id) }
         guard !active.isEmpty else { return nil }
@@ -262,6 +263,7 @@ nonisolated enum PluginRegistry {
 
         var parts: [String] = []
         parts.append("// === Naki 插件注入（第二個 WKUserScript，共 \(active.count) 個）===")
+        parts.append("window.__nakiPluginsMayModifyOutbound = \(mayModifyOutbound ? "true" : "false");")
         parts.append("window.__nakiPluginGrants = \(grantsJSON);")
         for d in active {
             guard let source = d.entrySource else { continue }
@@ -304,12 +306,14 @@ nonisolated enum PluginRegistry {
     /// 熱**啟用**單一插件的 JS（`setGrant` 下發權威 grant，再跑插件源碼 → register 立即生效）。
     /// 函式體語意（fire-and-forget，不需 `return`）。插件源碼包在 try/catch，語法/執行錯不外溢。
     static func enableScript(for descriptor: PluginDescriptor,
-                             overrides: [String: Any] = [:]) -> String? {
+                             overrides: [String: Any] = [:],
+                             mayModifyOutbound: Bool = false) -> String? {
         guard let manifest = descriptor.manifest,
               let source = descriptor.entrySource,
               let grantJSON = grantJSON(for: manifest, overrides: overrides) else { return nil }
         let idLit = jsStringLiteral(descriptor.id)
         return """
+        window.__nakiPluginsMayModifyOutbound = \(mayModifyOutbound ? "true" : "false");
         if (window.__nakiPlugins && window.__nakiPlugins.setGrant) {
           window.__nakiPlugins.setGrant(\(idLit), \(grantJSON));
           try {

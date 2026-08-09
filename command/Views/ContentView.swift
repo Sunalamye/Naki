@@ -1907,6 +1907,27 @@ struct PluginsPageView: View {
 
                 Divider()
 
+                // L3 總開關（§8.1）：預設關。開啟＝允許插件用你的帳號送遊戲動作。
+                Toggle(isOn: Binding(
+                    get: { naki.settings.pluginsMayModifyOutbound },
+                    set: { on in
+                        naki.settings.pluginsMayModifyOutbound = on
+                        let js = "window.__nakiPluginsMayModifyOutbound = \(on ? "true" : "false");"
+                        Task { _ = try? await naki.actions.executeJavaScript(js) }
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("允許插件送出遊戲動作（L3）").font(.caption).bold()
+                        Text("開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request。預設關閉。只在測試帳號、且你信任插件時開。")
+                            .font(.caption2)
+                            .foregroundColor(naki.settings.pluginsMayModifyOutbound ? .red : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .accessibilityIdentifier("plugins-may-modify-outbound-toggle")
+
+                Divider()
+
                 Text("**安裝插件＝信任其作者。** 插件與遊戲跑在同一個環境裡，惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上任何資料，Naki 無法阻止。只裝你信任的插件。開關**即時生效，免重新載入頁面**。")
                     .font(.caption)
                     .foregroundColor(.secondary)

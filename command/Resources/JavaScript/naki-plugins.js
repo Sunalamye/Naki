@@ -47,6 +47,46 @@
     var pendingMethods = new Map();
     var PENDING_LIMIT = 256;
 
+    // ---- L3 送出側（injectSend，§7.6/§7.7b）----
+    // 插件注入用 msgId 區段 64000–65500（Naki 自送收窄為 60000–63999）。
+    var pluginMsgId = 64000;
+    function nextPluginMsgId() {
+        var v = pluginMsgId;
+        pluginMsgId = (v >= 65500) ? 64000 : (v + 1);
+        return v;
+    }
+    // 插件注入的 msgId -> 發起插件 id（回應路由，§7.7b）
+    var injectedMsgIds = new Map();
+
+    function encodeVarint(n) {
+        var out = [];
+        n = n >>> 0;
+        while (n > 0x7f) { out.push((n & 0x7f) | 0x80); n = n >>> 7; }
+        out.push(n & 0x7f);
+        return out;
+    }
+
+    // 組 REQUEST envelope：[2][msgId LE 2B][0a][methodLen][method][12][payloadLen][payload]
+    // field1=method、field2=payload；REQUEST 無 XOR（§7.4 送出側協定事實）。
+    function buildRequestEnvelope(msgId, method, payload) {
+        var mb = [];
+        for (var i = 0; i < method.length; i++) mb.push(method.charCodeAt(i) & 0xff);
+        var out = [2, msgId & 0xff, (msgId >> 8) & 0xff];
+        out.push(0x0a); out = out.concat(encodeVarint(mb.length)).concat(mb);
+        out.push(0x12); out = out.concat(encodeVarint(payload.length));
+        for (var j = 0; j < payload.length; j++) out.push(payload[j] & 0xff);
+        return new Uint8Array(out);
+    }
+
+    function uint8ToBase64(u8) {
+        if (window.__nakiCore && window.__nakiCore.arrayBufferToBase64) {
+            return window.__nakiCore.arrayBufferToBase64(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
+        }
+        var bin = '';
+        for (var i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+        return btoa(bin);
+    }
+
     function pluginLog(id, msg) {
         try {
             sendToSwift('plugin_event', { id: id, kind: 'log', msg: String(msg) });
@@ -192,6 +232,38 @@
                 }
             };
         }
+
+        // L3：injectSend → ctx.sendRequest（送一筆 REQUEST）。受總開關把關。
+        if (caps.indexOf('injectSend') !== -1) {
+            ctx.sendRequest = function (method, payloadBytes) {
+                // 總開關（§8.1）：預設 false，關著一律拒——對應「送 Liqi request 前先確認」。
+                if (!window.__nakiPluginsMayModifyOutbound) {
+                    return { ok: false, reason: 'outbound_disabled' };
+                }
+                if (typeof method !== 'string' || !method) {
+                    return { ok: false, reason: 'bad_method' };
+                }
+                var payload = payloadBytes || new Uint8Array(0);
+                var msgId = nextPluginMsgId();
+                var envBytes = buildRequestEnvelope(msgId, method, payload);
+                var b64;
+                try { b64 = uint8ToBase64(envBytes); }
+                catch (e) { return { ok: false, reason: 'encode_failed' }; }
+
+                var ws = window.__nakiWebSocket;
+                var r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' };
+                if (!r || !r.success) {
+                    return { ok: false, reason: (r && r.reason) || 'send_failed' };
+                }
+                // 登記 msgId → 發起插件（§7.7b 回應路由）
+                injectedMsgIds.set(msgId, grant.__id);
+                if (injectedMsgIds.size > 256) {
+                    injectedMsgIds.delete(injectedMsgIds.keys().next().value);
+                }
+                pluginLog(grant.__id, 'sendRequest ' + method + ' msgId=' + msgId + '（送出，成功要看 RESPONSE）');
+                return { ok: true, msgId: msgId };
+            };
+        }
         return ctx;
     }
 
@@ -246,6 +318,22 @@
             rememberIfRequest(env, raw.direction);
             var method = resolveMethod(env, raw.direction);
             var isNaki = (env.msgId != null && env.msgId >= 60000);
+
+            // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
+            // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
+            if (raw.direction === 'receive' && env.msgId != null && injectedMsgIds.has(env.msgId)) {
+                var originId = injectedMsgIds.get(env.msgId);
+                injectedMsgIds.delete(env.msgId);
+                var origin = registry.get(originId);
+                if (origin && typeof origin.spec.onInjectResponse === 'function') {
+                    var rctx = makeCtx(raw, env, method, isNaki, origin.grant);
+                    rctx.inResponseTo = env.msgId;
+                    rctx.timedOut = false;
+                    try { origin.spec.onInjectResponse(rctx); }
+                    catch (e) { noteFailure(originId, e); }
+                }
+                return;   // 注入回應不進一般鏈
+            }
 
             // 建鏈：isNaki 走「只含宣告 observeNakiTraffic 的 observer」另一條，
             // 與一般鏈分開，同一則訊息永遠只屬於其中一條（契約 §7.7）。
