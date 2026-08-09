@@ -117,6 +117,37 @@ HTTP request、MCP `tools/call`、連線錯誤改走它。
 
 **未驗證**：本機雲端開關是關的，狀態卡沒跑過真資料。
 
+## 不要在含 WKWebView 的容器上放 `.animation(_:value:)`
+
+**決策**：iOS 版面的 HUD transition 由切換按鈕的 `withAnimation` 驅動，容器上不掛
+隱式動畫。
+
+**為什麼**：`.animation(_:value:)` 會套到整個子樹，包含 `AdaptiveNakiWebView`
+（WKWebView），而它自己帶一整組 UIGestureRecognizer。點雀魂登入頁的輸入框
+（鍵盤升起、safe area 劇烈變動）就崩：
+
+```
+*** -[__NSArrayM insertObject:atIndex:]: object cannot be nil
+3  UIKitCore  -[UIGestureRecognizer _delayTouchesForEvent:inPhase:]
+7  UIKitCore  -[UIWindow sendEvent:]
+```
+
+**怎麼證的**（重點在「怎麼證」，因為我前兩次診斷都錯）：
+
+- 先推測是 `.help()` 的 hover 註冊、以及狀態列浮層參與 hit-testing。**兩個都錯。**
+- XCUITest 的合成 tap／drag／長按**重現不了**——合成事件走 Source0，真實滑鼠點擊
+  走 Source1（`__CFMachPortPerform`），在 UIKit 內部是不同的注入路徑。看 crash log
+  最後幾格是 Source0 還是 Source1，能分辨這件事。
+- 真正重現的方式是**點 WebView 裡的 HTML input**（`app.webViews.textFields`）——
+  鍵盤升起才是觸發條件。
+- 然後二分法：其餘修正全保留、只把 `.animation` 加回去 → 立刻重現；拿掉 → 通過。
+
+回歸測試在 `Naki-MUITests/DecisionHUDTouchTests`。
+
+**順帶修好的設定問題**：`Naki-M` scheme 的 `<Testables>` 一直是空的，而
+`Naki-MUITests` target 被設成要編譯整個 `command/`、依賴卻不齊——**那個 target
+從來沒編譯成功過**，只是沒人跑所以沒發現。UI test 只 `import XCTest`，清掉即可。
+
 ## 截圖 API 的能力邊界
 
 **決策**：`windowScreenshot` 改成「有 attached sheet 就截 sheet」；**不**繞道 `screencapture`。
@@ -146,4 +177,4 @@ HTTP request、MCP `tools/call`、連線錯誤改走它。
 | 動作色仍是 7 色 | 紅同時是「槓」與「危險」 |
 | macOS toolbar 13 個控制 | 加了雲端開關後更擠；MCP Server 仍佔一級位置 |
 | 側欄下半空白 | `tehaiTiles` / `tsumoTile` / `recommendationsOplistSequence` 都還沒上畫面 |
-| iOS | 零實機驗證 |
+| iOS | Simulator 已驗（toolbar／HUD／空狀態／觸控回歸測試）；仍無真機 |
