@@ -200,7 +200,23 @@ struct GameSummaryDisclosure: View {
             .accessibilityIdentifier("game-summary-disclosure")
             .accessibilityLabel("牌局與模型資訊")
             .accessibilityValue(isExpanded ? "已展開" : "已收合")
-            .accessibilityHint("展開後顯示局況、四家點數、寶牌與模型來源")
+            .accessibilityHint("展開後顯示四家點數、寶牌與模型來源")
+
+            // 授權動作常駐在摘要條底下，不再藏進展開層。
+            //
+            // 它回答的是「現在能做什麼」——那跟局況同屬「此刻的狀態」，要點開才看得到
+            // 就等於每一手都要多一次互動。放進同一張卡片（而不是卡片外另起一塊）是因為
+            // 兩者是同一個資訊塊，多一圈邊框只會多吃 iOS 右側欄稀缺的垂直空間。
+            //
+            // `inGame` 是必要的：不在對局時六個 badge 全灰、永遠不會亮，常駐顯示只是
+            // 噪音——與「拔北只在三麻出現」同一個判斷。
+            if inGame {
+                Divider()
+                AuthorizedActionsRow(botStatus: botStatus)
+                    .padding(.horizontal, 10)
+                    .padding(.top, compact ? 7 : 9)
+                    .padding(.bottom, compact ? 8 : 10)
+            }
 
             if isExpanded {
                 Divider()
@@ -265,16 +281,15 @@ struct GameDetailsPanel: View {
 
             Divider()
 
+            // 授權動作**不在這裡**：它移到摘要條底下常駐顯示了（見
+            // `GameSummaryDisclosure`）。這裡再放一份就是同一份資料出現兩次，
+            // 而展開層本來的用途就是收那些「不必每手都看」的東西。
             group("模型與資料來源") {
                 pair("模型", botStatus.modelDisplayName)
                 pair("決策來源", botStatus.decisionSource)
                 pair("推論位置", botStatus.cloudHost ?? "本機 Core ML")
                 pair("雲端狀態", cloudState)
             }
-
-            Divider()
-
-            AuthorizedActionsRow(botStatus: botStatus)
         }
         .padding(compact ? 10 : 12)
     }
