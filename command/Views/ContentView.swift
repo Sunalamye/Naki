@@ -99,7 +99,11 @@ struct ContentView: View {
         .accessibilityIdentifier("autoplay-delay-stepper")
         .accessibilityLabel("自動打牌基準延遲")
         .accessibilityValue(String(format: "%.1f 秒", naki.settings.actionDelaySeconds))
+#if os(macOS)
+        // `.help` 只包 macOS：iOS 上 tooltip 只在有指標裝置時看得到，對 iPhone 是
+        // 多餘的 pointer 互動註冊。專案既有慣例就是這樣（見 `LogPanel` 的兩個 `.help`）。
         .help("送出前的模擬人類延遲基準；1.0s 為預設，向上更慢、向下更快（隨機分布保留）")
+#endif
     }
 
     /// 雲端推論快速開關。
@@ -115,7 +119,9 @@ struct ContentView: View {
             Image(systemName: cloudIconName)
                 .foregroundStyle(cloudIconTint)
         }
+#if os(macOS)
         .help(cloudToggleHelp)
+#endif
         .accessibilityIdentifier("toolbar-cloud-toggle")
         .accessibilityLabel("雲端推論")
         .accessibilityValue(cloudToggleHelp)
@@ -329,19 +335,38 @@ struct ContentView: View {
                         .accessibilityIdentifier("ios-decision-hud")
                 }
             }
-            .animation(.easeInOut(duration: 0.2), value: showGamePanel)
+            // ⚠️ **絕對不要**在這裡加 `.animation(_:value:)`。
+            //
+            // 它會把隱式動畫套到整個子樹，包含 `AdaptiveNakiWebView`（WKWebView），
+            // 而 WKWebView 自己帶一整組 UIGestureRecognizer。在 iOS 26 上，點雀魂
+            // 登入頁的輸入框（鍵盤升起 → safe area 劇烈變動）會直接崩：
+            //
+            //     *** -[__NSArrayM insertObject:atIndex:]: object cannot be nil
+            //     3  UIKitCore  -[UIGestureRecognizer _delayTouchesForEvent:inPhase:]
+            //     7  UIKitCore  -[UIWindow sendEvent:]
+            //
+            // 2026-08-09 用二分法證實：其餘修正全部保留、只把這一行加回去，
+            // `DecisionHUDTouchTests.testTappingWebViewTextFieldDoesNotCrash` 立刻
+            // 重現崩潰（app state 變成 notRunning）。拿掉就過。
+            //
+            // 動畫改由切換處的 `withAnimation` 驅動，只作用在 HUD 的 transition。
             .safeAreaInset(edge: .top) {
                 JSInjectionFailureBanner()
             }
             .safeAreaInset(edge: .top) {
                 LiqiParseFailureBanner()
             }
-            // 狀態列改為浮在畫面上但**可讀**：material 背景取代原本的 opacity 0.5，
-            // 並且不再 `allowsHitTesting(false)`——半透明到讀不清的文字沒有存在價值。
+            // 狀態列浮在畫面上但**可讀**：material 背景取代原本的 `opacity(0.5)`
+            // （半透明到讀不清的文字沒有存在價值）。
+            //
+            // `allowsHitTesting(false)` 要保留——它是純資訊顯示，沒有任何可點的東西，
+            // 卻疊在 WebView 上。先前改材質時把它拿掉了，那會讓它平白吃掉牌桌的觸控。
+            // （它**不是**上面那個崩潰的成因，二分法已排除；純粹是它本來就該有。）
             .overlay(alignment: .bottom) {
                 if !naki.store.statusMessage.isEmpty {
                     StatusBar()
                         .background(.ultraThinMaterial)
+                        .allowsHitTesting(false)
                 }
             }
             .navigationTitle("Naki")
@@ -385,7 +410,10 @@ struct ContentView: View {
 
         // 右側：決策 HUD 開關
         ToolbarItem(placement: .navigationBarTrailing) {
-            Button(action: { showGamePanel.toggle() }) {
+            Button {
+                // 動畫綁在這裡而不是容器上：容器那條會波及 WebView（見 iOSLayout 註解）
+                withAnimation(.easeInOut(duration: 0.2)) { showGamePanel.toggle() }
+            } label: {
                 Image(systemName: showGamePanel ? "sidebar.trailing" : "sidebar.right")
             }
             .accessibilityIdentifier("toolbar-game-panel-toggle")
