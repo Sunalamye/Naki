@@ -170,7 +170,44 @@
         if (grant.settings && typeof grant.settings === 'object') {
             ctx.settings = grant.settings;
         }
+
+        // Phase 2：rewriteReceive → ctx.replace（等長就地改寫）。
+        // 只在「有 rewriteReceive capability + receive 方向 + method 不在禁改名單」時掛。
+        // raw.bytes 是遊戲那份 buffer 的 view，set 就地改 ⇒ 遊戲與 Naki 都看到改後的。
+        var caps = grant.capabilities || [];
+        if (raw.direction === 'receive'
+            && caps.indexOf('rewriteReceive') !== -1
+            && !isForbiddenMethod(method, grant)) {
+            ctx.replace = function (newBytes) {
+                // 等長是 v1 硬約束（protobuf varint 長度前綴，改長度要連動所有外層）。
+                if (!newBytes || typeof newBytes.length !== 'number'
+                    || newBytes.length !== raw.bytes.length) {
+                    return false;   // fail-open：長度不等 ⇒ 不改、原樣通過
+                }
+                try {
+                    raw.bytes.set(newBytes);
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            };
+        }
         return ctx;
+    }
+
+    // §8.2 預設禁改名單：這些 method 是 Naki 判斷牌局的真相來源，改了畫面看不出來、
+    // 但會污染推薦與自動打牌。除非 manifest 明確在 rewriteAllow 逐一解除（§11 #5）。
+    var FORBIDDEN_METHODS = [
+        '.lq.ActionPrototype',
+        '.lq.FastTest.syncGame',
+        '.lq.NotifyGameEndResult'
+    ];
+    function isForbiddenMethod(method, grant) {
+        if (method == null) return true;
+        if (FORBIDDEN_METHODS.indexOf(method) === -1) return false;
+        // manifest 逐一解除：grant.rewriteAllow 含這個 method 才放行
+        var allow = grant.rewriteAllow || [];
+        return allow.indexOf(method) === -1;
     }
 
     var api = {
