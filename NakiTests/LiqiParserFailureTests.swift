@@ -242,6 +242,32 @@ final class LiqiParserFailureTests: XCTestCase {
         XCTAssertEqual(state.totalCount, 0, "正常 fixture 不得產生任何 fault")
     }
 
+    /// RESPONSE wrapper **沒有**空的 field 1（canonical proto3 encoder 的形狀）。
+    ///
+    /// 官方伺服器恆送 `0a 00 12 …`（空 method + payload，兩個 block），但 mitmproxy 類
+    /// 改包工具（MajsoulMax）重新序列化時會省略預設值欄位，wrapper 只剩 field 2。
+    /// payload 按位置取 `blocks[1]` 會靜默變成空 Data → authGame 形同沒收到、
+    /// start_game 不發、整局偵測不到（issue #2）。payload 必須按欄位號取。
+    func testAuthGameResponseWithoutEmptyMethodFieldStillStartsGame() {
+        let (bridge, state) = makeBridge()
+
+        _ = bridge.parse(authGameRequest(msgId: 53))
+
+        // 手工組 envelope：[3][msgId LE][field2=payload]——刻意不寫 field 1
+        let payload = LiqiEncoder.encodeFields([
+            .bytes(field: 3, value: packed([2, accountId, 3, 4]))
+        ])
+        var frame: [UInt8] = [LiqiMsgType.response.rawValue, 53, 0]
+        frame += LiqiEncoder.encodeLengthDelimited(field: 2, bytes: payload)
+
+        let events = bridge.parse(Data(frame))
+
+        XCTAssertEqual(events?.first?["type"] as? String, "start_game")
+        XCTAssertEqual(events?.first?["id"] as? Int, 1, "accountId 在 seatList 的第 1 位")
+        XCTAssertNil(state.blocking)
+        XCTAssertEqual(state.totalCount, 0, "合法的 canonical 形狀不得產生 fault")
+    }
+
     func testNormalNewRoundStillEmitsStartKyoku() {
         let (bridge, state) = makeBridge()
         authenticate(bridge)
