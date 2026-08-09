@@ -53,9 +53,14 @@ final class NakiRuntime {
     /// View 層看得到的副作用集合（一次組好，之後不變）
     private(set) var actions = NakiActions()
 
+    /// 啟動時掃描到的插件（含無效的，供設定頁顯示原因）。掃描只讀檔、不執行插件程式碼。
+    /// 開關插件要重新載入頁面才生效，所以這份快照在頁面生命週期內不變。
+    private(set) var pluginDescriptors: [PluginDescriptor] = []
+
     /// 注入 Scene 的值
     var environment: NakiEnvironment {
-        NakiEnvironment(store: store, settings: settings, actions: actions)
+        NakiEnvironment(store: store, settings: settings, actions: actions,
+                        pluginDescriptors: pluginDescriptors)
     }
 
     // MARK: - 組裝
@@ -78,10 +83,18 @@ final class NakiRuntime {
             settings?.cloudConfig
         }
 
+        // ①-c 插件：掃描目錄，產出已啟用插件的注入源碼（掃描只讀檔，不執行任何插件程式碼）。
+        //     預設 `enabledPluginIds` 空 ⇒ 沒有啟用插件 ⇒ injection 為 nil ⇒ 不加第二個 script。
+        let descriptors = PluginRegistry.scan()
+        pluginDescriptors = descriptors
+        let pluginInjection = PluginRegistry.buildInjectionScript(
+            descriptors: descriptors, enabled: settings.enabledPluginIds)
+
         // ② 頁面側：JS bridge 的收件人就是 coordinator 的 WS handler
         session = WebSession(store: store,
                              settings: settings,
-                             messageHandler: coordinator.websocketHandler)
+                             messageHandler: coordinator.websocketHandler,
+                             pluginInjection: pluginInjection)
 
         // ③ 互相接線（兩邊都不認得對方的型別，只認得協定）
         coordinator.observer = self

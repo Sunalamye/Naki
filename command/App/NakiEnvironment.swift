@@ -25,11 +25,18 @@ struct NakiEnvironment {
     var settings: SettingsStore
     var actions: NakiActions
 
-    /// 正式路徑：由 `NakiRuntime` 顯式提供三者。
-    init(store: GameStore, settings: SettingsStore, actions: NakiActions) {
+    /// 掃描到的插件（唯讀顯示用；開關寫進 `settings.enabledPluginIds`）。
+    /// 預設空——`#Preview` 與未接線的情況都不該炸。
+    var pluginDescriptors: [PluginDescriptor]
+
+    /// 正式路徑：由 `NakiRuntime` 顯式提供。`pluginDescriptors` 給預設值，
+    /// 這樣現有呼叫端不必全部改。
+    init(store: GameStore, settings: SettingsStore, actions: NakiActions,
+         pluginDescriptors: [PluginDescriptor] = []) {
         self.store = store
         self.settings = settings
         self.actions = actions
+        self.pluginDescriptors = pluginDescriptors
     }
 
     /// **預設值只給 Preview。**
@@ -47,6 +54,7 @@ struct NakiEnvironment {
         self.store = GameStore()
         self.settings = SettingsStore()
         self.actions = NakiActions()
+        self.pluginDescriptors = []
     }
 }
 

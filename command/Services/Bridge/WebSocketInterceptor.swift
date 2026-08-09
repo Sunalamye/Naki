@@ -163,10 +163,16 @@ class WebSocketInterceptor {
     /// 而 Unity WebGL 客戶端沒有這些物件，所以那 2,900 行在 runtime 只會靜默失敗。
     /// 注入腳本是 `forMainFrameOnly: false`，每個 iframe 都要 parse 一次，留著只有成本。
     ///
-    /// 順序仍然重要：`naki-websocket` 會取 `naki-core` 的 base64／sendToSwift。
+    /// 順序仍然重要：`naki-websocket` 會取 `naki-core` 的 base64／sendToSwift；
+    /// `naki-plugins` 提供 `window.__nakiPlugins`，`naki-websocket` 的 handleMessage
+    /// 在中段呼叫它的 `dispatch`——runtime 查找，所以載入順序排在最後也安全。
+    ///
+    /// 這三個是 **bundled**（全有或全無，見 `buildInjection`）。第三方插件的原始碼
+    /// 不在這裡——它們走「第二個 WKUserScript」，任一插件壞掉只停用該插件，不影響本體。
     static let jsModules = [
         "naki-core",
-        "naki-websocket"
+        "naki-websocket",
+        "naki-plugins"
     ]
 
     /// 從 Bundle 載入單一 JavaScript 模組。
@@ -294,6 +300,7 @@ class WebSocketInterceptor {
 /// | `websocket_close` | `socketId: Int`, `code: Int`, `reason: String`, `isMajsoul: Bool` | 雀魂線才從 `connectedSockets` 移除；全空則轉 disconnected |
 /// | `websocket_error` | `socketId: Int`, `error: String` | log |
 /// | `force_reconnect` | `closedCount: Int` | log：接下來那幾筆 `websocket_close` 是 Naki 自己關的 |
+/// | `plugin_event` | `id: String`, `kind: String`, `msg: String` | 插件經 `ctx.log()` 送出的事件（唯一的插件→Swift 通道，見 `naki-plugins.js`） |
 ///
 /// 兩個機械保證，缺一契約就會再漂：
 /// 1. `WebSocketMessageHandler` 的 switch **不寫 `default`**——新增 case 沒處理就編不過。
@@ -314,6 +321,7 @@ nonisolated enum BridgeMessageType: String, CaseIterable, Sendable {
     case websocketClose = "websocket_close"
     case websocketError = "websocket_error"
     case forceReconnect = "force_reconnect"
+    case pluginEvent = "plugin_event"
 }
 
 /// 未知／畸形訊息的 warning 去重器。
@@ -434,6 +442,9 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
 
         case .forceReconnect:
             handleForceReconnect(data)
+
+        case .pluginEvent:
+            handlePluginEvent(data)
         }
     }
 
@@ -619,6 +630,18 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
 
         wsLog("[WS] Naki 主動強制重連：已關閉 \(closedCount) 條連線"
             + "（接下來的 websocket_close 是預期內的）", level: .event)
+    }
+
+    /// 插件經 `ctx.log()` 送出的事件。
+    ///
+    /// **第三方插件不可自呼 `sendToSwift`**（未知 type 會被 `warnUnknown` 丟掉）。
+    /// bundled 的 `naki-plugins.js` 用這個固定 type `plugin_event` 統一轉發，
+    /// 這是唯一的插件→Swift 通道。data schema：`id` / `kind` / `msg`。
+    /// 只記插件 id 與訊息，**不記錄封包內容**（可能含 session token，CLAUDE.md 第 8 條）。
+    private func handlePluginEvent(_ data: [String: Any]) {
+        guard let id = data["id"] as? String else { return }
+        let msg = data["msg"] as? String ?? ""
+        wsLog("[Plugin] \(id)：\(msg)")
     }
 
     // MARK: - Public Methods

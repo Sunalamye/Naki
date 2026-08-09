@@ -88,6 +88,21 @@ final class SettingsStore {
         }
     }
 
+    // MARK: - 已啟用的插件
+
+    nonisolated static let enabledPluginIdsKey = "naki.plugins.enabledIds"
+
+    /// 已啟用插件的 id 集合。**預設空集合——所有插件預設關閉**（§6.4）。
+    /// 改變只在下次頁面載入生效（WKUserScript 只在 document start 注入）。
+    var enabledPluginIds: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: SettingsStore.enabledPluginIdsKey) ?? []) {
+        didSet {
+            guard enabledPluginIds != oldValue else { return }
+            UserDefaults.standard.set(Array(enabledPluginIds).sorted(),
+                                      forKey: Self.enabledPluginIdsKey)
+        }
+    }
+
     // MARK: - 雀魂區服
 
     nonisolated static let majsoulServerKey = "MajsoulServer"

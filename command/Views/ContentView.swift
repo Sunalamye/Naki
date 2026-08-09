@@ -1214,6 +1214,69 @@ struct AdvancedSettingsSheet: View {
     /// 開關又排在 key 上面——捲下去貼完 key 就不會再往上看，於是得到一個看起來配置好、
     /// 行為卻完全是本地模型的設定（Akagi #221 的形狀）。兩欄讓開關與其結果同時在畫面上。
     /// iOS 維持單欄捲動：窄畫面放不下兩欄。
+    /// 插件清單（實驗）。有效插件給啟用開關（寫進 `settings.enabledPluginIds`）；
+    /// 無效插件顯示原因（紅字）。開關要重新載入頁面才生效。
+    @ViewBuilder
+    private var pluginSettingsBox: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                if naki.pluginDescriptors.isEmpty {
+                    Text("沒有安裝插件。放進 ~/Library/Application Support/Naki/Plugins/<id>/ 後重啟。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(naki.pluginDescriptors, id: \.id) { descriptor in
+                        pluginRow(descriptor)
+                        if descriptor.id != naki.pluginDescriptors.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+
+                Divider()
+
+                Text("插件與遊戲跑在同一個環境裡——**安裝插件等於信任其作者**，惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上任何資料，Naki 無法阻止。只裝你信任的插件。開關插件需**重新載入頁面**才生效。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } label: {
+            Label("插件（實驗）", systemImage: "puzzlepiece.extension")
+        }
+    }
+
+    @ViewBuilder
+    private func pluginRow(_ descriptor: PluginDescriptor) -> some View {
+        if let manifest = descriptor.manifest {
+            Toggle(isOn: Binding(
+                get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
+                set: { on in
+                    if on { naki.settings.enabledPluginIds.insert(descriptor.id) }
+                    else { naki.settings.enabledPluginIds.remove(descriptor.id) }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(manifest.name).font(.body)
+                    Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    if let license = manifest.license {
+                        Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(descriptor.id).font(.body)
+                Text(descriptor.failure?.text ?? "無效插件")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var settingsForm: some View {
 #if os(macOS)
         HStack(alignment: .top, spacing: 16) {
@@ -1308,6 +1371,9 @@ struct AdvancedSettingsSheet: View {
             } label: {
                 Label("畫面", systemImage: "eye.slash")
             }
+
+            // 插件（實驗）
+            pluginSettingsBox
 
             // Bot 管理
             GroupBox {

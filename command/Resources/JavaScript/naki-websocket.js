@@ -417,6 +417,26 @@
     /**
      * 處理 WebSocket 訊息
      */
+    // 把訊息交給插件 hook（naki-plugins.js，若已載入）。
+    //
+    // 位置：在 nakiNicknameMask.observe 之後、arrayBufferToBase64／sendToSwift 之前
+    // ——這樣 Phase 2 的等長 rewriteReceive 就地改 bytes 後，Swift 收到的是改後的。
+    // 插件層自己做解析、白名單、鏈式與錯誤隔離；這裡再包一層 try/catch，
+    // 保證「插件出錯絕不影響封包本身」（fail-open）。
+    function dispatchToPlugins(direction, wsId, info, bytes) {
+        if (!window.__nakiPlugins || typeof window.__nakiPlugins.dispatch !== 'function') return;
+        try {
+            window.__nakiPlugins.dispatch({
+                direction: direction,
+                wsId: wsId,
+                url: info ? info.url : '',
+                bytes: bytes
+            });
+        } catch (e) {
+            console.error('[Naki WS] 插件 dispatch 錯誤:', e);
+        }
+    }
+
     function handleMessage(ws, wsId, data, direction, isMajsoul) {
         // 只處理雀魂連接的訊息
         if (!isMajsoul) return;
@@ -437,8 +457,10 @@
 
         try {
             if (data instanceof ArrayBuffer) {
-                nakiNicknameMask.observe(new Uint8Array(data), direction);
-                // ArrayBuffer：轉成 Base64
+                const pluginBytes = new Uint8Array(data);
+                nakiNicknameMask.observe(pluginBytes, direction);
+                dispatchToPlugins(direction, wsId, info, pluginBytes);
+                // ArrayBuffer：轉成 Base64（pluginBytes 是 data 的 view，插件若就地改過這裡編碼的是改後的）
                 const base64 = arrayBufferToBase64(data);
                 sendToSwift('websocket_message', {
                     socketId: wsId,
@@ -453,6 +475,7 @@
                 //  連帶讓 LiqiParser 收不到 REQUEST、無法配對 RESPONSE）
                 const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
                 nakiNicknameMask.observe(view, direction);
+                dispatchToPlugins(direction, wsId, info, view);
                 sendToSwift('websocket_message', {
                     socketId: wsId,
                     direction: direction,

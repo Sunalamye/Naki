@@ -117,7 +117,8 @@ final class WebSession {
     // MARK: - 建立
 
     /// - Parameter messageHandler: JS bridge 的收件人（`NakiWebCoordinator.websocketHandler`）
-    init(store: GameStore, settings: SettingsStore, messageHandler: WKScriptMessageHandler) {
+    init(store: GameStore, settings: SettingsStore, messageHandler: WKScriptMessageHandler,
+         pluginInjection: String? = nil) {
         self.store = store
         self.settings = settings
 
@@ -129,6 +130,16 @@ final class WebSession {
         // 見 `WebSocketInterceptor.createUserScript()`。
         if let websocketScript = WebSocketInterceptor.createUserScript() {
             controller.addUserScript(websocketScript)
+
+            // 第二個 WKUserScript：已啟用的第三方插件。**必須在 bundled 之後**——
+            // 插件要用 bundled 提供的 `window.__nakiPlugins`；同一 controller 內先加先執行。
+            // 只有 bundled 注入成功才加插件（bundled 都沒有，插件也無從掛起）。
+            if let pluginInjection, !pluginInjection.isEmpty {
+                controller.addUserScript(WKUserScript(
+                    source: pluginInjection,
+                    injectionTime: .atDocumentStart,
+                    forMainFrameOnly: false))
+            }
         }
 
         // ⚠️ 全專案唯一的版本分歧點（回歸鎖：`PlatformDivergenceTests`）
