@@ -48,13 +48,17 @@ final class AutoPlayAvailabilityTests: XCTestCase {
 
     func testSupportedPathKeepsAllModes() {
         XCTAssertEqual(AutoPlayAvailability.modes(autoPlaySupported: true),
-                       [.off, .recommend, .auto])
+                       [.off, .recommend, .auto, .fullAuto])
     }
 
+    /// 不支援自動送出的路徑上，「自動」與「全自動」都不該出現。
+    ///
+    /// 「全自動」比「自動」更嚴重：它除了送出動作，還會主動把帳號排進伺服器隊列。
     func testUnsupportedPathDropsAuto() {
         let modes = AutoPlayAvailability.modes(autoPlaySupported: false)
         XCTAssertEqual(modes, [.off, .recommend])
         XCTAssertFalse(modes.contains(.auto), "不支援的路徑上不該有「自動」這個選項")
+        XCTAssertFalse(modes.contains(.fullAuto), "更不該有「全自動」")
     }
 
     func testUnavailableReasonIsUserFacing() {

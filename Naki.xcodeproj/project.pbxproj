@@ -55,12 +55,6 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		ECAAD45C2EE1BAD30056F965 /* Exceptions for "Naki" folder in "Naki-MUITests" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-			);
-			target = ECAAD4312EE1BAB60056F965 /* Naki-MUITests */;
-		};
 		ECAAD5072EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -84,6 +78,7 @@
 				Services/Bot/AutoPlayEngine.swift,
 				Services/Bot/AutoPlayGate.swift,
 				Services/Bot/AutoPlayMode.swift,
+				Services/Bot/AutoRematchEngine.swift,
 				Services/Bot/BundledCoreMLBot.swift,
 				Services/Bot/CloudBot.swift,
 				Services/Bot/CloudBreaker.swift,
@@ -105,10 +100,12 @@
 				Services/Bridge/LiqiResponseStore.swift,
 				Services/Bridge/LiqiTile.swift,
 				Services/Bridge/MajsoulBridge.swift,
+				Services/Bridge/MatchModeTable.swift,
 				Services/Bridge/MJAIEventStream.swift,
 				Services/Bridge/NakiWebCoordinator.swift,
 				Services/Bridge/NakiWebSocketScript.swift,
 				Services/Bridge/ObservedMatchModes.swift,
+				Services/Bridge/ObservedMatchSids.swift,
 				Services/Bridge/SelfActionEchoTracker.swift,
 				Services/Bridge/SerialEventIntake.swift,
 				Services/Bridge/WebSocketInterceptor.swift,
@@ -142,12 +139,6 @@
 			);
 			target = EC30765D2EDAFD2300216E0C /* Naki */;
 		};
-		ECAAD5082EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki-MUITests" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-			);
-			target = ECAAD4312EE1BAB60056F965 /* Naki-MUITests */;
-		};
 		ECAAD50B2EE1BB260056F965 /* Exceptions for "command" folder in "Naki-M" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -170,6 +161,7 @@
 				Services/Bot/AutoPlayEngine.swift,
 				Services/Bot/AutoPlayGate.swift,
 				Services/Bot/AutoPlayMode.swift,
+				Services/Bot/AutoRematchEngine.swift,
 				Services/Bot/BundledCoreMLBot.swift,
 				Services/Bot/CloudBot.swift,
 				Services/Bot/CloudBreaker.swift,
@@ -191,10 +183,12 @@
 				Services/Bridge/LiqiResponseStore.swift,
 				Services/Bridge/LiqiTile.swift,
 				Services/Bridge/MajsoulBridge.swift,
+				Services/Bridge/MatchModeTable.swift,
 				Services/Bridge/MJAIEventStream.swift,
 				Services/Bridge/NakiWebCoordinator.swift,
 				Services/Bridge/NakiWebSocketScript.swift,
 				Services/Bridge/ObservedMatchModes.swift,
+				Services/Bridge/ObservedMatchSids.swift,
 				Services/Bridge/SelfActionEchoTracker.swift,
 				Services/Bridge/SerialEventIntake.swift,
 				Services/Bridge/WebSocketInterceptor.swift,
@@ -254,7 +248,6 @@
 		EC3076602EDAFD2300216E0C /* Naki */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				ECAAD45C2EE1BAD30056F965 /* Exceptions for "Naki" folder in "Naki-MUITests" target */,
 				ECAAD45D2EE1BAD30056F965 /* Exceptions for "Naki" folder in "Compile Sources" phase from "Naki-MUITests" target */,
 			);
 			path = Naki;
@@ -280,7 +273,6 @@
 			exceptions = (
 				ECAAD5072EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki" target */,
 				ECAAD50B2EE1BB260056F965 /* Exceptions for "command" folder in "Naki-M" target */,
-				ECAAD5082EE1BB0E0056F965 /* Exceptions for "command" folder in "Naki-MUITests" target */,
 				ECAAD5092EE1BB0E0056F965 /* Exceptions for "command" folder in "Compile Sources" phase from "Naki-MUITests" target */,
 			);
 			path = command;

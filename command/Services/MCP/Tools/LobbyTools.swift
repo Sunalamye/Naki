@@ -96,13 +96,14 @@ struct MatchModeListTool: MCPTool {
 struct StartMatchTool: MCPTool {
     static let name = "lobby_start_match"
     static let description = """
-        開始段位場匹配。送出 .lq.Lobby.matchGame（ReqJoinMatchQueue：match_mode=1, \
-        client_version_string=2）。match_mode 用 lobby_match_modes 查（從流量觀察，不是靜態表）。\
-        ⚠️ 真的會排進伺服器隊列，請只在測試帳號使用。
+        ⚠️ **已過時，請改用 lobby_start_unified_match**。送出 .lq.Lobby.matchGame\
+        （ReqJoinMatchQueue：match_mode=1, client_version_string=2）——2026-08-09 實測\
+        match_mode 1／2／3 一律回 error 1306，同一時間客戶端自己送的是 startUnifiedMatch。\
+        保留這個工具只為了驗證舊路徑是否復活；正常開局請走 lobby_start_unified_match。
         """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "match_mode": .integer("匹配模式 ID（1=銅東, 2=銅半, 4=銀東, 5=銀半, 7=金東, 8=金半, 10=玉東, 11=玉半, 13=王座東, 14=王座半）"),
+            "match_mode": .integer("匹配模式 ID（uint32）。⚠️ 沒有可信的靜態對照表——舊表整組偏移一格已移除，且 lobby_match_modes 觀察到的值屬於 fetchCurrentMatchInfo 的命名空間，實測送進 matchGame 會回 1306"),
             "client_version_string": .string("客戶端版本字串（可選，空字串則不送此欄位）"),
             "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
         ],
@@ -177,6 +178,132 @@ struct CancelMatchTool: MCPTool {
         context.log("⏹️ lobby_cancel_match match_mode=\(matchMode)")
         return LiqiToolResult.dictionary(result.outcome, spec: result.spec,
                                          extra: ["match_mode": matchMode])
+    }
+}
+
+// MARK: - Unified Match Tools
+
+/// 統一匹配 `match_sid`：**從遊戲流量觀察**，因為沒有任何地方可以查
+///
+/// `ReqStartUnifiedMatch.match_sid` 是 string，而 `liqi.json` 裡沒有任何 response
+/// 或 config 訊息會產生這個字串。唯一來源是玩家自己點入口時客戶端送的那一筆
+/// `startUnifiedMatch`（見 `ObservedMatchSids`）。
+struct MatchSidListTool: MCPTool {
+    static let name = "lobby_match_sids"
+    static let description = """
+        列出從遊戲流量觀察到的 match_sid（統一匹配用）。⚠️ 沒有靜態表可查——\
+        liqi.json 裡沒有任何訊息會產生 match_sid。要有資料，請先在遊戲裡自己點一次\
+        段位場的場次入口，客戶端會送 .lq.Lobby.startUnifiedMatch，Naki 就攔得到。\
+        注意 match_sid（string）與 lobby_match_modes 的 match_mode（uint32）不是同一組東西。
+        """
+    static let inputSchema = MCPInputSchema.empty
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        await ObservedMatchSids.shared.dictionary
+    }
+}
+
+/// 開始統一匹配（現行段位場入口）
+struct StartUnifiedMatchTool: MCPTool {
+    static let name = "lobby_start_unified_match"
+    static let description = """
+        開始段位場匹配（現行入口）。送出 .lq.Lobby.startUnifiedMatch\
+        （ReqStartUnifiedMatch：match_sid=1, client_version_string=2）。\
+        match_sid 是**字串**，用 lobby_match_sids 查（從流量觀察）；不填則用最近一次\
+        觀察到的那一組。⚠️ 真的會排進伺服器隊列，請只在測試帳號使用。\
+        舊的 lobby_start_match（.lq.Lobby.matchGame）2026-08-09 實測一律回 error 1306。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "match_sid": .string("匹配 sid 字串（不填則用 lobby_match_sids 最近觀察到的一組）"),
+            "client_version_string": .string("客戶端版本字串（不填則沿用該次觀察到的值）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+
+        // 沒帶參數時退回「最近觀察到的那一組」——這是唯一有真憑據的預設值。
+        // 猜一個 sid 送出去比失敗更糟：可能排進非預期的場次。
+        let observed = await ObservedMatchSids.shared.latest
+        let matchSid = (arguments["match_sid"] as? String) ?? observed?.sid ?? ""
+        guard !matchSid.isEmpty else {
+            throw MCPToolError.invalidParameter(
+                "match_sid",
+                expected: "非空字串；還沒觀察到任何 sid 時必須自己指定"
+                    + "（先在遊戲裡點一次段位場入口，或查 lobby_match_sids）")
+        }
+        let clientVersion = (arguments["client_version_string"] as? String)
+            ?? observed?.clientVersionString ?? ""
+
+        let result = await nakiContext.startUnifiedMatch(
+            matchSid: matchSid,
+            clientVersionString: clientVersion,
+            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        context.log("🎮 lobby_start_unified_match match_sid=\(matchSid)")
+        return LiqiToolResult.dictionary(
+            result.outcome, spec: result.spec,
+            extra: ["match_sid": matchSid,
+                    "client_version_string": clientVersion,
+                    "sidSource": arguments["match_sid"] == nil ? "observed" : "argument"])
+    }
+}
+
+/// 取消統一匹配
+struct CancelUnifiedMatchTool: MCPTool {
+    static let name = "lobby_cancel_unified_match"
+    static let description = """
+        取消段位場匹配（現行入口）。送出 .lq.Lobby.cancelUnifiedMatch\
+        （ReqCancelUnifiedMatch：match_sid=1）。match_sid 不填則用最近一次觀察到的那一組。
+        """
+    static let inputSchema = MCPInputSchema(
+        properties: [
+            "match_sid": .string("要取消的匹配 sid（不填則用最近觀察到的一組）"),
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+        ],
+        required: []
+    )
+
+    private let context: MCPContext
+
+    init(context: MCPContext) {
+        self.context = context
+    }
+
+    func execute(arguments: [String: Any]) async throws -> Any {
+        guard let nakiContext = context as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+        // `??` 右側是 autoclosure，不能直接放 await——先取出來再合併。
+        let observed = await ObservedMatchSids.shared.latest
+        let matchSid = (arguments["match_sid"] as? String) ?? observed?.sid ?? ""
+        guard !matchSid.isEmpty else {
+            throw MCPToolError.invalidParameter(
+                "match_sid", expected: "非空字串；查 lobby_match_sids")
+        }
+
+        let result = await nakiContext.cancelUnifiedMatch(
+            matchSid: matchSid,
+            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+        context.log("⏹️ lobby_cancel_unified_match match_sid=\(matchSid)")
+        return LiqiToolResult.dictionary(result.outcome, spec: result.spec,
+                                         extra: ["match_sid": matchSid])
     }
 }
 

@@ -40,6 +40,14 @@ protocol NakiMCPContext: MCPContext {
     /// 取消段位場排隊
     func cancelMatch(matchMode: UInt32, awaitResponseMs: Int) async -> LiqiActionResult
 
+    /// 統一匹配排隊（現行段位場入口；`match_sid` 是字串，不是舊的 uint32 match_mode）
+    func startUnifiedMatch(matchSid: String,
+                           clientVersionString: String,
+                           awaitResponseMs: Int) async -> LiqiActionResult
+
+    /// 取消統一匹配
+    func cancelUnifiedMatch(matchSid: String, awaitResponseMs: Int) async -> LiqiActionResult
+
     /// 強制斷線重連（`bot_sync`）
     func forceReconnect() async -> ForceReconnectOutcome
 
@@ -133,6 +141,18 @@ final class DefaultNakiMCPContext: NakiMCPContext {
 
     func cancelMatch(matchMode: UInt32, awaitResponseMs: Int) async -> LiqiActionResult {
         await dependencies.cancelMatch(matchMode: matchMode, awaitResponseMs: awaitResponseMs)
+    }
+
+    func startUnifiedMatch(matchSid: String,
+                           clientVersionString: String,
+                           awaitResponseMs: Int) async -> LiqiActionResult {
+        await dependencies.startUnifiedMatch(matchSid: matchSid,
+                                             clientVersionString: clientVersionString,
+                                             awaitResponseMs: awaitResponseMs)
+    }
+
+    func cancelUnifiedMatch(matchSid: String, awaitResponseMs: Int) async -> LiqiActionResult {
+        await dependencies.cancelUnifiedMatch(matchSid: matchSid, awaitResponseMs: awaitResponseMs)
     }
 
     func forceReconnect() async -> ForceReconnectOutcome {

@@ -213,6 +213,14 @@ enum NakiToolOutputSchemas {
         }
         table["lobby_start_match"] = liqiSend(extra: ["match_mode": integer("送出的 match_mode")])
         table["lobby_cancel_match"] = liqiSend(extra: ["match_mode": integer("取消的 match_mode")])
+        table["lobby_start_unified_match"] = liqiSend(extra: [
+            "match_sid": string("送出的 match_sid"),
+            "client_version_string": string("送出的 client_version_string"),
+            "sidSource": string("observed（用觀察到的值）或 argument（呼叫端指定）")
+        ])
+        table["lobby_cancel_unified_match"] = liqiSend(extra: [
+            "match_sid": string("取消的 match_sid")
+        ])
         table["lobby_account_info"] = liqiSend(extra: [
             "account_id": integer("查詢的帳號 id"),
             "accountIdSource": string("naki-login-capture 或 argument"),
@@ -224,6 +232,16 @@ enum NakiToolOutputSchemas {
             properties: [
                 "source": string("資料來源說明"),
                 "knownErrorForBadMode": string("1306 = match_mode 不存在")
+            ],
+            required: ["source"])
+
+        table["lobby_match_sids"] = object(
+            "從遊戲流量觀察到的 match_sid（統一匹配用；沒有靜態表可查）",
+            properties: [
+                "source": string("資料來源說明"),
+                "knownSids": array("觀察到的所有 match_sid（去重排序）"),
+                "latest": object("最近一次觀察到的 sid 與 client_version_string"),
+                "note": string("怎麼讓這裡有資料")
             ],
             required: ["source"])
 

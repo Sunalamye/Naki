@@ -327,6 +327,77 @@ struct CancelMatchAction {
   }
 }
 
+// MARK: - StartUnifiedMatchAction / CancelUnifiedMatchAction
+
+/// 統一匹配排隊（`.lq.Lobby.startUnifiedMatch`）——**現行**的段位場入口。
+///
+/// ⚠️ 真的會排進伺服器隊列，只在測試帳號使用。
+///
+/// `matchSid` 是字串且沒有靜態表；值要從 `ObservedMatchSids`（攔客戶端流量）取得。
+@MainActor
+struct StartUnifiedMatchAction {
+
+  private let perform: (String, String, Int) async -> LiqiActionResult
+
+  private init(perform: @escaping (String, String, Int) async -> LiqiActionResult) {
+    self.perform = perform
+  }
+
+  /// 真實實作：組 spec + 送出（欄位編號查 docs/protocol/liqi.json 的 ReqStartUnifiedMatch）
+  init(send: SendActionAction) {
+    self.init(perform: { matchSid, clientVersionString, awaitMs in
+      let spec = LiqiRequestBuilder.startUnifiedMatch(
+        matchSid: matchSid, clientVersionString: clientVersionString)
+      return LiqiActionResult(spec: spec, outcome: await send(spec, awaitResponseMs: awaitMs))
+    })
+  }
+
+  #if DEBUG
+    init(stub: @escaping (String, String, Int) async -> LiqiActionResult) {
+      self.init(perform: stub)
+    }
+  #endif
+
+  func callAsFunction(
+    matchSid: String,
+    clientVersionString: String = "",
+    awaitResponseMs: Int
+  ) async -> LiqiActionResult {
+    await perform(matchSid, clientVersionString, awaitResponseMs)
+  }
+}
+
+/// 取消統一匹配（`.lq.Lobby.cancelUnifiedMatch`）。
+///
+/// `match_sid` 必填：伺服器要知道取消哪一條隊列（與 `cancelMatch` 同樣語意）。
+@MainActor
+struct CancelUnifiedMatchAction {
+
+  private let perform: (String, Int) async -> LiqiActionResult
+
+  private init(perform: @escaping (String, Int) async -> LiqiActionResult) {
+    self.perform = perform
+  }
+
+  /// 真實實作
+  init(send: SendActionAction) {
+    self.init(perform: { matchSid, awaitMs in
+      let spec = LiqiRequestBuilder.cancelUnifiedMatch(matchSid: matchSid)
+      return LiqiActionResult(spec: spec, outcome: await send(spec, awaitResponseMs: awaitMs))
+    })
+  }
+
+  #if DEBUG
+    init(stub: @escaping (String, Int) async -> LiqiActionResult) {
+      self.init(perform: stub)
+    }
+  #endif
+
+  func callAsFunction(matchSid: String, awaitResponseMs: Int) async -> LiqiActionResult {
+    await perform(matchSid, awaitResponseMs)
+  }
+}
+
 // MARK: - TriggerAutoPlayAction
 
 /// 手動要求自動打牌跑一輪（MCP `bot_trigger` / HTTP `POST /bot/trigger`）。
@@ -603,6 +674,49 @@ struct SetAutoPlayModeAction {
   }
 }
 
+// MARK: - StartFullAutoNowAction
+
+/// 在大廳按下「開始」時立刻排一場，不等 `end_game`。
+///
+/// 為什麼需要它：續局引擎是由 `end_game` 驅動的，而**在大廳切到全自動時根本沒有
+/// `end_game` 可等**——不補這條，使用者按了「開始」會什麼都不發生，
+/// 得自己先手動開一局才會進入循環。
+///
+/// 對局中按下去也安全：權威在伺服器，已經在對局中時 `startUnifiedMatch` 會被拒，
+/// 引擎照樣會在這局的 `end_game` 正常續局。這裡不自己判斷「在不在對局中」——
+/// `GameStore.inGame` 對局結束後不會歸位（AUDIT §16.4），拿它判斷會卡死。
+@MainActor
+struct StartFullAutoNowAction {
+
+  private nonisolated(unsafe) let perform: () -> Void
+
+  private init(perform: @escaping () -> Void) {
+    self.perform = perform
+  }
+
+  /// 真實實作
+  init(runtime: NakiRuntime) {
+    self.init(perform: { [weak runtime] in runtime?.startFullAutoNow() })
+  }
+
+  /// Preview／未接線：什麼都不做
+  static let noop = StartFullAutoNowAction()
+
+  nonisolated init() {
+    self.perform = {}
+  }
+
+  #if DEBUG
+    init(stub: @escaping () -> Void) {
+      self.init(perform: stub)
+    }
+  #endif
+
+  func callAsFunction() {
+    perform()
+  }
+}
+
 // MARK: - DeleteBotAction
 
 /// 刪除原生 Bot（進階設定的「刪除 Bot」按鈕）。
@@ -852,6 +966,8 @@ struct NakiActions {
   var forceReconnect: ForceReconnectAction
   /// 切換自動打牌模式
   var setAutoPlayMode: SetAutoPlayModeAction
+  /// 全自動：立刻排一場（大廳按「開始」時用，不等 end_game）
+  var startFullAutoNow: StartFullAutoNowAction
   /// 手動要求自動打牌跑一輪
   var triggerAutoPlay: TriggerAutoPlayAction
   /// 刪除原生 Bot
@@ -876,6 +992,7 @@ struct NakiActions {
     self.executeJavaScript = ExecuteJavaScriptAction()
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
+    self.startFullAutoNow = StartFullAutoNowAction()
     self.triggerAutoPlay = TriggerAutoPlayAction()
     self.deleteBot = DeleteBotAction()
     self.toggleDebugServer = ToggleDebugServerAction()
@@ -889,6 +1006,7 @@ struct NakiActions {
   init(executeJavaScript: ExecuteJavaScriptAction,
        forceReconnect: ForceReconnectAction,
        setAutoPlayMode: SetAutoPlayModeAction,
+       startFullAutoNow: StartFullAutoNowAction,
        triggerAutoPlay: TriggerAutoPlayAction,
        deleteBot: DeleteBotAction,
        toggleDebugServer: ToggleDebugServerAction,
@@ -899,6 +1017,7 @@ struct NakiActions {
     self.executeJavaScript = executeJavaScript
     self.forceReconnect = forceReconnect
     self.setAutoPlayMode = setAutoPlayMode
+    self.startFullAutoNow = startFullAutoNow
     self.triggerAutoPlay = triggerAutoPlay
     self.deleteBot = deleteBot
     self.toggleDebugServer = toggleDebugServer

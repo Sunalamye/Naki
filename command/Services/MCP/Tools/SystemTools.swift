@@ -123,7 +123,11 @@ enum NakiHelpContent {
             ],
             "workflows": [
                 "友人房一條龍": ["room_create（time_fixed=300, time_add=0）", "room_add_robot ×3", "room_start"],
-                "段位場": ["lobby_match_modes", "lobby_start_match", "（要取消）lobby_cancel_match"],
+                "段位場": ["先在遊戲裡自己點一次場次入口（讓 Naki 攔到 match_sid）",
+                          "lobby_match_sids",
+                          "lobby_start_unified_match",
+                          "（要取消）lobby_cancel_unified_match",
+                          "⚠️ 舊的 lobby_start_match（matchGame）2026-08-09 實測回 error 1306"],
                 "對局中": ["game_ops 看可用操作", "bot_status 看 AI 推薦", "game_action 送出動作"],
                 "連線自檢": ["lobby_server_time（最無害的請求，有 RESPONSE 即代表注入通道通到伺服器）"]
             ],

@@ -19,6 +19,7 @@ enum AutoPlayMode: String, CaseIterable {
     case off = "關閉"            // 不自動打牌，也不顯示推薦（側欄與遊戲內高亮都清空）
     case recommend = "推薦"      // 顯示推薦，需要手動打牌
     case auto = "自動"           // 顯示推薦，自動執行推薦動作
+    case fullAuto = "全自動"     // 自動打牌 ＋ 對局結束後自動排下一場
 
     /// 是否顯示推薦（側欄 `RecommendationView` 與遊戲內 `__nakiHighlight` 共用同一個閘門）
     ///
@@ -32,9 +33,21 @@ enum AutoPlayMode: String, CaseIterable {
         return self != .off
     }
 
-    /// 是否啟用自動打牌（只有自動模式）
+    /// 是否啟用自動送出（`.auto` 與 `.fullAuto` 都送）
+    ///
+    /// ⚠️ 名字沿用歷史，語意是「**這一手**由 Naki 自己送」，不是「整場全自動」。
+    /// 新增模式時務必讓這裡涵蓋到：Legacy 路徑的能力收斂（`AutoPlayAvailability`）
+    /// 就是用它過濾的，漏掉會讓不支援自動送出的裝置選得到、然後靜靜地送出去。
     var isFullAuto: Bool {
-        return self == .auto
+        return self == .auto || self == .fullAuto
+    }
+
+    /// 對局結束後是否自動排下一場（只有 `.fullAuto`）
+    ///
+    /// 與 `isFullAuto` 分開的理由：自動打「這一手」和自動開「下一場」是兩種不同的授權。
+    /// 前者只影響進行中的對局，後者會**主動把帳號排進伺服器隊列**——使用者可能只想要前者。
+    var autoRematch: Bool {
+        return self == .fullAuto
     }
 
     /// Picker 上的短標籤（macOS toolbar 與 iOS toolbar 共用同一份，避免兩邊各寫一串字面值）
@@ -43,6 +56,7 @@ enum AutoPlayMode: String, CaseIterable {
         case .off: return "關"
         case .recommend: return "推薦"
         case .auto: return "自動"
+        case .fullAuto: return "全自動"
         }
     }
 }

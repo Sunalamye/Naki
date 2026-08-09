@@ -215,6 +215,54 @@ final class SettingsStore {
         Self.actionDelayScale(forSeconds: actionDelaySeconds)
     }
 
+    // MARK: - 全自動：三麻還是四麻
+
+    /// 「全自動」續局要排哪一種的持久化 key。
+    nonisolated static let fullAutoPrefersSanmaKey = "naki.fullAutoPrefersSanma"
+
+    /// 預設四麻。
+    ///
+    /// 不是隨手挑的預設：bundled Core ML 是四麻模型，三麻走雲端-only（見 CLAUDE.md），
+    /// 雲端沒設定時三麻一手都不會打。把預設放在「一定能打」的那一邊。
+    nonisolated static func loadFullAutoPrefersSanma(
+        from defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: fullAutoPrefersSanmaKey)
+    }
+
+    /// 全自動續局排三麻（true）還是四麻（false）。寫入即持久化。
+    ///
+    /// 讀取端是 `AutoRematchEngine.Context.prefersSanma`；它只影響**續局排哪一種**，
+    /// 不影響進行中的對局（那由伺服器發的 `start_game.is3P` 決定）。
+    var fullAutoPrefersSanma: Bool = SettingsStore.loadFullAutoPrefersSanma() {
+        didSet {
+            guard fullAutoPrefersSanma != oldValue else { return }
+            UserDefaults.standard.set(fullAutoPrefersSanma,
+                                      forKey: Self.fullAutoPrefersSanmaKey)
+        }
+    }
+
+    /// 續局在段位允許的房間裡挑最低還是最高的持久化 key。
+    nonisolated static let fullAutoRoomPreferenceKey = "naki.fullAutoRoomPreference"
+
+    /// 預設挑**最低**的房間。
+    ///
+    /// 段位場輸了會掉分，掉到門檻以下就退房。挑最低＝對手最弱、掉段風險最小，
+    /// 是「放著讓它一直打」這個情境下唯一不會愈打愈糟的預設。
+    nonisolated static func loadFullAutoRoomPreference(
+        from defaults: UserDefaults = .standard) -> RoomPreference {
+        (defaults.string(forKey: fullAutoRoomPreferenceKey))
+            .flatMap(RoomPreference.init(rawValue:)) ?? .lowest
+    }
+
+    /// 續局挑房偏好。寫入即持久化。
+    var fullAutoRoomPreference: RoomPreference = SettingsStore.loadFullAutoRoomPreference() {
+        didSet {
+            guard fullAutoRoomPreference != oldValue else { return }
+            UserDefaults.standard.set(fullAutoRoomPreference.rawValue,
+                                      forKey: Self.fullAutoRoomPreferenceKey)
+        }
+    }
+
     // MARK: - 雲端推論（docs/cloud-inference-plan.md）
 
     /// 三個非機密欄位走 UserDefaults（與本檔既有 pattern 同款）；

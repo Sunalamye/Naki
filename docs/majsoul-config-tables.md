@@ -116,6 +116,54 @@ python3 tools/dump_sheet.py /path/to/lqc.lqbin item_definition.view 20
 
 `desktop.matchmode` 的 runtime cross-check 仍支持 mode 1 = 東風、mode 2 = 半莊。友人房 `pre_rule` 應由當前 `desktop.friend_room` 查合法值，不把歷史硬編碼清單當長期 API。
 
+### `desktop.matchmode` 段位場入口（2026-08-09 解出）
+
+52 列裡 `type == 1` 的 25 列是段位場。`level_limit`／`level_limit_ceil` 是可進入的
+段位區間（含兩端），四麻段位是 `1xxxx`、三麻是 `2xxxx`。
+
+| id | 房間 | 規則 | 段位下限 | 段位上限 |
+|---:|------|------|--------:|--------:|
+| 2 / 3 | 銅之間 | 四人東 / 四人南 | 10101 | 10203 |
+| 5 / 6 | 銀之間 | 四人東 / 四人南 | 10201 | 10303 |
+| 8 / 9 | 金之間 | 四人東 / 四人南 | 10301 | 10403 |
+| 11 / 12 | 玉之間 | 四人東 / 四人南 | 10401 | 10503 |
+| 15 / 16 | 王座間 | 四人東 / 四人南 | 10501 | 10720 |
+| 17 / 18 | 銅之間 | 三人東 / 三人南 | 20101 | 20203 |
+| 19 / 20 | 銀之間 | 三人東 / 三人南 | 20201 | 20303 |
+| 21 / 22 | 金之間 | 三人東 / 三人南 | 20301 | 20403 |
+| 23 / 24 | 玉之間 | 三人東 / 三人南 | 20401 | 20503 |
+| 25 / 26 | 王座間 | 三人東 / 三人南 | 20501 | 20720 |
+
+`mode` 欄：1 = 四人東、2 = 四人南、11 = 三人東、12 = 三人南（0 = 一局戰，未收）。
+這張表也是 `ObservedMatchModes` 註解裡那組 `[2, 3, 17, 18]` 的來歷——它正是銅之間
+畫面上的四個入口，順序確實是四人東／四人南／三人東／三人南。
+
+**這張表只用來挑候選，不是授權。** 副本在 `command/Services/Bridge/MatchModeTable.swift`；
+id 不存在伺服器回 1306、`match_sid` 不合法回 1303，兩個都是安全失敗。
+
+### `match_sid`：表裡沒有，只能攔
+
+`ReqStartUnifiedMatch.match_sid` 是 **string**，形狀 `"{match_group}:{mode_id}"`
+（實測 `"1:2"` ＝ 銅之間四人東，`match_group` 全部段位場都是 1）。
+
+**整份 `lqc.lqbin`（41 表 263 sheets）沒有任何 sid 欄位**，`liqi.json` 也只在
+`ReqStartUnifiedMatch`／`ReqCancelUnifiedMatch` 兩處「使用」它，沒有任何訊息會產生它。
+唯一來源是攔玩家自己點入口時客戶端送出的那一筆（見 `ObservedMatchSids`）。
+
+同一筆請求的 `client_version_string` 實測是 `"WebGL_2022-0.16.257"`，
+**不是** `version.json` 的 `0.11.252.w`——兩者是不同的版本命名空間。
+
+### 帳號段位
+
+`.lq.Lobby.fetchAccountInfo` 的 RESPONSE，內層 account 訊息：
+
+```text
+field 21 → { 1: <四麻段位 id>, 2: <分數> }
+field 22 → { 1: <三麻段位 id>, 2: <分數> }
+```
+
+欄位編號取自實際封包，不是 `liqi.json`（那份已過期）。解析在 `AccountLevelParser`。
+
 ## 安全邊界
 
 - 下載與解析公開資源是唯讀。

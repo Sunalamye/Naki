@@ -110,6 +110,10 @@ enum LiqiRequestBuilder {
     static let matchGameMethod = ".lq.Lobby.matchGame"
     /// `.lq.Lobby.cancelMatch`
     static let cancelMatchMethod = ".lq.Lobby.cancelMatch"
+    /// `.lq.Lobby.startUnifiedMatch`（現行段位場入口；取代 `matchGame`）
+    static let startUnifiedMatchMethod = ".lq.Lobby.startUnifiedMatch"
+    /// `.lq.Lobby.cancelUnifiedMatch`
+    static let cancelUnifiedMatchMethod = ".lq.Lobby.cancelUnifiedMatch"
     /// `.lq.Lobby.fetchAccountInfo`
     static let fetchAccountInfoMethod = ".lq.Lobby.fetchAccountInfo"
     /// `.lq.Lobby.fetchGamingInfo`
@@ -326,6 +330,30 @@ enum LiqiRequestBuilder {
         var fields: [LiqiField] = []
         if matchMode != 0 { fields.append(.varint(field: 1, value: UInt64(matchMode))) }
         return LiqiRequestSpec(method: cancelMatchMethod, fields: fields)
+    }
+
+    /// 統一匹配排隊（`ReqStartUnifiedMatch`：match_sid=1, client_version_string=2）
+    ///
+    /// 這是**現行**的段位場入口。舊的 `matchGame` 2026-08-09 實測對 match_mode
+    /// 1／2／3 一律回 error 1306，同一時間客戶端自己送的是這個方法。
+    ///
+    /// ⚠️ `match_sid` 是 **string**，不是舊的 uint32 `match_mode`，兩者不同命名空間。
+    /// 值沒有靜態表可查，只能攔客戶端流量（見 `ObservedMatchSids`）。
+    static func startUnifiedMatch(matchSid: String,
+                                  clientVersionString: String = "") -> LiqiRequestSpec {
+        var fields: [LiqiField] = []
+        if !matchSid.isEmpty { fields.append(.string(field: 1, value: matchSid)) }
+        if !clientVersionString.isEmpty {
+            fields.append(.string(field: 2, value: clientVersionString))
+        }
+        return LiqiRequestSpec(method: startUnifiedMatchMethod, fields: fields)
+    }
+
+    /// 取消統一匹配（`ReqCancelUnifiedMatch`：match_sid=1）
+    static func cancelUnifiedMatch(matchSid: String) -> LiqiRequestSpec {
+        var fields: [LiqiField] = []
+        if !matchSid.isEmpty { fields.append(.string(field: 1, value: matchSid)) }
+        return LiqiRequestSpec(method: cancelUnifiedMatchMethod, fields: fields)
     }
 
     /// 查詢帳號資訊（`ReqAccountInfo`：account_id=1）

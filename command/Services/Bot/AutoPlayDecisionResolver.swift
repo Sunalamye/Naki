@@ -67,7 +67,7 @@ nonisolated struct AutoPlayDecisionResolver {
         // 例外：`cloudDecision`（雲端 3p 算出的那一手）不降級，
         // 規則見 `AutoPlayGate.Input.cloudDecision`。
         let effectiveMode: AutoPlayMode =
-            (isSanma && !cloudDecision && mode == .auto) ? .recommend : mode
+            (isSanma && !cloudDecision && mode.isFullAuto) ? .recommend : mode
 
         // 缺少權威資料一律 fail closed。
         // 舊行為是「沒有 snapshot 時預設當自摸送出」，那等於在沒有伺服器授權的
@@ -89,7 +89,7 @@ nonisolated struct AutoPlayDecisionResolver {
         if let hora = snapshot.horaOperation {
             let tile = snapshot.contextTile ?? ""
             switch effectiveMode {
-            case .auto:
+            case .auto, .fullAuto:
                 return .send(action: .hora, tile: tile)
             case .recommend:
                 return .surfaceOnly(action: .hora, tile: tile)
@@ -102,7 +102,7 @@ nonisolated struct AutoPlayDecisionResolver {
         guard let top = recommendations.first else {
             // 有副露機會但模型沒有意見 → 送「過」，否則對局會停在那裡等我們回應
             if snapshot.isCallOpportunity {
-                return effectiveMode == .auto
+                return effectiveMode.isFullAuto
                     ? .send(action: .none, tile: "")
                     : .none(reason: "no_recommendation_mode_\(mode.rawValue)\(isSanma ? "_sanma" : "")")
             }
@@ -115,7 +115,7 @@ nonisolated struct AutoPlayDecisionResolver {
         }
 
         switch effectiveMode {
-        case .auto:
+        case .auto, .fullAuto:
             return .send(action: top.actionType, tile: top.displayTile)
         case .recommend:
             return .surfaceOnly(action: top.actionType, tile: top.displayTile)

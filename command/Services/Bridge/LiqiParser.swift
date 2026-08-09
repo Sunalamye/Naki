@@ -186,6 +186,26 @@ class LiqiParser {
             }
         }
 
+        // 從遊戲自己的流量學 match_sid。段位場入口已換成 startUnifiedMatch，而
+        // match_sid 是字串且 liqi.json 裡沒有任何訊息會產生它（見 ObservedMatchSids）。
+        //
+        // ⚠️ **只學遊戲自己送的**：Naki 送出的請求同樣會經過這裡，而
+        // `lobby_start_unified_match` 送的就是這個方法。不濾掉的話，一次猜錯的
+        // 嘗試值會被記成「觀察到的真值」，然後變成該工具不帶參數時的預設——
+        // 錯誤自我餵養。2026-08-09 實測踩過：連續 8 次失敗嘗試（sid "1".."18"）
+        // 全被記進觀察表。判準沿用 `naki-websocket.js` 的既有慣例：Naki 自己送的
+        // msgId 一律落在 60000+ 號段。
+        if method == LiqiRequestBuilder.startUnifiedMatchMethod,
+           msgId < Int(LiqiMsgIdAllocator.rangeStart) {
+            let sid = parseStringField(payload, field: 1) ?? ""
+            let version = parseStringField(payload, field: 2) ?? ""
+            if !sid.isEmpty {
+                Task { @MainActor in
+                    ObservedMatchSids.shared.record(sid: sid, clientVersionString: version)
+                }
+            }
+        }
+
         var result: [String: Any] = [
             "id": msgId,
             "type": "request",
@@ -233,6 +253,16 @@ class LiqiParser {
             .compactMap { block in
                 parseVarint(block.data, offset: 0).map { Int($0.0) }
             }
+    }
+
+    /// 取出某個 field 的字串值（proto3 `string` 是 wire type 2）
+    ///
+    /// 只取第一個符合的 block：`match_sid`／`client_version_string` 都是 singular，
+    /// 重複出現代表對方送了不該送的東西，取第一個比合併起來更接近原意。
+    private func parseStringField(_ data: Data, field: Int) -> String? {
+        parseProtobufBlocks(data)
+            .first { $0.fieldId == field && $0.wireType == 2 }?
+            .stringValue
     }
 
     private func parseInnerMessage(methodName: String, data: Data, isResponse: Bool = false) -> [String: Any]? {

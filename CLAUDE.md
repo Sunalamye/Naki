@@ -101,6 +101,9 @@ OptionalOperationList
 | oplist／sender | `command/Services/Bridge/LiqiOperationStore.swift`、`LiqiActionSender.swift` |
 | decision | `command/Services/Bot/AutoPlayDecisionResolver.swift` |
 | 自動打牌狀態機 | `command/Services/Bot/AutoPlayEngine.swift`（單一 Task 迴圈：輪詢＋延遲＋重試都用 `Task.sleep`；執行狀態是 enum，進出只有 `occupy(...)` 一個作用域） |
+| 對局結束後自動排下一場 | `command/Services/Bot/AutoRematchEngine.swift`（只有 `.fullAuto` 會動；`end_game` 或大廳按「開始」觸發） |
+| match_sid 觀察／持久化 | `command/Services/Bridge/ObservedMatchSids.swift`（只學**遊戲自己送的**，msgId < 60000） |
+| 段位場房間門檻表 | `command/Services/Bridge/MatchModeTable.swift`（`lqc.lqbin` 解出；只用來挑候選，權威仍在伺服器） |
 | action 送出 | `command/Services/Bot/AutoPlayActionExecutor.swift`（兩條 WebView path 共用的唯一動作 switch，9 種動作 + unknown；成功才 markHandled） |
 | AI | `command/Services/Bot/NativeBotController.swift` |
 | 自動打牌停滯回報 | `AutoPlayEngine.onStallChanged` → `GameStore.autoPlayStall` → `BotStatusView`（「該動而沒動」唯一上得了畫面的路；其餘失敗只走 log，且 log 對同一原因只印一行） |
@@ -125,6 +128,17 @@ OptionalOperationList
   `ReqSelfOperation` 缺 `auto_operation`。`scripts/check-liqi-drift.sh` 比對的是同一個
   過期基準，**結構上驗不到這種漂移**（見 task #16）。
 - MJAI 字牌 `E/S/W/N/P/F/C`；雀魂字牌 `1z`–`7z`。
+- **段位場入口已換人**（2026-08-09 實測）：`.lq.Lobby.matchGame` 對 match_mode
+  1／2／3 一律回 **error 1306**；現行入口是 `.lq.Lobby.startUnifiedMatch`
+  （`ReqStartUnifiedMatch`：`match_sid` 是 **string**，不是舊的 uint32 match_mode）。
+  `lobby_start_match` 因此已標為過時，改用 `lobby_start_unified_match`。
+- **`match_sid` 猜不出來**：形狀是 `"{match_group}:{mode_id}"`（實測 `"1:2"` ＝銅之間
+  四人東），但 `liqi.json` 裡**沒有任何訊息會產生它**，`lqc.lqbin` 的 41 表 263 sheets
+  也沒有 sid 欄位。唯一來源是攔玩家自己點入口時送出的那一筆
+  （`ObservedMatchSids`，已持久化）。搭配的 `client_version_string` 是
+  `"WebGL_2022-0.16.257"`——**不是** `version.json` 的 `0.11.252.w`。
+  ⚠️ 記錄時必須濾掉 Naki 自送的（msgId ≥ 60000），否則猜錯的嘗試值會被記成
+  「觀察到的真值」再變成預設，錯誤自我餵養（2026-08-09 踩過）。
 
 ## 平台差距
 

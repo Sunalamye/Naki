@@ -44,6 +44,9 @@ final class NakiRuntime {
     /// 自動打牌狀態機（單一 Task 迴圈；輪詢／延遲／重試都是 `Task.sleep`）
     private var autoPlayEngine: AutoPlayEngine?
 
+    /// 對局結束後自動排下一場（只有 `.fullAuto` 模式會動）
+    private var autoRematchEngine: AutoRematchEngine?
+
     /// MCP／Debug HTTP server（兩個平台都啟動，見 `DebugServer` 檔頭）
     private var debugServer: DebugServer?
 
@@ -186,6 +189,59 @@ final class NakiRuntime {
 
         autoPlayEngine = engine
         engine.start()
+
+        startAutoRematchEngine()
+    }
+
+    /// 「全自動」模式的續局引擎。
+    ///
+    /// 送出通道與自動打牌共用同一個 `liqiSender`——續局是大廳請求，走 `/gateway`，
+    /// 由 sender 自己挑連線，這裡不另建第二條路。
+    private func startAutoRematchEngine() {
+        autoRematchEngine = AutoRematchEngine(
+            context: { [weak self] in
+                guard let self else { return .init(mode: .off, isReady: false) }
+                return .init(mode: self.store.autoPlayMode,
+                             isReady: self.session.isReady,
+                             prefersSanma: self.settings.fullAutoPrefersSanma,
+                             cloudInferenceActive: self.settings.cloudConfig.isActive,
+                             roomPreference: self.settings.fullAutoRoomPreference)
+            },
+            // sid 的來源：遊戲自己送過的那些（Naki 自送的不算，見 ObservedMatchSids）。
+            // 挑哪一個交給 RematchTargetResolver——它會優先用已確認的，
+            // 目標房間沒打過時才用 MatchModeTable 推導候選。
+            observations: { ObservedMatchSids.shared.observations },
+            accountLevel: { [weak self] sanma in
+                guard let self else { return nil }
+                let accountId = self.coordinator.websocketHandler.majsoulAccountId
+                guard accountId > 0 else { return nil }
+                let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: UInt32(accountId))
+                let outcome = await self.liqiSender.sendAwaitingResponse(
+                    spec, awaitResponseMs: 4000)
+                guard let record = outcome.response, !record.hasError,
+                      let payload = record.fields["field2"] as? String else { return nil }
+                let levels = AccountLevelParser.levels(fromBase64: payload)
+                return sanma ? levels.sanma : levels.yonma
+            },
+            startMatch: { [weak self] sid, version in
+                guard let self else { return false }
+                let spec = LiqiRequestBuilder.startUnifiedMatch(
+                    matchSid: sid, clientVersionString: version)
+                let outcome = await self.liqiSender.sendAwaitingResponse(spec, awaitResponseMs: 6000)
+                // 「送進 WebSocket」不算成功：只有同 msgId 的 RESPONSE 沒有 error 才算
+                return outcome.response.map { !$0.hasError } == true
+            },
+            lobbyProbe: { [weak self] in
+                guard let self else { return false }
+                // 用 fetchAccountInfo 當探針：fetchServerTime 即使 session 正常也會被
+                // 伺服器拒（2026-08-01 實測），拿它當探針會永遠通不過。
+                let accountId = self.coordinator.websocketHandler.majsoulAccountId
+                guard accountId > 0 else { return false }
+                let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: UInt32(accountId))
+                let outcome = await self.liqiSender.sendAwaitingResponse(spec, awaitResponseMs: 3000)
+                return outcome.response.map { !$0.hasError } == true
+            },
+            log: { [weak self] message in self?.logAutoPlayEvent(message) })
     }
 
     /// 自動打牌的關鍵節點：同時進 Debug buffer 與 naki-events.log。
@@ -219,6 +275,12 @@ final class NakiRuntime {
 
         // 引擎自己會在下一輪讀新的模式；這裡只是叫它別等下一拍，並重設去抖。
         autoPlayEngine?.modeDidChange()
+
+        // 離開全自動就取消待排的續局。不取消的話，使用者切回「推薦」之後，
+        // 上一場結束時排的那個 45 秒等待仍會醒來，把帳號送進隊列。
+        if !effective.autoRematch {
+            autoRematchEngine?.cancel()
+        }
     }
 
     /// 手動觸發自動打牌（MCP `bot_trigger`）。
@@ -227,6 +289,15 @@ final class NakiRuntime {
     /// 在 `AutoPlayEngine.runManualCycle` 裡。
     func triggerAutoPlayNow(delay: TimeInterval = 1.2) {
         autoPlayEngine?.requestManualTrigger(delay: delay)
+    }
+
+    /// 全自動：立刻排一場，不等 `end_game`。
+    ///
+    /// 在大廳切到全自動時沒有 `end_game` 可等——不主動踢一腳的話，使用者按了
+    /// 「開始」會什麼都不發生。對局中呼叫也安全：伺服器會拒，而這一局的
+    /// `end_game` 仍會照常觸發續局。
+    func startFullAutoNow() {
+        autoRematchEngine?.startNow()
     }
 
     // MARK: - MCP／Debug Server
@@ -252,6 +323,8 @@ final class NakiRuntime {
             sendAction: send,
             startMatch: StartMatchAction(send: send),
             cancelMatch: CancelMatchAction(send: send),
+            startUnifiedMatch: StartUnifiedMatchAction(send: send),
+            cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),
             // 統一走主自動打牌路徑：推薦 → gate → resolver → LiqiActionSender，
             // 沒有第二條「照手牌排序索引直接打」的捷徑
             triggerAutoPlay: settings.supportsAutoPlay
@@ -299,6 +372,7 @@ final class NakiRuntime {
             executeJavaScript: ExecuteJavaScriptAction(session: session),
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
+            startFullAutoNow: StartFullAutoNowAction(runtime: self),
             triggerAutoPlay: TriggerAutoPlayAction(runtime: self),
             deleteBot: DeleteBotAction(coordinator: coordinator),
             toggleDebugServer: ToggleDebugServerAction(runtime: self),
@@ -341,5 +415,7 @@ extension NakiRuntime: BotResponseObserving {
     /// 整場對局結束（`end_game`）：終局取消任何待送的 confirmNewRound。
     func gameDidEnd() {
         autoPlayEngine?.gameDidEnd()
+        // 全自動模式才會真的動；其餘模式 engine 自己第一行就 return。
+        autoRematchEngine?.gameDidEnd()
     }
 }

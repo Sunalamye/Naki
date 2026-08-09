@@ -211,11 +211,15 @@ extension MCPToolRegistry {
         // JavaScript 執行（1）
         register(ExecuteJSTool.self)
 
-        // 大廳類（8）— 全部走 .lq.Lobby.* protobuf
+        // 大廳類（11）— 全部走 .lq.Lobby.* protobuf
         register(LobbyStatusTool.self)
         register(MatchModeListTool.self)
         register(StartMatchTool.self)
         register(CancelMatchTool.self)
+        // 統一匹配：現行段位場入口（matchGame 已回 1306，見 ObservedMatchSids）
+        register(MatchSidListTool.self)
+        register(StartUnifiedMatchTool.self)
+        register(CancelUnifiedMatchTool.self)
         register(AccountInfoTool.self)
         register(ServerTimeTool.self)
         register(HeartbeatTool.self)

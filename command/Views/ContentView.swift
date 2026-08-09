@@ -27,6 +27,21 @@ struct ContentView: View {
     @State private var showAdvancedSettings = false
     @State private var showLog = false
 
+    /// 切到「全自動」時彈出的設定表（人數 × 房間偏好）
+    @State private var showFullAutoKindChoice = false
+
+    // sheet 上的暫存選擇：按「開始」才寫進 settings，取消就整個丟掉。
+    // 直接綁 settings 的話，滑一下 picker 就已經改掉正在生效的設定了。
+    @State private var draftPrefersSanma = false
+    @State private var draftRoomPreference: RoomPreference = .lowest
+
+    /// 這次的設定表是不是按「開始」關掉的。
+    ///
+    /// 判斷放在 `onDismiss` 而不是取消鈕的 action：按 Esc 或點視窗外關掉 sheet 時，
+    /// SwiftUI **不會**呼叫取消鈕的 action，模式就會停在「全自動」但設定沒確認
+    /// （2026-08-09 實測）。`onDismiss` 是唯一不論怎麼關都會走到的地方。
+    @State private var fullAutoConfirmed = false
+
     // 自動打牌控制
     //
     // key 與 runtime 共用（`AutoPlayModeStore.key`）：UI 與送出端各記各的 key，
@@ -40,6 +55,23 @@ struct ContentView: View {
         AutoPlayAvailability.modes(autoPlaySupported: naki.settings.supportsAutoPlay)
     }
 
+    /// iOS 側欄的 segmented control 寬度（依實際標籤字數算，不寫死點數）。
+    private var autoPlayPickerWidth: CGFloat {
+        availableAutoPlayModes.reduce(0) { total, mode in
+            total + CGFloat(mode.pickerLabel.count) * 15 + 26
+        }
+    }
+
+    /// macOS toolbar 的下拉選單寬度。
+    ///
+    /// 四個模式在 segmented control 上排不好看：SwiftUI 會**等寬分配**，而標籤是
+    /// 1/2/2/3 字，「關」那格被撐得很空、「全自動」剛好塞滿（2026-08-09 實測截圖）。
+    /// 下拉選單只顯示目前選中的那一個，寬度看最長的標籤就夠。
+    private var autoPlayMenuWidth: CGFloat {
+        let longest = availableAutoPlayModes.map(\.pickerLabel.count).max() ?? 2
+        return CGFloat(longest) * 15 + 52   // 文字 ＋ 箭頭 ＋ 左右 padding
+    }
+
     /// 模式 picker 本體：**刻意放在 `#if` 之外**，兩個平台的 toolbar 共用同一份。
     ///
     /// 這條路徑的選項與行為只有 iOS 17–25 會走到，而本機（macOS 26）連編譯都碰不到
@@ -48,7 +80,7 @@ struct ContentView: View {
     ///
     /// `width` 傳 `nil` 代表不約束寬度：segmented control 會自己撐滿父容器。
     /// iOS 的右側欄用這條——欄寬改了不必回頭同步一個寫死的點數。
-    private func autoPlayModePicker(width: CGFloat?) -> some View {
+    private func autoPlayModePicker(width: CGFloat?, menu: Bool = false) -> some View {
         Picker("模式", selection: $autoPlayMode) {
             // 選項來自 `AutoPlayAvailability`：不支援自動送出的路徑上，
             // 「自動」不是灰掉的按鈕而是根本不存在——灰掉的控制照樣要解釋，
@@ -57,18 +89,70 @@ struct ContentView: View {
                 Text(mode.pickerLabel).tag(mode)
             }
         }
-        .pickerStyle(.segmented)
+        // 兩種樣式共用底下所有 modifier（onChange／sheet／a11y），
+        // 分開寫兩份 Picker 的話，改行為時很容易只改到一邊。
+        .modifier(ModePickerStyle(menu: menu))
         // a11y: fixed width for segmented control; kept to preserve toolbar layout
         .frame(width: width)
         .onChange(of: autoPlayMode) { _, newValue in
             // 收斂與持久化在 `NakiRuntime.setAutoPlayMode` → `AutoPlayAvailability.commit`；
             // Action 只是這個 View 對「切模式」這件副作用的型別化入口。
             naki.actions.setAutoPlayMode(newValue)
+
+            // 全自動會**主動把帳號排進伺服器隊列**，排哪一種必須是使用者當下說的，
+            // 不是沿用一個他看不到的舊設定。每次切進來都問（帶上次的選擇當預設）。
+            if newValue == .fullAuto {
+                draftPrefersSanma = naki.settings.fullAutoPrefersSanma
+                draftRoomPreference = naki.settings.fullAutoRoomPreference
+                showFullAutoKindChoice = true
+            }
+        }
+        // 用 sheet 而不是 confirmationDialog：人數 × 房間偏好共 4 種組合，
+        // macOS 的 confirmationDialog 只渲染得下 3 個按鈕＋取消——實測第 4 個
+        // 「三人麻將・最高房」直接消失，而取消鈕被畫成「OK」。選項用 Picker 表達
+        // 就不受按鈕數限制，也讓兩個維度看起來像兩個維度。
+        .sheet(isPresented: $showFullAutoKindChoice, onDismiss: {
+            // 沒按「開始」就退回「自動」：這一局照打，但不會自己再開下一場。
+            // 只寫 `autoPlayMode`，不要再呼叫一次 `setAutoPlayMode`——
+            // 上面的 `onChange` 已經會轉呼叫，兩邊都做會執行兩次（log 印兩行）。
+            if !fullAutoConfirmed { autoPlayMode = .auto }
+            fullAutoConfirmed = false
+        }) {
+            FullAutoSetupSheet(
+                sanma: $draftPrefersSanma,
+                room: $draftRoomPreference,
+                cloudActive: naki.settings.cloudConfig.isActive,
+                onStart: {
+                    applyFullAutoChoice(sanma: draftPrefersSanma, room: draftRoomPreference)
+                    fullAutoConfirmed = true
+                    showFullAutoKindChoice = false
+                    // 在大廳按「開始」就該立刻排一場——續局引擎是 end_game 驅動的，
+                    // 大廳沒有 end_game 可等，不踢這一腳就會什麼都不發生。
+                    naki.actions.startFullAutoNow()
+                },
+                onCancel: { showFullAutoKindChoice = false })
         }
         .accessibilityIdentifier("autoplay-mode-picker")
         .accessibilityLabel("自動打牌模式")
         .accessibilityHint(naki.settings.supportsAutoPlay
                            ? "" : AutoPlayAvailability.autoUnavailableReason)
+    }
+
+    /// 套用全自動的兩個選擇。兩個設定一起寫，避免只改一半就開始排隊。
+    private func applyFullAutoChoice(sanma: Bool, room: RoomPreference) {
+        naki.settings.fullAutoPrefersSanma = sanma
+        naki.settings.fullAutoRoomPreference = room
+    }
+
+    /// 選人數時要先講清楚的兩件事：續局用的是哪個入口、三麻需要雲端。
+    private var fullAutoKindMessage: String {
+        var lines = ["對局結束後會自動排下一場，直到你切走模式。"]
+        if !naki.settings.cloudConfig.isActive {
+            // 三麻是雲端-only（bundled 模型的 obs 對三麻結構性無效，見 CLAUDE.md）
+            lines.append("⚠️ 雲端推論未啟用，選三麻會排不進去（排了也不會出手）。")
+        }
+        lines.append("只會排你自己點過、而且已經打過一場的場次；沒有的話會停下來並在紀錄裡說明。")
+        return lines.joined(separator: "\n")
     }
 
     /// 自動打牌基準延遲 stepper：`[ 1.0s ⌃⌄ ]`。
@@ -255,7 +339,7 @@ struct ContentView: View {
 
         // 左側：自動打牌模式
         ToolbarItem(placement: .navigation) {
-            autoPlayModePicker(width: 160)
+            autoPlayModePicker(width: autoPlayMenuWidth, menu: true)
                 .help(naki.settings.supportsAutoPlay
                       ? "AI 推薦模式"
                       : "AI 推薦模式（此裝置不提供自動送出）")
@@ -1633,6 +1717,98 @@ struct StatusBar: View {
             return .green
         }
         return .blue
+    }
+}
+
+// MARK: - 模式 picker 樣式
+
+/// macOS toolbar 用下拉選單、iOS 側欄用 segmented control。
+///
+/// 抽成 modifier 是因為兩種 `pickerStyle` 的回傳型別不同，寫在同一個 `some View`
+/// 函式裡會逼出兩份 Picker——而底下的 `onChange`／`sheet`／a11y 是共用的，
+/// 複製兩份就等著哪天只改到一邊。
+private struct ModePickerStyle: ViewModifier {
+    let menu: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if menu {
+            content.pickerStyle(.menu)
+        } else {
+            content.pickerStyle(.segmented)
+        }
+    }
+}
+
+// MARK: - 全自動設定表
+
+/// 切到「全自動」時要當場確認的兩件事：打幾人麻將、排哪一級的房。
+///
+/// 為什麼是 sheet 不是 confirmationDialog：4 種組合在 macOS 的
+/// confirmationDialog 上只畫得出 3 個按鈕（第 4 個消失、取消鈕變成 OK，2026-08-09 實測）。
+/// 兩個維度用兩個 Picker 表達也比 4 個複合按鈕好讀。
+private struct FullAutoSetupSheet: View {
+
+    @Binding var sanma: Bool
+    @Binding var room: RoomPreference
+    /// 雲端推論是否可用（決定要不要對三麻掛警告）
+    let cloudActive: Bool
+    let onStart: () -> Void
+    let onCancel: () -> Void
+
+    /// 選三麻但沒有雲端＝排進去也一手都不會打（三麻是雲端-only）
+    private var sanmaBlocked: Bool { sanma && !cloudActive }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("全自動")
+                .font(.headline)
+            Text("對局結束後會自動排下一場，直到你切走模式。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            Picker("人數", selection: $sanma) {
+                Text("四人麻將").tag(false)
+                Text("三人麻將").tag(true)
+            }
+            .pickerStyle(.segmented)
+
+            Picker("房間", selection: $room) {
+                ForEach(RoomPreference.allCases, id: \.self) { pref in
+                    Text("\(pref.label)房").tag(pref)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("依帳號段位挑一間打得了的房：「最低」對手最弱、掉段風險最小；"
+                 + "「最高」點數效率高但打不好會掉段。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if sanmaBlocked {
+                Label("雲端推論未啟用，三麻不會排隊——三麻只有雲端路徑，排進去也不會出手。",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+
+            Text("只會排你自己點過、而且已經打過一場的場次；沒有的話會停下來並在紀錄裡說明。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("取消", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("開始", action: onStart)
+                    .keyboardShortcut(.defaultAction)
+                    // 選了會直接失敗的組合就不讓按，而不是按了才在 log 裡說不行
+                    .disabled(sanmaBlocked)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .accessibilityIdentifier("fullauto-setup-sheet")
     }
 }
 

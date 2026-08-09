@@ -451,7 +451,7 @@ final class AutoPlayEngine {
         let snapshot = store.pending
 
         let gate = AutoPlayGate.evaluate(.init(
-            isAutoMode: ctx.mode == .auto,
+            isAutoMode: ctx.mode.isFullAuto,
             isSanma: ctx.isSanma,
             cloudDecision: ctx.cloudDecision,
             hasActionInFlight: state != .idle,
@@ -643,7 +643,7 @@ final class AutoPlayEngine {
             return .notReady
         }
 
-        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode == .auto, isSanma: ctx.isSanma,
+        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.isFullAuto, isSanma: ctx.isSanma,
                                           cloudInferenceActive: ctx.cloudInferenceActive) {
         case .skip(let reason):
             // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。

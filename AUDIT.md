@@ -146,6 +146,33 @@ iOS 17–25 的 `LegacyWebViewModel`（p3-4 已刪除）直接使用 AI 第一�
 - 持紅五（mask 34–36）時能否正常打出。
 - AI 相對其他模型的實戰強度。
 
+### 全自動（`.fullAuto`）／統一匹配（2026-08-09 新增）
+
+**已驗證（live）**：
+
+| 項目 | 證據 |
+|------|------|
+| `matchGame` 已失效 | match_mode 1／2／3 各送一次，全回 error 1306 |
+| `startUnifiedMatch` 可用 | `lobby_start_unified_match` 不帶參數 → `serverAccepted: true`，隨後 `NotifyMatchGameStart` |
+| `match_sid` 攔截 | 玩家點入口 → 攔到 `"1:2"` ＋ `"WebGL_2022-0.16.257"` |
+| 自送不污染 | 送 `self-pollution-probe` 後觀察表仍為 0 筆 |
+| 人數回填 | `start_game(is3P=false)` → log `sid=1:2 確認為四麻` |
+| 自動續局 | 11:30:27 `end_game` → 11:31:14 `✅ 已排入四麻 match_sid=1:2` → 11:31:18 `NotifyMatchGameStart` |
+| 跨啟動保留 | 正常關閉等 flush 後重啟，啟動即讀到 `1:2`（`is3P: false`） |
+| 大廳立刻排隊 | 按「開始」→ `[自動續局] 立刻排一場` → payload `0a03"1:2"` ＋ `1213"WebGL_2022-0.16.257"` |
+
+**未驗證**：
+
+- 三麻整條路徑（雲端未啟用，UI 直接停用「開始」鈕；只有單測）。
+- 連續 3 場以上的穩定性（目前最多連續 2 場）。
+- 「偏好最高房」推導出來的 sid（例如銀之間 `1:5`）是否真的被伺服器接受——
+  只有 `1:2` 被實際接受過，其餘 id 都是 `MatchModeTable` 推導的候選（`verified: false`）。
+- 真正在**大廳**（非對局中）按「開始」成功排進去：實測那次帳號已在對局中，
+  伺服器拒絕是預期行為，但「大廳成功」這條沒單獨走過。
+- 段位掉出房間門檻後的行為（例如掉回初心，`MatchModeTable.pick` 回不同房間）。
+- `AutoRematchEngine` 的 bounded retry 用完之後，使用者要怎麼發現（目前只有 log，
+  沒有像 `autoPlayStall` 那樣上畫面的路）。
+
 ## 驗證環境與副作用
 
 - Fresh app-hosted tests 曾初始化共用 temp `LogManager`，使當時正在執行的 Naki 日誌發生一次 rotation；最舊的一份歷史 rotation 可能因此被擠掉。
