@@ -23,6 +23,32 @@ final class DecisionHUDTouchTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// 點帳號欄位後**停住**，讓外部（`simctl io screenshot`）拍到當下畫面。
+    ///
+    /// 只在設了 `NAKI_HOLD_AFTER_TAP` 時才跑——一般回歸不需要卡 25 秒。
+    @MainActor
+    func testTapAccountFieldAndHold() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["NAKI_HOLD_AFTER_TAP"] == "1",
+                          "只在需要人工觀察畫面時執行")
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+
+        let field = app.webViews.textFields.firstMatch
+        if field.waitForExistence(timeout: 45) {
+            field.tap()
+        } else {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.52, dy: 0.30)).tap()
+        }
+        XCTAssertEqual(app.state, .runningForeground, "點帳號欄位不應該崩潰")
+
+        // 停住讓外部截圖；期間持續確認 App 還活著
+        for _ in 0..<25 {
+            Thread.sleep(forTimeInterval: 1)
+            XCTAssertEqual(app.state, .runningForeground, "停留期間 App 不應該崩潰")
+        }
+    }
+
     /// 點雀魂登入頁的輸入框——使用者實際回報的崩潰觸發點。
     ///
     /// 點 WebView 裡的 `<input>` 會叫出鍵盤，那是 safe area 劇烈變動的時刻，而
@@ -121,5 +147,38 @@ final class DecisionHUDTouchTests: XCTestCase {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)).tap()
             XCTAssertEqual(app.state, .runningForeground, "transition 之後再觸控 WebView 不應該崩潰")
         }
+    }
+}
+
+/// HUD 是否真的在畫面上。
+///
+/// 2026-08-09 觀察到：App 啟動約 20 秒時 HUD 還在，雀魂登入頁完全載入之後就從
+/// 截圖裡消失了。截圖看不出「不存在」與「存在但透明」的差別，所以直接問
+/// accessibility 樹。
+final class DecisionHUDPresenceTests: XCTestCase {
+
+    @MainActor
+    func testHUDStaysVisibleAfterWebViewFinishesLoading() {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+
+        // 用 HUD 內的實際文字判斷，不用容器的 identifier——SwiftUI 容器上的
+        // `accessibilityIdentifier` 不保證會變成一個 `otherElements` 節點，
+        // 拿它當「存在與否」的判準會得到假的 false（已踩過一次）。
+        let title = app.staticTexts["即時決策"]
+        let earlyExists = title.waitForExistence(timeout: 20)
+
+        // 等雀魂登入頁載完（出現輸入框），再看 HUD 還在不在
+        _ = app.webViews.textFields.firstMatch.waitForExistence(timeout: 60)
+        Thread.sleep(forTimeInterval: 5)
+
+        let lateExists = title.exists
+        let toggle = app.buttons["toolbar-game-panel-toggle"]
+        XCTContext.runActivity(named: "HUD 狀態") { _ in
+            print(">>> HUD 早期=\(earlyExists) 晚期=\(lateExists) toggle存在=\(toggle.exists)")
+            print(">>> staticTexts: \(app.staticTexts.allElementsBoundByIndex.prefix(12).map(\.label))")
+        }
+        XCTAssertTrue(lateExists, "WebView 載入完成後 HUD 不應該消失（早期=\(earlyExists)）")
     }
 }

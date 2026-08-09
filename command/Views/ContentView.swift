@@ -335,21 +335,12 @@ struct ContentView: View {
                         .accessibilityIdentifier("ios-decision-hud")
                 }
             }
-            // ⚠️ **絕對不要**在這裡加 `.animation(_:value:)`。
+            // 不在這裡放 `.animation(_:value:)`：它會把隱式動畫套到整個子樹，包含
+            // `AdaptiveNakiWebView`（WKWebView）。動畫只該作用在 HUD 自己的 transition，
+            // 所以改由切換處的 `withAnimation` 驅動。
             //
-            // 它會把隱式動畫套到整個子樹，包含 `AdaptiveNakiWebView`（WKWebView），
-            // 而 WKWebView 自己帶一整組 UIGestureRecognizer。在 iOS 26 上，點雀魂
-            // 登入頁的輸入框（鍵盤升起 → safe area 劇烈變動）會直接崩：
-            //
-            //     *** -[__NSArrayM insertObject:atIndex:]: object cannot be nil
-            //     3  UIKitCore  -[UIGestureRecognizer _delayTouchesForEvent:inPhase:]
-            //     7  UIKitCore  -[UIWindow sendEvent:]
-            //
-            // 2026-08-09 用二分法證實：其餘修正全部保留、只把這一行加回去，
-            // `DecisionHUDTouchTests.testTappingWebViewTextFieldDoesNotCrash` 立刻
-            // 重現崩潰（app state 變成 notRunning）。拿掉就過。
-            //
-            // 動畫改由切換處的 `withAnimation` 驅動，只作用在 HUD 的 transition。
+            // ⚠️ 這**不是**下面那個崩潰的已證實修復，見 `docs/ui-reference/
+            // implementation-decisions.md` 的「iOS 間歇性崩潰（未解決）」。
             .safeAreaInset(edge: .top) {
                 JSInjectionFailureBanner()
             }

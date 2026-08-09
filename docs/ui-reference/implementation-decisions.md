@@ -117,36 +117,62 @@ HTTP request、MCP `tools/call`、連線錯誤改走它。
 
 **未驗證**：本機雲端開關是關的，狀態卡沒跑過真資料。
 
-## 不要在含 WKWebView 的容器上放 `.animation(_:value:)`
+## iOS 間歇性崩潰（**未解決**）
 
-**決策**：iOS 版面的 HUD transition 由切換按鈕的 `withAnimation` 驅動，容器上不掛
-隱式動畫。
-
-**為什麼**：`.animation(_:value:)` 會套到整個子樹，包含 `AdaptiveNakiWebView`
-（WKWebView），而它自己帶一整組 UIGestureRecognizer。點雀魂登入頁的輸入框
-（鍵盤升起、safe area 劇烈變動）就崩：
+崩潰堆疊固定，30 格裡沒有一格是 Naki 的程式碼：
 
 ```
 *** -[__NSArrayM insertObject:atIndex:]: object cannot be nil
-3  UIKitCore  -[UIGestureRecognizer _delayTouchesForEvent:inPhase:]
-7  UIKitCore  -[UIWindow sendEvent:]
+ 3  UIKitCore  -[UIGestureRecognizer _delayTouchesForEvent:inPhase:]
+ 7  UIKitCore  -[UIWindow sendEvent:]
+ 9  UIKit      -[UIApplicationAccessibility sendEvent:]   ← 只在 accessibility 啟用時介入
 ```
 
-**怎麼證的**（重點在「怎麼證」，因為我前兩次診斷都錯）：
+**這一節的重點是「我試錯了什麼」，不是結論——因為還沒有結論。**
 
-- 先推測是 `.help()` 的 hover 註冊、以及狀態列浮層參與 hit-testing。**兩個都錯。**
-- XCUITest 的合成 tap／drag／長按**重現不了**——合成事件走 Source0，真實滑鼠點擊
-  走 Source1（`__CFMachPortPerform`），在 UIKit 內部是不同的注入路徑。看 crash log
-  最後幾格是 Source0 還是 Source1，能分辨這件事。
-- 真正重現的方式是**點 WebView 裡的 HTML input**（`app.webViews.textFields`）——
-  鍵盤升起才是觸發條件。
-- 然後二分法：其餘修正全保留、只把 `.animation` 加回去 → 立刻重現；拿掉 → 通過。
+### 三次診斷，三次都不成立
 
-回歸測試在 `Naki-MUITests/DecisionHUDTouchTests`。
+1. `.help()` 註冊的 hover 互動 → 錯
+2. 狀態列浮層參與 hit-testing → 錯
+3. 容器上的 `.animation(_:value:)` 波及 WKWebView → **一度以為證實了，也不成立**
 
-**順帶修好的設定問題**：`Naki-M` scheme 的 `<Testables>` 一直是空的，而
-`Naki-MUITests` target 被設成要編譯整個 `command/`、依賴卻不齊——**那個 target
-從來沒編譯成功過**，只是沒人跑所以沒發現。UI test 只 `import XCTest`，清掉即可。
+第 3 個是這樣「證實」的：其餘修正全保留、只把 `.animation` 加回去 → 重現崩潰；拿掉 → 通過。
+看起來很乾淨，但那是**單次對照**，而這個崩潰是**間歇性**的。後續同條件重跑：
+
+| 條件 | 結果 |
+|---|---|
+| 有 HUD、89 秒流程 | 通過 |
+| 無 HUD、88 秒流程 | 通過 |
+| 有 HUD、`DecisionHUDPresenceTests` | **崩潰** |
+
+同一份程式碼、同一台模擬器，結果不一致。所以先前那次二分法只是運氣。
+
+### 方法上的教訓
+
+- **間歇性崩潰不能用單次對照做二分法。** 要先建立崩潰率（同條件重複 N 次），
+  再比較兩組的率，否則得到的因果是假的。
+- XCUITest 的合成觸控走 Source0，真實滑鼠點擊走 Source1（`__CFMachPortPerform`）。
+  crash log 最後幾格是哪個 Source，能分辨事件從哪來——但**兩種都能觸發這個崩潰**。
+- 一次崩潰發生在 XCUITest 只是在**查詢 accessibility 樹**的時候，完全沒有觸控。
+  配合堆疊裡的 `UIApplicationAccessibility`，合理的懷疑是「accessibility 啟用時的事件
+  派送」而非任何特定手勢。若成立，真機不開 VoiceOver 可能碰不到。**未驗證。**
+- 判斷「HUD 在不在畫面上」不要用容器的 `accessibilityIdentifier` 查 `otherElements`
+  （SwiftUI 不保證產生那個節點，會得到假的 false）；用它內部的 `staticTexts`。
+  另外要留意：測試報「元素不存在」也可能是 **App 已經崩了**。
+
+### 目前的處置
+
+`.animation` 仍然移除、改用 `withAnimation`；`.help` 仍然只包 macOS；狀態列仍然
+`allowsHitTesting(false)`。這三項各自站得住（見下），但**都不宣稱修好了崩潰**：
+
+- 動畫只該作用在 HUD 的 transition，不該波及 WebView 子樹
+- `.help` 在 iPhone 沒有 UI 效果（`LogPanel` 早有 `#if os(macOS)` 慣例）
+- 狀態列是純顯示元件，不該吃掉牌桌的觸控
+
+### 下一步
+
+建立崩潰率再談因果：同一條測試連跑 10 次以上，記錄崩潰次數，然後才比較「有/無 HUD」
+或「有/無 `.animation`」。在那之前不要再宣稱任何根因。
 
 ## 截圖 API 的能力邊界
 
@@ -177,4 +203,5 @@ HTTP request、MCP `tools/call`、連線錯誤改走它。
 | 動作色仍是 7 色 | 紅同時是「槓」與「危險」 |
 | macOS toolbar 13 個控制 | 加了雲端開關後更擠；MCP Server 仍佔一級位置 |
 | 側欄下半空白 | `tehaiTiles` / `tsumoTile` / `recommendationsOplistSequence` 都還沒上畫面 |
-| iOS | Simulator 已驗（toolbar／HUD／空狀態／觸控回歸測試）；仍無真機 |
+| iOS 間歇性崩潰 | **未解決**，見上節。三次診斷都不成立 |
+| iOS | Simulator 已驗（toolbar／HUD／空狀態）；仍無真機 |

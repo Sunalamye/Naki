@@ -665,6 +665,54 @@ struct DecisionAlerts: View {
     }
 }
 
+// MARK: - Empty States
+
+// 從 `RecommendationView.swift` 搬過來的——那個檔案的其餘內容在側欄重排之後
+// 沒有任何使用者了。這兩個空狀態仍然要：它們刻意分開，因為「還沒算出來」與
+// 「我把顯示關掉了」都是空白畫面，但成因完全不同。
+
+struct EmptyRecommendationView: View {
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "questionmark.circle")
+                .font(.body)
+                .foregroundColor(.secondary)
+            Text("等待遊戲數據...")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+}
+
+/// 「關閉」模式的空狀態。
+///
+/// 刻意跟 `EmptyRecommendationView`（等待資料）分開：兩者都是空白，但成因完全不同，
+/// 用同一個畫面會讓「我關掉了」跟「Bot 還沒算出來」看不出差別。
+struct RecommendationsDisabledView: View {
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "eye.slash")
+                .font(.body)
+                .foregroundColor(.secondary)
+            Text("推薦顯示已關閉")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            Text("切換到「推薦」或「自動」可恢復")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("recommendation-disabled-state")
+        .accessibilityLabel("AI 推薦")
+        .accessibilityValue("推薦顯示已關閉")
+    }
+}
+
 // MARK: - Preview
 
 #Preview("DecisionSidebar - 寬版") {
