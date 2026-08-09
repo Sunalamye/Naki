@@ -214,4 +214,51 @@ nonisolated enum PluginRegistry {
         }
         return parts.joined(separator: "\n")
     }
+
+    // MARK: - 熱插拔（runtime enable/disable，免 reload）
+
+    /// 單一插件的 grant JSON（capabilities / methods / priority / observeNakiTraffic）。
+    static func grantJSON(for manifest: PluginManifest) -> String? {
+        let grant: [String: Any] = [
+            "capabilities": manifest.capabilities,
+            "methods": manifest.methods,
+            "priority": manifest.priority ?? 100,
+            "observeNakiTraffic": manifest.observeNakiTraffic ?? false
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: grant, options: [.sortedKeys]),
+              let s = String(data: data, encoding: .utf8) else { return nil }
+        return s
+    }
+
+    /// 熱**啟用**單一插件的 JS（`setGrant` 下發權威 grant，再跑插件源碼 → register 立即生效）。
+    /// 函式體語意（fire-and-forget，不需 `return`）。插件源碼包在 try/catch，語法/執行錯不外溢。
+    static func enableScript(for descriptor: PluginDescriptor) -> String? {
+        guard let manifest = descriptor.manifest,
+              let source = descriptor.entrySource,
+              let grantJSON = grantJSON(for: manifest) else { return nil }
+        let idLit = jsStringLiteral(descriptor.id)
+        return """
+        if (window.__nakiPlugins && window.__nakiPlugins.setGrant) {
+          window.__nakiPlugins.setGrant(\(idLit), \(grantJSON));
+          try {
+        \(source)
+          } catch (e) { console.error('[Naki Plugin] enable 失敗', e); }
+        }
+        """
+    }
+
+    /// 熱**停用**單一插件的 JS。
+    static func disableScript(id: String) -> String {
+        let idLit = jsStringLiteral(id)
+        return "if (window.__nakiPlugins && window.__nakiPlugins.disable) { window.__nakiPlugins.disable(\(idLit)); }"
+    }
+
+    /// 安全的 JS 字串字面值（用 JSONSerialization 逸出，避免 id 內有特殊字元破壞注入）。
+    private static func jsStringLiteral(_ s: String) -> String {
+        if let data = try? JSONSerialization.data(withJSONObject: [s]),
+           let arr = String(data: data, encoding: .utf8) {
+            return String(arr.dropFirst().dropLast())   // ["x"] → "x"
+        }
+        return "\"\(s)\""
+    }
 }

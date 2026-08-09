@@ -380,9 +380,33 @@ final class NakiRuntime {
 
     // MARK: - Action 集合
 
+    /// 熱插拔：開關插件**免重新載入頁面**。
+    ///
+    /// 持久化到 `enabledPluginIds`（下次啟動照舊生效），同時對**當前活著的頁面**注入
+    /// enable/disable JS 讓它立即生效。這條路不經 WKUserScript，所以不必 reload。
+    /// 找不到（或無效）的插件只持久化、不注入——避免注入壞源碼。
+    func setPluginEnabled(id: String, enabled: Bool) {
+        if enabled { settings.enabledPluginIds.insert(id) }
+        else { settings.enabledPluginIds.remove(id) }
+
+        let script: String?
+        if enabled {
+            guard let descriptor = pluginDescriptors.first(where: { $0.id == id }),
+                  descriptor.isValid else { return }
+            script = PluginRegistry.enableScript(for: descriptor)
+        } else {
+            script = PluginRegistry.disableScript(id: id)
+        }
+        guard let script else { return }
+        Task { [weak self] in
+            _ = try? await self?.session.callJavaScript(script)
+        }
+    }
+
     private func makeActions() -> NakiActions {
         NakiActions(
             executeJavaScript: ExecuteJavaScriptAction(session: session),
+            setPluginEnabled: SetPluginEnabledAction(runtime: self),
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
             startFullAutoNow: StartFullAutoNowAction(runtime: self),

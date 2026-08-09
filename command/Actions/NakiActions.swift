@@ -962,6 +962,8 @@ struct NakiActions {
 
   /// 在遊戲頁面執行 JS（函式體語意）
   var executeJavaScript: ExecuteJavaScriptAction
+  /// 熱插拔：開關插件（免 reload；持久化 + 對當前頁面注入 enable/disable）
+  var setPluginEnabled: SetPluginEnabledAction
   /// 強制斷線重連以重建 Bot
   var forceReconnect: ForceReconnectAction
   /// 切換自動打牌模式
@@ -990,6 +992,7 @@ struct NakiActions {
   /// 而 `@Entry` 的 `defaultValue` 正是那種上下文。
   nonisolated init() {
     self.executeJavaScript = ExecuteJavaScriptAction()
+    self.setPluginEnabled = SetPluginEnabledAction()
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
     self.startFullAutoNow = StartFullAutoNowAction()
@@ -1004,6 +1007,7 @@ struct NakiActions {
 
   /// 正式路徑：由 `NakiRuntime` 一次組好（十個全部明講，漏一個編譯期就不過）
   init(executeJavaScript: ExecuteJavaScriptAction,
+       setPluginEnabled: SetPluginEnabledAction,
        forceReconnect: ForceReconnectAction,
        setAutoPlayMode: SetAutoPlayModeAction,
        startFullAutoNow: StartFullAutoNowAction,
@@ -1015,6 +1019,7 @@ struct NakiActions {
        setHidePlayerNames: SetHidePlayerNamesAction,
        webView: WebViewAction) {
     self.executeJavaScript = executeJavaScript
+    self.setPluginEnabled = setPluginEnabled
     self.forceReconnect = forceReconnect
     self.setAutoPlayMode = setAutoPlayMode
     self.startFullAutoNow = startFullAutoNow
@@ -1025,5 +1030,43 @@ struct NakiActions {
     self.switchServer = switchServer
     self.setHidePlayerNames = setHidePlayerNames
     self.webView = webView
+  }
+}
+
+// MARK: - 熱插拔插件開關
+
+/// 開關插件（免 reload）。真實實作把工作交給 `NakiRuntime.setPluginEnabled`：
+/// 持久化到 `enabledPluginIds` + 對當前頁面注入 enable/disable JS。
+struct SetPluginEnabledAction {
+
+  private nonisolated(unsafe) let perform: (String, Bool) -> Void
+
+  private init(perform: @escaping (String, Bool) -> Void) {
+    self.perform = perform
+  }
+
+  /// 真實實作
+  init(runtime: NakiRuntime) {
+    self.init(perform: { [weak runtime] id, enabled in
+      runtime?.setPluginEnabled(id: id, enabled: enabled)
+    })
+  }
+
+  /// Preview／未接線
+  static let noop = SetPluginEnabledAction()
+
+  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
+  nonisolated init() {
+    self.perform = { _, _ in }
+  }
+
+  #if DEBUG
+    init(stub: @escaping (String, Bool) -> Void) {
+      self.init(perform: stub)
+    }
+  #endif
+
+  func callAsFunction(_ id: String, _ enabled: Bool) {
+    perform(id, enabled)
   }
 }

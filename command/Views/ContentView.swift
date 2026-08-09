@@ -25,6 +25,7 @@ struct ContentView: View {
     /// 切走寬度，所以預設藏起來只會讓人以為 Naki 沒在運作。
     @State private var showGamePanel = true
     @State private var showAdvancedSettings = false
+    @State private var showPlugins = false
     @State private var showLog = false
 
     /// 切到「全自動」時彈出的設定表（人數 × 房間偏好）
@@ -315,6 +316,9 @@ struct ContentView: View {
         .sheet(isPresented: $showAdvancedSettings) {
             AdvancedSettingsSheet()
         }
+        .sheet(isPresented: $showPlugins) {
+            PluginsPageView()
+        }
         .toolbar {
             macOSToolbarContent
         }
@@ -335,6 +339,16 @@ struct ContentView: View {
             .help("進階設定")
             .accessibilityIdentifier("toolbar-settings")
             .accessibilityLabel("進階設定")
+        }
+
+        // 插件（獨立頁面：清單 + 熱插拔開關 + 即時 log）
+        ToolbarItem(placement: .primaryAction) {
+            Button(action: { showPlugins = true }) {
+                Image(systemName: "puzzlepiece.extension")
+            }
+            .help("插件")
+            .accessibilityIdentifier("toolbar-plugins")
+            .accessibilityLabel("插件")
         }
 
         // 左側：自動打牌模式
@@ -1214,69 +1228,6 @@ struct AdvancedSettingsSheet: View {
     /// 開關又排在 key 上面——捲下去貼完 key 就不會再往上看，於是得到一個看起來配置好、
     /// 行為卻完全是本地模型的設定（Akagi #221 的形狀）。兩欄讓開關與其結果同時在畫面上。
     /// iOS 維持單欄捲動：窄畫面放不下兩欄。
-    /// 插件清單（實驗）。有效插件給啟用開關（寫進 `settings.enabledPluginIds`）；
-    /// 無效插件顯示原因（紅字）。開關要重新載入頁面才生效。
-    @ViewBuilder
-    private var pluginSettingsBox: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                if naki.pluginDescriptors.isEmpty {
-                    Text("沒有安裝插件。放進 ~/Library/Application Support/Naki/Plugins/<id>/ 後重啟。")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    ForEach(naki.pluginDescriptors, id: \.id) { descriptor in
-                        pluginRow(descriptor)
-                        if descriptor.id != naki.pluginDescriptors.last?.id {
-                            Divider()
-                        }
-                    }
-                }
-
-                Divider()
-
-                Text("插件與遊戲跑在同一個環境裡——**安裝插件等於信任其作者**，惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上任何資料，Naki 無法阻止。只裝你信任的插件。開關插件需**重新載入頁面**才生效。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } label: {
-            Label("插件（實驗）", systemImage: "puzzlepiece.extension")
-        }
-    }
-
-    @ViewBuilder
-    private func pluginRow(_ descriptor: PluginDescriptor) -> some View {
-        if let manifest = descriptor.manifest {
-            Toggle(isOn: Binding(
-                get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
-                set: { on in
-                    if on { naki.settings.enabledPluginIds.insert(descriptor.id) }
-                    else { naki.settings.enabledPluginIds.remove(descriptor.id) }
-                }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(manifest.name).font(.body)
-                    Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    if let license = manifest.license {
-                        Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(descriptor.id).font(.body)
-                Text(descriptor.failure?.text ?? "無效插件")
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
     private var settingsForm: some View {
 #if os(macOS)
         HStack(alignment: .top, spacing: 16) {
@@ -1371,9 +1322,6 @@ struct AdvancedSettingsSheet: View {
             } label: {
                 Label("畫面", systemImage: "eye.slash")
             }
-
-            // 插件（實驗）
-            pluginSettingsBox
 
             // Bot 管理
             GroupBox {
@@ -1885,4 +1833,147 @@ private struct FullAutoSetupSheet: View {
         #if os(macOS)
         .frame(width: 1200, height: 800)
         #endif
+}
+
+// MARK: - 插件頁面（獨立）
+
+/// 插件的獨立頁面：上半是插件清單（帶**熱插拔**開關，即時生效免 reload），
+/// 下半是即時的 `[Plugin]` log——啟用的插件經 `ctx.log` 送出的每一行都會出現在這。
+///
+/// log 即時性：`LogManager.shared` 是 `@Observable`，body 直接讀它的 `recentLogLines()`
+/// ⇒ 有新 log 進來就自動重繪（不必自己輪詢）。
+struct PluginsPageView: View {
+    @Environment(\.naki) private var naki
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        #if os(macOS)
+        VStack(spacing: 0) {
+            HStack {
+                Label("插件", systemImage: "puzzlepiece.extension").font(.headline)
+                Spacer()
+                Button("完成") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("plugins-done-button")
+            }
+            .padding()
+            .background(Color.contentBackground)
+            Divider()
+            ScrollView { content }
+        }
+        .frame(width: 720, height: 640)
+        #else
+        NavigationStack {
+            ScrollView { content }
+                .navigationTitle("插件")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { dismiss() }
+                            .accessibilityIdentifier("plugins-done-button")
+                    }
+                }
+        }
+        #endif
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            pluginList
+            logSection
+        }
+        .padding()
+    }
+
+    // MARK: 插件清單
+
+    @ViewBuilder
+    private var pluginList: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                if naki.pluginDescriptors.isEmpty {
+                    Text("沒有安裝插件。放進 ~/Library/Application Support/Naki/Plugins/<id>/ 後重新啟動 App。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ForEach(naki.pluginDescriptors, id: \.id) { descriptor in
+                        pluginRow(descriptor)
+                        if descriptor.id != naki.pluginDescriptors.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+
+                Divider()
+
+                Text("**安裝插件＝信任其作者。** 插件與遊戲跑在同一個環境裡，惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上任何資料，Naki 無法阻止。只裝你信任的插件。開關**即時生效，免重新載入頁面**。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } label: {
+            Label("已安裝插件", systemImage: "square.stack.3d.up")
+        }
+    }
+
+    @ViewBuilder
+    private func pluginRow(_ descriptor: PluginDescriptor) -> some View {
+        if let manifest = descriptor.manifest {
+            Toggle(isOn: Binding(
+                get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
+                set: { on in naki.actions.setPluginEnabled(descriptor.id, on) }   // 熱插拔
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(manifest.name).font(.body)
+                    Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    if let license = manifest.license {
+                        Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .accessibilityIdentifier("plugin-toggle-\(descriptor.id)")
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(descriptor.id).font(.body)
+                Text(descriptor.failure?.text ?? "無效插件")
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: 即時 log
+
+    @ViewBuilder
+    private var logSection: some View {
+        GroupBox {
+            let lines = LogManager.shared.recentLogLines().filter { $0.contains("[Plugin]") }
+            VStack(alignment: .leading, spacing: 6) {
+                if lines.isEmpty {
+                    Text("還沒有插件 log。啟用一個插件、進一局後，它經 ctx.log 送出的訊息會即時出現在這裡。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(lines.suffix(300).enumerated()), id: \.offset) { _, line in
+                                Text(line)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 160, maxHeight: 280)
+                }
+            }
+        } label: {
+            Label("插件 Log（即時）", systemImage: "text.append")
+        }
+    }
 }

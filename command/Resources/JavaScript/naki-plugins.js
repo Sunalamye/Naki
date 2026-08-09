@@ -252,6 +252,29 @@
                 out.push({ id: id, capabilities: entry.grant.capabilities || [] });
             });
             return out;
+        },
+
+        // ---- 熱插拔（runtime enable/disable，免 reload）----
+        //
+        // Swift 端 toggle 時呼叫：先 setGrant 下發權威 grant，再由呼叫端 evaluateJavaScript
+        // 插件源碼（源碼會呼叫 register，register 讀 grant 生效）。disable 反向移除。
+        // 這條路不經 WKUserScript，所以不必重新載入頁面。
+
+        // 設定/更新某 id 的 grant（register 前必須先有 grant，否則 register 會被拒）
+        setGrant: function (id, grant) {
+            if (typeof id !== 'string' || !grant) return false;
+            window.__nakiPluginGrants = window.__nakiPluginGrants || {};
+            window.__nakiPluginGrants[id] = grant;
+            return true;
+        },
+
+        // 熱停用：從 registry 移除、清 grant、歸零失敗計數。回可觀測結果。
+        disable: function (id) {
+            var wasRegistered = registry.delete(id);
+            failures.delete(id);
+            if (window.__nakiPluginGrants) delete window.__nakiPluginGrants[id];
+            pluginLog(id, 'disabled（熱停用，免 reload）');
+            return { ok: true, wasRegistered: wasRegistered };
         }
     };
 
