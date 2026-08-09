@@ -18,8 +18,8 @@ bash .claude/skills/release-manager/scripts/release.sh <version> --yes
 ```
 
 腳本會 preflight（工作樹乾淨、版本沒撞 tag、gh 授權、MortalSwift pin 提示）→ **test（NakiTests）**
-→ **bump 三處版本** → build（macOS Release + iOS 編譯驗證）→ package（DMG 含 /Applications 捷徑）
-→ commit → tag → push origin main + tag → gh release。
+→ **bump 三處版本** → build（macOS Release + **iOS device archive**）→ package（DMG 含
+/Applications 捷徑、ZIP、**IPA**）→ commit → tag → push origin main + tag → gh release。
 **push origin main 要用戶明示授權**（全域規則）；`--yes` 只跳互動確認，不代表授權 push。
 
 2026-08-07 修正的三件事（順序不要再改回去）：
@@ -35,6 +35,17 @@ bash .claude/skills/release-manager/scripts/release.sh <version> --yes
   `iOSLayout` 有一百多行只在 iOS 編譯；在此之前所有文件化的指令都只 build
   `-scheme Naki`，那段程式碼一次都碰不到。`Naki-M.xcscheme` 已補進
   `xcshareddata`（先前只靠 Xcode autocreate，clean clone 不一定有）。
+
+2026-08-09 加的一件事：
+
+- **iOS 產出 IPA。** 那一步從 `-sdk iphonesimulator` 的編譯驗證，換成
+  `-destination 'generic/platform=iOS'` 的 `xcodebuild archive`，因為 simulator 產物是
+  arm64-simulator，**裝不到手機上**。archive 之後把 `.app` 包成
+  `Payload/<App>.app` 再 zip 成 `dist/Naki-M.ipa`（`Payload` 這個目錄名是側載工具認的，
+  不能改），並掛進 `gh release`。IPA 走 `CODE_SIGNING_ALLOWED=NO` **刻意不簽名**——
+  Naki 沒有 App Store 管道，使用者用 AltStore / Sideloadly 自行簽名安裝。
+  archive 產物同樣做 `CFBundleShortVersionString` 比對，理由與 macOS 那道一樣：
+  IPA 的版本號沒人會去點開看。
 
 bump 之後有 `trap` 保護：任何一步失敗都會 `git checkout` 還原三個版本號檔案，
 不留下「版本已改、但沒 commit 也沒產物」的中間狀態（那會讓下次 preflight 擋下自己）。
@@ -97,12 +108,20 @@ NEVER force push、NEVER 推別人的 main。
 
 **Release Manager v2.0** — 硬化版，MortalSwift-dependency-first + 上次踩坑固化
 
-## ⚠️ 2026-08-05 新坑（未修，發布前必查）
+## LookInsideServer 閃退（2026-08-05 記錄，2026-08-09 已不復現）
 
-| 坑 | 症狀 | 修法（擇一，使用者尚未拍板） |
-|----|------|------|
-| LookInsideServer.framework 被連進 target，Release ad-hoc 簽名（`-`）與該 framework 的 LookInside Team ID 不符 | **Release 版啟動即 SIGABRT**（dyld: different Team IDs 拒載）；Debug 正常，所以 build/test 全綠也看不出來 | ① framework embed 改 Debug-only（正解）② 打包時 `codesign -f -s -` 重簽 ③ 打包腳本剝掉該 framework |
+當時的症狀：LookInsideServer.framework 被連進 target，Release 的 ad-hoc 簽名（`-`）
+與該 framework 的 Team ID 不符 → **Release 版啟動即 SIGABRT**（dyld 拒載），
+而 Debug 正常，所以 build/test 全綠也看不出來。
 
-**當前 `dist/Naki.zip`／`Naki.dmg`（2026-08-05 深夜版）就是這個會閃退的包，不可發佈**；
-修好前 release.sh 的 preflight 應加「啟動一次 Release .app 並 curl /status」的 smoke test
-——「build 成功」不代表「啟動成功」，這次就是活例。
+**2026-08-09 複驗：不再復現。** 兩項證據——`grep LookInside Naki.xcodeproj/project.pbxproj`
+零命中（framework 已不在 target 裡）；Release build 實際啟動後進程存活、自己綁住 8765、
+`/status` 回 `running` 且 `logFile` 指向 host（不是 CoreSimulator）。
+
+那次複驗踩到一個假陽性值得記著：**simulator 裡跑著的 Naki-M 會先佔住 8765**，
+於是 `curl /status` 回的是 simulator 那個 app 的狀態，看起來像 macOS 版活得好好的。
+分辨方法是看回應裡的 `logFile`／`eventLog` 路徑有沒有 `CoreSimulator`。
+smoke test 前先 `xcrun simctl shutdown booted` + `pkill -x Naki`，並用
+`lsof -nP -iTCP:8765 -sTCP:LISTEN` 確認沒人佔。
+
+「build 成功」不代表「啟動成功」這句仍然成立，只是這個特定成因已經消失。

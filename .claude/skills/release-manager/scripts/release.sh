@@ -71,6 +71,16 @@ NOTES=$(cat <<EOF
 
 $COMMITS
 
+### 下載
+
+| 平台 | 檔案 | 安裝 |
+|---|---|---|
+| macOS | \`Naki.dmg\`（或 \`Naki.zip\`） | 開啟後把 Naki 拖進 Applications |
+| iOS | \`Naki-M.ipa\` | **未簽名**，需要自行簽名側載（AltStore / Sideloadly 等） |
+
+macOS 版是 ad-hoc 簽名，首次開啟要在「系統設定 → 隱私權與安全性」放行。
+iOS 版沒有 App Store 發布管道，IPA 刻意不含開發者憑證。
+
 **完整 changelog**: https://github.com/$REPO/compare/${PREV_TAG:-HEAD}...v$VERSION
 EOF
 )
@@ -126,19 +136,38 @@ APP_PATH=$(find ./build -name "Naki.app" -type d | head -1)
 BUILT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
   "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "?")
 [ "$BUILT_VERSION" = "$VERSION" ] || {
-  echo "❌ 產物版本號是 $BUILT_VERSION，不是 $VERSION（bump 與 build 的順序又反了？）"; exit 1; }
+  echo "❌ 產物版本號是 ${BUILT_VERSION}，不是 ${VERSION}（bump 與 build 的順序又反了？）"; exit 1; }
 echo "  built: ${APP_PATH}（CFBundleShortVersionString = $BUILT_VERSION ✓）"
 
-# iOS target 不進發布產物，但要編得過——`command/` 是兩個 target 共用的，
-# 而 `ContentView.swift` 的 iOSLayout 有一百多行只在 iOS 編譯。沒有這一步，
-# 那段程式碼在所有文件化的指令裡一次都碰不到。
-echo "▶ Build（iOS，只驗編譯）"
-xcodebuild build -project Naki.xcodeproj -scheme Naki-M -sdk iphonesimulator \
-  -configuration Release -derivedDataPath ./build-ios \
-  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO \
-  2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | tail -3
+# iOS：archive 出**未簽名 IPA**。這一步有兩個目的，別降級回 simulator build——
+#
+#   1. 編譯驗證。`command/` 是兩個 target 共用的，而 `ContentView.swift` 的
+#      iOSLayout 有一百多行只在 iOS 編譯；沒有這一步，那段程式碼在所有文件化的
+#      指令裡一次都碰不到。
+#   2. 產物。simulator build 出來的是 x86_64/arm64-simulator，**裝不到手機上**；
+#      要能側載就得是 `generic/platform=iOS` 的 device build。
+#
+# `CODE_SIGNING_ALLOWED=NO` 是刻意的：Naki 沒有 App Store 發布管道，也沒有要把
+# 開發者憑證綁進發布流程。使用者拿 AltStore / Sideloadly 這類工具自行簽名安裝。
+echo "▶ Build（iOS archive → 未簽名 IPA）"
+xcodebuild archive -project Naki.xcodeproj -scheme Naki-M \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath ./build-ios/Naki-M.xcarchive \
+  CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  2>&1 | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)|BUILD (SUCCEEDED|FAILED)" | tail -3
 
-# ── 5. Package DMG + ZIP ─────────────────────────────────────
+IOS_APP=$(find ./build-ios/Naki-M.xcarchive/Products/Applications -maxdepth 1 -name "*.app" -type d 2>/dev/null | head -1)
+[ -n "${IOS_APP}" ] || { echo "❌ archive 裡找不到 iOS .app"; exit 1; }
+
+# 與 macOS 產物同一套檢查：版本號真的進到 binary 了嗎（bump/build 順序的那個坑
+# 對 iOS 一樣成立，而 IPA 的版本號沒人會去點開看）
+IOS_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+  "${IOS_APP}/Info.plist" 2>/dev/null || echo "?")
+[ "${IOS_VERSION}" = "${VERSION}" ] || {
+  echo "❌ iOS 產物版本號是 ${IOS_VERSION}，不是 ${VERSION}（bump 與 build 的順序又反了？）"; exit 1; }
+echo "  archived: $(basename "${IOS_APP}")（CFBundleShortVersionString = ${IOS_VERSION} ✓）"
+
+# ── 5. Package DMG + ZIP + IPA ───────────────────────────────
 echo "▶ Package"
 mkdir -p dist
 ( cd "$(dirname "$APP_PATH")" && zip -r -y -q "$OLDPWD/dist/Naki.zip" Naki.app )
@@ -146,6 +175,14 @@ rm -rf /tmp/naki_dmg && mkdir -p /tmp/naki_dmg && cp -R "$APP_PATH" /tmp/naki_dm
 ln -s /Applications /tmp/naki_dmg/Applications   # DMG 內要有 Applications 捷徑供拖入
 hdiutil create -volname "Naki" -srcfolder /tmp/naki_dmg -ov -format UDZO dist/Naki.dmg >/dev/null
 rm -rf /tmp/naki_dmg
+
+# IPA 就是一個 zip，內容固定是 `Payload/<App>.app`——這個目錄名不能改，
+# 側載工具（AltStore / Sideloadly）與 iOS 安裝器都認它。
+rm -rf /tmp/naki_ipa && mkdir -p /tmp/naki_ipa/Payload
+cp -R "${IOS_APP}" /tmp/naki_ipa/Payload/
+( cd /tmp/naki_ipa && zip -r -y -q "$OLDPWD/dist/Naki-M.ipa" Payload )
+rm -rf /tmp/naki_ipa
+
 ls -lh dist/ | awk 'NR>1{print "  "$5, $9}'
 
 # ── 6. Commit + tag ──────────────────────────────────────────
@@ -166,7 +203,7 @@ git push origin "v$VERSION"
 # ── 8. GitHub release ────────────────────────────────────────
 echo "▶ GitHub release"
 gh release create "v$VERSION" --repo "$REPO" --title "Naki v$VERSION" \
-  --notes "$NOTES" dist/Naki.dmg dist/Naki.zip
+  --notes "$NOTES" dist/Naki.dmg dist/Naki.zip dist/Naki-M.ipa
 
 echo "════════ ✅ Released ════════"
 echo "🔗 https://github.com/$REPO/releases/tag/v$VERSION"
