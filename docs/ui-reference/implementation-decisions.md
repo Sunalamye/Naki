@@ -116,6 +116,44 @@
 那 20pt 的視覺確認（值有讀到並套用，但決策內容目前填不滿欄高，看不出來）、旋轉到另一個
 方向、`DecisionHUDTouchTests` 未重跑。
 
+## 啟動時選雀魂區服：預設每次問，可升級成「記住」
+
+**決策**：三個區服（國服／日服／國際服）在啟動時選；勾「以後都用這個」就不再問；
+設定頁可換服、也可取消固定。URL 的唯一定義點是 `MajsoulServer`
+（`SettingsStore.swift`），先前寫死在 `WebSession.swift:171`。
+
+**為什麼是「每次問」當預設**：選錯服的代價不是畫面不對，是**登不進去**——各服帳號
+不互通。固定一個服的人勾一次就再也不會看到它，成本只有一次；而常換服的人如果預設
+是「記住」，每次都要進設定改。兩邊的痛不對稱。
+
+**三個服跑同一份 client**（2026-08-09 實測）：三個 `version.json` 完全相同
+（`0.11.252.w`），所以 Liqi 協定一致，不需要為不同服準備 parser，UI 上也不必把非國服
+標成「未驗證」。這個結論會隨雀魂改版失效——換服後解析大量失敗的話，先回頭比對這三個
+`version.json`。
+
+**換服不會打壞注入**：注入的 JS 不判 hostname，`WKUserScript` 是
+`forMainFrameOnly: false` + `atDocumentStart` 套用在所有頁面。舊版那份有自己
+majsoul URL 判定的 fallback 攔截器已經整段刪掉了（見 `WebSocketInterceptor`）。
+
+**選擇畫面取代整個畫面，不是蓋在上面**：WebView 一旦進 view tree 就會開始載入
+（`WebSession.makeView()` 的 `.task`），用 sheet／fullScreenCover 蓋上去等於
+「先載入上次的服、選完再整頁重載一次」。不渲染它就不會載。
+
+**判斷要不要顯示用 `@AppStorage` 而不是 `naki.settings`**：`@Environment` 要到 body
+求值時才拿得到，那時主版面已經渲染過一幀——而那一幀就足以建立 WebView。
+`@AppStorage` 只讀，寫入仍然只有 `SettingsStore` 一個入口。
+
+**iOS 不掛 `.keyboardShortcut(.defaultAction)`**：Enter＝預設按鈕是 macOS 慣例。
+在這個畫面上，任何送進來的 Return 都會直接確認選擇，而誤觸的代價是連錯服。
+
+## iOS 右側欄的控制列順序：圖示在上，模式與延遲在下
+
+**決策**：重載／日誌／雲端／設定／收面板那排圖示排在最上，模式切換與延遲 stepper
+排在它下面。
+
+**為什麼**：圖示那排是「離開這裡去別的地方」，一局裡按不到幾次；模式與延遲是對局中
+真的會動的東西，排下面就離決策區更近。
+
 ## 診斷輸出不上狀態列
 
 **決策**：`NakiMCPDependencies` / `MCPContext` 新增 `trace()`（只進 `LogManager`），

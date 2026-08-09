@@ -152,13 +152,42 @@ struct ContentView: View {
         return "雲端推論已關閉，目前使用內建本地模型"
     }
 
+    /// 啟動時要不要問區服。
+    ///
+    /// 用 `@AppStorage` 直接讀 UserDefaults 而不是等 `naki.settings`：`@Environment`
+    /// 要到 body 求值時才拿得到，那時主版面已經渲染過一幀——而渲染主版面就等於
+    /// 建立 WebView、開始載入舊的服（見 `ServerPickerView` 的註解）。
+    ///
+    /// **只讀不寫。** 寫入仍然只有 `SettingsStore.pinMajsoulServer` 一個入口——
+    /// 同一個設定兩個寫入點正是 `hidePlayerNames` 踩過的坑。
+    @AppStorage(SettingsStore.pinMajsoulServerKey) private var serverPinned = false
+
+    /// 這次啟動已經選過了（選完就不再擋，即使沒勾「以後都用這個」）
+    @State private var serverChosen = false
+
+    private var showsServerPicker: Bool { !serverPinned && !serverChosen }
+
     var body: some View {
         Group {
+            if showsServerPicker {
+                ServerPickerView(initial: naki.settings.majsoulServer) { server, pin in
+                    naki.settings.pinMajsoulServer = pin
+                    // 相同就只寫設定，不重載——`switchServer` 一定會整頁重載，
+                    // 而這時頁面根本還沒載過，重載沒有意義。
+                    if server == naki.settings.majsoulServer {
+                        naki.settings.majsoulServer = server
+                    } else {
+                        naki.actions.switchServer(server)
+                    }
+                    serverChosen = true
+                }
+            } else {
 #if os(macOS)
-            macOSLayout
+                macOSLayout
 #else
-            iOSLayout
+                iOSLayout
 #endif
+            }
         }
         .task {
             // 存檔可能是在支援自動送出的裝置上寫下的 `.auto`。Picker 上沒有那個選項時，
@@ -480,16 +509,12 @@ struct ContentView: View {
     ///
     /// 排成三列而不是硬擠一列：220pt 欄寬裡，延遲 stepper（~130pt）與五顆圖示
     /// （~200pt）加起來超過可用寬度，擠在一起會先犧牲 stepper 的數字。
+    ///
+    /// **順序：圖示列在最上，模式與延遲在下。** 圖示那排是「離開這裡去別的地方」
+    /// （重載／日誌／設定／收面板），一局裡按不到幾次；模式與延遲是對局中真的會動的
+    /// 東西，排在下面就離決策區更近。
     private var iOSPanelControls: some View {
         VStack(spacing: 8) {
-            // 傳 nil：segmented control 自己撐滿欄寬，欄寬改了不必回頭同步點數。
-            autoPlayModePicker(width: nil)
-
-            // 只在這條 path 真的會自動送出時才出現（與 macOS 同一個判斷）
-            if naki.settings.supportsAutoPlay {
-                actionDelayStepper
-            }
-
             HStack(spacing: 0) {
                 Button(action: { naki.actions.reloadPage() }) {
                     Image(systemName: "arrow.clockwise")
@@ -524,6 +549,14 @@ struct ContentView: View {
                 .accessibilityIdentifier("toolbar-game-panel-toggle")
                 .accessibilityLabel("隱藏決策面板")
                 .accessibilityValue("已顯示")
+            }
+
+            // 傳 nil：segmented control 自己撐滿欄寬，欄寬改了不必回頭同步點數。
+            autoPlayModePicker(width: nil)
+
+            // 只在這條 path 真的會自動送出時才出現（與 macOS 同一個判斷）
+            if naki.settings.supportsAutoPlay {
+                actionDelayStepper
             }
         }
         .padding(.horizontal, 10)
@@ -584,6 +617,131 @@ struct GamePanel: View {
     }
 }
 #endif
+
+// MARK: - 啟動時的區服選擇
+
+/// 啟動時問要連哪個雀魂區服。
+///
+/// **它取代整個畫面，而不是蓋在上面。** WebView 一旦進了 view tree 就會開始載入
+/// （`WebSession.makeView()` 的 `.task` → `loadMajsoulIfNeeded`），所以用
+/// sheet／fullScreenCover 蓋上去等於「先載入上次的服、選完再整頁重載一次」。
+/// 不渲染它就不會載——首次啟動因此只有一次頁面載入。
+///
+/// 兩個平台共用這一份：macOS 版面大，但這個畫面沒有任何需要更多空間的東西，
+/// 寫兩份只會讓其中一份先過期。
+struct ServerPickerView: View {
+
+    /// 預選上次用的服。常換服的人多半也只在兩個之間切，預選上次那個比預選第一個有用。
+    @State private var selection: MajsoulServer
+    @State private var pin = false
+
+    /// `(選定的服, 要不要記住)`
+    let onConfirm: (MajsoulServer, Bool) -> Void
+
+    init(initial: MajsoulServer, onConfirm: @escaping (MajsoulServer, Bool) -> Void) {
+        _selection = State(initialValue: initial)
+        self.onConfirm = onConfirm
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 12)
+
+            Text("選擇雀魂伺服器")
+                .font(.title3)
+                .fontWeight(.semibold)
+
+            // 這句是這個畫面存在的理由：選錯服不是「畫面不對」而是「登不進去」。
+            Text("各服的帳號不互通")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 3)
+                .padding(.bottom, 16)
+
+            VStack(spacing: 8) {
+                ForEach(MajsoulServer.allCases) { server in
+                    row(for: server)
+                }
+            }
+            .frame(maxWidth: 340)
+
+            Toggle("以後都用這個伺服器，不要再問", isOn: $pin)
+                .font(.callout)
+                .frame(maxWidth: 340)
+                .padding(.top, 16)
+                .accessibilityIdentifier("server-picker-pin-toggle")
+
+            Text("之後可以在進階設定裡改，或取消固定。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 340, alignment: .leading)
+                .padding(.top, 4)
+
+            Button {
+                onConfirm(selection, pin)
+            } label: {
+                Text("進入遊戲")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: 340)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .padding(.top, 18)
+#if os(macOS)
+            // Enter＝預設按鈕是 macOS 的慣例。iOS 上沒有這個慣例，而且它會讓任何
+            // 送進來的 Return 直接確認選擇——這個畫面的誤觸代價是連錯服。
+            .keyboardShortcut(.defaultAction)
+#endif
+            .accessibilityIdentifier("server-picker-confirm")
+
+            Spacer(minLength: 12)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.windowBackground)
+        .accessibilityIdentifier("server-picker")
+    }
+
+    private func row(for server: MajsoulServer) -> some View {
+        let isOn = selection == server
+        return Button {
+            selection = server
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isOn ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
+                    .imageScale(.large)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(server.displayName)・\(server.regionName)")
+                        .fontWeight(isOn ? .semibold : .regular)
+                    // 網域是「我要連去哪」的唯一憑據——國服與國際服的招牌長得不像，
+                    // 但網址是使用者真正認得的東西
+                    Text(server.host)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(isOn ? Color.accentColor.opacity(0.12) : Color.contentBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isOn ? Color.accentColor.opacity(0.55)
+                                       : Color.secondary.opacity(0.22),
+                                  lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("server-option-\(server.rawValue)")
+        .accessibilityLabel("\(server.displayName) \(server.regionName)")
+        .accessibilityValue(isOn ? "已選擇" : "未選擇")
+    }
+}
 
 // MARK: - Connection Indicator
 
@@ -701,6 +859,19 @@ struct AdvancedSettingsSheet: View {
     private var showStatusBar: Binding<Bool> {
         Binding(get: { naki.settings.showStatusBar },
                 set: { naki.settings.showStatusBar = $0 })
+    }
+
+    /// 區服。setter 走 Action 而不是直接寫 settings——換服要整頁重載，
+    /// 那是副作用，屬於 `SwitchServerAction`（它自己會寫設定）。
+    private var majsoulServer: Binding<MajsoulServer> {
+        Binding(get: { naki.settings.majsoulServer },
+                set: { naki.actions.switchServer($0) })
+    }
+
+    /// 「啟動時不再詢問」。純設定，下次啟動才生效。
+    private var pinMajsoulServer: Binding<Bool> {
+        Binding(get: { naki.settings.pinMajsoulServer },
+                set: { naki.settings.pinMajsoulServer = $0 })
     }
 
     // ☁️ 雲端推論設定：讀寫都是 `SettingsStore` 那一份（key 進 Keychain，
@@ -989,6 +1160,43 @@ struct AdvancedSettingsSheet: View {
         autoPlayAvailabilityBox
 
         autoPlaySettingsBox
+
+            // 雀魂伺服器
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("伺服器", selection: majsoulServer) {
+                        ForEach(MajsoulServer.allCases) { server in
+                            Text("\(server.displayName)・\(server.regionName)").tag(server)
+                        }
+                    }
+                    .accessibilityIdentifier("majsoul-server-picker")
+
+                    Text("目前：\(naki.settings.majsoulServer.host)")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                    Text("換伺服器會**整頁重新載入**，等於登出重來——各服的帳號不互通。對局中不要換。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider()
+
+                    Toggle("啟動時不再詢問", isOn: pinMajsoulServer)
+                        .accessibilityIdentifier("pin-majsoul-server-toggle")
+
+                    // 這行是「取消固定」的說明：關掉開關就會恢復每次啟動詢問。
+                    // 沒有這句的話，勾過「以後都用這個」的人不會知道怎麼把它要回來。
+                    Text(naki.settings.pinMajsoulServer
+                         ? "已固定為 \(naki.settings.majsoulServer.regionName)，啟動時直接進入。關掉這個開關就會恢復每次詢問。"
+                         : "每次啟動都會問要連哪個伺服器，上次選的會預先選起來。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } label: {
+                Label("雀魂伺服器", systemImage: "globe.asia.australia")
+            }
 
             // 畫面
             GroupBox {

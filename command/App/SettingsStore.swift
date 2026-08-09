@@ -18,6 +18,53 @@ import SwiftUI
 ///   `AutoPlayAvailability.commit`，而「現在生效的是哪一個」住在 `GameStore`。
 ///   這裡只放「這條 path 允不允許 `.auto` 這個選項」。
 /// - 牌局資料不在這裡（`GameStore`）。
+/// 雀魂的區服。
+///
+/// **三個服跑同一份 client**：2026-08-09 實測三個 `version.json` 完全相同
+/// （`0.11.252.w`），所以 Liqi 協定一致——Naki 不需要為不同服準備不同的 parser，
+/// 也不需要在 UI 上把非國服標成「未驗證」。這個結論會隨雀魂改版失效，
+/// 換服之後解析大量失敗的話，先回頭比對這三個 `version.json`。
+///
+/// URL 是**唯一定義點**：`WebSession.loadMajsoul` 與選擇畫面都讀這裡，
+/// 不要在別處再寫一次字面值（先前那份寫死在 `WebSession.swift` 的 URL 就是這樣長出來的）。
+enum MajsoulServer: String, CaseIterable, Identifiable, Sendable {
+    case cn
+    case jp
+    case intl
+
+    nonisolated var id: String { rawValue }
+
+    /// 各服自己的招牌，不是翻譯——選單上要能對應到使用者實際看到的畫面。
+    nonisolated var displayName: String {
+        switch self {
+        case .cn:   return "雀魂麻將"
+        case .jp:   return "じゃんたま"
+        case .intl: return "MahjongSoul"
+        }
+    }
+
+    nonisolated var regionName: String {
+        switch self {
+        case .cn:   return "國服"
+        case .jp:   return "日服"
+        case .intl: return "國際服"
+        }
+    }
+
+    nonisolated var urlString: String {
+        switch self {
+        case .cn:   return "https://game.maj-soul.com/1/"
+        case .jp:   return "https://game.mahjongsoul.com/"
+        case .intl: return "https://mahjongsoul.game.yo-star.com/"
+        }
+    }
+
+    nonisolated var url: URL? { URL(string: urlString) }
+
+    /// 選單第二行顯示的網域（讓人看得出自己要連去哪，尤其國服與國際服長得不像）
+    nonisolated var host: String { URL(string: urlString)?.host ?? urlString }
+}
+
 @Observable
 @MainActor
 final class SettingsStore {
@@ -38,6 +85,40 @@ final class SettingsStore {
         didSet {
             guard hidePlayerNames != oldValue else { return }
             UserDefaults.standard.set(hidePlayerNames, forKey: Self.hidePlayerNamesKey)
+        }
+    }
+
+    // MARK: - 雀魂區服
+
+    nonisolated static let majsoulServerKey = "MajsoulServer"
+    nonisolated static let pinMajsoulServerKey = "PinMajsoulServer"
+
+    /// 要連哪個區服。預設國服＝這個功能出現之前的寫死行為，升級不會換掉任何人的服。
+    ///
+    /// 存 `rawValue` 而不是 index：日後在中間插一個新區服，index 會讓所有人默默換服。
+    var majsoulServer: MajsoulServer =
+        MajsoulServer(rawValue: UserDefaults.standard
+            .string(forKey: SettingsStore.majsoulServerKey) ?? "") ?? .cn
+    {
+        didSet {
+            guard majsoulServer != oldValue else { return }
+            UserDefaults.standard.set(majsoulServer.rawValue, forKey: Self.majsoulServerKey)
+        }
+    }
+
+    /// 啟動時是否**跳過**詢問，直接用 `majsoulServer`。
+    ///
+    /// 預設 false＝每次啟動都問。選擇畫面上那個「以後都用這個」勾選就是寫這個值，
+    /// 設定頁可以隨時取消（取消之後下次啟動又會問）。
+    ///
+    /// 預設值剛好等於 `UserDefaults.bool` 對未設定 key 的回傳（false），所以不必
+    /// `register(defaults:)`——與 `showStatusBar` 同一個理由，哪天要改預設就得補註冊。
+    var pinMajsoulServer: Bool = UserDefaults.standard
+        .bool(forKey: SettingsStore.pinMajsoulServerKey)
+    {
+        didSet {
+            guard pinMajsoulServer != oldValue else { return }
+            UserDefaults.standard.set(pinMajsoulServer, forKey: Self.pinMajsoulServerKey)
         }
     }
 

@@ -712,8 +712,45 @@ struct ReloadPageAction {
     }
   #endif
 
-  func callAsFunction() {
-    perform()
+  func callAsFunction() { perform() }
+}
+
+// MARK: - 切換雀魂區服
+
+/// 換到另一個區服並重新載入頁面。
+///
+/// 與 `ReloadPageAction` 分開而不是加參數：那個是「重載目前這一頁」，這個會**換掉
+/// URL**。各服帳號不互通，所以切換等於登出重來——把它做成兩個不同的動作，
+/// 呼叫端就不會不小心把「重新載入」寫成換服。
+@MainActor
+struct SwitchServerAction {
+
+  private nonisolated(unsafe) let perform: (MajsoulServer) -> Void
+
+  private init(perform: @escaping (MajsoulServer) -> Void) {
+    self.perform = perform
+  }
+
+  /// 真實實作
+  init(session: WebSession) {
+    self.init(perform: { [weak session] server in session?.switchServer(to: server) })
+  }
+
+  /// Preview／未接線
+  static let noop = SwitchServerAction()
+
+  nonisolated init() {
+    self.perform = { _ in }
+  }
+
+  #if DEBUG
+    init(stub: @escaping (MajsoulServer) -> Void) {
+      self.init(perform: stub)
+    }
+  #endif
+
+  func callAsFunction(_ server: MajsoulServer) {
+    perform(server)
   }
 }
 
@@ -823,6 +860,8 @@ struct NakiActions {
   var toggleDebugServer: ToggleDebugServerAction
   /// 重新載入雀魂頁面
   var reloadPage: ReloadPageAction
+  /// 換到另一個區服（換 URL，不是重載）
+  var switchServer: SwitchServerAction
   /// 隱藏玩家名稱開關
   var setHidePlayerNames: SetHidePlayerNamesAction
   /// 交出這條 path 的 WebView
@@ -841,11 +880,12 @@ struct NakiActions {
     self.deleteBot = DeleteBotAction()
     self.toggleDebugServer = ToggleDebugServerAction()
     self.reloadPage = ReloadPageAction()
+    self.switchServer = SwitchServerAction()
     self.setHidePlayerNames = SetHidePlayerNamesAction()
     self.webView = WebViewAction()
   }
 
-  /// 正式路徑：由 `NakiRuntime` 一次組好（九個全部明講，漏一個編譯期就不過）
+  /// 正式路徑：由 `NakiRuntime` 一次組好（十個全部明講，漏一個編譯期就不過）
   init(executeJavaScript: ExecuteJavaScriptAction,
        forceReconnect: ForceReconnectAction,
        setAutoPlayMode: SetAutoPlayModeAction,
@@ -853,6 +893,7 @@ struct NakiActions {
        deleteBot: DeleteBotAction,
        toggleDebugServer: ToggleDebugServerAction,
        reloadPage: ReloadPageAction,
+       switchServer: SwitchServerAction,
        setHidePlayerNames: SetHidePlayerNamesAction,
        webView: WebViewAction) {
     self.executeJavaScript = executeJavaScript
@@ -862,6 +903,7 @@ struct NakiActions {
     self.deleteBot = deleteBot
     self.toggleDebugServer = toggleDebugServer
     self.reloadPage = reloadPage
+    self.switchServer = switchServer
     self.setHidePlayerNames = setHidePlayerNames
     self.webView = webView
   }

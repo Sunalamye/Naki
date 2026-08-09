@@ -167,11 +167,26 @@ final class WebSession {
     /// 這次 App 生命週期內是否已經要求過首次載入
     private var hasRequestedInitialLoad = false
 
+    /// 載入目前選定的區服（URL 的唯一定義點在 `MajsoulServer`）。
     func loadMajsoul() {
-        guard let url = URL(string: "https://game.maj-soul.com/1/") else { return }
+        let server = settings.majsoulServer
+        guard let url = server.url else { return }
         hasRequestedInitialLoad = true
         backend.load(url)
-        store.statusMessage = "正在加載雀魂麻將..."
+        store.statusMessage = "正在載入\(server.displayName)…"
+    }
+
+    /// 換區服。
+    ///
+    /// 一定是**整頁重載**，不是 `reload()`：URL 換了，而各服的帳號不互通，
+    /// 舊頁面的 WebSocket 與登入狀態全部作廢。這也是為什麼切換要由使用者明確觸發，
+    /// 不會在對局中自己發生。
+    func switchServer(to server: MajsoulServer) {
+        settings.majsoulServer = server
+        guard let url = server.url else { return }
+        hasRequestedInitialLoad = true
+        backend.load(url)
+        store.statusMessage = "正在切換到\(server.regionName)…"
     }
 
     /// View 出現時的首次載入（重複呼叫無效果）。

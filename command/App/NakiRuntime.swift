@@ -303,6 +303,7 @@ final class NakiRuntime {
             deleteBot: DeleteBotAction(coordinator: coordinator),
             toggleDebugServer: ToggleDebugServerAction(runtime: self),
             reloadPage: ReloadPageAction(session: session),
+            switchServer: SwitchServerAction(session: session),
             setHidePlayerNames: SetHidePlayerNamesAction(session: session),
             webView: WebViewAction(session: session))
     }
