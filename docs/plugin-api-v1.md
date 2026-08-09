@@ -271,6 +271,35 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 
 作為插件作者，這對你的意義：**你的插件被安裝＝使用者把帳號託付給你。** 別辜負。也別在 log 或任何地方記錄封包內容——那可能含 session token。
 
+### 插件實際能碰到什麼（完整頁面權限，實證）
+
+**先分清兩件事：**
+
+- **`capabilities` / `methods` 只管「Naki 主動遞給你的封包 hook」**——observe 讓你看 ctx、rewriteReceive 讓你改遊戲看到的封包。這是 Naki 這側能控制、能稽核的門。
+- **頁面本身的一切，你無條件全有，不受 capability 限制。** 因為你的 JS 跟遊戲跑在同一個 realm——你人已經在房間裡了，房間裡的東西都拿得到，Naki 攔不住。
+
+以下是**在 live 雀魂頁面實測**到的、任何插件（哪怕只給 `observe`）都能直接呼叫的東西：
+
+| 你能碰到 | 全域入口 | 意味著 |
+|---|---|---|
+| **送任意 Liqi 封包** | `window.__nakiWebSocket.sendRaw(base64)` | 用使用者帳號送出任何遊戲動作——**繞過所有 capability**（這是 §8 的核心破口） |
+| **發任意網路請求** | `fetch` / `XMLHttpRequest` / `new WebSocket` | 把頁面上任何資料（含下面的 token）外傳到任意伺服器 |
+| **讀 session 憑證** | `localStorage`（實測 57 個鍵）、`document.cookie`、`indexedDB` | 讀到登入 token、帳號狀態——足以在別處冒用這個 session |
+| **讀遊戲記憶體** | `window.__nakiHeap()`（Naki 已把 wasm heap 存這） | 讀 IL2CPP `System.String`（暱稱等）與其他 heap 內容 |
+| **改／疊 DOM** | `document`、`document.body.appendChild` | 疊自己的 HTML/canvas 層（但見下「畫面」） |
+| **碰 Naki 的 hook** | `window.__nakiHighlight`、`window.__nakiPlugins` | 存取 Naki 自己的 WebGL 高亮與插件 runtime |
+
+換句話說：**安裝一個插件，等於把「這個帳號的整個 session ＋ 頁面上的一切」交給插件作者。** Naki 的 capability／禁改名單只是把「Naki 遞出去的那部分」寫清楚讓你稽核，擋不住決心亂來的插件。這就是為什麼上面反覆說「只裝你信任的作者」。
+
+### 關於「自訂畫面顯示」——雀魂的現實
+
+雀魂是 **Unity WebGL**：整個畫面（牌、名字、牌桌、按鈕）都畫在一塊 `unity-canvas`（WebGL，實測 2560×1440）上，**不在 DOM**（整頁 DOM 實測只有 ~30 個元素）。所以：
+
+- **改 DOM 改不到遊戲畫的東西**——DOM 上沒有牌、沒有名字。CLAUDE.md 也寫死「不可用 DOM tile、Laya sprite 或座標點擊」。
+- **疊 DOM overlay 有點擊衝突**：蓋在 canvas 上的 overlay 會攔截滑鼠事件，遊戲點不到；要 `pointer-events: none` 穿透，但那樣 overlay 自己的互動元件又點不了。這是為什麼 Naki **不**提供受控 overlay API——這個取捨留給插件作者自己權衡（你有完整 DOM 權限，要怎麼疊、怎麼處理 pointer-events 由你決定）。
+- **真要改遊戲畫面內容**（角色／皮膚／名字）：走 `rewriteReceive` 改**封包**，讓遊戲自己重繪（Phase 2）——這才是「本機解鎖」的正路，不是改 DOM。
+- **染色／遮罩遊戲畫的像素**：得 hook WebGL draw call（`window.__nakiHighlight` 是 Naki 的既有實作），但「認出哪個 draw 是什麼」極脆，自負風險。
+
 ### 封號風險
 
 魔改有被雀魂偵測封號的風險。只在使用者自己的**測試帳號**上用，不要碰主帳號。

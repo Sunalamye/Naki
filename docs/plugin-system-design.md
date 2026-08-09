@@ -625,6 +625,13 @@ window.__nakiWebSocket.sendRaw(anyBase64);   // 繞過所有 capability 檢查
 
 > 安裝插件 ＝ 信任插件作者。插件與遊戲跑在同一個環境裡，一個惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上的任何資料。Naki 沒有辦法阻止這件事。只裝你信任的插件。
 
+#### 插件的實際權限範圍（2026-08-10 決定：明講「完整頁面權限」）
+
+決策：**不做受控的 overlay／DOM API，直接讓插件擁有完整頁面權限，並把「有多大」寫清楚**（呼應 §8.3 的誠實聲明——同 realm 本來就擋不住，假裝有沙箱只會誤導）。完整實證清單見 `docs/plugin-api-v1.md` §8「插件實際能碰到什麼」。要點：
+
+- `capabilities`／`methods` 只管「Naki 遞出去的封包 hook」；**頁面本身**（`window`／`document`／`fetch`／`localStorage`（實測 57 鍵）／`cookie`／`indexedDB`／`__nakiWebSocket.sendRaw`／`__nakiHeap` wasm heap）插件**無條件全有**，不受 capability 限制。
+- **「自訂畫面顯示」的現實**：雀魂是 Unity WebGL，畫面全在 `unity-canvas`（WebGL，實測 DOM 僅 ~30 元素），**改 DOM 改不到遊戲畫的東西**；overlay 疊 canvas 有 pointer-events 點擊衝突（故不做受控 overlay API，取捨留給插件）。改遊戲畫面內容 → `rewriteReceive` 改封包（Phase 2）；碰遊戲像素 → hook WebGL draw（`__nakiHighlight`，極脆）。
+
 ### 8.4 封號風險
 
 MajsoulMax 自己的 README 反覆警告（原文，已驗證）：
