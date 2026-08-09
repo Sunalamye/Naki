@@ -189,11 +189,22 @@ ls -lh dist/ | awk 'NR>1{print "  "$5, $9}'
 echo "▶ Commit + tag"
 git add README.md CLAUDE.md Naki.xcodeproj/project.pbxproj \
   Naki.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved 2>/dev/null || true
-git commit -q -m "chore: Release v$VERSION"
+
+# 版本號可能在跑這支之前就已經手動 bump 並 commit 過了（例如先做本機安裝、
+# 確認版面沒問題再發）。那種情況上面的 sed 不會產生任何改動，而
+# `git commit` 在沒有 staged 改動時是**非零退出**——`set -e` 會讓整支腳本
+# 死在這裡，而且死在 build 與 package 都已經做完之後，最浪費的位置。
+if git diff --cached --quiet; then
+  echo "  版本號已經是 ${VERSION}（先前已 bump 並 commit），跳過 release commit"
+else
+  git commit -q -m "chore: Release v$VERSION"
+  echo "  commit $(git rev-parse --short HEAD)"
+fi
+
 git tag -a "v$VERSION" -m "Release v$VERSION"
-# 版本改動已經進了 commit，rollback 的對象不存在了
+# 版本改動已經在 commit 裡（這次的或先前那次），rollback 的對象不存在了
 BUMPED=0
-echo "  commit $(git rev-parse --short HEAD) + tag v$VERSION"
+echo "  tag v$VERSION"
 
 # ── 7. Push（main + tag，origin=Sunalamye SSH）────────────────
 echo "▶ Push origin main + v$VERSION"
