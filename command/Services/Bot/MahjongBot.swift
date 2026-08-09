@@ -85,4 +85,18 @@ struct BotReaction {
     /// 這批推薦由誰算出："local" 或 "cloud:<model>"。
     /// fallback 原則——可以更弱，但必須讓人看得出來。
     let source: String
+
+    /// 完整合法動作集是單元素（最常見＝立直後每一摸的強制摸切）——答案完全
+    /// 確定，任何引擎都只可能回同一手。必須量在 mask 上：推薦數量分不出
+    /// 「強制」與「只映射出一個」（mapper 對個別索引可回 nil）。
+    /// `CloudBot` 據此本地回答、跳過雲端呼叫（Akagi #227/#228 同款）。
+    let forced: Bool
+
+    init(action: [String: Any]?, recommendations: [Recommendation],
+         source: String, forced: Bool = false) {
+        self.action = action
+        self.recommendations = recommendations
+        self.source = source
+        self.forced = forced
+    }
 }

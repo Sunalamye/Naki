@@ -14,7 +14,11 @@
 //  - 每個決策點重讀設定並 reconcile（修 key、換模型局中即生效，變更 reset 斷路器）
 //  - 斷路器 5s→120s：掛掉的伺服器一個視窗只付一次慢回合
 //  - 立直兩段式：伺服器回裸 reach，附上 reach 再問一次拿捨牌；
-//    第二段失敗＝整個決策退回本地（不做半雲半本地拼裝，見 decisions D3）
+//    第二段失敗＝整個決策退回本地（不做半雲半本地拼裝，見 decisions D3）。
+//    第二段 429＝burst rate-limit（兩段是毫秒內連發）：短暫等待重試一次、
+//    不開斷路器——rate limit 的伺服器是可達的（Akagi #227）
+//  - 強制手（完整合法集單元素，最常見＝立直後摸切）本地回答、不打 API、
+//    不動斷路器——伺服器只可能回同一手（Akagi #227/#228）
 //  - null reaction＝事件流不同步：打本地決策並 warn，絕不默默 pass 掉真回合
 //  - 重連重放歷史事件期間抑制雲端呼叫（`suppressCloud(forNextEvents:)`）——
 //    歷史決策早就做完了，重放時打 API 是純浪費（N 個決策 × 2s 逾時預算＋額度）
@@ -168,6 +172,10 @@ final class CloudBot: MahjongBot {
         // ── 4p：本地閘門——不是決策點連 API 都不打 ──
         guard let localReaction else { return nil }
 
+        // 強制手：答案完全確定，伺服器只可能回同一手。本地回答、不花額度；
+        // 斷路器與 fallbackStreak 都不動——這不是 fallback（Akagi #227/#228）
+        if localReaction.forced { return localReaction }
+
         if let cloud = await cloudOverride() {
             fallbackStreak = 0
             return cloud
@@ -260,23 +268,39 @@ final class CloudBot: MahjongBot {
     }
 
     /// 立直第二段：把裸 reach 附到視窗尾再問一次，取回捨牌。
+    ///
+    /// 兩段是毫秒內連發，第二段吃到 429 是 burst rate-limit 而非伺服器掛
+    ///（Akagi #227）：短暫等待重試一次；再 429 仍不開斷路器——rate limit 的
+    /// 伺服器是可達的，開 5s→120s 退避會把接下來幾手一起賠進去
+    ///（三麻雲端-only 時＝接下來幾手全部無推薦）。
     private func resolveReachDiscard(client: AkagiApiClient, model: String,
                                      events: [[String: Any]]) async -> String? {
         var followUp = events
         followUp.append(["type": "reach", "actor": Int(playerId)])
-        do {
-            let response = try await client.react(model: model.isEmpty ? nil : model,
-                                                  playerId: Int(playerId), events: followUp)
-            if let reaction = response.reaction,
-               (reaction["type"] as? String) == "dahai",
-               let pai = reaction["pai"] as? String {
-                return pai
+        var retriedAfterRateLimit = false
+        while true {
+            do {
+                let response = try await client.react(model: model.isEmpty ? nil : model,
+                                                      playerId: Int(playerId), events: followUp)
+                if let reaction = response.reaction,
+                   (reaction["type"] as? String) == "dahai",
+                   let pai = reaction["pai"] as? String {
+                    return pai
+                }
+                return nil
+            } catch CloudAPIError.http(429, _, let retryAfter) {
+                // 二連 429：這一手退回本地（D3 不變），但斷路器不開
+                guard !retriedAfterRateLimit else { return nil }
+                retriedAfterRateLimit = true
+                // Retry-After 解不出（缺席或 HTTP-date 格式）用 0.4s；
+                // 上限 1s——決策逾時預算才 2s，等更久不如退回本地
+                let seconds = min(retryAfter.flatMap(Double.init) ?? 0.4, 1.0)
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            } catch {
+                // 宣告那次成功、跟進失敗＝伺服器不穩：開斷路器，下個決策不再付一次逾時
+                breaker.recordFailure(now: Date())
+                return nil
             }
-            return nil
-        } catch {
-            // 宣告那次成功、跟進失敗＝伺服器不穩：開斷路器，下個決策不再付一次逾時
-            breaker.recordFailure(now: Date())
-            return nil
         }
     }
 
