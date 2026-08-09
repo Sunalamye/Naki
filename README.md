@@ -100,6 +100,26 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 <sub>iPhone 截圖為 iOS 26 模擬器實機畫面，玩家名稱是 App 內建的「隱藏玩家名稱」效果。</sub>
 
+### 三個雀魂區服，啟動時選
+
+國服、日服、國際服。**預設每次啟動都問**——各服的帳號不互通，選錯不是畫面不對而是
+登不進去。勾「以後都用這個伺服器」就不再問；進階設定裡可以隨時換服，也可以把固定取消、
+恢復每次詢問。
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/server-picker-macos.png" width="100%" alt="macOS：選擇雀魂伺服器">
+</td>
+<td width="50%">
+<img src="docs/images/server-picker-ios.png" width="100%" alt="iPhone：選擇雀魂伺服器">
+</td>
+</tr>
+</table>
+
+<sub>三個服跑同一份 client（實測 <code>version.json</code> 都是 <code>0.11.252.w</code>），
+所以協定一致——Naki 不必為不同服準備不同的解析。</sub>
+
 ### 三種模式，隨時切換
 
 | 模式 | 行為 |
