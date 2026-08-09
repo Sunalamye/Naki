@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.10.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.10.1-green" alt="Version">
   <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
   <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-required-red" alt="Architecture">
