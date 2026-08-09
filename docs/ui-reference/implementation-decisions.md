@@ -63,19 +63,58 @@
 **為什麼**：紅色牌背同時說了兩件不成立的事——這個動作牽涉某張牌（不是），
 而且它危險（紅是 danger 色）。暗槓的蓋牌保留真牌背，那裡「面朝下」是正確語意。
 
-## iOS：單一 adaptive view + 浮動 HUD
+## iOS：單一 adaptive view + 右側常駐欄
 
-**決策**：不做兩套 view。iOS 廢掉硬切 140pt 左欄，改成浮在 WebView 上的 HUD。
+**決策**：不做兩套 view。iOS 的控制列與決策收進右側 220pt 常駐欄，牌桌拿全螢幕
+高度——**沒有 `NavigationStack`**。狀態訊息留在牌桌底部當浮層，但**預設關閉**。
 
-**為什麼**：舊版 `HStack { 固定 140pt 欄; WebView }` 直接從牌桌切走寬度，
-而雀魂是 3D 橫向畫面。狀態列更糟——`.opacity(0.5).allowsHitTesting(false)`
-疊在手牌上，半透明到既擋畫面又讀不清。
+**為什麼是「右側欄反而讓牌桌變大」**：這條看起來矛盾，但橫向 iPhone 的瓶頸是
+**高度**不是寬度。雀魂是 16:9 等比縮放的 Unity canvas，貼齊高度之後左右本來就
+空著約 25% 的黑邊。所以把 nav bar 與底部狀態列佔掉的高度還給 WebView、面板放進
+原本是黑邊的那塊寬度，牌桌比「有 nav bar、沒有面板」時更大（iPhone 16 Pro 橫向
+推算 571×321 → 622×350，面積 +19%）。
 
-**adaptive 不是等比縮小**：iPhone 橫向只有 393pt 高、HUD 190pt 寬。摘要條四欄塞進去
-每欄會縮到 10pt 而全部不可讀，所以窄版只留局況與自風，點數與模型**降級到展開層**；
-次選限 2 個並顯示「還有 N 個」——截斷說得出來，裁切只是看起來壞掉。
+**演進**：140pt 硬切左欄 →（切走寬度，代價實在）→ 浮在 WebView 上的 HUD
+→（遮住右家那一區）→ 右側常駐欄。中間那版的狀態列是
+`.opacity(0.5).allowsHitTesting(false)` 疊在手牌上，半透明到既擋畫面又讀不清。
 
-**未驗證**：iOS 全部只有 build 與 wireframe，無實機。
+**分成 ZStack 兩層不是排版偏好**：WebView 的 `.ignoresSafeArea(.container)` 會把
+**整個 HStack** 的高度撐成「含 safe area 的全螢幕高」，同一層的面板被一起拉到最下緣，
+底部的內容就壓在 home indicator 上（實機確認）。所以牌桌鋪滿螢幕、右側用等寬
+`Color.clear` 佔位讓開；面板獨立一層。
+
+**safe area 只能問 UIKit**（實測，2026-08-09 iPhone 17 Pro 橫向）：整個 iOS 版面活在
+`.ignoresSafeArea(.container)` 的座標系裡，而 SwiftUI 在那個座標系裡回報的 safe area
+**一律是 0**——`GeometryProxy` 四邊全 0、size 是完整的 874×402，同一刻 UIKit 報
+`left/right 62、bottom 20`。`safeAreaPadding` 同理失效。所以 home indicator 的高度是
+`UIApplication.shared.connectedScenes` 逐一問 window 取最大值。
+
+兩個踩過的坑：`keyWindow` 在 `onAppear` 時常常還是 nil（實測就是這樣讀回 0），要走
+`windows`；重讀的訊號用**版面尺寸變化**而不是 `orientationDidChangeNotification`，
+後者要先 `beginGeneratingDeviceOrientationNotifications()`、而且平放會回報 `.faceUp`。
+
+**同一件事也決定了收合鈕的位置**：它必須待在 ZStack 內。掛在外層 `.overlay` 上會
+重新套用 safe area，把按鈕往畫面內推 62pt，正好壓在牌桌右上角的「公告」那一區。
+
+**adaptive 不是等比縮小**：欄寬 220pt、內容約 200pt。摘要條四欄塞進去每欄會縮到
+10pt 而全部不可讀，所以窄版只留局況與自風，點數與模型**降級到展開層**；次選限 2 個
+並顯示「還有 N 個」。
+
+**狀態訊息預設不顯示**（`SettingsStore.showStatusBar`，只有 iOS 讀）：它疊在牌桌上，
+而內容多半是「已連線到雀魂伺服器」這種一次性回饋或 `skip:noOplist` 這種診斷輸出。
+真正不會自己好的錯誤走頂端橫幅那一組，不受這個開關影響。macOS 不讀它——那邊的狀態列
+是 `safeAreaInset` 排版出來的一列，不疊在任何東西上。
+
+**收合的回程**：面板收起時右上角出現一顆浮動小圓鈕，與面板內的收合鈕共用
+`toolbar-game-panel-toggle`（兩者互斥出現）。沒有它，收合就是單向操作。
+
+**已驗證**（2026-08-09）：實機 iPhone + iOS 26 看到牌桌放大、右側欄就位、對局中決策卡
+正常更新（那一版狀態訊息還在面板底部）。Simulator（iPhone 17 Pro / iOS 26）確認全新安裝
+下狀態訊息不顯示、`bottomSafeInset` 讀到 20.0、收合鈕貼齊螢幕右緣約 12pt。
+
+**未驗證**：狀態訊息開啟後的實際樣子（要有非空 `statusMessage` 才畫得出來）、面板底部
+那 20pt 的視覺確認（值有讀到並套用，但決策內容目前填不滿欄高，看不出來）、旋轉到另一個
+方向、`DecisionHUDTouchTests` 未重跑。
 
 ## 診斷輸出不上狀態列
 
@@ -203,5 +242,5 @@ HTTP request、MCP `tools/call`、連線錯誤改走它。
 | 動作色仍是 7 色 | 紅同時是「槓」與「危險」 |
 | macOS toolbar 13 個控制 | 加了雲端開關後更擠；MCP Server 仍佔一級位置 |
 | 側欄下半空白 | `tehaiTiles` / `tsumoTile` / `recommendationsOplistSequence` 都還沒上畫面 |
-| iOS 間歇性崩潰 | **未解決**，見上節。三次診斷都不成立 |
-| iOS | Simulator 已驗（toolbar／HUD／空狀態）；仍無真機 |
+| iOS 間歇性崩潰 | **未解決**，見上節。三次診斷都不成立。右側欄版拿掉了牌桌上的所有浮層（HUD／狀態列），但那不是針對此崩潰的修復，也還沒證明它消失了 |
+| iOS 右側欄 | 實機已驗版面與對局中決策；**未驗**收合／展開回程、另一旋轉方向、`DecisionHUDTouchTests` 未重跑 |

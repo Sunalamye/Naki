@@ -45,7 +45,10 @@ struct ContentView: View {
     /// 這條路徑的選項與行為只有 iOS 17–25 會走到，而本機（macOS 26）連編譯都碰不到
     /// `#if os(iOS)` 區塊——寫兩份的話，iOS 那份的錯字要到實機上才會被發現。
     /// 共用之後 macOS build 至少會替它做型別檢查。
-    private func autoPlayModePicker(width: CGFloat) -> some View {
+    ///
+    /// `width` 傳 `nil` 代表不約束寬度：segmented control 會自己撐滿父容器。
+    /// iOS 的右側欄用這條——欄寬改了不必回頭同步一個寫死的點數。
+    private func autoPlayModePicker(width: CGFloat?) -> some View {
         Picker("模式", selection: $autoPlayMode) {
             // 選項來自 `AutoPlayAvailability`：不支援自動送出的路徑上，
             // 「自動」不是灰掉的按鈕而是根本不存在——灰掉的控制照樣要解釋，
@@ -308,132 +311,224 @@ struct ContentView: View {
     // MARK: - iOS Layout
 #if os(iOS)
 
-    /// iPhone 版面：WebView 全寬，決策以浮動 HUD 疊在右上。
+    /// 右側常駐欄的寬度。
     ///
-    /// 舊版是 `HStack { 固定 140pt 欄; WebView }`——那條側欄直接從牌桌切走一塊寬度，
-    /// 而雀魂是 3D 橫向畫面，壓縮它的代價很實在。狀態列則是
-    /// `.opacity(0.5).allowsHitTesting(false)` 疊在手牌上：半透明讓它既擋畫面又讀不清。
-    ///
-    /// HUD 不是側欄的等比縮小（見 `DecisionSidebar` 的 `compact`）：摘要條在 210pt 寬
-    /// 只留局況與自風，其餘降級到展開層，否則每欄會縮到讀不了。
-    private var iOSLayout: some View {
-        NavigationStack {
-            ZStack(alignment: .topTrailing) {
-                AdaptiveNakiWebView()
+    /// 220pt 不是視覺偏好而是三個下限的交集：segmented picker 三段（關／推薦／自動）
+    /// 要 ~200pt 才不把字擠掉；`DecisionSidebar(compact:)` 的摘要條是照 ~190–210pt
+    /// 內容寬設計的；控制列五顆圖示每顆 40pt 剛好排滿一列。再窄就得砍其中一項。
+    private static let iOSPanelWidth: CGFloat = 220
 
-                if showGamePanel {
-                    DecisionSidebar(compact: true)
-                        .frame(width: 210)
-                        .background(.ultraThinMaterial,
-                                    in: RoundedRectangle(cornerRadius: 14))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .strokeBorder(Color.secondary.opacity(0.28), lineWidth: 1)
-                        )
-                        .padding(10)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                        .accessibilityIdentifier("ios-decision-hud")
-                }
-            }
-            // 不在這裡放 `.animation(_:value:)`：它會把隱式動畫套到整個子樹，包含
-            // `AdaptiveNakiWebView`（WKWebView）。動畫只該作用在 HUD 自己的 transition，
-            // 所以改由切換處的 `withAnimation` 驅動。
-            //
-            // ⚠️ 這**不是**下面那個崩潰的已證實修復，見 `docs/ui-reference/
-            // implementation-decisions.md` 的「iOS 間歇性崩潰（未解決）」。
-            .safeAreaInset(edge: .top) {
-                JSInjectionFailureBanner()
-            }
-            .safeAreaInset(edge: .top) {
-                LiqiParseFailureBanner()
-            }
-            // 狀態列浮在畫面上但**可讀**：material 背景取代原本的 `opacity(0.5)`
-            // （半透明到讀不清的文字沒有存在價值）。
-            //
-            // `allowsHitTesting(false)` 要保留——它是純資訊顯示，沒有任何可點的東西，
-            // 卻疊在 WebView 上。先前改材質時把它拿掉了，那會讓它平白吃掉牌桌的觸控。
-            // （它**不是**上面那個崩潰的成因，二分法已排除；純粹是它本來就該有。）
-            .overlay(alignment: .bottom) {
-                if !naki.store.statusMessage.isEmpty {
-                    StatusBar()
-                        .background(.ultraThinMaterial)
-                        .allowsHitTesting(false)
-                }
-            }
-            .navigationTitle("Naki")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                iOSToolbarContent
-            }
-            .sheet(isPresented: $showLog) {
-                iOSLogSheet
-            }
-            .sheet(isPresented: $showAdvancedSettings) {
-                AdvancedSettingsSheet()
-            }
+    /// home indicator 那條的高度。
+    ///
+    /// **不能**用 `GeometryReader` 或 `safeAreaPadding` 讀。整個 iOS 版面活在
+    /// `.ignoresSafeArea(.container)` 的座標系裡（那正是面板能貼齊螢幕右緣、與底層佔位
+    /// 對齊的原因），而 SwiftUI 在那個座標系裡回報的 safe area **一律是 0**——實測
+    /// iPhone 17 Pro 橫向：`GeometryProxy` 四邊全 0、size 是完整的 874×402，同一刻
+    /// UIKit 報 `left/right 62、bottom 20`。所以只能直接問 UIKit。
+    @State private var bottomSafeInset: CGFloat = 0
+
+    /// 取所有 window 的最大值，不是 `keyWindow` 的值：`keyWindow` 在 `onAppear` 這個
+    /// 時間點常常還是 nil（實測就是這樣讀回 0 的），而 sheet 疊上來時它又會換人。
+    private func refreshBottomSafeInset() {
+        let inset = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .map(\.safeAreaInsets.bottom)
+            .max() ?? 0
+        if inset != bottomSafeInset { bottomSafeInset = inset }
+    }
+
+    /// 牌桌底部的狀態訊息浮層。**預設關閉**，見 `SettingsStore.showStatusBar`。
+    ///
+    /// `allowsHitTesting(false)` 是必要的而不是保險：它是純資訊顯示、沒有任何可點的
+    /// 東西，卻疊在 WebView 上——少了這行就平白吃掉牌桌那一條的觸控。
+    @ViewBuilder
+    private var iOSStatusOverlay: some View {
+        if naki.settings.showStatusBar, !naki.store.statusMessage.isEmpty {
+            StatusBar()
+                .background(.ultraThinMaterial)
+                // 整條（含背景）讓開 home indicator，否則最後一行字會被那根橫條壓住
+                .padding(.bottom, bottomSafeInset)
+                .allowsHitTesting(false)
         }
     }
 
-    @ToolbarContentBuilder
-    private var iOSToolbarContent: some ToolbarContent {
-        // 左側：重新載入
-        ToolbarItem(placement: .navigationBarLeading) {
-            Button(action: { naki.actions.reloadPage() }) {
-                Image(systemName: "arrow.clockwise")
+    /// iPhone 橫向版面：牌桌拿全高，控制與決策收進右側常駐欄。
+    ///
+    /// **為什麼右側欄不會讓牌桌變小**：雀魂是 16:9 等比縮放的 Unity canvas，橫向 iPhone
+    /// 的瓶頸是**高度**——canvas 貼齊高度之後，左右本來就空著約 25% 的黑邊。把 nav bar
+    /// 與底部狀態列佔掉的高度還給 WebView、再把面板放進原本是黑邊的那塊寬度，牌桌反而
+    /// 比「有 nav bar、沒有面板」時更大（iPhone 16 Pro 橫向推算 571×321 → 622×350）。
+    ///
+    /// 所以這裡**沒有** `NavigationStack`：它的 nav bar 是唯一會從牌桌切走高度的東西，
+    /// 而兩張 sheet 各自帶自己的 `NavigationStack`，不靠外層這一個。
+    ///
+    /// 牌桌上也**不再有任何浮層**（HUD、狀態列都進了右欄）。那是附帶效果但值得記一筆：
+    /// `DecisionHUDTouchTests` 盯的崩潰正是「SwiftUI 手勢層疊在 WKWebView 上」那一類。
+    private var iOSLayout: some View {
+        ZStack(alignment: .trailing) {
+            // 底層：牌桌鋪滿整個螢幕（含瀏海／home indicator 那一圈），右側用一塊
+            // 等寬佔位讓開面板——Unity canvas 是在**扣掉佔位之後**的區域裡置中，
+            // 所以牌桌不會有任何一角被面板蓋到。
+            HStack(spacing: 0) {
+                AdaptiveNakiWebView()
+                    .safeAreaInset(edge: .top) {
+                        JSInjectionFailureBanner()
+                    }
+                    .safeAreaInset(edge: .top) {
+                        LiqiParseFailureBanner()
+                    }
+                    // 狀態訊息回到牌桌底部（預設關，見 `SettingsStore.showStatusBar`）。
+                    // 掛在 WebView 上而不是整個 ZStack 上：橫跨全寬會連面板底部一起壓。
+                    .overlay(alignment: .bottom) {
+                        iOSStatusOverlay
+                    }
+
+                if showGamePanel {
+                    Color.clear
+                        .frame(width: Self.iOSPanelWidth)
+                        .allowsHitTesting(false)
+                }
             }
-            .accessibilityIdentifier("toolbar-reload")
-            .accessibilityLabel("重新載入")
-        }
 
-        ToolbarItem(placement: .automatic) {
-            // iOS 17–25 走 Legacy WebView，那條路不提供自動送出：
-            // picker 只會列出「關 / 推薦」，理由在進階設定裡說明。
-            autoPlayModePicker(width: 150)
-        }
+            // 上層：面板。它跟底層在**同一個** `ignoresSafeArea` 座標系裡，所以外緣
+            // 貼齊螢幕右緣、與上面那塊佔位對齊——這是它不會壓進牌桌的原因。
+            //
+            // 分成兩層的理由是高度：放同一個 HStack 裡的話，WebView 的
+            // `ignoresSafeArea` 會把整個 HStack 撐成「含 safe area 的全螢幕高」，
+            // 面板被一起拉到最下緣。
+            if showGamePanel {
+                iOSSidePanel
+                    .frame(width: Self.iOSPanelWidth)
+                    .transition(.move(edge: .trailing))
+            }
 
-        // 延遲基準 stepper：與 macOS 同款、同一份 `SettingsStore` 讀寫；
-        // 只在支援自動送出的 path（iOS 26+ WebPage）出現，Legacy 不掛假控制。
-        if naki.settings.supportsAutoPlay {
-            ToolbarItem(placement: .automatic) {
+            // 面板收起來之後唯一叫得回來的入口。
+            //
+            // 它**必須**待在這個 ZStack 裡（而不是掛在外層 `.overlay` 上）：外層那個
+            // 位置會重新套用 safe area，把按鈕往畫面內推 62pt，正好壓在牌桌右上角的
+            // 「公告」那一區。在這裡它貼的是螢幕右緣那條黑邊。
+            //
+            // identifier 與面板內那顆收合鈕共用：兩者互斥出現，測試永遠只找得到一顆。
+            if !showGamePanel {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showGamePanel = true }
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .accessibilityIdentifier("toolbar-game-panel-toggle")
+                .accessibilityLabel("顯示決策面板")
+                .accessibilityValue("已隱藏")
+            }
+        }
+        // 只忽略容器 safe area（瀏海／home indicator），**不含鍵盤**：點雀魂
+        // 登入頁的 `<input>` 時 layout 照舊避讓，與改版前一致。鍵盤那條是
+        // 已知崩潰的觸發路徑（見上述測試），不在這次一起動。
+        .ignoresSafeArea(.container)
+        // 面板同色鋪滿 safe area：橫向旋轉方向決定瀏海在左或右，靠右那次會在面板
+        // 外側露出一條底色。這一行讓那條跟面板連續，而不是一道黑邊。
+        .background(Color.windowBackground.ignoresSafeArea())
+        // 這裡**不放** `.animation(_:value:)`：它會把隱式動畫套到整個子樹（含
+        // WKWebView）。動畫一律由切換處的 `withAnimation` 驅動。
+        // 見 `docs/ui-reference/implementation-decisions.md` 的「iOS 間歇性崩潰」。
+        //
+        // 用尺寸變化當「該重讀 safe area 了」的訊號，而不是
+        // `orientationDidChangeNotification`：那個通知要先
+        // `beginGeneratingDeviceOrientationNotifications()` 才會發，而且面朝上平放時
+        // 會回報 `.faceUp`——旋轉了但版面沒變、以及版面變了但沒旋轉（分割視窗、鍵盤）
+        // 兩種情況它都答錯。版面尺寸變了才是真的要重算。
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size, initial: true) { _, _ in refreshBottomSafeInset() }
+            }
+        }
+        .sheet(isPresented: $showLog) {
+            iOSLogSheet
+        }
+        .sheet(isPresented: $showAdvancedSettings) {
+            AdvancedSettingsSheet()
+        }
+    }
+
+    /// 右側常駐欄：控制列在上、決策在中、狀態訊息釘在最下。
+    ///
+    /// 三塊各自從別處搬來——控制列原本在 nav bar（吃牌桌高度）、決策原本是浮在牌桌上的
+    /// HUD（遮住右家那一區）、狀態訊息原本是疊在手牌上的浮層。
+    private var iOSSidePanel: some View {
+        VStack(spacing: 0) {
+            iOSPanelControls
+
+            Divider()
+
+            // 捲動只包決策：控制列不該跟著內容捲走。
+            ScrollView {
+                DecisionSidebar(compact: true)
+            }
+        }
+        // 面板整體活在忽略 safe area 的座標系裡（見 `iOSLayout`），所以 home indicator
+        // 那條要自己讓——不讓的話決策內容的最後一列會被那根橫條壓住。
+        .padding(.bottom, bottomSafeInset)
+        .accessibilityIdentifier("ios-decision-hud")
+    }
+
+    /// 面板頂端的控制列——原本 nav bar 上那一整排。
+    ///
+    /// 排成三列而不是硬擠一列：220pt 欄寬裡，延遲 stepper（~130pt）與五顆圖示
+    /// （~200pt）加起來超過可用寬度，擠在一起會先犧牲 stepper 的數字。
+    private var iOSPanelControls: some View {
+        VStack(spacing: 8) {
+            // 傳 nil：segmented control 自己撐滿欄寬，欄寬改了不必回頭同步點數。
+            autoPlayModePicker(width: nil)
+
+            // 只在這條 path 真的會自動送出時才出現（與 macOS 同一個判斷）
+            if naki.settings.supportsAutoPlay {
                 actionDelayStepper
             }
-        }
 
-        // 右側：決策 HUD 開關
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button {
-                // 動畫綁在這裡而不是容器上：容器那條會波及 WebView（見 iOSLayout 註解）
-                withAnimation(.easeInOut(duration: 0.2)) { showGamePanel.toggle() }
-            } label: {
-                Image(systemName: showGamePanel ? "sidebar.trailing" : "sidebar.right")
+            HStack(spacing: 0) {
+                Button(action: { naki.actions.reloadPage() }) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("toolbar-reload")
+                .accessibilityLabel("重新載入")
+
+                Button(action: { showLog = true }) {
+                    Image(systemName: "terminal")
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("toolbar-log-toggle")
+                .accessibilityLabel("顯示日誌")
+
+                cloudQuickToggle
+                    .frame(maxWidth: .infinity)
+
+                Button(action: { showAdvancedSettings = true }) {
+                    Image(systemName: "gearshape")
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("toolbar-settings")
+                .accessibilityLabel("進階設定")
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showGamePanel = false }
+                } label: {
+                    Image(systemName: "sidebar.trailing")
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("toolbar-game-panel-toggle")
+                .accessibilityLabel("隱藏決策面板")
+                .accessibilityValue("已顯示")
             }
-            .accessibilityIdentifier("toolbar-game-panel-toggle")
-            .accessibilityLabel("顯示或隱藏決策面板")
-            .accessibilityValue(showGamePanel ? "已顯示" : "已隱藏")
         }
-
-        // 右側：日誌
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button(action: { showLog = true }) {
-                Image(systemName: "terminal")
-            }
-            .accessibilityIdentifier("toolbar-log-toggle")
-            .accessibilityLabel("顯示日誌")
-        }
-
-        // 右側：雲端推論快速開關
-        ToolbarItem(placement: .navigationBarTrailing) {
-            cloudQuickToggle
-        }
-
-        // 右側：設定
-        ToolbarItem(placement: .navigationBarTrailing) {
-            Button(action: { showAdvancedSettings = true }) {
-                Image(systemName: "gearshape")
-            }
-            .accessibilityIdentifier("toolbar-settings")
-            .accessibilityLabel("進階設定")
-        }
+        .padding(.horizontal, 10)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
     }
 
     /// 日誌 sheet。
@@ -599,6 +694,13 @@ struct AdvancedSettingsSheet: View {
     private var hidePlayerNames: Binding<Bool> {
         Binding(get: { naki.settings.hidePlayerNames },
                 set: { naki.actions.setHidePlayerNames($0) })
+    }
+
+    /// 狀態訊息列的顯示與否。純顯示設定，沒有副作用要走 Action——
+    /// 與 `hidePlayerNames` 不同，那個要連動 `WebSession` 去改注入的 JS。
+    private var showStatusBar: Binding<Bool> {
+        Binding(get: { naki.settings.showStatusBar },
+                set: { naki.settings.showStatusBar = $0 })
     }
 
     // ☁️ 雲端推論設定：讀寫都是 `SettingsStore` 那一份（key 進 Keychain，
@@ -897,6 +999,19 @@ struct AdvancedSettingsSheet: View {
                     Text("在遊戲解析封包前把暱稱改寫成 Player 1–4。只對開啟之後才開始的對局生效；斷線重連與終局結算畫面仍會顯示原名。")
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    // 只有 iOS：那條狀態列疊在牌桌上。macOS 的是排版出來的一列，
+                    // 不擋任何東西，沒有這個開關要解決的問題。
+                    #if os(iOS)
+                    Divider()
+
+                    Toggle("顯示狀態訊息列", isOn: showStatusBar)
+                        .accessibilityIdentifier("show-status-bar-toggle")
+
+                    Text("牌桌底部那條浮動訊息（連線狀態、未自動送出的原因等）。預設關閉——它疊在牌桌上，而內容多半是一次性回饋或診斷輸出。真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    #endif
                 }
             } label: {
                 Label("畫面", systemImage: "eye.slash")

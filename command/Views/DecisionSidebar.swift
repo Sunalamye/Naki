@@ -18,9 +18,9 @@ import SwiftUI
 /// 現在的順序是：**答案 → 次選 → 細節（收合）**。局況與模型收進摘要條，
 /// 點開才展開——摘要條本身就是那份資料的 summary，不再是兩列講同一件事。
 ///
-/// `compact` 給 iPhone 橫向的浮動 HUD 用（約 190pt 寬）。它不是等比縮小：
-/// 摘要條在窄寬度下只留局況與自風，點數與模型降級到展開層，否則四欄會各自
-/// 縮到 10pt 而全部不可讀。
+/// `compact` 給 iPhone 橫向的右側常駐欄用（220pt 欄寬，內容約 200pt）。它不是
+/// 等比縮小：摘要條在窄寬度下只留局況與自風，點數與模型降級到展開層，否則四欄
+/// 會各自縮到 10pt 而全部不可讀。
 struct DecisionSidebar: View {
 
     @Environment(\.naki) private var naki
@@ -36,8 +36,9 @@ struct DecisionSidebar: View {
 
     /// 次選最多顯示幾個。
     ///
-    /// iPhone 橫向的 HUD 高度只有約 300pt，三個次選會被裁掉——截斷並說出
-    /// 「還有 N 個」比裁切誠實，裁切在畫面上只是看起來壞掉。
+    /// iPhone 橫向的欄位扣掉控制列與狀態訊息只剩約 300pt，三個次選要捲才看得完。
+    /// 側欄現在是可捲的，所以這不再是「會被裁掉」的問題，而是「掃一眼要看幾個」——
+    /// 第三順位的期望值差距通常已經小於決策雜訊，把它收在捲軸外面換取不必捲。
     private var maxOptions: Int { compact ? 2 : 3 }
 
     var body: some View {
@@ -77,9 +78,9 @@ struct DecisionSidebar: View {
                 EmptyRecommendationView()
             }
 
-            // 窄版不放 Spacer：HUD 是浮在牌桌上的，撐滿高度等於白白遮住遊戲。
-            // 實測空狀態時它佔掉畫面 49%，而內容只有摘要條加一行「等待遊戲數據」。
-            // 側欄版要 Spacer 把內容釘在頂端（它有固定寬度，撐滿是預期的）。
+            // 窄版不放 Spacer：它現在活在 `ScrollView` 裡（iOS 右側欄），而
+            // ScrollView 內的 Spacer 會把可捲內容撐成無限高。
+            // macOS 側欄版要 Spacer 把內容釘在頂端（固定寬度，撐滿是預期的）。
             if !compact {
                 Spacer(minLength: 0)
             }
@@ -365,7 +366,10 @@ enum SeatWind {
 
 /// 伺服器目前授權的動作。
 ///
-/// 「可用／不可用」不只靠顏色：每個 badge 帶符號，完整措辭在 `accessibilityValue`。
+/// 「可用／不可用」不只靠顏色——但線索換過一輪：原本每個 badge 帶 ✓／✗ 符號，
+/// 那讓 badge 寬到一列擺不下（見 `body` 的裁字問題）。現在改用**字重與底色深淺**
+/// （可用 semibold＋較實的底，不可用 regular＋幾乎透明的底），完整措辭仍在
+/// `accessibilityValue`。這比符號弱，是為了寬度做的取捨。
 struct AuthorizedActionsRow: View {
     var botStatus: BotStatus
 
@@ -390,26 +394,52 @@ struct AuthorizedActionsRow: View {
                 .fontWeight(.bold)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 4) {
-                ForEach(items, id: \.0) { name, available in
-                    HStack(spacing: 2) {
-                        Text(name)
-                        Image(systemName: available ? "checkmark" : "xmark")
-                            .font(.system(size: 8, weight: .bold))
-                    }
-                    .font(.caption2)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 3)
-                    .foregroundStyle(available ? Color.green : Color.secondary)
-                    .background(available ? Color.green.opacity(0.15) : Color.gray.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(name)
-                    .accessibilityValue(available ? "可用" : "不可用")
+            // 一列擺得下就一列，擺不下自動折兩列。
+            //
+            // 為什麼需要它：iOS 右側欄只有 220pt（內容約 200pt）。而 SwiftUI 在放不下
+            // 時的預設行為既不是換行也不是省略號，是**把 `Text` 壓到字形被裁掉一半**
+            // ——實測「打」只剩「扌」、「立直」兩字疊在一起，讀不出是哪個動作。
+            // `ViewThatFits` 把那個失敗模式換成換行。
+            //
+            // 拿掉 ✓／✗ 之後四麻的 6 個單列就夠，三麻多一個「拔北」才會折——所以這
+            // 不是兩種寬度寫死，是讓它自己量。
+            ViewThatFits(in: .horizontal) {
+                badgeRow(items)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    let half = (items.count + 1) / 2
+                    badgeRow(Array(items.prefix(half)))
+                    badgeRow(Array(items.dropFirst(half)))
                 }
             }
         }
         .accessibilityIdentifier("authorized-actions-row")
+    }
+
+    private func badgeRow(_ row: [(String, Bool)]) -> some View {
+        HStack(spacing: 4) {
+            ForEach(row, id: \.0) { name, available in
+                badge(name: name, available: available)
+            }
+        }
+    }
+
+    private func badge(name: String, available: Bool) -> some View {
+        Text(name)
+            .font(.caption2)
+            // 字重是「可用」的非顏色線索之一（另一個是底色深淺）
+            .fontWeight(available ? .semibold : .regular)
+            // 寧可溢出也不要被壓縮。`ViewThatFits` 是靠「量得出真實寬度」來選版面的，
+            // 少了這行，第一個候選永遠「擠得下」——擠的方式就是裁掉字形。
+            .fixedSize()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .foregroundStyle(available ? Color.green : Color.secondary)
+            .background(available ? Color.green.opacity(0.18) : Color.gray.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(name)
+            .accessibilityValue(available ? "可用" : "不可用")
     }
 }
 

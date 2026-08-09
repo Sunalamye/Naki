@@ -67,21 +67,38 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 </tr>
 <tr>
 <td width="52%">
-<img src="docs/images/ios-hud-wireframe.png" width="100%" alt="iPhone 決策 HUD（設計稿）">
+<img src="docs/images/ios-decision.png" width="100%" alt="iPhone 橫向：牌桌全高＋右側決策欄">
 </td>
 <td width="48%">
 
 ### Mac 和 iPhone 都能用
 
 - **macOS** — 決策側欄，支援自動送出與局間自動確認
-- **iPhone / iPad** — 決策浮在牌桌上方的 HUD，不從遊戲畫面切走寬度
+- **iPhone / iPad** — 牌桌拿全螢幕高度，控制與決策收進右側常駐欄
 - 深色模式、響應式排版
 
-<sub>iPhone 圖為設計稿（`docs/ui-reference/`），非實機截圖。</sub>
+橫向 iPhone 的瓶頸是**高度**：雀魂是 16:9 等比縮放的畫面，貼齊高度之後左右
+本來就空著黑邊。把導覽列的高度還給牌桌、面板放進原本是黑邊的那塊寬度，
+牌桌反而比「有導覽列、沒有面板」時更大。
 
 </td>
 </tr>
+<tr>
+<td width="52%">
+
+### 牌局細節收在同一欄
+
+摘要條點開就是這一層：伺服器目前授權哪些動作、四家點數、寶牌指示牌、
+這一手的決策來自本機還是雲端。收合時它只佔一列。
+
+</td>
+<td width="48%">
+<img src="docs/images/ios-details.png" width="100%" alt="iPhone：牌局與模型資訊展開">
+</td>
+</tr>
 </table>
+
+<sub>iPhone 截圖為 iOS 26 模擬器實機畫面，玩家名稱是 App 內建的「隱藏玩家名稱」效果。</sub>
 
 ### 三種模式，隨時切換
 
@@ -129,8 +146,25 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 進階設定分兩欄：左邊是這台機器怎麼跑（畫面、自動操作、Bot、MCP Server），
 右邊是雲端推論。金鑰狀態在填好 key 之後自動出現，不必按測試連線。
 
-<sub>設定頁圖為設計稿（`docs/ui-reference/`）。App 內的截圖 API 抓不到 sheet 的完整渲染，
+<sub>macOS 設定頁圖為設計稿（`docs/ui-reference/`）。App 內的截圖 API 抓不到 sheet 的完整渲染，
 見 `CaptureScreenshotAction.windowScreenshot` 的註解。</sub>
+
+iPhone 是同一份設定表單的單欄版（窄畫面放不下兩欄）：
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone 進階設定：自動操作與畫面">
+</td>
+<td width="50%">
+<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone 進階設定：雲端推論">
+</td>
+</tr>
+</table>
+
+「顯示狀態訊息列」控制牌桌底部那條浮動訊息（連線狀態、未自動送出的原因等），
+**預設關閉**——它疊在牌桌上，而內容多半是一次性回饋或診斷輸出。
+真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。
 
 雲端相關的驗證進度記在 [`AUDIT.md`](AUDIT.md) §20 與
 [`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md)。

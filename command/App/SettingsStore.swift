@@ -41,6 +41,31 @@ final class SettingsStore {
         }
     }
 
+    /// 狀態訊息浮層的持久化 key。
+    nonisolated static let showStatusBarKey = "ShowStatusBar"
+
+    /// 牌桌底部那條狀態訊息浮層要不要顯示（**只有 iOS 讀**）。
+    ///
+    /// 預設關閉：它疊在牌桌上，而內容多半是「已連線到雀魂伺服器」這種一次性回饋，
+    /// 或 `skip:noOplist` 這種診斷輸出——兩者都不值得長期佔著手牌上方那條。要看的人
+    /// 自己開，真正不會自己好的錯誤走橫幅（`JSInjectionFailureBanner` 那一組），
+    /// 不受這個開關影響。
+    ///
+    /// **預設值剛好等於 `UserDefaults.bool` 對未設定 key 的回傳值（false）**，所以不必
+    /// `register(defaults:)`。哪天要把預設改成 true，就得補註冊——沒補的話新裝的人會
+    /// 拿到 false，而程式碼上看起來是 true。
+    ///
+    /// macOS 不讀它：那邊的狀態列是 `safeAreaInset` 排版的一列，不疊在任何東西上，
+    /// 沒有這個開關要解決的問題。
+    var showStatusBar: Bool = UserDefaults.standard
+        .bool(forKey: SettingsStore.showStatusBarKey)
+    {
+        didSet {
+            guard showStatusBar != oldValue else { return }
+            UserDefaults.standard.set(showStatusBar, forKey: Self.showStatusBarKey)
+        }
+    }
+
     // MARK: - 自動打牌基準延遲
 
     /// 延遲 stepper 的持久化 key。
