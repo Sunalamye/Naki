@@ -120,8 +120,27 @@ ctx = {
 
 - 非雀魂連線的訊息（`handleMessage` 開頭就 `if (!isMajsoul) return`）。
 - Blob 分支與字串訊息不在範圍內。實務上雀魂送的是 ArrayBuffer／TypedArray，但這是限制不是保證。
-- Naki 的 Swift 狀態（推薦、手牌、oplist）。v1 不開回程通道。
 - `method` 對 RESPONSE **可能是 null**（pending 對不回來時）。白名單比對時 null 視為**不命中**——宣告了某 method 不保證每一筆該 method 的 RESPONSE 都到得了你手上。
+
+### 你**讀得到**的 Naki 狀態（唯讀，2026-08-10 起）
+
+原本 §7.3 說「拿不到 Naki 的 Swift 狀態」——現在開了**唯讀**回程通道與現成的顯示 API，讓插件能接管「牌改色」「暱稱隱藏」這類顯示功能：
+
+| 全域（唯讀讀取） | 內容 | 用途 |
+|---|---|---|
+| `window.__nakiRecommendations` | AI 推薦快照陣列，每項 `{tile, label, probability, actionType, detail}`（`tile` 是 MJAI 字串如 `"5m"`，非打牌動作為 null）。每次 Naki 同步高亮時更新 | 讀「該高亮哪張牌」「機率多少」——**能讀不能改** |
+
+現成的顯示 API（插件可直接呼叫，Naki 內建的 WebGL 實作）：
+
+| API | 作用 |
+|---|---|
+| `window.__nakiHighlight.set(...)` / `.clear()` | 牌面高亮／改色（Naki 內建 highlighter 用的同一支） |
+| `window.__nakiHighlight.setNameMask(true/false)` | 暱稱遮罩（渲染層即時遮名字） |
+
+**做「牌改色」插件**：讀 `window.__nakiRecommendations` 拿到推薦 → 自己呼叫 `window.__nakiHighlight.set(...)`。
+**做「暱稱隱藏」插件**：直接 `window.__nakiHighlight.setNameMask(true)`（不需要推薦）。
+
+⚠️ 這是唯讀通道，插件**改不了** Naki 的推薦或牌局狀態（只能讀）。想改遊戲畫面內容仍走 `rewriteReceive` 改封包。內建 highlighter 與插件若同時開會打架——要讓插件接管，把 AI 推薦模式切 `.off`（推薦照算、內建不高亮），插件自己畫。
 
 ---
 

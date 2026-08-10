@@ -34,6 +34,7 @@
 
 import SwiftUI
 import WebKit
+import MortalSwift   // Tile.mjaiString（推薦序列化用）
 
 // MARK: - Backend
 
@@ -264,7 +265,32 @@ final class WebSession {
             tehaiTiles: store.tehaiTiles,
             snapshot: LiqiOperationStore.shared.latest)
 
-        Task { _ = try? await backend.callJavaScript(script) }
+        // 順便把推薦注入唯讀全域，讓插件讀得到 AI 結果（§7.3 的回程通道，唯讀）。
+        // 推薦本來就沿這條路從 Swift 流到 JS（GameHighlightScript 用它高亮）；
+        // 這裡只是讓它留在 window.__nakiRecommendations，插件能讀不能改（每次同步更新）。
+        // 插件要接管牌改色時：讀這份 + 自己呼叫 window.__nakiHighlight.set。
+        let recoScript = "window.__nakiRecommendations = "
+            + Self.recommendationsJSON(store.recommendations) + ";"
+
+        Task { _ = try? await backend.callJavaScript(recoScript + "\n" + script) }
+    }
+
+    /// 把推薦序列化成插件好用的 JSON（唯讀快照）。純函式，可測。
+    /// 每項：tile(MJAI 字串，非打牌動作為 null)、label、probability、actionType、detail。
+    nonisolated static func recommendationsJSON(_ recs: [Recommendation]) -> String {
+        let arr: [[String: Any]] = recs.map { r in
+            var d: [String: Any] = [
+                "label": r.label,
+                "probability": r.probability,
+                "actionType": r.actionType.rawValue
+            ]
+            d["tile"] = r.tile?.mjaiString as Any? ?? NSNull()
+            if let detail = r.detail { d["detail"] = detail }
+            return d
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: arr),
+              let s = String(data: data, encoding: .utf8) else { return "[]" }
+        return s
     }
 
     // MARK: - 隱藏玩家名稱

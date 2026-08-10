@@ -404,7 +404,12 @@ ctx = {
 - `handleMessage` 開頭就有 `if (!isMajsoul) return`（`naki-websocket.js:421`）⇒ 非雀魂連線的訊息插件看不到
 - **Blob 分支不在範圍內**：`handleMessage` 的 Blob 路徑（`:463-473`）是非同步的，既有的 `nakiNicknameMask.observe` 也沒有接進去。插件同樣不接。實務上雀魂送的是 ArrayBuffer / TypedArray，但這是限制不是保證
 - 字串訊息（`:474-483`）不在範圍內
-- 拿不到 Naki 的 Swift 狀態（推薦、手牌、oplist）。要拿必須另開回程通道——**v1 不做**
+- ~~拿不到 Naki 的 Swift 狀態（推薦、手牌、oplist）。要拿必須另開回程通道——v1 不做~~
+  **2026-08-10 改：開了唯讀回程通道。** `WebSession.syncHighlight` 順便把推薦注入
+  `window.__nakiRecommendations`（唯讀陣列，每項 `{tile, label, probability, actionType, detail}`）。
+  插件**能讀不能改**。搭配現成的 `window.__nakiHighlight.set/clear/setNameMask`（Naki 內建
+  WebGL 高亮/遮名字），插件可接管「牌改色」（讀推薦 + 自己 set）與「暱稱隱藏」（直接 setNameMask）。
+  手牌/oplist 尚未注入（要再擴充）。改遊戲狀態仍只能走 `rewriteReceive`。
 
 ### 7.4 改寫與長度
 
