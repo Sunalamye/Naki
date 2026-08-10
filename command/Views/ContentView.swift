@@ -1856,6 +1856,7 @@ struct PluginsPageView: View {
     // 移除插件的確認
     @State private var pendingRemoval: String?
     @State private var tab: PluginTab = .plugins
+    @State private var selectedPluginId: String?   // master-detail 選中的插件
 
     /// 分頁：把 Log 與信任/L3 從主畫面分出去，插件管理不再和 log 擠一起。
     enum PluginTab: String, CaseIterable, Identifiable {
@@ -1887,14 +1888,17 @@ struct PluginsPageView: View {
             .padding()
             .background(Color.contentBackground)
             Divider()
-            ScrollView { content }
+            tabBody
         }
-        .frame(width: 760, height: 640)
+        .frame(width: 900, height: 660)
+        .confirmationDialog(removeDialogTitle, isPresented: removeDialogBinding,
+                            presenting: pendingRemoval, actions: removeDialogActions,
+                            message: removeDialogMessage)
         #else
         NavigationStack {
             VStack(spacing: 0) {
                 tabPicker.padding([.horizontal, .top])
-                ScrollView { content }
+                tabBody
             }
             .navigationTitle("插件")
             .navigationBarTitleDisplayMode(.inline)
@@ -1904,8 +1908,41 @@ struct PluginsPageView: View {
                         .accessibilityIdentifier("plugins-done-button")
                 }
             }
+            .confirmationDialog(removeDialogTitle, isPresented: removeDialogBinding,
+                                presenting: pendingRemoval, actions: removeDialogActions,
+                                message: removeDialogMessage)
         }
         #endif
+    }
+
+    // 移除確認對話（抽成可重用的片段，兩個平台共用）
+    private var removeDialogTitle: String { "移除插件？" }
+    private var removeDialogBinding: Binding<Bool> {
+        Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })
+    }
+    @ViewBuilder private func removeDialogActions(_ id: String) -> some View {
+        Button("移除「\(id)」", role: .destructive) {
+            naki.actions.removePlugin(id)
+            if selectedPluginId == id { selectedPluginId = nil }
+            pendingRemoval = nil
+        }
+        Button("取消", role: .cancel) { pendingRemoval = nil }
+    }
+    private func removeDialogMessage(_ id: String) -> some View {
+        Text("會刪掉 \(id) 的整個插件目錄。可重新匯入或放檔案救回。")
+    }
+
+    /// 分頁主體：插件 tab 走 master-detail（雙欄），Log/信任走捲動。
+    @ViewBuilder
+    private var tabBody: some View {
+        switch tab {
+        case .plugins:
+            pluginsSplitView
+        case .log:
+            ScrollView { logSection.padding() }
+        case .trust:
+            ScrollView { trustSection.padding() }
+        }
     }
 
     private var tabPicker: some View {
@@ -1919,32 +1956,155 @@ struct PluginsPageView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            switch tab {
-            case .plugins:
-                pluginList
-                importSection
-            case .log:
-                logSection
-            case .trust:
-                trustSection
+    // MARK: 插件 tab — master-detail（左清單、右詳情）
+
+    private var pluginsSplitView: some View {
+        NavigationSplitView {
+            List(selection: $selectedPluginId) {
+                if naki.pluginDescriptors.isEmpty {
+                    Text("還沒有插件。點下方「從來源加入」貼 GitHub repo / gist / URL 引入。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Section("已安裝（\(naki.pluginDescriptors.count)）") {
+                        ForEach(naki.pluginDescriptors, id: \.id) { d in
+                            sidebarRow(d).tag(d.id)
+                        }
+                    }
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 6) {
+                    Divider()
+                    Button { selectedPluginId = nil } label: {
+                        Label("從來源加入…", systemImage: "plus.circle").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderless)
+                    Button { Task { await checkUpdates() } } label: {
+                        Label(updateChecking ? "檢查中…" : "檢查更新",
+                              systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(updateChecking)
+                    if let msg = importMessage {
+                        Text(msg).font(.caption2).foregroundColor(.green)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(8)
+                .background(.bar)
+            }
+        } detail: {
+            if let id = selectedPluginId, let d = naki.pluginDescriptors.first(where: { $0.id == id }) {
+                ScrollView { pluginDetail(d).padding() }
+            } else {
+                ScrollView { importSection.padding() }   // 沒選插件 → 顯示匯入面板
             }
         }
-        .padding()
-        .confirmationDialog(
-            "移除插件？",
-            isPresented: Binding(get: { pendingRemoval != nil },
-                                 set: { if !$0 { pendingRemoval = nil } }),
-            presenting: pendingRemoval
-        ) { id in
-            Button("移除「\(id)」", role: .destructive) {
-                naki.actions.removePlugin(id)   // 熱停用 + 刪目錄 + 重掃
-                pendingRemoval = nil
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private func statusColor(_ d: PluginDescriptor) -> Color {
+        if !d.isValid { return .red }
+        return naki.settings.enabledPluginIds.contains(d.id) ? .green : .secondary
+    }
+
+    /// 左欄一列：狀態點 + 名稱 + id（緊湊，好掃）。
+    @ViewBuilder
+    private func sidebarRow(_ d: PluginDescriptor) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(statusColor(d)).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(d.manifest?.name ?? d.id).font(.callout)
+                Text(d.id).font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary).lineLimit(1)
             }
-            Button("取消", role: .cancel) { pendingRemoval = nil }
-        } message: { id in
-            Text("會刪掉 \(id) 的整個插件目錄。可重新匯入或放檔案救回。")
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    /// 右欄：選中插件的完整詳情（header + 操作 + 設定 + 原始碼）。
+    @ViewBuilder
+    private func pluginDetail(_ d: PluginDescriptor) -> some View {
+        if let m = d.manifest {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(m.name).font(.title3).bold()
+                    Text("\(m.id) · v\(m.version)")
+                        .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(m.capabilities, id: \.self) { cap in
+                            Text(cap).font(.caption2)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.15)).clipShape(Capsule())
+                        }
+                        if let lic = m.license {
+                            Text(lic).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    if let desc = m.description {
+                        Text(desc).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Divider()
+
+                HStack(spacing: 16) {
+                    Toggle("啟用", isOn: Binding(
+                        get: { naki.settings.enabledPluginIds.contains(d.id) },
+                        set: { on in naki.actions.setPluginEnabled(d.id, on) }
+                    ))
+                    .toggleStyle(.switch)
+                    .accessibilityIdentifier("plugin-toggle-\(d.id)")
+                    Spacer()
+                    Button(role: .destructive) { pendingRemoval = d.id } label: {
+                        Label("移除", systemImage: "trash")
+                    }
+                    .accessibilityIdentifier("plugin-remove-\(d.id)")
+                }
+
+                if let schema = m.settings, !schema.isEmpty {
+                    Divider()
+                    Text("設定").font(.headline)
+                    ForEach(schema.keys.sorted(), id: \.self) { key in
+                        if let field = schema[key] {
+                            pluginSettingControl(pluginId: d.id, key: key, field: field)
+                        }
+                    }
+                    if !naki.settings.enabledPluginIds.contains(d.id) {
+                        Text("啟用後改設定即時套用（熱重載）。")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+
+                if let src = d.entrySource {
+                    Divider()
+                    DisclosureGroup("原始碼（\(m.entry)）") {
+                        ScrollView {
+                            Text(src)
+                                .font(.system(.caption2, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 220)
+                        .background(Color.secondary.opacity(0.08))
+                    }
+                    .font(.callout)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(d.id).font(.title3).bold()
+                Text(d.failure?.text ?? "無效插件")
+                    .foregroundColor(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(role: .destructive) { pendingRemoval = d.id } label: {
+                    Label("移除", systemImage: "trash")
+                }
+            }
         }
     }
 
@@ -2092,31 +2252,6 @@ struct PluginsPageView: View {
             : "檢查了 \(checked) 個，沒有更新。"
     }
 
-    // MARK: 插件清單
-
-    @ViewBuilder
-    private var pluginList: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                if naki.pluginDescriptors.isEmpty {
-                    Text("還沒有插件。從下面「從來源加入」貼 GitHub repo / gist / URL 引入，或手放檔案到 ~/Library/Application Support/Naki/Plugins/<id>/。")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    ForEach(naki.pluginDescriptors, id: \.id) { descriptor in
-                        pluginRow(descriptor)
-                        if descriptor.id != naki.pluginDescriptors.last?.id {
-                            Divider()
-                        }
-                    }
-                }
-            }
-        } label: {
-            Label("已安裝插件（\(naki.pluginDescriptors.count)）", systemImage: "square.stack.3d.up")
-        }
-    }
-
     // MARK: 信任 / L3（分頁）
 
     @ViewBuilder
@@ -2156,69 +2291,6 @@ struct PluginsPageView: View {
         } label: {
             Label("信任邊界與 L3 權限", systemImage: "lock.shield")
         }
-    }
-
-    @ViewBuilder
-    private func pluginRow(_ descriptor: PluginDescriptor) -> some View {
-        if let manifest = descriptor.manifest {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top) {
-                    Toggle(isOn: Binding(
-                        get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
-                        set: { on in naki.actions.setPluginEnabled(descriptor.id, on) }   // 熱插拔
-                    )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(manifest.name).font(.body)
-                            Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                            if let license = manifest.license {
-                                Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .accessibilityIdentifier("plugin-toggle-\(descriptor.id)")
-
-                    removeButton(descriptor.id)
-                }
-
-                // 插件設定（§7.10a）：有 schema 且已啟用才顯示；改值即時套用（熱重載）。
-                if let schema = manifest.settings, !schema.isEmpty,
-                   naki.settings.enabledPluginIds.contains(descriptor.id) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(schema.keys.sorted(), id: \.self) { key in
-                            if let field = schema[key] {
-                                pluginSettingControl(pluginId: descriptor.id, key: key, field: field)
-                            }
-                        }
-                    }
-                    .padding(.leading, 20)
-                }
-            }
-        } else {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(descriptor.id).font(.body)
-                    Text(descriptor.failure?.text ?? "無效插件")
-                        .font(.caption)
-                        .foregroundColor(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                removeButton(descriptor.id)   // 壞插件也能移除
-            }
-        }
-    }
-
-    /// 移除按鈕（垃圾桶）——點了走確認對話。
-    @ViewBuilder
-    private func removeButton(_ id: String) -> some View {
-        Button(role: .destructive) { pendingRemoval = id } label: {
-            Image(systemName: "trash")
-        }
-        .buttonStyle(.borderless)
-        .help("移除插件（刪檔案，可重新匯入救回）")
-        .accessibilityIdentifier("plugin-remove-\(id)")
     }
 
     /// 單一設定欄位的控制項（string→TextField、number→TextField、boolean→Toggle）。
