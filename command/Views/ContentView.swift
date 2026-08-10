@@ -1299,12 +1299,10 @@ struct AdvancedSettingsSheet: View {
             // 畫面
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("隱藏玩家名稱", isOn: hidePlayerNames)
-                        .accessibilityIdentifier("hide-player-names-toggle")
-
-                    Text("在遊戲解析封包前把暱稱改寫成 Player 1–4。只對開啟之後才開始的對局生效；斷線重連與終局結算畫面仍會顯示原名。")
+                    Text("暱稱隱藏與牌面高亮已改由**插件**提供（工具列拼圖圖示 → 插件頁面）。裝「暱稱隱藏」「牌面變色」插件即可；底層 API 仍在，只是不再內建自動開。")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     // 只有 iOS：那條狀態列疊在牌桌上。macOS 的是排版出來的一列，
                     // 不擋任何東西，沒有這個開關要解決的問題。

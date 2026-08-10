@@ -321,12 +321,12 @@ final class WebSession {
         }
     }
 
-    /// 頁面載入完成後把持久化的設定推回 JS（每次載入只推一次）
+    /// 內建暱稱隱藏**已移除**（2026-08-10，交給插件）：頁面載入後不再自動套用。
+    /// 底層 API（`__nakiHideNames` 協定層、`__nakiHighlight.setNameMask` 渲染層）仍保留，
+    /// 插件可自行呼叫。`setHidePlayerNames` 方法留著但已無內建呼叫端。
     private func applyHideNamesIfNeeded() {
-        guard !hasAppliedHideNames else { return }
         hasAppliedHideNames = true
-        guard settings.hidePlayerNames else { return }
-        setHidePlayerNames(true)
+        // no-op：內建自動遮名字已關閉。
     }
 }
 
