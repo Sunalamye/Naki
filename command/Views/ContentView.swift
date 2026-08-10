@@ -1844,12 +1844,13 @@ struct PluginsPageView: View {
     @Environment(\.naki) private var naki
     @Environment(\.dismiss) private var dismiss
 
-    // 從 URL 匯入（§6.5）的狀態
+    // 從 URL 匯入（§6.5）的狀態。importPreview 是**一批**（GitHub repo 可多個）。
     @State private var importURL = ""
     @State private var importing = false
-    @State private var importPreview: ImportedPlugin?
+    @State private var importPreview: [ImportedPlugin] = []
     @State private var importError: String?
     @State private var importMessage: String?
+    @State private var updateChecking = false
 
     // 移除插件的確認
     @State private var pendingRemoval: String?
@@ -1914,18 +1915,21 @@ struct PluginsPageView: View {
     private var importSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
-                Text("貼 gist 連結（gist.github.com/…）或任意 HTTPS 的 plugin.json 網址。只抓一次、預覽確認後才落地。")
+                Text("貼 **GitHub repo**（`owner/repo`，一次多個插件）、gist 連結、或任意 HTTPS 的 plugin.json。只抓一次、預覽確認後才落地。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack {
-                    TextField("https://gist.github.com/you/… 或 https://…/plugin.json", text: $importURL)
+                    TextField("Sunalamye/naki-plugins 或 gist / plugin.json 網址", text: $importURL)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.caption, design: .monospaced))
                         .disableAutocorrection(true)
                         .accessibilityIdentifier("plugin-import-url")
                     Button(importing ? "抓取中…" : "抓取") { Task { await fetchImport() } }
                         .disabled(importing || importURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button(updateChecking ? "檢查中…" : "檢查更新") { Task { await checkUpdates() } }
+                        .disabled(updateChecking)
+                        .help("對每個已裝插件重抓來源，比對內容有沒有變")
                 }
 
                 if let err = importError {
@@ -1934,64 +1938,96 @@ struct PluginsPageView: View {
                 }
                 if let msg = importMessage {
                     Text(msg).font(.caption).foregroundColor(.green)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if let p = importPreview {
+                if !importPreview.isEmpty {
                     Divider()
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("預覽：\(p.manifest.name)").font(.caption).bold()
-                        Text("\(p.manifest.id) · v\(p.manifest.version) · \(p.manifest.capabilities.joined(separator: ", "))")
-                            .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
-                        if let rev = p.revision {
-                            Text("gist revision：\(rev.prefix(12))").font(.caption2).foregroundStyle(.secondary)
+                    Text("預覽 \(importPreview.count) 個插件——看過原始碼再引入：")
+                        .font(.caption).bold()
+                    ForEach(importPreview, id: \.id) { p in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(p.manifest.name).font(.caption).bold()
+                            Text("\(p.manifest.id) · v\(p.manifest.version) · \(p.manifest.capabilities.joined(separator: ", "))")
+                                .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                            if let rev = p.revision {
+                                Text("revision：\(rev.prefix(12))").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            DisclosureGroup("原始碼（\(p.manifest.entry)）") {
+                                ScrollView {
+                                    Text(p.entrySource)
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .frame(maxHeight: 120)
+                                .background(Color.secondary.opacity(0.08))
+                            }
+                            .font(.caption2)
                         }
-                        Text("原始碼（\(p.manifest.entry)）：").font(.caption2).foregroundStyle(.secondary)
-                        ScrollView {
-                            Text(p.entrySource)
-                                .font(.system(.caption2, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxHeight: 140)
-                        .background(Color.secondary.opacity(0.08))
+                        Divider()
+                    }
 
-                        Text("⚠️ 安裝＝信任作者。插件能用你的帳號送動作、讀頁面上任何資料，Naki 無法阻止。確認你看過上面的原始碼。")
-                            .font(.caption2).foregroundColor(.red)
-                            .fixedSize(horizontal: false, vertical: true)
+                    Text("⚠️ 安裝＝信任作者。插件能用你的帳號送動作、讀頁面上任何資料，Naki 無法阻止。")
+                        .font(.caption2).foregroundColor(.red)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                        HStack {
-                            Button("確認引入") { confirmImport(p) }
-                                .buttonStyle(.borderedProminent)
-                            Button("取消") { importPreview = nil }
-                        }
+                    HStack {
+                        Button("確認引入全部（\(importPreview.count)）") { confirmImportAll() }
+                            .buttonStyle(.borderedProminent)
+                        Button("取消") { importPreview = [] }
                     }
                 }
             }
         } label: {
-            Label("從 URL 匯入（實驗）", systemImage: "arrow.down.circle")
+            Label("從來源加入（GitHub repo / gist / URL）", systemImage: "arrow.down.circle")
         }
     }
 
     private func fetchImport() async {
-        importing = true; importError = nil; importMessage = nil; importPreview = nil
-        let result = await PluginImportSource.fetch(urlString: importURL)
+        importing = true; importError = nil; importMessage = nil; importPreview = []
+        // fetchAny：repo → 多個；gist / plugin.json → 一個
+        let result = await PluginImportSource.fetchAny(urlString: importURL)
         importing = false
         switch result {
-        case .success(let p): importPreview = p
+        case .success(let list): importPreview = list
         case .failure(let e): importError = e.text
         }
     }
 
-    private func confirmImport(_ p: ImportedPlugin) {
-        switch PluginImportSource.install(p, now: Date()) {
-        case .success:
-            naki.actions.rescanPlugins()          // 刷新清單（@Observable → 立即反映）
-            importPreview = nil
-            importURL = ""
-            importMessage = "已引入「\(p.manifest.name)」。在上面清單啟用它（熱插拔，免重載）。"
-        case .failure(let e):
-            importError = e.text
+    private func confirmImportAll() {
+        var ok = 0
+        for p in importPreview {
+            if case .success = PluginImportSource.install(p, now: Date()) { ok += 1 }
         }
+        naki.actions.rescanPlugins()               // 刷新清單（@Observable → 立即反映）
+        let total = importPreview.count
+        importPreview = []
+        importURL = ""
+        importMessage = "已引入 \(ok)/\(total) 個插件。在上面清單啟用（熱插拔，免重載）。"
+    }
+
+    /// 檢查每個已裝插件有沒有更新；有的話一鍵更新（重抓 + 覆蓋 + 熱重載）。
+    private func checkUpdates() async {
+        updateChecking = true; importError = nil; importMessage = nil
+        var updated = 0, checked = 0
+        for d in naki.pluginDescriptors {
+            checked += 1
+            guard let fresh = await PluginImportSource.fetchUpdate(pluginId: d.id) else { continue }
+            if case .success = PluginImportSource.install(fresh, now: Date()) {
+                updated += 1
+                // 熱重載：啟用中的話 disable→enable 帶新源碼
+                if naki.settings.enabledPluginIds.contains(d.id) {
+                    naki.actions.setPluginEnabled(d.id, false)
+                    naki.actions.setPluginEnabled(d.id, true)
+                }
+            }
+        }
+        naki.actions.rescanPlugins()
+        updateChecking = false
+        importMessage = updated > 0
+            ? "更新了 \(updated) 個插件（已熱重載套用）。"
+            : "檢查了 \(checked) 個，沒有更新。"
     }
 
     // MARK: 插件清單
