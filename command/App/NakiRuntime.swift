@@ -53,14 +53,15 @@ final class NakiRuntime {
     /// View 層看得到的副作用集合（一次組好，之後不變）
     private(set) var actions = NakiActions()
 
-    /// 啟動時掃描到的插件（含無效的，供設定頁顯示原因）。掃描只讀檔、不執行插件程式碼。
-    /// 開關插件要重新載入頁面才生效，所以這份快照在頁面生命週期內不變。
-    private(set) var pluginDescriptors: [PluginDescriptor] = []
+    /// 掃描到的插件（含無效的，供設定頁顯示原因）。放進 `PluginStore`（@Observable class）
+    /// 讓引入/移除/重掃後 UI 能 reactive 更新（見 `PluginStore` 檔頭）。
+    let pluginStore = PluginStore()
+    var pluginDescriptors: [PluginDescriptor] { pluginStore.descriptors }
 
     /// 注入 Scene 的值
     var environment: NakiEnvironment {
         NakiEnvironment(store: store, settings: settings, actions: actions,
-                        pluginDescriptors: pluginDescriptors)
+                        pluginStore: pluginStore)
     }
 
     // MARK: - 組裝
@@ -86,7 +87,7 @@ final class NakiRuntime {
         // ①-c 插件：掃描目錄，產出已啟用插件的注入源碼（掃描只讀檔，不執行任何插件程式碼）。
         //     預設 `enabledPluginIds` 空 ⇒ 沒有啟用插件 ⇒ injection 為 nil ⇒ 不加第二個 script。
         let descriptors = PluginRegistry.scan()
-        pluginDescriptors = descriptors
+        pluginStore.descriptors = descriptors
         let settingsStore = settings
         let pluginInjection = PluginRegistry.buildInjectionScript(
             descriptors: descriptors, enabled: settings.enabledPluginIds,
@@ -427,7 +428,7 @@ final class NakiRuntime {
     /// 重掃插件目錄，更新 `pluginDescriptors`。@Observable ⇒ UI 自動反映。
     /// URL 匯入落地後、或使用者手動放檔案後呼叫。
     func rescanPlugins() {
-        pluginDescriptors = PluginRegistry.scan()
+        pluginStore.descriptors = PluginRegistry.scan()
     }
 
     /// 移除插件：先熱停用（從頁面卸掉 + 清 enabledPluginIds），再刪目錄，再重掃。

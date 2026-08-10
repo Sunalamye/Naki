@@ -12,6 +12,24 @@
 
 import SwiftUI
 
+// MARK: - Plugin Store
+
+/// 插件清單的 reactive 容器。
+///
+/// **為什麼要它**：`NakiEnvironment` 是 struct 值，透過 `.environment(\.naki, …)`
+/// 注入一次快照。App（`App` protocol）的 body 不像 View 會因 `@Observable` 變化
+/// 重新求值，所以 `NakiRuntime.pluginDescriptors` 變了也不會重新注入 environment
+/// ——UI 讀到的是舊快照（引入插件後清單還是 0）。把清單放進 `@Observable` class，
+/// environment 持有它的 **ref**，UI 讀 `naki.pluginDescriptors`（＝這個 class 的
+/// 屬性）就會建立對 class 的依賴，rescan 更新它時 UI 自動重繪。
+@Observable
+final class PluginStore {
+    /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
+    nonisolated deinit { }
+    var descriptors: [PluginDescriptor] = []
+    nonisolated init() { }
+}
+
 // MARK: - Naki Environment
 
 /// SwiftUI 這一側的 Naki。
@@ -25,18 +43,22 @@ struct NakiEnvironment {
     var settings: SettingsStore
     var actions: NakiActions
 
-    /// 掃描到的插件（唯讀顯示用；開關寫進 `settings.enabledPluginIds`）。
-    /// 預設空——`#Preview` 與未接線的情況都不該炸。
-    var pluginDescriptors: [PluginDescriptor]
+    /// 插件清單的 reactive 容器（ref）。UI 讀 `pluginDescriptors` ⇒ 觀察這個 class
+    /// ⇒ rescan 更新時自動重繪（見 `PluginStore` 檔頭為什麼不能用 struct 快照）。
+    var pluginStore: PluginStore
 
-    /// 正式路徑：由 `NakiRuntime` 顯式提供。`pluginDescriptors` 給預設值，
+    /// 掃描到的插件（唯讀顯示用；開關寫進 `settings.enabledPluginIds`）。
+    /// 讀的是 `pluginStore.descriptors`（class ref）⇒ reactive。
+    var pluginDescriptors: [PluginDescriptor] { pluginStore.descriptors }
+
+    /// 正式路徑：由 `NakiRuntime` 顯式提供。`pluginStore` 給預設值，
     /// 這樣現有呼叫端不必全部改。
     init(store: GameStore, settings: SettingsStore, actions: NakiActions,
-         pluginDescriptors: [PluginDescriptor] = []) {
+         pluginStore: PluginStore = PluginStore()) {
         self.store = store
         self.settings = settings
         self.actions = actions
-        self.pluginDescriptors = pluginDescriptors
+        self.pluginStore = pluginStore
     }
 
     /// **預設值只給 Preview。**
@@ -54,7 +76,7 @@ struct NakiEnvironment {
         self.store = GameStore()
         self.settings = SettingsStore()
         self.actions = NakiActions()
-        self.pluginDescriptors = []
+        self.pluginStore = PluginStore()
     }
 }
 
