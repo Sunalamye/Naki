@@ -887,3 +887,42 @@ GPL-3.0 §7 同一段還接著寫（已驗證，§0 #4c）：
   - commit pin `b3933bbaf7d847fdc0c7b4509b07f9bcb3610ab0`（committer date 2026-07-16）、LICENSE 674 行、sha256 前綴 `3972dc9744f6499f`——由 teammate `gpl-30-license` 以本機 clone 取證，我未自行核對 SHA
 - GPL-3.0 全文：即上述 repo 的 `LICENSE`（§7 在 L388-390、§10 在 L463-464、§13 在 L552-560）
 - 相關既有文件：`docs/pluggable-bots-plan.md`（「不做 bot 市集／自動安裝」的既有決定與理由）、`docs/architecture-deep-dive.md`（現行架構）、`docs/majsoul-unity-protocol.md`（Unity／Liqi 事實）
+
+---
+
+## 12. 實作進展與新決策（2026-08-10）
+
+Phase 1–3 已實作並 live 驗證，另有四項偏離／延伸原設計的決策，記錄 why 與取捨。
+
+### 12.1 內建牌面高亮／暱稱隱藏移交插件（關掉內建、保留 API）
+
+**決策**：把 Naki 內建的牌面高亮（`syncHighlight` → `GameHighlightScript.make`）與暱稱隱藏（`setHidePlayerNames`／`applyHideNamesIfNeeded`）**關掉**，交給插件。
+**Why**：兩個功能都做成插件後，內建版會和插件**同時呼叫 `window.__nakiHighlight`** 打架。
+**取捨**：**只關內建自動驅動 + 設定 UI，底層 API 全保留**（`__nakiHighlight.set/clear/setNameMask`、`__nakiHideNames`、`__nakiRecommendations` 插件在用，砍了插件也壞）。`syncHighlight` 改為只注入 `__nakiRecommendations` + `clear` 殘留；`applyHideNamesIfNeeded` 改 no-op；設定頁開關換成指向插件的說明。`GameHighlightScript` 函式保留（沒人呼叫但測試仍測它）。代價：沒裝插件就沒有高亮／遮名字。commit `c0b7564`。
+
+### 12.2 GitHub repo 為插件來源 + 更新機制（§6.5 延伸）
+
+**決策**：§6.5 原本只有 GistSource / HTTPSource（一來源一插件）。新增 **GitHubSource：一個 repo 多個插件**（`plugins/<id>/plugin.json`），可勾選批次引入 + 檢查/一鍵更新。
+**Why**：使用者要「naki 的 github 版」——一個 repo 放多個插件、還能更新。
+**取捨**：
+- `fetchAny` 統一入口回**一批** `ImportedPlugin`；`github.com/<owner>/<repo>` → repo（多個），gist / 單一 HTTPS 仍回單一（不砍）。
+- repo 抓取用 `git/trees?recursive=1` **一次拿全路徑**（top sha ＝ revision），每個插件經 `raw.githubusercontent.com/<sha>/…` **釘 commit**（不可變）。
+- **更新用內容 sha 比對**（fresh 各檔 sha vs `install-receipt.json` 的 `sha256`）——比 revision 比對可靠，連沒 revision 的 HTTP 也準。釘 sha 的 raw URL 重抓會拿到同一份，所以 receipt 另存**可重查來源** `updateSource`。
+- 引入預覽**可勾選**（不是只能引入全部）。
+commit `b8b819f`／`a9ee48e`／`ff4c519`／`2c8ca88`。§0 #23 gist revision 行為已驗（真實 gist + repo）。
+
+### 12.3 PluginStore reactivity 坑（會再踩，記下來）
+
+**症狀**：引入插件成功，但「已安裝插件」清單還是 0。
+**根因**：`NakiEnvironment` 是 **struct 值快照**，`.environment(\.naki, …)` 注入一次。**`App`（App protocol）的 body 不像 `View` 會因 `@Observable` 變化重新求值**，所以 `rescanPlugins` 更新 `NakiRuntime.pluginDescriptors` 後**不會重新注入 environment**，UI 讀舊快照。
+**修法／取捨**：新增 `@Observable class PluginStore`（**ref**），`NakiRuntime` 持有它、rescan 寫 `pluginStore.descriptors`；`NakiEnvironment` 改持有 `pluginStore` ref，`pluginDescriptors` 變 computed 讀它。**教訓：跨 App-scene 注入的 reactive 狀態要放 `@Observable` class（ref），不能放 struct 值。** commit `29e0aed`。
+
+### 12.4 插件頁面 master-detail + 分頁（design-tool）
+
+**決策**：長捲軸 sheet → 分頁（插件/Log/信任）+ 插件 tab 走 `NavigationSplitView`（左緊湊清單、右詳情）。
+**Why**：使用者說「全部擠在一起、不好看不方便」。方向取自 `/design-tool`（插件頁像控制台）。
+**取捨**：Log 與信任/L3 分到獨立分頁；左欄狀態點（綠啟用/灰停用/紅無效）+ 名稱 + 等寬 id，右欄選中才顯示完整詳情（含 `descriptor.entrySource`）。沒選 → 右欄顯示匯入面板。commit `24fcc5a`／`e312b9f`。
+
+### 12.5 未完成：D 開人機場實測
+
+插件 runtime 已在**真實雀魂頁面** live 驗證（`__nakiPlugins`、`__nakiHighlight.set/setNameMask`、canvas 都在），但完整對局測試**卡在登入**：fresh 啟動的 App WebSocket 連線數 = 0（未登入），沒對局就沒 `__nakiRecommendations`（牌面變色無料）、沒 authGame（暱稱隱藏無料）。**AI 不能自動登入雀魂**，D 需使用者先登入測試帳號，再由 `lobby_start_unified_match` 開局 + 啟用插件 + 觀察。
