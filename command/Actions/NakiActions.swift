@@ -966,6 +966,8 @@ struct NakiActions {
   var setPluginEnabled: SetPluginEnabledAction
   /// 重掃插件目錄（URL 匯入落地後刷新清單）
   var rescanPlugins: RescanPluginsAction
+  /// 移除插件（刪目錄 + 熱停用 + 重掃）
+  var removePlugin: RemovePluginAction
   /// 強制斷線重連以重建 Bot
   var forceReconnect: ForceReconnectAction
   /// 切換自動打牌模式
@@ -996,6 +998,7 @@ struct NakiActions {
     self.executeJavaScript = ExecuteJavaScriptAction()
     self.setPluginEnabled = SetPluginEnabledAction()
     self.rescanPlugins = RescanPluginsAction()
+    self.removePlugin = RemovePluginAction()
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
     self.startFullAutoNow = StartFullAutoNowAction()
@@ -1012,6 +1015,7 @@ struct NakiActions {
   init(executeJavaScript: ExecuteJavaScriptAction,
        setPluginEnabled: SetPluginEnabledAction,
        rescanPlugins: RescanPluginsAction,
+       removePlugin: RemovePluginAction,
        forceReconnect: ForceReconnectAction,
        setAutoPlayMode: SetAutoPlayModeAction,
        startFullAutoNow: StartFullAutoNowAction,
@@ -1025,6 +1029,7 @@ struct NakiActions {
     self.executeJavaScript = executeJavaScript
     self.setPluginEnabled = setPluginEnabled
     self.rescanPlugins = rescanPlugins
+    self.removePlugin = removePlugin
     self.forceReconnect = forceReconnect
     self.setAutoPlayMode = setAutoPlayMode
     self.startFullAutoNow = startFullAutoNow
@@ -1099,4 +1104,29 @@ struct RescanPluginsAction {
   #endif
 
   func callAsFunction() { perform() }
+}
+
+// MARK: - 移除插件
+
+/// 移除插件（刪目錄 + 熱停用 + 重掃）。destructive 但可逆。
+struct RemovePluginAction {
+
+  private nonisolated(unsafe) let perform: (String) -> Void
+
+  private init(perform: @escaping (String) -> Void) {
+    self.perform = perform
+  }
+
+  init(runtime: NakiRuntime) {
+    self.init(perform: { [weak runtime] id in runtime?.removePlugin(id: id) })
+  }
+
+  static let noop = RemovePluginAction()
+  nonisolated init() { self.perform = { _ in } }
+
+  #if DEBUG
+    init(stub: @escaping (String) -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(_ id: String) { perform(id) }
 }

@@ -430,11 +430,22 @@ final class NakiRuntime {
         pluginDescriptors = PluginRegistry.scan()
     }
 
+    /// 移除插件：先熱停用（從頁面卸掉 + 清 enabledPluginIds），再刪目錄，再重掃。
+    /// 可逆——重新匯入／放檔案即可救回。
+    func removePlugin(id: String) {
+        if settings.enabledPluginIds.contains(id) {
+            setPluginEnabled(id: id, enabled: false)   // 熱停用（免 reload 從頁面卸掉）
+        }
+        _ = PluginRegistry.remove(id: id)
+        rescanPlugins()
+    }
+
     private func makeActions() -> NakiActions {
         NakiActions(
             executeJavaScript: ExecuteJavaScriptAction(session: session),
             setPluginEnabled: SetPluginEnabledAction(runtime: self),
             rescanPlugins: RescanPluginsAction(runtime: self),
+            removePlugin: RemovePluginAction(runtime: self),
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
             startFullAutoNow: StartFullAutoNowAction(runtime: self),

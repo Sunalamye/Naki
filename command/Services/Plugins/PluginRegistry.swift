@@ -329,6 +329,25 @@ nonisolated enum PluginRegistry {
         return "if (window.__nakiPlugins && window.__nakiPlugins.disable) { window.__nakiPlugins.disable(\(idLit)); }"
     }
 
+    /// 移除插件：刪掉 `Plugins/<id>/` 整個目錄。
+    ///
+    /// destructive——但可逆（重新匯入／放檔案即可）。preflight：id 非空、解出的目錄
+    /// **必須真的在 Plugins root 底下**（擋 id 含 `..` 的路徑穿越）。已不存在視為成功。
+    /// 呼叫端（NakiRuntime）負責移除前先熱停用（從頁面卸掉 + 清 enabledPluginIds）。
+    /// 回傳 nil＝成功；非 nil＝錯誤訊息。
+    static func remove(id: String) -> String? {
+        guard !id.isEmpty else { return "id 為空" }
+        guard let root = pluginsDirectory else { return "找不到插件目錄" }
+        let dir = root.appendingPathComponent(id, isDirectory: true).standardizedFileURL
+        guard dir.deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL else {
+            return "非法路徑（拒絕刪除 \(id)）"
+        }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: dir.path) else { return nil }
+        do { try fm.removeItem(at: dir); return nil }
+        catch { return "刪除失敗：\(error.localizedDescription)" }
+    }
+
     /// 安全的 JS 字串字面值（用 JSONSerialization 逸出，避免 id 內有特殊字元破壞注入）。
     private static func jsStringLiteral(_ s: String) -> String {
         if let data = try? JSONSerialization.data(withJSONObject: [s]),

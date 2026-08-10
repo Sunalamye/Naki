@@ -1853,6 +1853,9 @@ struct PluginsPageView: View {
     @State private var importError: String?
     @State private var importMessage: String?
 
+    // 移除插件的確認
+    @State private var pendingRemoval: String?
+
     var body: some View {
         #if os(macOS)
         VStack(spacing: 0) {
@@ -1891,6 +1894,20 @@ struct PluginsPageView: View {
             logSection
         }
         .padding()
+        .confirmationDialog(
+            "移除插件？",
+            isPresented: Binding(get: { pendingRemoval != nil },
+                                 set: { if !$0 { pendingRemoval = nil } }),
+            presenting: pendingRemoval
+        ) { id in
+            Button("移除「\(id)」", role: .destructive) {
+                naki.actions.removePlugin(id)   // 熱停用 + 刪目錄 + 重掃
+                pendingRemoval = nil
+            }
+            Button("取消", role: .cancel) { pendingRemoval = nil }
+        } message: { id in
+            Text("會刪掉 \(id) 的整個插件目錄。可重新匯入或放檔案救回。")
+        }
     }
 
     // MARK: 從 URL 匯入（§6.5）
@@ -2036,21 +2053,25 @@ struct PluginsPageView: View {
     private func pluginRow(_ descriptor: PluginDescriptor) -> some View {
         if let manifest = descriptor.manifest {
             VStack(alignment: .leading, spacing: 6) {
-                Toggle(isOn: Binding(
-                    get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
-                    set: { on in naki.actions.setPluginEnabled(descriptor.id, on) }   // 熱插拔
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(manifest.name).font(.body)
-                        Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        if let license = manifest.license {
-                            Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
+                HStack(alignment: .top) {
+                    Toggle(isOn: Binding(
+                        get: { naki.settings.enabledPluginIds.contains(descriptor.id) },
+                        set: { on in naki.actions.setPluginEnabled(descriptor.id, on) }   // 熱插拔
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(manifest.name).font(.body)
+                            Text("\(manifest.id) · v\(manifest.version) · \(manifest.capabilities.joined(separator: ", "))")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            if let license = manifest.license {
+                                Text("授權：\(license)").font(.caption2).foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .accessibilityIdentifier("plugin-toggle-\(descriptor.id)")
+
+                    removeButton(descriptor.id)
                 }
-                .accessibilityIdentifier("plugin-toggle-\(descriptor.id)")
 
                 // 插件設定（§7.10a）：有 schema 且已啟用才顯示；改值即時套用（熱重載）。
                 if let schema = manifest.settings, !schema.isEmpty,
@@ -2066,14 +2087,29 @@ struct PluginsPageView: View {
                 }
             }
         } else {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(descriptor.id).font(.body)
-                Text(descriptor.failure?.text ?? "無效插件")
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(descriptor.id).font(.body)
+                    Text(descriptor.failure?.text ?? "無效插件")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                removeButton(descriptor.id)   // 壞插件也能移除
             }
         }
+    }
+
+    /// 移除按鈕（垃圾桶）——點了走確認對話。
+    @ViewBuilder
+    private func removeButton(_ id: String) -> some View {
+        Button(role: .destructive) { pendingRemoval = id } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .help("移除插件（刪檔案，可重新匯入救回）")
+        .accessibilityIdentifier("plugin-remove-\(id)")
     }
 
     /// 單一設定欄位的控制項（string→TextField、number→TextField、boolean→Toggle）。
