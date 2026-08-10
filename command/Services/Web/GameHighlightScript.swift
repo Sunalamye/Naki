@@ -5,6 +5,11 @@
 //  遊戲畫面內高亮：由「模式 + 推薦 + 手牌 + oplist」算出要送給
 //  `window.__nakiHighlight` 的那一行 JS。
 //
+//  §12（2026-08-11）起牌面自動高亮移交插件：`WebSession.syncHighlight` 不再自動
+//  注入這段。此型別保留為 **highlight payload 的參考實作與測試對象**——它示範插件該用
+//  什麼形狀呼叫 `__nakiHighlight.set()`，也是「`.off` 是否真的清空」唯一能寫機械測試的地方。
+//  `clear` 仍由 `syncHighlight` 在關閉顯示時使用。
+//
 //  輸出字串由 `GameHighlightScriptTests` 逐條鎖著。
 //
 

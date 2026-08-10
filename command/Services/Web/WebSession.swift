@@ -252,27 +252,23 @@ final class WebSession {
 
     /// 依目前模式與推薦，暫時改 Unity 畫該牌時的 tint。
     ///
-    /// Unity WebGL 沒有 JS per-tile object；JS 從 `_MainTex_ST` atlas UV 辨識牌名。
-    /// Swift 只傳牌 identity 與顏色，不推算螢幕位置或手牌 index。
-    /// 腳本內容由純函式 `GameHighlightScript.make` 決定（唯一能對「`.off` 是不是
-    /// 真的清空」寫機械測試的地方）。
+    /// 牌面自動高亮已移交插件（plugin-system-design §12）：這裡不再自己呼叫
+    /// `__nakiHighlight.set()`，只維護唯讀推薦通道 `__nakiRecommendations`，
+    /// 讓高亮類插件讀它、自己決定要不要染色。移交前內建高亮每次都 `set()`，
+    /// 會把插件剛設的顏色覆蓋掉（live 實測 2026-08-11 確認過這個衝突）。
+    ///
+    /// `GameHighlightScript.make` 保留為 highlight payload 的參考實作與測試對象，
+    /// 不再自動注入。關閉顯示（`.off`）時清一次並清空推薦——使用者關掉的東西不該還在畫面上。
     func syncHighlight() {
         guard backend.isReady else { return }
 
-        let script = GameHighlightScript.make(
-            mode: store.autoPlayMode,
-            recommendations: store.recommendations,
-            tehaiTiles: store.tehaiTiles,
-            snapshot: LiqiOperationStore.shared.latest)
-
-        // 順便把推薦注入唯讀全域，讓插件讀得到 AI 結果（§7.3 的回程通道，唯讀）。
-        // 推薦本來就沿這條路從 Swift 流到 JS（GameHighlightScript 用它高亮）；
-        // 這裡只是讓它留在 window.__nakiRecommendations，插件能讀不能改（每次同步更新）。
-        // 插件要接管牌改色時：讀這份 + 自己呼叫 window.__nakiHighlight.set。
+        let show = store.autoPlayMode.showRecommendation
+        let recos = show ? store.recommendations : []
         let recoScript = "window.__nakiRecommendations = "
-            + Self.recommendationsJSON(store.recommendations) + ";"
+            + Self.recommendationsJSON(recos) + ";"
+        let tail = show ? "" : "\n" + GameHighlightScript.clear
 
-        Task { _ = try? await backend.callJavaScript(recoScript + "\n" + script) }
+        Task { _ = try? await backend.callJavaScript(recoScript + tail) }
     }
 
     /// 把推薦序列化成插件好用的 JSON（唯讀快照）。純函式，可測。
