@@ -142,6 +142,88 @@ nonisolated enum PluginImportSource {
         return finalize(files: files, sourceURL: url.absoluteString, revision: nil)
     }
 
+    // MARK: GitHub repo（多插件）
+
+    /// 統一入口：回**一批** ImportedPlugin。
+    /// - `github.com/<owner>/<repo>` 或 `<owner>/<repo>` → repo 內所有 `plugins/*/plugin.json`（多個）
+    /// - `gist.github.com/…` → 單一
+    /// - 任意 `https://…/plugin.json` → 單一
+    static func fetchAny(urlString: String) async -> Result<[ImportedPlugin], PluginImportError> {
+        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 允許裸 owner/repo（無 scheme）
+        let normalized = normalizeInput(trimmed)
+        guard let url = URL(string: normalized), let host = url.host else {
+            return .failure(.badURL)
+        }
+        if host.contains("gist.github.com") {
+            return (await fetchGist(url)).map { [$0] }
+        }
+        if host.contains("github.com") {
+            return await fetchGitHubRepo(url)
+        }
+        return (await fetchHTTP(url)).map { [$0] }
+    }
+
+    /// 裸 `owner/repo` → `https://github.com/owner/repo`；已是 URL 則原樣。
+    private static func normalizeInput(_ s: String) -> String {
+        if s.hasPrefix("http://") || s.hasPrefix("https://") { return s }
+        let parts = s.split(separator: "/")
+        if parts.count == 2 { return "https://github.com/\(parts[0])/\(parts[1])" }
+        return s
+    }
+
+    /// 從 GitHub repo 抓所有 `plugins/<id>/plugin.json` 插件（多個），釘 commit sha。
+    static func fetchGitHubRepo(_ url: URL) async -> Result<[ImportedPlugin], PluginImportError> {
+        let parts = url.pathComponents.filter { $0 != "/" }
+        guard parts.count >= 2 else { return .failure(.badURL) }
+        let owner = parts[0], repo = parts[1]
+
+        // 1) default branch
+        guard let repoData = try? await get(URL(string: "https://api.github.com/repos/\(owner)/\(repo)")!, max: manifestMax),
+              let repoJSON = try? JSONSerialization.jsonObject(with: repoData) as? [String: Any],
+              let branch = repoJSON["default_branch"] as? String else {
+            return .failure(.network("讀不到 repo \(owner)/\(repo)"))
+        }
+        // 2) recursive tree（一次拿全部路徑）；top sha ＝ revision
+        guard let treeData = try? await get(URL(string: "https://api.github.com/repos/\(owner)/\(repo)/git/trees/\(branch)?recursive=1")!, max: bundleMax),
+              let treeJSON = try? JSONSerialization.jsonObject(with: treeData) as? [String: Any],
+              let tree = treeJSON["tree"] as? [[String: Any]] else {
+            return .failure(.network("讀不到 repo tree"))
+        }
+        let revision = treeJSON["sha"] as? String
+        let pin = revision ?? branch
+
+        // 3) 找 plugins/<id>/plugin.json
+        var dirs: [String] = []
+        for entry in tree {
+            guard let path = entry["path"] as? String, (entry["type"] as? String) == "blob" else { continue }
+            let comps = path.split(separator: "/").map(String.init)
+            if comps.count == 3, comps[0] == "plugins", comps[2] == "plugin.json" {
+                dirs.append(comps[1])
+            }
+        }
+        guard !dirs.isEmpty else { return .failure(.noPluginJson) }
+
+        // 4) 每個插件：抓 plugin.json + entry（raw，釘 pin）
+        var out: [ImportedPlugin] = []
+        for dir in dirs {
+            let base = "https://raw.githubusercontent.com/\(owner)/\(repo)/\(pin)/plugins/\(dir)"
+            guard let mURL = URL(string: "\(base)/plugin.json"),
+                  let mData = try? await get(mURL, max: manifestMax),
+                  let manifest = try? JSONDecoder().decode(PluginManifest.self, from: mData) else { continue }
+            var files: [String: Data] = ["plugin.json": mData]
+            if let eURL = URL(string: "\(base)/\(manifest.entry)"),
+               let eData = try? await get(eURL, max: bundleMax) {
+                files[manifest.entry] = eData
+            }
+            if case .success(let p) = finalize(files: files, sourceURL: "\(base)/plugin.json", revision: revision) {
+                out.append(p)
+            }
+        }
+        guard !out.isEmpty else { return .failure(.invalidManifest("repo 裡沒有有效插件")) }
+        return .success(out)
+    }
+
     // MARK: 共用
 
     /// 驗 manifest（apiVersion/id/欄位），組 ImportedPlugin。
