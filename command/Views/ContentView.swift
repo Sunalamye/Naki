@@ -1846,6 +1846,13 @@ struct PluginsPageView: View {
     @Environment(\.naki) private var naki
     @Environment(\.dismiss) private var dismiss
 
+    // 從 URL 匯入（§6.5）的狀態
+    @State private var importURL = ""
+    @State private var importing = false
+    @State private var importPreview: ImportedPlugin?
+    @State private var importError: String?
+    @State private var importMessage: String?
+
     var body: some View {
         #if os(macOS)
         VStack(spacing: 0) {
@@ -1880,9 +1887,96 @@ struct PluginsPageView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             pluginList
+            importSection
             logSection
         }
         .padding()
+    }
+
+    // MARK: 從 URL 匯入（§6.5）
+
+    @ViewBuilder
+    private var importSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("貼 gist 連結（gist.github.com/…）或任意 HTTPS 的 plugin.json 網址。只抓一次、預覽確認後才落地。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    TextField("https://gist.github.com/you/… 或 https://…/plugin.json", text: $importURL)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.caption, design: .monospaced))
+                        .disableAutocorrection(true)
+                        .accessibilityIdentifier("plugin-import-url")
+                    Button(importing ? "抓取中…" : "抓取") { Task { await fetchImport() } }
+                        .disabled(importing || importURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+
+                if let err = importError {
+                    Text("匯入失敗：\(err)").font(.caption).foregroundColor(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let msg = importMessage {
+                    Text(msg).font(.caption).foregroundColor(.green)
+                }
+
+                if let p = importPreview {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("預覽：\(p.manifest.name)").font(.caption).bold()
+                        Text("\(p.manifest.id) · v\(p.manifest.version) · \(p.manifest.capabilities.joined(separator: ", "))")
+                            .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                        if let rev = p.revision {
+                            Text("gist revision：\(rev.prefix(12))").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Text("原始碼（\(p.manifest.entry)）：").font(.caption2).foregroundStyle(.secondary)
+                        ScrollView {
+                            Text(p.entrySource)
+                                .font(.system(.caption2, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 140)
+                        .background(Color.secondary.opacity(0.08))
+
+                        Text("⚠️ 安裝＝信任作者。插件能用你的帳號送動作、讀頁面上任何資料，Naki 無法阻止。確認你看過上面的原始碼。")
+                            .font(.caption2).foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack {
+                            Button("確認引入") { confirmImport(p) }
+                                .buttonStyle(.borderedProminent)
+                            Button("取消") { importPreview = nil }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("從 URL 匯入（實驗）", systemImage: "arrow.down.circle")
+        }
+    }
+
+    private func fetchImport() async {
+        importing = true; importError = nil; importMessage = nil; importPreview = nil
+        let result = await PluginImportSource.fetch(urlString: importURL)
+        importing = false
+        switch result {
+        case .success(let p): importPreview = p
+        case .failure(let e): importError = e.text
+        }
+    }
+
+    private func confirmImport(_ p: ImportedPlugin) {
+        switch PluginImportSource.install(p, now: Date()) {
+        case .success:
+            naki.actions.rescanPlugins()          // 刷新清單（@Observable → 立即反映）
+            importPreview = nil
+            importURL = ""
+            importMessage = "已引入「\(p.manifest.name)」。在上面清單啟用它（熱插拔，免重載）。"
+        case .failure(let e):
+            importError = e.text
+        }
     }
 
     // MARK: 插件清單

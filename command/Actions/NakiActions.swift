@@ -964,6 +964,8 @@ struct NakiActions {
   var executeJavaScript: ExecuteJavaScriptAction
   /// 熱插拔：開關插件（免 reload；持久化 + 對當前頁面注入 enable/disable）
   var setPluginEnabled: SetPluginEnabledAction
+  /// 重掃插件目錄（URL 匯入落地後刷新清單）
+  var rescanPlugins: RescanPluginsAction
   /// 強制斷線重連以重建 Bot
   var forceReconnect: ForceReconnectAction
   /// 切換自動打牌模式
@@ -993,6 +995,7 @@ struct NakiActions {
   nonisolated init() {
     self.executeJavaScript = ExecuteJavaScriptAction()
     self.setPluginEnabled = SetPluginEnabledAction()
+    self.rescanPlugins = RescanPluginsAction()
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
     self.startFullAutoNow = StartFullAutoNowAction()
@@ -1008,6 +1011,7 @@ struct NakiActions {
   /// 正式路徑：由 `NakiRuntime` 一次組好（十個全部明講，漏一個編譯期就不過）
   init(executeJavaScript: ExecuteJavaScriptAction,
        setPluginEnabled: SetPluginEnabledAction,
+       rescanPlugins: RescanPluginsAction,
        forceReconnect: ForceReconnectAction,
        setAutoPlayMode: SetAutoPlayModeAction,
        startFullAutoNow: StartFullAutoNowAction,
@@ -1020,6 +1024,7 @@ struct NakiActions {
        webView: WebViewAction) {
     self.executeJavaScript = executeJavaScript
     self.setPluginEnabled = setPluginEnabled
+    self.rescanPlugins = rescanPlugins
     self.forceReconnect = forceReconnect
     self.setAutoPlayMode = setAutoPlayMode
     self.startFullAutoNow = startFullAutoNow
@@ -1069,4 +1074,29 @@ struct SetPluginEnabledAction {
   func callAsFunction(_ id: String, _ enabled: Bool) {
     perform(id, enabled)
   }
+}
+
+// MARK: - 重掃插件
+
+/// 重掃插件目錄（URL 匯入落地後刷新 `pluginDescriptors`）。
+struct RescanPluginsAction {
+
+  private nonisolated(unsafe) let perform: () -> Void
+
+  private init(perform: @escaping () -> Void) {
+    self.perform = perform
+  }
+
+  init(runtime: NakiRuntime) {
+    self.init(perform: { [weak runtime] in runtime?.rescanPlugins() })
+  }
+
+  static let noop = RescanPluginsAction()
+  nonisolated init() { self.perform = { } }
+
+  #if DEBUG
+    init(stub: @escaping () -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction() { perform() }
 }

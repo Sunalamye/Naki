@@ -40,7 +40,7 @@
 | 20 | iOS 無法載入任意原生程式碼 | **平台事實，未於本機實測** | 這是 Apple 平台的既有限制（無未簽章碼的 `dlopen`、App 內可執行碼必須與 App 同簽章、無 JIT 例外給 App 本體）。不是 Naki 的配置問題 |
 | 21 | receive 側「換掉遊戲拿到的 event」在技術上可行 | **未驗證** | §7.5 的機制候選（capture 階段 `stopImmediatePropagation()` + `ws.dispatchEvent(new MessageEvent(...))`）在 Naki 上**沒有做過任何 probe**。Phase 4 動工前必須先驗 |
 | 22 | JS 插件可攔 `fetch`／`XHR` 做資源替換 | **未驗證** | 對應 MajsoulMax `replace`。Naki 目前只 hook 了 `WebAssembly.instantiate*`（`naki-core.js`），沒有任何 `fetch`／`XHR` hook 的證據 |
-| 23 | gist 有 revision-pinned raw URL；GitHub API 可列出 gist 的檔案與 revision | **未驗證** | §6.5 GistSource 依賴此行為。訓練知識，Phase 1b 動工前要以真實 gist 驗一次（驗收已含） |
+| 23 | gist 有 revision-pinned raw URL；GitHub API 可列出 gist 的檔案與 revision | **已驗證** | 2026-08-10 以真實 gist（octocat 與自建測試 gist）驗證：`GET api.github.com/gists/<id>` 回 `files{name:{content, truncated, raw_url}}` + `history[0].version`（revision）。小檔 `content` 直接帶內容（`truncated:false`）。GistSource 已實作並對此結構驗過 |
 | 24 | WebExtensions（MV3）有 `options_ui`＋`chrome.storage`＋`optional_permissions`；VS Code 有 `activate`/`deactivate`＋`contributes.configuration`＋`engines.vscode` | 已驗證（檢索） | 2026-08-09 經 context7 取自 developer.chrome.com 與 code.visualstudio.com 官方文件；§7.10 的對照以此為據。**未親測**任一平台的執行期行為 |
 
 > ⚠️ 授權段落是工程判讀，不是法律意見。真正要對外散布前應取得法律意見。

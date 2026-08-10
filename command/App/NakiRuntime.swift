@@ -424,10 +424,17 @@ final class NakiRuntime {
         }
     }
 
+    /// 重掃插件目錄，更新 `pluginDescriptors`。@Observable ⇒ UI 自動反映。
+    /// URL 匯入落地後、或使用者手動放檔案後呼叫。
+    func rescanPlugins() {
+        pluginDescriptors = PluginRegistry.scan()
+    }
+
     private func makeActions() -> NakiActions {
         NakiActions(
             executeJavaScript: ExecuteJavaScriptAction(session: session),
             setPluginEnabled: SetPluginEnabledAction(runtime: self),
+            rescanPlugins: RescanPluginsAction(runtime: self),
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
             startFullAutoNow: StartFullAutoNowAction(runtime: self),
