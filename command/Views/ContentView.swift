@@ -1854,12 +1854,30 @@ struct PluginsPageView: View {
 
     // 移除插件的確認
     @State private var pendingRemoval: String?
+    @State private var tab: PluginTab = .plugins
+
+    /// 分頁：把 Log 與信任/L3 從主畫面分出去，插件管理不再和 log 擠一起。
+    enum PluginTab: String, CaseIterable, Identifiable {
+        case plugins = "插件"
+        case log = "Log"
+        case trust = "信任"
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .plugins: return "puzzlepiece.extension"
+            case .log: return "text.append"
+            case .trust: return "lock.shield"
+            }
+        }
+    }
 
     var body: some View {
         #if os(macOS)
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 12) {
                 Label("插件", systemImage: "puzzlepiece.extension").font(.headline)
+                Spacer()
+                tabPicker.frame(maxWidth: 320)
                 Spacer()
                 Button("完成") { dismiss() }
                     .keyboardShortcut(.defaultAction)
@@ -1870,27 +1888,47 @@ struct PluginsPageView: View {
             Divider()
             ScrollView { content }
         }
-        .frame(width: 720, height: 640)
+        .frame(width: 760, height: 640)
         #else
         NavigationStack {
-            ScrollView { content }
-                .navigationTitle("插件")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") { dismiss() }
-                            .accessibilityIdentifier("plugins-done-button")
-                    }
+            VStack(spacing: 0) {
+                tabPicker.padding([.horizontal, .top])
+                ScrollView { content }
+            }
+            .navigationTitle("插件")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                        .accessibilityIdentifier("plugins-done-button")
                 }
+            }
         }
         #endif
     }
 
+    private var tabPicker: some View {
+        Picker("分頁", selection: $tab) {
+            ForEach(PluginTab.allCases) { t in
+                Label(t.rawValue, systemImage: t.icon).tag(t)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+    }
+
+    @ViewBuilder
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
-            pluginList
-            importSection
-            logSection
+            switch tab {
+            case .plugins:
+                pluginList
+                importSection
+            case .log:
+                logSection
+            case .trust:
+                trustSection
+            }
         }
         .padding()
         .confirmationDialog(
@@ -2037,7 +2075,7 @@ struct PluginsPageView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 if naki.pluginDescriptors.isEmpty {
-                    Text("沒有安裝插件。放進 ~/Library/Application Support/Naki/Plugins/<id>/ 後重新啟動 App。")
+                    Text("還沒有插件。從下面「從來源加入」貼 GitHub repo / gist / URL 引入，或手放檔案到 ~/Library/Application Support/Naki/Plugins/<id>/。")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2049,9 +2087,18 @@ struct PluginsPageView: View {
                         }
                     }
                 }
+            }
+        } label: {
+            Label("已安裝插件（\(naki.pluginDescriptors.count)）", systemImage: "square.stack.3d.up")
+        }
+    }
 
-                Divider()
+    // MARK: 信任 / L3（分頁）
 
+    @ViewBuilder
+    private var trustSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
                 // L3 總開關（§8.1）：預設關。開啟＝允許插件用你的帳號送遊戲動作。
                 Toggle(isOn: Binding(
                     get: { naki.settings.pluginsMayModifyOutbound },
@@ -2062,9 +2109,9 @@ struct PluginsPageView: View {
                     }
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("允許插件送出遊戲動作（L3）").font(.caption).bold()
+                        Text("允許插件送出遊戲動作（L3）").font(.body).bold()
                         Text("開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request。預設關閉。只在測試帳號、且你信任插件時開。")
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundColor(naki.settings.pluginsMayModifyOutbound ? .red : .secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -2073,13 +2120,17 @@ struct PluginsPageView: View {
 
                 Divider()
 
-                Text("**安裝插件＝信任其作者。** 插件與遊戲跑在同一個環境裡，惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上任何資料，Naki 無法阻止。只裝你信任的插件。開關**即時生效，免重新載入頁面**。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Label {
+                    Text("**安裝插件＝信任其作者。** 插件與遊戲跑在同一個 JS 環境裡，惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上任何資料（含 session token），Naki **無法阻止**。只裝你信任的插件。開關即時生效、免重新載入頁面。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                }
             }
         } label: {
-            Label("已安裝插件", systemImage: "square.stack.3d.up")
+            Label("信任邊界與 L3 權限", systemImage: "lock.shield")
         }
     }
 
