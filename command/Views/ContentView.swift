@@ -1851,6 +1851,7 @@ struct PluginsPageView: View {
     @State private var importError: String?
     @State private var importMessage: String?
     @State private var updateChecking = false
+    @State private var selectedImports: Set<String> = []   // 預覽中勾選要引入的 id
 
     // 移除插件的確認
     @State private var pendingRemoval: String?
@@ -1981,27 +1982,46 @@ struct PluginsPageView: View {
 
                 if !importPreview.isEmpty {
                     Divider()
-                    Text("預覽 \(importPreview.count) 個插件——看過原始碼再引入：")
-                        .font(.caption).bold()
+                    HStack {
+                        Text("預覽 \(importPreview.count) 個——勾選要引入的：")
+                            .font(.caption).bold()
+                        Spacer()
+                        Button(selectedImports.count == importPreview.count ? "全不選" : "全選") {
+                            selectedImports = selectedImports.count == importPreview.count
+                                ? [] : Set(importPreview.map { $0.id })
+                        }
+                        .font(.caption)
+                    }
                     ForEach(importPreview, id: \.id) { p in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(p.manifest.name).font(.caption).bold()
-                            Text("\(p.manifest.id) · v\(p.manifest.version) · \(p.manifest.capabilities.joined(separator: ", "))")
-                                .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
-                            if let rev = p.revision {
-                                Text("revision：\(rev.prefix(12))").font(.caption2).foregroundStyle(.secondary)
-                            }
-                            DisclosureGroup("原始碼（\(p.manifest.entry)）") {
-                                ScrollView {
-                                    Text(p.entrySource)
-                                        .font(.system(.caption2, design: .monospaced))
-                                        .textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(alignment: .top, spacing: 8) {
+                            Toggle("", isOn: Binding(
+                                get: { selectedImports.contains(p.id) },
+                                set: { on in
+                                    if on { selectedImports.insert(p.id) } else { selectedImports.remove(p.id) }
                                 }
-                                .frame(maxHeight: 120)
-                                .background(Color.secondary.opacity(0.08))
+                            ))
+                            .labelsHidden()
+                            .accessibilityIdentifier("import-select-\(p.id)")
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(p.manifest.name).font(.caption).bold()
+                                Text("\(p.manifest.id) · v\(p.manifest.version) · \(p.manifest.capabilities.joined(separator: ", "))")
+                                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
+                                if let rev = p.revision {
+                                    Text("revision：\(rev.prefix(12))").font(.caption2).foregroundStyle(.secondary)
+                                }
+                                DisclosureGroup("原始碼（\(p.manifest.entry)）") {
+                                    ScrollView {
+                                        Text(p.entrySource)
+                                            .font(.system(.caption2, design: .monospaced))
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .frame(maxHeight: 120)
+                                    .background(Color.secondary.opacity(0.08))
+                                }
+                                .font(.caption2)
                             }
-                            .font(.caption2)
                         }
                         Divider()
                     }
@@ -2011,9 +2031,10 @@ struct PluginsPageView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack {
-                        Button("確認引入全部（\(importPreview.count)）") { confirmImportAll() }
+                        Button("引入選中的（\(selectedImports.count)）") { confirmImportSelected() }
                             .buttonStyle(.borderedProminent)
-                        Button("取消") { importPreview = [] }
+                            .disabled(selectedImports.isEmpty)
+                        Button("取消") { importPreview = []; selectedImports = [] }
                     }
                 }
             }
@@ -2028,21 +2049,24 @@ struct PluginsPageView: View {
         let result = await PluginImportSource.fetchAny(urlString: importURL)
         importing = false
         switch result {
-        case .success(let list): importPreview = list
+        case .success(let list):
+            importPreview = list
+            selectedImports = Set(list.map { $0.id })   // 預設全選（方便），使用者可取消勾
         case .failure(let e): importError = e.text
         }
     }
 
-    private func confirmImportAll() {
+    private func confirmImportSelected() {
+        let chosen = importPreview.filter { selectedImports.contains($0.id) }
         var ok = 0
-        for p in importPreview {
+        for p in chosen {
             if case .success = PluginImportSource.install(p, now: Date()) { ok += 1 }
         }
         naki.actions.rescanPlugins()               // 刷新清單（@Observable → 立即反映）
-        let total = importPreview.count
         importPreview = []
+        selectedImports = []
         importURL = ""
-        importMessage = "已引入 \(ok)/\(total) 個插件。在上面清單啟用（熱插拔，免重載）。"
+        importMessage = "已引入 \(ok)/\(chosen.count) 個插件。在上面清單啟用（熱插拔，免重載）。"
     }
 
     /// 檢查每個已裝插件有沒有更新；有的話一鍵更新（重抓 + 覆蓋 + 熱重載）。
