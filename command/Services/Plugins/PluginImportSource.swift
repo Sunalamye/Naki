@@ -48,8 +48,11 @@ nonisolated struct ImportedPlugin: Sendable {
     let id: String                      // manifest id（＝落地目錄名）
     let manifest: PluginManifest
     let files: [String: Data]           // 檔名 → bytes（fetch-once 的同一份）
-    let sourceURL: String               // redirect 後最終 URL
-    let revision: String?               // gist version（若適用）
+    let sourceURL: String               // redirect 後最終 URL（落地當下抓的）
+    let revision: String?               // gist version / repo commit sha（更新比對用）
+    /// **可重查來源**：使用者原本貼的 owner/repo、gist URL 或 plugin.json URL。
+    /// B2 更新機制用它重抓、比對 revision（釘 sha 的 raw URL 重抓會拿到同一份，故要存這個）。
+    let updateSource: String
 
     /// 給確認畫面顯示的 entry 源碼
     var entrySource: String {
@@ -109,7 +112,7 @@ nonisolated enum PluginImportSource {
 
         let revision = (json["history"] as? [[String: Any]])?.first?["version"] as? String
         return finalize(files: files, sourceURL: (json["html_url"] as? String) ?? url.absoluteString,
-                        revision: revision)
+                        revision: revision, updateSource: url.absoluteString)
     }
 
     // MARK: 任意 HTTPS
@@ -139,7 +142,8 @@ nonisolated enum PluginImportSource {
         catch let e as PluginImportError { return .failure(e) }
         catch { return .failure(.network("entry: \(error.localizedDescription)")) }
 
-        return finalize(files: files, sourceURL: url.absoluteString, revision: nil)
+        return finalize(files: files, sourceURL: url.absoluteString, revision: nil,
+                        updateSource: url.absoluteString)
     }
 
     // MARK: GitHub repo（多插件）
@@ -216,7 +220,7 @@ nonisolated enum PluginImportSource {
                let eData = try? await get(eURL, max: bundleMax) {
                 files[manifest.entry] = eData
             }
-            if case .success(let p) = finalize(files: files, sourceURL: "\(base)/plugin.json", revision: revision) {
+            if case .success(let p) = finalize(files: files, sourceURL: "\(base)/plugin.json", revision: revision, updateSource: "\(owner)/\(repo)") {
                 out.append(p)
             }
         }
@@ -228,7 +232,8 @@ nonisolated enum PluginImportSource {
 
     /// 驗 manifest（apiVersion/id/欄位），組 ImportedPlugin。
     private static func finalize(files: [String: Data], sourceURL: String,
-                                 revision: String?) -> Result<ImportedPlugin, PluginImportError> {
+                                 revision: String?,
+                                 updateSource: String) -> Result<ImportedPlugin, PluginImportError> {
         guard let mData = files["plugin.json"] else { return .failure(.noPluginJson) }
         guard let manifest = try? JSONDecoder().decode(PluginManifest.self, from: mData) else {
             return .failure(.invalidManifest("plugin.json 缺欄位或格式錯"))
@@ -249,7 +254,8 @@ nonisolated enum PluginImportSource {
         guard total <= bundleMax else { return .failure(.tooLarge("整包 \(total) bytes")) }
 
         return .success(ImportedPlugin(id: manifest.id, manifest: manifest, files: files,
-                                       sourceURL: sourceURL, revision: revision))
+                                       sourceURL: sourceURL, revision: revision,
+                                       updateSource: updateSource))
     }
 
     /// 抓一個 URL，帶尺寸上限。allow redirect；回最終資料。
@@ -286,6 +292,7 @@ nonisolated enum PluginImportSource {
             let iso = ISO8601DateFormatter().string(from: now)
             var receipt: [String: Any] = [
                 "sourceURL": imported.sourceURL,
+                "updateSource": imported.updateSource,
                 "importedAt": iso,
                 "sha256": receipts
             ]
@@ -297,5 +304,40 @@ nonisolated enum PluginImportSource {
         } catch {
             return .failure(.network("寫入失敗：\(error.localizedDescription)"))
         }
+    }
+
+    // MARK: - 更新（B2）
+
+    /// 讀某插件 install-receipt 的 `updateSource`；沒有（手放的檔案）回 nil。
+    static func installedUpdateSource(pluginId: String) -> String? {
+        receiptJSON(pluginId: pluginId)?["updateSource"] as? String
+    }
+
+    /// receipt 裡各檔的 sha256（沒有回 nil）。
+    private static func installedShas(pluginId: String) -> [String: String]? {
+        receiptJSON(pluginId: pluginId)?["sha256"] as? [String: String]
+    }
+
+    private static func receiptJSON(pluginId: String) -> [String: Any]? {
+        guard let root = PluginRegistry.pluginsDirectory else { return nil }
+        let url = root.appendingPathComponent(pluginId, isDirectory: true)
+            .appendingPathComponent("install-receipt.json")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json
+    }
+
+    /// 檢查某插件有沒有更新：重抓 `updateSource`、找同 id、比**內容 sha**（可靠，不分來源類型）。
+    /// 回 fresh ImportedPlugin（有更新）；nil＝沒更新、沒 receipt、或抓失敗。
+    static func fetchUpdate(pluginId: String) async -> ImportedPlugin? {
+        guard let src = installedUpdateSource(pluginId: pluginId) else { return nil }
+        guard case .success(let list) = await fetchAny(urlString: src),
+              let fresh = list.first(where: { $0.id == pluginId }) else { return nil }
+        guard let oldShas = installedShas(pluginId: pluginId) else { return fresh }
+        for (name, data) in fresh.files {
+            let sha = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            if oldShas[name] != sha { return fresh }   // 任一檔內容變了 = 有更新
+        }
+        return nil   // 全部一樣 = 沒更新
     }
 }
