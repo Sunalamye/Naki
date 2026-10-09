@@ -99,7 +99,7 @@ struct SidebarHeader: View {
         HStack(spacing: 6) {
             Text("即時決策")
                 .font(compact ? .subheadline : .title3)
-                .fontWeight(.bold)
+                .bold()
 
             Spacer()
 
@@ -131,7 +131,7 @@ struct SectionLabel: View {
     var body: some View {
         Text(text)
             .font(compact ? .caption2 : .caption)
-            .fontWeight(.bold)
+            .bold()
             .foregroundStyle(.secondary)
             .padding(.top, compact ? 8 : 12)
             .padding(.bottom, compact ? 5 : 8)
@@ -157,11 +157,12 @@ struct GameSummaryDisclosure: View {
     var inGame: Bool
     var compact: Bool
     @Binding var isExpanded: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeInOut(duration: 0.18)) { isExpanded.toggle() }
+                withAnimation(PanelLayout.animation(.easeInOut(duration: 0.18), reduceMotion: reduceMotion)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: compact ? 10 : 6) {
                     if inGame {
@@ -229,10 +230,10 @@ struct GameSummaryDisclosure: View {
         }
         .background(Color.contentBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
+        .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 1)
-        )
+        }
     }
 
     private var myScore: String {
@@ -305,7 +306,7 @@ struct GameDetailsPanel: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title)
                 .font(.caption2)
-                .fontWeight(.bold)
+                .bold()
                 .foregroundStyle(.secondary)
             content()
         }
@@ -405,7 +406,7 @@ struct AuthorizedActionsRow: View {
         VStack(alignment: .leading, spacing: 5) {
             Text("伺服器目前授權動作")
                 .font(.caption2)
-                .fontWeight(.bold)
+                .bold()
                 .foregroundStyle(.secondary)
 
             // 一列擺得下就一列，擺不下自動折兩列。
@@ -495,20 +496,20 @@ struct DecisionCard: View {
 
                 Text(actionName)
                     .font(compact ? .caption : .headline)
-                    .fontWeight(.bold)
+                    .bold()
                     .foregroundStyle(tone)
                     .padding(.horizontal, compact ? 7 : 10)
                     .padding(.vertical, compact ? 3 : 6)
-                    .overlay(
+                    .overlay {
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(tone.opacity(0.7), lineWidth: 1)
-                    )
+                    }
 
                 Spacer(minLength: 4)
 
                 Text(recommendation.percentageString)
                     .font(.system(compact ? .title3 : .largeTitle, design: .monospaced))
-                    .fontWeight(.bold)
+                    .bold()
                     .monospacedDigit()
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
@@ -527,10 +528,10 @@ struct DecisionCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tone.opacity(0.09))
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
+        .overlay {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(tone.opacity(0.45), lineWidth: 1)
-        )
+        }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("decision-card")
         .accessibilityLabel("最佳選擇")
@@ -694,9 +695,9 @@ struct DecisionAlerts: View {
 
     private func alert(icon: String, tone: Color, text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: 5) {
-            Image(systemName: icon).font(.caption2)
+            Image(systemName: icon).font(.caption)
             Text(text)
-                .font(.caption2)
+                .font(.caption)
                 .fontWeight(.semibold)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -720,10 +721,10 @@ struct EmptyRecommendationView: View {
         VStack(spacing: 4) {
             Image(systemName: "questionmark.circle")
                 .font(.body)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text("等待遊戲數據...")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -739,13 +740,13 @@ struct RecommendationsDisabledView: View {
         VStack(spacing: 4) {
             Image(systemName: "eye.slash")
                 .font(.body)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text("推薦顯示已關閉")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             Text("切換到「推薦」或「自動」可恢復")
                 .font(.caption2)
-                .foregroundColor(.secondary.opacity(0.7))
+                .foregroundStyle(Color.secondary.opacity(0.7))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)

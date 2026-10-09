@@ -9,6 +9,49 @@
 
 import SwiftUI
 
+/// 面板尺寸與動態的決策，抽成純函式讓單元測試鎖得住。
+enum PanelLayout {
+    /// Apple HIG 的最小可點區域。
+    static let minTapTarget: CGFloat = 44
+
+    /// iPhone 橫向（compact）維持 220pt；regular 寬度（iPad、Max 機型橫向）有餘裕放寬。
+    static func iOSPanelWidth(horizontal: UserInterfaceSizeClass?) -> CGFloat {
+        horizontal == .regular ? 300 : 220
+    }
+
+    /// 寬度 compact 且高度 regular（iPad 窄分割、Slide Over）放不下 220pt 面板，預設收起。
+    static func startsVisible(horizontal: UserInterfaceSizeClass?,
+                              vertical: UserInterfaceSizeClass?) -> Bool {
+        !(horizontal == .compact && vertical == .regular)
+    }
+
+    /// 開啟「減少動態效果」時不做動畫。
+    static func animation(_ base: Animation = .easeInOut(duration: 0.2),
+                          reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : base
+    }
+}
+
+/// 只靠顏色區分的狀態點：開啟「不以顏色區分」時改畫符號。
+private struct StatusDot: View {
+    let isOn: Bool
+    let onColor: Color
+    let offColor: Color
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
+
+    var body: some View {
+        if differentiate {
+            Image(systemName: isOn ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.system(size: 8))
+                .foregroundStyle(isOn ? onColor : offColor)
+        } else {
+            Circle()
+                .fill(isOn ? onColor : offColor)
+                .frame(width: 6, height: 6)
+        }
+    }
+}
+
 struct ContentView: View {
 
     /// Naki 的三件東西：狀態、設定、副作用。
@@ -18,6 +61,11 @@ struct ContentView: View {
     /// SwiftUI 的 diffing 規則說了算，而 Preview 會真的去建一個 WebView、啟一個 MCP server。
     /// 這裡讀到的預設值只給 Preview（見 `NakiEnvironment`）。
     @Environment(\.naki) private var naki
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+#if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+#endif
 
     /// 決策面板／HUD 是否顯示。
     ///
@@ -80,7 +128,6 @@ struct ContentView: View {
         // 兩種樣式共用底下所有 modifier（onChange／sheet／a11y），
         // 分開寫兩份 Picker 的話，改行為時很容易只改到一邊。
         .modifier(ModePickerStyle(menu: menu))
-        // a11y: fixed width for segmented control; kept to preserve toolbar layout
         .frame(width: width)
         // 用 sheet 而不是 confirmationDialog：人數 × 房間偏好共 4 種組合，
         // macOS 的 confirmationDialog 只渲染得下 3 個按鈕＋取消——實測第 4 個
@@ -130,14 +177,14 @@ struct ContentView: View {
         // macOS 的 `Stepper(value:) { label }` 在 toolbar 這種水平緊湊容器裡
         // 會把 trailing-closure label 吃掉、只剩箭頭（實測畫面上「1.0s」不見了），
         // 所以改成 HStack 把值文字明確擺在箭頭左邊。
-        HStack(spacing: 4) {
-            Text(String(format: "%.1fs", naki.settings.actionDelaySeconds))
+        @Bindable var settings = naki.settings
+        return HStack(spacing: 4) {
+            delaySecondsText
                 .font(.system(.caption, design: .monospaced))
                 .monospacedDigit()
-                .frame(minWidth: 32, alignment: .trailing)
+                .frame(minWidth: 40, alignment: .trailing)
             Stepper("自動打牌基準延遲",
-                    value: Binding(get: { naki.settings.actionDelaySeconds },
-                                   set: { naki.settings.actionDelaySeconds = $0 }),
+                    value: $settings.actionDelaySeconds,
                     in: SettingsStore.actionDelayRange,
                     step: SettingsStore.actionDelayStep)
                 .labelsHidden()
@@ -145,12 +192,16 @@ struct ContentView: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("autoplay-delay-stepper")
         .accessibilityLabel("自動打牌基準延遲")
-        .accessibilityValue(Text("\(naki.settings.actionDelaySeconds, format: .number.precision(.fractionLength(1))) 秒"))
+        .accessibilityValue(delaySecondsText)
 #if os(macOS)
         // `.help` 只包 macOS：iOS 上 tooltip 只在有指標裝置時看得到，對 iPhone 是
         // 多餘的 pointer 互動註冊。專案既有慣例就是這樣（見 `LogPanel` 的兩個 `.help`）。
         .help("送出前的模擬人類延遲基準；1.0s 為預設，向上更慢、向下更快（隨機分布保留）")
 #endif
+    }
+
+    private var delaySecondsText: Text {
+        Text("\(naki.settings.actionDelaySeconds, format: .number.precision(.fractionLength(1))) 秒")
     }
 
     /// 雲端推論快速開關。
@@ -163,14 +214,14 @@ struct ContentView: View {
         Button {
             naki.settings.cloudInferenceEnabled.toggle()
         } label: {
-            Image(systemName: cloudIconName)
+            Label("雲端推論", systemImage: cloudIconName)
+                .labelStyle(.iconOnly)
                 .foregroundStyle(cloudIconTint)
         }
 #if os(macOS)
         .help(cloudToggleHelp)
 #endif
         .accessibilityIdentifier("toolbar-cloud-toggle")
-        .accessibilityLabel("雲端推論")
         .accessibilityValue(cloudToggleHelp)
     }
 
@@ -263,14 +314,14 @@ struct ContentView: View {
             // 決策面板（右側）
             if showGamePanel {
                 GamePanel(showLog: $showLog)
-                    .frame(width: 360)
+                    .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             StatusBar()
         }
-        .animation(.easeInOut(duration: 0.2), value: showGamePanel)
+        .animation(PanelLayout.animation(reduceMotion: reduceMotion), value: showGamePanel)
         .sheet(isPresented: $showAdvancedSettings) {
             AdvancedSettingsSheet().appLocale()
         }
@@ -291,22 +342,18 @@ struct ContentView: View {
 
         // 進階設定
         ToolbarItem(placement: .primaryAction) {
-            Button(action: { showAdvancedSettings = true }) {
-                Image(systemName: "gearshape")
-            }
-            .help("進階設定")
-            .accessibilityIdentifier("toolbar-settings")
-            .accessibilityLabel("進階設定")
+            Button("進階設定", systemImage: "gearshape") { showAdvancedSettings = true }
+                .labelStyle(.iconOnly)
+                .help("進階設定")
+                .accessibilityIdentifier("toolbar-settings")
         }
 
         // 插件（獨立頁面：清單 + 熱插拔開關 + 即時 log）
         ToolbarItem(placement: .primaryAction) {
-            Button(action: { showPlugins = true }) {
-                Image(systemName: "puzzlepiece.extension")
-            }
-            .help("插件")
-            .accessibilityIdentifier("toolbar-plugins")
-            .accessibilityLabel("插件")
+            Button("插件", systemImage: "puzzlepiece.extension") { showPlugins = true }
+                .labelStyle(.iconOnly)
+                .help("插件")
+                .accessibilityIdentifier("toolbar-plugins")
         }
 
         // 左側：自動打牌模式
@@ -332,18 +379,14 @@ struct ContentView: View {
         ToolbarItem(placement: .navigation) {
             Button(action: { naki.actions.toggleDebugServer() }) {
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack{
-                        Circle()
-                            .fill(naki.store.isDebugServerRunning ? Color.green : Color.gray)
-                            .frame(width: 6, height: 6)
-
+                    HStack {
+                        StatusDot(isOn: naki.store.isDebugServerRunning, onColor: .green, offColor: .gray)
                         Text("\(naki.store.debugServerPort)")
                             .font(.system(.caption, design: .monospaced))
-
                     }
                     Text("MCP Server")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
             .frame(width: 80)
@@ -361,34 +404,30 @@ struct ContentView: View {
         }
 
         // 重新載入
-        ToolbarItem(placement: .destructiveAction) {
-            Button(action: { naki.actions.reloadPage() }) {
-                Image(systemName: "arrow.clockwise")
-            }
-            .help("重新載入")
-            .accessibilityIdentifier("toolbar-reload")
-            .accessibilityLabel("重新載入")
+        ToolbarItem(placement: .primaryAction) {
+            Button("重新載入", systemImage: "arrow.clockwise") { naki.actions.reloadPage() }
+                .labelStyle(.iconOnly)
+                .help("重新載入")
+                .accessibilityIdentifier("toolbar-reload")
         }
 
         // 右側：日誌切換
         ToolbarItem(placement: .primaryAction) {
-            Button(action: { showLog.toggle() }) {
-                Image(systemName: showLog ? "terminal.fill" : "terminal")
-            }
-            .help("顯示/隱藏日誌")
-            .accessibilityIdentifier("toolbar-log-toggle")
-            .accessibilityLabel("顯示或隱藏日誌")
-            .accessibilityValue(showLog ? "已顯示" : "已隱藏")
+            Button("顯示或隱藏日誌", systemImage: showLog ? "terminal.fill" : "terminal") { showLog.toggle() }
+                .labelStyle(.iconOnly)
+                .help("顯示/隱藏日誌")
+                .accessibilityIdentifier("toolbar-log-toggle")
+                .accessibilityValue(showLog ? "已顯示" : "已隱藏")
         }
 
         // 遊戲面板切換
         ToolbarItem(placement: .primaryAction) {
-            Button(action: { showGamePanel.toggle() }) {
-                Image(systemName: showGamePanel ? "sidebar.trailing" : "sidebar.right")
+            Button("顯示或隱藏遊戲面板", systemImage: showGamePanel ? "sidebar.trailing" : "sidebar.right") {
+                showGamePanel.toggle()
             }
+            .labelStyle(.iconOnly)
             .help("顯示/隱藏遊戲面板")
             .accessibilityIdentifier("toolbar-game-panel-toggle")
-            .accessibilityLabel("顯示或隱藏遊戲面板")
             .accessibilityValue(showGamePanel ? "已顯示" : "已隱藏")
         }
     }
@@ -397,12 +436,14 @@ struct ContentView: View {
     // MARK: - iOS Layout
 #if os(iOS)
 
-    /// 右側常駐欄的寬度。
+    /// 右側常駐欄的寬度，依 size class 決定（見 `PanelLayout.iOSPanelWidth`）。
     ///
-    /// 220pt 不是視覺偏好而是三個下限的交集：segmented picker 三段（關／推薦／自動）
+    /// compact 的 220pt 是兩個下限的交集：segmented picker 三段（關／推薦／自動）
     /// 要 ~200pt 才不把字擠掉；`DecisionSidebar(compact:)` 的摘要條是照 ~190–210pt
-    /// 內容寬設計的；控制列五顆圖示每顆 40pt 剛好排滿一列。再窄就得砍其中一項。
-    private static let iOSPanelWidth: CGFloat = 220
+    /// 內容寬設計的。圖示列放不下的部分靠橫向捲動。
+    private var iOSPanelWidth: CGFloat {
+        PanelLayout.iOSPanelWidth(horizontal: horizontalSizeClass)
+    }
 
     /// home indicator 那條的高度。
     ///
@@ -422,21 +463,6 @@ struct ContentView: View {
             .map(\.safeAreaInsets.bottom)
             .max() ?? 0
         if inset != bottomSafeInset { bottomSafeInset = inset }
-    }
-
-    /// 牌桌底部的狀態訊息浮層。**預設關閉**，見 `SettingsStore.showStatusBar`。
-    ///
-    /// `allowsHitTesting(false)` 是必要的而不是保險：它是純資訊顯示、沒有任何可點的
-    /// 東西，卻疊在 WebView 上——少了這行就平白吃掉牌桌那一條的觸控。
-    @ViewBuilder
-    private var iOSStatusOverlay: some View {
-        if naki.settings.showStatusBar, !naki.store.statusMessage.isEmpty {
-            StatusBar()
-                .background(.ultraThinMaterial)
-                // 整條（含背景）讓開 home indicator，否則最後一行字會被那根橫條壓住
-                .padding(.bottom, bottomSafeInset)
-                .allowsHitTesting(false)
-        }
     }
 
     /// iPhone 橫向版面：牌桌拿全高，控制與決策收進右側常駐欄。
@@ -473,12 +499,12 @@ struct ContentView: View {
                     // 狀態訊息回到牌桌底部（預設關，見 `SettingsStore.showStatusBar`）。
                     // 掛在 WebView 上而不是整個 ZStack 上：橫跨全寬會連面板底部一起壓。
                     .overlay(alignment: .bottom) {
-                        iOSStatusOverlay
+                        IOSStatusOverlay(bottomInset: bottomSafeInset)
                     }
 
                 if showGamePanel {
                     Color.clear
-                        .frame(width: Self.iOSPanelWidth)
+                        .frame(width: iOSPanelWidth)
                         .allowsHitTesting(false)
                 }
             }
@@ -491,8 +517,8 @@ struct ContentView: View {
             // 面板被一起拉到最下緣。
             if showGamePanel {
                 iOSSidePanel
-                    .frame(width: Self.iOSPanelWidth)
-                    .transition(.move(edge: .trailing))
+                    .frame(width: iOSPanelWidth)
+                    .transition(reduceMotion ? .opacity : .move(edge: .trailing))
             }
 
             // 面板收起來之後唯一叫得回來的入口。
@@ -504,7 +530,7 @@ struct ContentView: View {
             // identifier 與面板內那顆收合鈕共用：兩者互斥出現，測試永遠只找得到一顆。
             if !showGamePanel {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { showGamePanel = true }
+                    withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { showGamePanel = true }
                 } label: {
                     Image(systemName: "sidebar.right")
                         .padding(10)
@@ -537,6 +563,11 @@ struct ContentView: View {
             GeometryReader { proxy in
                 Color.clear
                     .onChange(of: proxy.size, initial: true) { _, _ in refreshBottomSafeInset() }
+            }
+        }
+        .onAppear {
+            if !PanelLayout.startsVisible(horizontal: horizontalSizeClass, vertical: verticalSizeClass) {
+                showGamePanel = false
             }
         }
         .sheet(isPresented: $showLog) {
@@ -573,58 +604,44 @@ struct ContentView: View {
 
     /// 面板頂端的控制列——原本 nav bar 上那一整排。
     ///
-    /// 圖示列維持原本的 40pt 按鈕寬度。加上插件入口後共六顆，超出側欄時可以左右滑動；
-    /// 原本五顆按鈕的位置和大小不變，插件入口放在最右邊。
+    /// 六顆圖示按鈕各至少 44×44pt（`PanelLayout.minTapTarget`），超出側欄寬度時可以左右滑動。
     ///
     /// **順序：圖示列在最上，模式與延遲在下。** 圖示那排是「離開這裡去別的地方」
     /// （重載／日誌／雲端／設定／收面板／插件），一局裡按不到幾次；模式與延遲是對局中真的會動的
     /// 東西，排在下面就離決策區更近。
     private var iOSPanelControls: some View {
         VStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 HStack(spacing: 0) {
-                    Button(action: { naki.actions.reloadPage() }) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .frame(width: 40)
-                    .accessibilityIdentifier("toolbar-reload")
-                    .accessibilityLabel("重新載入")
+                    Button("重新載入", systemImage: "arrow.clockwise") { naki.actions.reloadPage() }
+                        .iOSTapTarget()
+                        .accessibilityIdentifier("toolbar-reload")
 
-                    Button(action: { showLog = true }) {
-                        Image(systemName: "terminal")
-                    }
-                    .frame(width: 40)
-                    .accessibilityIdentifier("toolbar-log-toggle")
-                    .accessibilityLabel("顯示日誌")
+                    Button("顯示日誌", systemImage: "terminal") { showLog = true }
+                        .iOSTapTarget()
+                        .accessibilityIdentifier("toolbar-log-toggle")
 
                     cloudQuickToggle
-                        .frame(width: 40)
+                        .iOSTapTarget()
 
-                    Button(action: { showAdvancedSettings = true }) {
-                        Image(systemName: "gearshape")
-                    }
-                    .frame(width: 40)
-                    .accessibilityIdentifier("toolbar-settings")
-                    .accessibilityLabel("進階設定")
+                    Button("進階設定", systemImage: "gearshape") { showAdvancedSettings = true }
+                        .iOSTapTarget()
+                        .accessibilityIdentifier("toolbar-settings")
 
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { showGamePanel = false }
-                    } label: {
-                        Image(systemName: "sidebar.trailing")
+                    Button("隱藏決策面板", systemImage: "sidebar.trailing") {
+                        withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { showGamePanel = false }
                     }
-                    .frame(width: 40)
+                    .iOSTapTarget()
                     .accessibilityIdentifier("toolbar-game-panel-toggle")
-                    .accessibilityLabel("隱藏決策面板")
                     .accessibilityValue("已顯示")
 
-                    Button(action: { showPlugins = true }) {
-                        Image(systemName: "puzzlepiece.extension")
-                    }
-                    .frame(width: 40)
-                    .accessibilityIdentifier("toolbar-plugins")
-                    .accessibilityLabel("插件")
+                    Button("插件", systemImage: "puzzlepiece.extension") { showPlugins = true }
+                        .iOSTapTarget()
+                        .accessibilityIdentifier("toolbar-plugins")
                 }
+                .labelStyle(.iconOnly)
             }
+            .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
 
             // 傳 nil：segmented control 自己撐滿欄寬，欄寬改了不必回頭同步點數。
@@ -650,7 +667,7 @@ struct ContentView: View {
                 .navigationTitle("日誌")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
+                    ToolbarItem(placement: .confirmationAction) {
                         Button("完成") { showLog = false }
                             .accessibilityIdentifier("log-sheet-done-button")
                     }
@@ -661,6 +678,35 @@ struct ContentView: View {
     }
 #endif
 }
+
+#if os(iOS)
+private extension View {
+    func iOSTapTarget() -> some View {
+        frame(minWidth: PanelLayout.minTapTarget, minHeight: PanelLayout.minTapTarget)
+            .contentShape(Rectangle())
+    }
+}
+
+/// 牌桌底部的狀態訊息浮層。**預設關閉**，見 `SettingsStore.showStatusBar`。
+///
+/// 獨立成 view 是為了讓 `statusMessage` 的讀取只重算這一塊，而不是整個 iOS 版面。
+/// `allowsHitTesting(false)` 是必要的：它是純資訊顯示，卻疊在 WebView 上，
+/// 少了這行就平白吃掉牌桌那一條的觸控。
+private struct IOSStatusOverlay: View {
+    @Environment(\.naki) private var naki
+    let bottomInset: CGFloat
+
+    var body: some View {
+        if naki.settings.showStatusBar, !naki.store.statusMessage.isEmpty {
+            StatusBar()
+                .background(.ultraThinMaterial)
+                // 整條（含背景）讓開 home indicator，否則最後一行字會被那根橫條壓住
+                .padding(.bottom, bottomInset)
+                .allowsHitTesting(false)
+        }
+    }
+}
+#endif
 
 // MARK: - Game Panel (macOS 右側面板)
 
@@ -720,6 +766,18 @@ struct ServerPickerView: View {
     }
 
     var body: some View {
+        GeometryReader { proxy in
+            ScrollView {
+                content
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .background(Color.windowBackground)
+        .accessibilityIdentifier("server-picker")
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             Spacer(minLength: 12)
 
@@ -773,9 +831,6 @@ struct ServerPickerView: View {
             Spacer(minLength: 12)
         }
         .padding(.horizontal, 20)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.windowBackground)
-        .accessibilityIdentifier("server-picker")
     }
 
     private func row(for server: MajsoulServer) -> some View {
@@ -804,12 +859,12 @@ struct ServerPickerView: View {
             .padding(.vertical, 9)
             .background(isOn ? Color.accentColor.opacity(0.12) : Color.contentBackground)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
+            .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(isOn ? Color.accentColor.opacity(0.55)
                                        : Color.secondary.opacity(0.22),
                                   lineWidth: 1)
-            )
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -844,7 +899,7 @@ struct ConnectionIndicator: View {
             }
             Text("WebSocket")
                 .font(.caption2)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("websocket-connection-indicator")
@@ -903,6 +958,21 @@ private struct FullAutoSetupSheet: View {
     private var sanmaBlocked: Bool { sanma && !sanmaEngineAvailable }
 
     var body: some View {
+        ScrollView {
+            form
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .safeAreaInset(edge: .bottom) {
+            buttons
+        }
+#if os(macOS)
+        .frame(width: 380)
+        .frame(minHeight: 300, idealHeight: 440)
+#endif
+        .accessibilityIdentifier("fullauto-setup-sheet")
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("全自動")
                 .font(.headline)
@@ -940,20 +1010,22 @@ private struct FullAutoSetupSheet: View {
             Text("只會排你自己點過、而且已經打過一場的場次；沒有的話會停下來並在紀錄裡說明。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-
-            HStack {
-                Spacer()
-                Button("取消", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("開始", action: onStart)
-                    .keyboardShortcut(.defaultAction)
-                    // 選了會直接失敗的組合就不讓按，而不是按了才在 log 裡說不行
-                    .disabled(sanmaBlocked)
-            }
         }
         .padding(20)
-        .frame(width: 380)
-        .accessibilityIdentifier("fullauto-setup-sheet")
+    }
+
+    private var buttons: some View {
+        HStack {
+            Spacer()
+            Button("取消", role: .cancel, action: onCancel)
+                .keyboardShortcut(.cancelAction)
+            Button("開始", action: onStart)
+                .keyboardShortcut(.defaultAction)
+                // 選了會直接失敗的組合就不讓按，而不是按了才在 log 裡說不行
+                .disabled(sanmaBlocked)
+        }
+        .padding(20)
+        .background(.bar)
     }
 }
 
