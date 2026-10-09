@@ -63,6 +63,16 @@ void nb_string_free(char*);
 | S1b | `SanmaState`、`SanmaLegal`、`SanmaAdapt`、`SanmaEngine`（立直二段、授權閘）；60 tests；fixture 1985 筆逐欄一致（logits |Δ| ≤1.5e-5）；手工變異 88 殺 85、3 等價 | Opus medium | 完成、復驗通過（修 2 處）、**使用者決定先不 commit** |
 | S1b 復驗 | 宣稱全部屬實；找出空 `consumed` 槓越界 trap、他家摸 `?` 留下假 1m，已修 | Opus medium | 完成 |
 | S2 | Naki：`AkagiSanmaBot: MahjongBot`、三麻 `CloudBot(local:)`、`cloudDecision`→`sanmaCapableDecision`、局間確認／續局改看引擎、強度標示上 UI、D23 文件；NakiTests 760、Release／iOS build 成功、修正分支變異 29 殺 29 | Sonnet medium，Opus 復驗一輪 | 完成；commit `8436337` 在 `wp/s2-sanma`，**未合 main**（等 MortalSwift 發版） |
+| S2c | `wp/s2-sanma` rebase 到 main；M1／M2 測試期望值對齊 S2 行為、刪 2 條重複；815 tests；macOS／iOS build 成功 | Sonnet medium | 完成；branch 現為 `11344e4`→`bfc0801`→`d696d6e`，未合 main（等 MortalSwift 發版） |
+| U1 | swiftui-pro 畫面設計審查（唯讀，HEAD `d696d6e`）：36 項，必修 4（U1-16 iOS 側欄按鈕 40pt、U1-24 模型 Menu 無名稱、U1-25 匯入預覽 Toggle／TextField 無名稱、U1-32 日誌滿 5000 筆後 `onChange(of: count)` 不再觸發、自動捲動失效）；與基準衝突不採 8 條（ViewModel、一型一檔、常數 enum、多寫註解、原生 WebView 等） | Opus medium | 完成 |
+| U-P0 | 純搬移：ContentView 2665→967 行，拆出 `AdvancedSettingsSheet`／`PluginsPageView`／`StatusBanners`；逐行多重集合比對相同 | Sonnet low | 完成 `d173f2e`（略過清理／變異：機械搬移） |
+| U-P1 | 主畫面＋側欄＋TileImage：19 項完成；版面決策抽成 `PanelLayout` 純函式（7 變異全殺）；819 tests | Sonnet medium | 完成 `f703065`，已合進 `wp/u-fixes` |
+| U-P2 | 設定／插件／Action：五個新 Action（probeCloud／testCloudConnection／startFullAuto／chooseServer／pluginDiagnostics），View 只顯示結果值；826 tests；變異 4+5 全殺 | Sonnet medium | 完成 `08ab6bf`，已合進 `wp/u-fixes`（`eb9592f`） |
+| U-P1b | ContentView 接上 startFullAuto／chooseServer（U1-10 呼叫端）；830 tests | Sonnet low | 完成 `b9f8b9f` |
+| U-P3 | 日誌／橫幅／Environment：U1-32 改觀察 `last?.id`、`@Entry` 預設值共用、LogManager append／recentEntries 純函式；手工變異 6 殺 6；817 tests | Sonnet medium | 完成 `c8645dd`，合進 `wp/u-fixes`（`4b2f599`）；後續：橫幅參數化收斂、單例注入 naki |
+| U-P4 | 字串目錄：新增 10 key 四語、刪 3 個拼接片段；393 key 四語齊全；剩 11 條不翻譤項（純插值／URL／WebSocket）不入 catalog；832 tests | Sonnet low | 完成 `c0ca95c` |
+| U 復驗 | Release／iOS build 成功、832 tests、四必修全部成立、P0 純搬移與 P1b 順序等價成立、三語截圖無裸 key；列 4 個非阻斷跟進 | Opus medium | 完成，裁決可合併 |
+| U-P5 | 跟進：叫回鈕 44pt＋標題、StatusDot 字級 caption2、更新橫幅關閉鈕標題、日文「未啟用」→オフ、notes 補 14 項可見行為變化 | Sonnet low | 完成 `a18c667` |
 | S3 | live 三麻 smoke：S2 build、測試帳號、三人友人房＋人機一局 | Sonnet medium | 第 1 次：登入過期。第 2 次：開出**四麻**（工具 bug，見 S2b），該局四麻正常（11 分鐘、和牌 2 次、無停滯）。第 3 次進行中 |
 | S2b | `room_quick_test`／`room_create` 的 GameMode 依人數映射（三人 11／12，預設 12）；`RoomModeTests`；765 tests；變異 18 殺 18 | Sonnet medium | 完成；commit `4accbae` 在 `wp/s2-sanma` |
 
@@ -87,6 +97,10 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 4. U1（使用者 2026-10-09 補充）：用 twostraws `swiftui-pro` skill（已裝到 `.claude/skills/swiftui-pro`，上游 `f980071`）審查現行畫面設計：`command/Views/*`、`App/*`、SettingsStore 介面；依 skill 的 11 步流程，產出必修／建議清單，再開修正包。評估基準沿用使用者認可的 @Observable Store + Action + @Entry 架構（不引入 ViewModel）。
 
 ## Deviations
+
+- **U 系列完成（2026-10-09）**：`wp/u-fixes` 共 12 個 commit（三麻 3＋UI 9），HEAD `a18c667`，**未合 main**，與三麻一起等 MortalSwift 發版。合併時 `sanma-implementation-notes.md` 以主 repo 版為準、併入 worktree 版的「U 系列」段。
+
+- **U 系列取捨（統帥代決）**：swiftui-pro 的 8 條建議與專案基準衝突不採（ViewModel、一型一檔、常數 enum、多寫註解、原生 WebView、iPhone Duo／iOS 27.1 API、自量 safe area、autoPlayModeSelection 改 onChange）。UI 分支無單測可殺時，把決策抽成純函式（`PanelLayout`、Action 回傳 enum）再測，不為測而拆 View。P2 診斷與重新注入合為一個 Action；測試用既有 `CloudMockURLProtocol` 不連真雲端。UI 畫面效果一律「未 live 驗證」，留給最後一輪復驗。
 
 - **M2 副作用**：`LogManager.swift:186`（XCTest host 不輪替）的變異體讓測試主機對 `~/Library/Logs/Naki` 跑了真實輪替，12:15 以前的 session 目錄可能被清；每次測試主機啟動也各留一個 session 目錄。錄影先前已備份在 `note/recordings-backup-20260930/`。
 
