@@ -510,6 +510,51 @@ final class AkagiApiClientTests: XCTestCase {
         XCTAssertEqual(header(request, "Authorization"), "Bearer SECRETKEY")
     }
 
+    private func failureText(status: Int, body: String, headers: [String: String] = [:],
+                             baseURL: String = "http://mock.test:8080/") async -> String {
+        CloudMockURLProtocol.reset(script: [(status, body, headers)])
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CloudMockURLProtocol.self]
+        let client = AkagiApiClient(baseURL: baseURL, key: "k", configuration: config)!
+        do {
+            _ = try await client.keyStatus()
+            return ""
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func test_httpError_403_statesObservableRejection() async {
+        let text = await failureText(status: 403, body: #"{"error":"forbidden"}"#)
+        XCTAssertEqual(text, "伺服器拒絕這把 key（HTTP 403）：forbidden")
+    }
+
+    func test_httpError_429_includesRetryAfter() async {
+        let text = await failureText(status: 429, body: #"{"error":""}"#, headers: ["Retry-After": "7"])
+        XCTAssertEqual(text, "伺服器限流（HTTP 429），7 秒後再試")
+    }
+
+    func test_httpError_htmlBody_isNotShownVerbatim() async {
+        let text = await failureText(status: 502, body: "\n<!doctype html><html>oops</html>")
+        XCTAssertEqual(text, "HTTP 502 — （HTML 錯誤頁）")
+    }
+
+    func test_httpError_htmlBodyOn403_isNotShownVerbatim() async {
+        let text = await failureText(status: 403, body: "<html>blocked</html>")
+        XCTAssertEqual(text, "伺服器拒絕這把 key（HTTP 403）：（HTML 錯誤頁）")
+    }
+
+    func test_httpError_defaultServer_appendsDiscordHint() async {
+        let text = await failureText(status: 401, body: #"{"error":""}"#,
+                                     baseURL: SettingsStore.defaultCloudBaseURL + "/")
+        XCTAssertEqual(text, "伺服器拒絕這把 key（HTTP 401）。預設服務可在 Discord 用 `!api_new` 換新 key")
+    }
+
+    func test_httpError_customServer_hasNoDiscordHint() async {
+        let text = await failureText(status: 429, body: #"{"error":""}"#)
+        XCTAssertFalse(text.contains("!api_new"))
+    }
+
     func test_health_sendsNoAuthorizationHeader() async throws {
         // health 是無認證端點——多送 key 是無謂洩漏（Akagi 同款斷言）
         CloudMockURLProtocol.reset(script: [

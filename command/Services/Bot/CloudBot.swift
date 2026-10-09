@@ -301,7 +301,7 @@ final class CloudBot: MahjongBot {
                     return pai
                 }
                 return nil
-            } catch CloudAPIError.http(429, _, let retryAfter) {
+            } catch CloudAPIError.http(429, _, let retryAfter, _) {
                 // 二連 429：這一手退回本地（D3 不變），但斷路器不開
                 guard !retriedAfterRateLimit else { return nil }
                 retriedAfterRateLimit = true

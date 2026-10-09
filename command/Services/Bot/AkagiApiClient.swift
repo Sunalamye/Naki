@@ -111,7 +111,8 @@ enum CloudAPIError: Error, LocalizedError {
     /// base URL 解析不出來（設定錯誤，重試無益——呼叫端記 tombstone）
     case invalidURL
     /// 非 2xx。`message` 是伺服器 `{"error": "..."}` 或 body 前 200 字。
-    case http(code: Int, message: String, retryAfter: String?)
+    /// `isDefaultServer`：請求打的是預設服務，提示會多附該服務的處理方式。
+    case http(code: Int, message: String, retryAfter: String?, isDefaultServer: Bool)
     /// 傳輸層失敗（逾時、連不上、DNS…）
     case transport(String)
     /// 2xx 但 body 解析不出 JSON 物件
@@ -121,9 +122,21 @@ enum CloudAPIError: Error, LocalizedError {
         switch self {
         case .invalidURL:
             return "伺服器 URL 無法解析"
-        case .http(let code, let message, let retryAfter):
-            let hint = retryAfter.map { "（retry after \($0)s）" } ?? ""
-            return "HTTP \(code) — \(message)\(hint)"
+        case .http(let code, let message, let retryAfter, let isDefaultServer):
+            let isHTML = message.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<") || message.lowercased().contains("<!doctype")
+            let detail = isHTML ? "（HTML 錯誤頁）" : message
+            let defaultHint = isDefaultServer ? "。預設服務可在 Discord 用 `!api_new` 換新 key" : ""
+            let suffix = detail.isEmpty ? "" : "：\(detail)"
+            switch code {
+            case 401, 403:
+                return "伺服器拒絕這把 key（HTTP \(code)）\(suffix)\(defaultHint)"
+            case 429:
+                let wait = retryAfter.map { "，\($0) 秒後再試" } ?? ""
+                return "伺服器限流（HTTP 429）\(wait)\(suffix)\(defaultHint)"
+            default:
+                let hint = retryAfter.map { "（retry after \($0)s）" } ?? ""
+                return "HTTP \(code) — \(detail)\(hint)"
+            }
         case .transport(let message):
             return "連線失敗：\(message)"
         case .invalidResponse:
@@ -151,6 +164,7 @@ final class AkagiApiClient {
     let host: String
     private let key: String
     private let session: URLSession
+    private let isDefaultServer: Bool
 
     /// 去頭尾空白與尾端斜線（`https://host/` 貼進來也能用）。
     static func normalize(baseURL: String) -> String {
@@ -189,6 +203,7 @@ final class AkagiApiClient {
         }
         self.base = base
         self.host = host
+        self.isDefaultServer = base.caseInsensitiveCompare(SettingsStore.defaultCloudBaseURL) == .orderedSame
         self.key = key.trimmingCharacters(in: .whitespaces)
         self.session = URLSession(configuration: configuration)
     }
@@ -323,7 +338,7 @@ final class AkagiApiClient {
             }
             let retryAfter = http.value(forHTTPHeaderField: "Retry-After")
             throw CloudAPIError.http(code: http.statusCode, message: redactingKey(raw),
-                                     retryAfter: retryAfter)
+                                     retryAfter: retryAfter, isDefaultServer: isDefaultServer)
         }
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CloudAPIError.invalidResponse
