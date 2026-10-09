@@ -552,11 +552,11 @@ struct AdvancedSettingsSheet: View {
 
                     if naki.store.isDebugServerRunning {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("http://localhost:\(naki.store.debugServerPort)")
+                            Text(verbatim: "http://localhost:\(naki.store.debugServerPort)")
                                 .font(.system(.caption, design: .monospaced))
                                 .textSelection(.enabled)
 
-                            Text("curl http://localhost:\(naki.store.debugServerPort)/logs")
+                            Text(verbatim: "curl http://localhost:\(naki.store.debugServerPort)/logs")
                                 .font(.system(.caption2, design: .monospaced))
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)

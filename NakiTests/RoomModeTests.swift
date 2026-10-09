@@ -59,4 +59,29 @@ final class RoomModeTests: XCTestCase {
         XCTAssertThrowsError(try resolve(4, 12))
         XCTAssertThrowsError(try resolve(4, 3))
     }
+
+    func testThreePlayerConfigUsesSanmaDefaults() {
+        let c = LiqiFriendRoomConfig(playerCount: 3)
+        XCTAssertEqual(c.playerCount, 3)
+        XCTAssertEqual(c.doraCount, 2)
+        XCTAssertEqual(c.initPoint, 35000)
+        XCTAssertEqual(c.fandian, 40000)
+    }
+
+    func testThreePlayerExplicitArgumentsOverrideSanmaDefaults() throws {
+        let c = LiqiFriendRoomConfig(playerCount: 3)
+        let args: [String: Any] = ["dora_count": 3, "init_point": 25000, "fandian": 30000]
+        XCTAssertEqual(try MCPArguments.uint32(args, "dora_count", default: Int(c.doraCount)), 3)
+        XCTAssertEqual(try MCPArguments.uint32(args, "init_point", default: Int(c.initPoint)), 25000)
+        XCTAssertEqual(try MCPArguments.uint32(args, "fandian", default: Int(c.fandian)), 30000)
+        XCTAssertEqual(try MCPArguments.uint32([:], "init_point", default: Int(c.initPoint)), 35000)
+    }
+
+    func testFourPlayerConfigKeepsFourPlayerDefaults() {
+        let c = LiqiFriendRoomConfig(playerCount: 4)
+        XCTAssertEqual(c.doraCount, 3)
+        XCTAssertEqual(c.initPoint, 25000)
+        XCTAssertEqual(c.fandian, 30000)
+        XCTAssertEqual(LiqiFriendRoomConfig().initPoint, 25000)
+    }
 }

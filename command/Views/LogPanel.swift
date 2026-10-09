@@ -64,11 +64,11 @@ struct LogPanel: View {
 
             Divider()
 
-            // 搜索框
+            // 搜尋框
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("搜索...", text: $searchText)
+                TextField("搜尋…", text: $searchText)
                     .textFieldStyle(.plain)
                     .accessibilityIdentifier("log-search-field")
                 if !searchText.isEmpty {
@@ -120,7 +120,8 @@ struct LogEntryRow: View {
             Text(entry.formattedTime)
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .frame(width: 70, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize()
 
             // 類別標籤
             Text(entry.category.rawValue)
@@ -130,7 +131,8 @@ struct LogEntryRow: View {
                 .background(categoryColor.opacity(0.2))
                 .foregroundStyle(categoryColor)
                 .clipShape(.rect(cornerRadius: 3))
-                .frame(width: 45)
+                .lineLimit(1)
+                .fixedSize()
 
             // 消息內容
             Text(entry.message)

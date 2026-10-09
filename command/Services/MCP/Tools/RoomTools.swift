@@ -77,10 +77,10 @@ struct RoomCreateTool: MCPTool {
             "time_fixed": .integer("固定思考時間秒數（預設 300）"),
             "time_add": .integer("每巡加時秒數（預設 0）"),
             "ai_level": .integer("AI 等級 GameDetailRule.ai_level（不填則不送此欄位）"),
-            "dora_count": .integer("赤寶牌數量（預設 3）"),
+            "dora_count": .integer("赤寶牌數量（預設 四麻 3、三麻 2）"),
             "shiduan": .integer("是否允許食斷：1=允許（預設 1）"),
-            "init_point": .integer("起始點數（預設 25000）"),
-            "fandian": .integer("返點／原點（預設 30000）"),
+            "init_point": .integer("起始點數（預設 四麻 25000、三麻 35000）"),
+            "fandian": .integer("返點／原點（預設 四麻 30000、三麻 40000）"),
             "public_live": .boolean("是否公開觀戰（預設 false）"),
             "enable_ai": .boolean("GameMode.ai：是否允許 AI 代打（預設 false）"),
             "client_version_string": .string("客戶端版本字串（可選）"),
@@ -105,16 +105,15 @@ struct RoomCreateTool: MCPTool {
             throw MCPToolError.invalidParameter("player_count", expected: "3 或 4")
         }
 
-        var config = LiqiFriendRoomConfig()
-        config.playerCount = UInt32(playerCount)
+        var config = LiqiFriendRoomConfig(playerCount: UInt32(playerCount))
         let resolved = try RoomMode.resolve(playerCount: playerCount, requested: arguments["mode"] as? Int)
         config.mode = UInt32(resolved.mode)
         config.timeFixed = try MCPArguments.uint32(arguments, "time_fixed", default: 300)
         config.timeAdd = try MCPArguments.uint32(arguments, "time_add")
-        config.doraCount = try MCPArguments.uint32(arguments, "dora_count", default: 3)
+        config.doraCount = try MCPArguments.uint32(arguments, "dora_count", default: Int(config.doraCount))
         config.shiduan = try MCPArguments.uint32(arguments, "shiduan", default: 1)
-        config.initPoint = try MCPArguments.uint32(arguments, "init_point", default: 25000)
-        config.fandian = try MCPArguments.uint32(arguments, "fandian", default: 30000)
+        config.initPoint = try MCPArguments.uint32(arguments, "init_point", default: Int(config.initPoint))
+        config.fandian = try MCPArguments.uint32(arguments, "fandian", default: Int(config.fandian))
         config.publicLive = arguments["public_live"] as? Bool ?? false
         config.enableAI = arguments["enable_ai"] as? Bool ?? false
         config.clientVersionString = arguments["client_version_string"] as? String ?? ""
@@ -384,8 +383,7 @@ struct RoomQuickTestTool: MCPTool {
         }
 
         // 1. 建房
-        var config = LiqiFriendRoomConfig()
-        config.playerCount = UInt32(playerCount)
+        var config = LiqiFriendRoomConfig(playerCount: UInt32(playerCount))
         let resolved = try RoomMode.resolve(playerCount: playerCount, requested: arguments["mode"] as? Int)
         config.mode = UInt32(resolved.mode)
         config.timeFixed = try MCPArguments.uint32(arguments, "time_fixed", default: 60)

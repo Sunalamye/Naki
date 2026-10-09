@@ -80,7 +80,16 @@ struct LiqiFriendRoomConfig {
     /// 其他 GameDetailRule 欄位的逃生口（欄位編號查 liqi.json）
     var extraDetailRuleFields: [LiqiField] = []
 
-    init() {}
+    /// 三麻房用三麻細則預設（赤寶 2、35000 起手、40000 返點）；四麻不變。
+    /// 三麻值為推測（四麻值送三麻房 live 全回 error 1112），待 live 驗證。
+    init(playerCount: UInt32 = 4) {
+        self.playerCount = playerCount
+        if playerCount == 3 {
+            doraCount = 2
+            initPoint = 35000
+            fandian = 40000
+        }
+    }
 }
 
 // MARK: - Request Builder

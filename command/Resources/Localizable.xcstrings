@@ -6142,31 +6142,31 @@
         }
       }
     },
-    "搜索...": {
+    "搜尋…": {
       "comment": "日誌搜尋框 placeholder",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Search..."
+            "value": "Search…"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "検索..."
+            "value": "検索…"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "검색..."
+            "value": "검색…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索..."
+            "value": "搜索…"
           }
         }
       }
@@ -9646,31 +9646,31 @@
         }
       }
     },
-    "運行中，連接埠 %lld": {
-      "comment": "MCP a11y value；%lld 為連接埠",
+    "運行中，連接埠 %@": {
+      "comment": "MCP a11y value；%@ 為連接埠（字串，避免千分位）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Running, port %lld"
+            "value": "Running, port %@"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "稼働中、ポート %lld"
+            "value": "稼働中、ポート %@"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "실행 중, 포트 %lld"
+            "value": "실행 중, 포트 %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "运行中，端口 %lld"
+            "value": "运行中，端口 %@"
           }
         }
       }

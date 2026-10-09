@@ -352,7 +352,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         StatusDot(isOn: naki.store.isDebugServerRunning, onColor: .green, offColor: .gray)
-                        Text("\(naki.store.debugServerPort)")
+                        Text(verbatim: String(naki.store.debugServerPort))
                             .font(.system(.caption, design: .monospaced))
                     }
                     Text("MCP Server")
@@ -365,7 +365,7 @@ struct ContentView: View {
             .accessibilityIdentifier("mcp-server-toggle")
             .accessibilityLabel("MCP Server")
             .accessibilityValue(naki.store.isDebugServerRunning
-                                ? "運行中，連接埠 \(Int(naki.store.debugServerPort))" : "未運行")
+                                ? "運行中，連接埠 \(String(naki.store.debugServerPort))" : "未運行")
         }
 
         // 連接狀態
@@ -989,8 +989,10 @@ private struct FullAutoSetupSheet: View {
             Spacer()
             Button("取消", role: .cancel, action: onCancel)
                 .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("fullauto-setup-cancel")
             Button("開始", action: onStart)
                 .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("fullauto-setup-start")
                 // 選了會直接失敗的組合就不讓按，而不是按了才在 log 裡說不行
                 .disabled(sanmaBlocked)
         }
