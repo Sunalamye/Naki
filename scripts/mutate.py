@@ -6,7 +6,7 @@ import argparse, json, os, re, signal, subprocess, sys, time
 REL = {"==": "!=", "!=": "==", ">=": "<=", "<=": ">=", "<": ">", ">": "<"}
 LOG = {"&&": "||", "||": "&&"}
 TOKEN = re.compile(r"(?<=\s)(==|!=|>=|<=|&&|\|\||<|>)(?=\s)")
-SRC = ["command/Services/Bot/*.swift", "command/Services/Bridge/*.swift"]
+SRC = ["command/*.swift"]
 
 def sh(*a):
     return subprocess.run(a, capture_output=True, text=True).stdout
@@ -91,7 +91,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--diff", required=True); ap.add_argument("--files", nargs="*", default=[]); ap.add_argument("--tests", nargs="*")
     ap.add_argument("--list", action="store_true"); ap.add_argument("--range", nargs=2, type=int); ap.add_argument("--limit", type=int); ap.add_argument("--offset", type=int, default=0)
-    ap.add_argument("--out", default=os.path.join(os.environ.get("MAIN_REPO", "."), ".swfd/logs/m1-mutation"))
+    ap.add_argument("--out", default=os.path.join(os.environ.get("MAIN_REPO", "."), ".swfd/logs/m2-mutation"))
     a = ap.parse_args()
     ranges = {f: r for f, r in changed(a.diff).items() if not a.files or os.path.basename(f)[:-6] in a.files or os.path.basename(f) in a.files}
     ms = mutants(ranges)
