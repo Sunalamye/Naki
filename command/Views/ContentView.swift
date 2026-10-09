@@ -140,12 +140,8 @@ struct ContentView: View {
                 room: $draftRoomPreference,
                 sanmaEngineAvailable: AkagiSanmaBot.isBundled || naki.settings.cloudConfig.isActive,
                 onStart: {
-                    applyFullAutoChoice(sanma: draftPrefersSanma, room: draftRoomPreference)
                     showFullAutoKindChoice = false
-                    naki.actions.setAutoPlayMode(.fullAuto)
-                    // 在大廳按「開始」就該立刻排一場——續局引擎是 end_game 驅動的，
-                    // 大廳沒有 end_game 可等，不踢這一腳就會什麼都不發生。
-                    naki.actions.startFullAutoNow()
+                    naki.actions.startFullAuto(sanma: draftPrefersSanma, room: draftRoomPreference)
                 },
                 onCancel: { showFullAutoKindChoice = false })
             .appLocale()
@@ -154,12 +150,6 @@ struct ContentView: View {
         .accessibilityLabel("自動打牌模式")
         .accessibilityHint(naki.settings.supportsAutoPlay
                            ? "" : AutoPlayAvailability.autoUnavailableReasonKey)
-    }
-
-    /// 套用全自動的兩個選擇。兩個設定一起寫，避免只改一半就開始排隊。
-    private func applyFullAutoChoice(sanma: Bool, room: RoomPreference) {
-        naki.settings.fullAutoPrefersSanma = sanma
-        naki.settings.fullAutoRoomPreference = room
     }
 
     /// 自動打牌基準延遲 stepper：`[ 1.0s ⌃⌄ ]`。
@@ -266,14 +256,7 @@ struct ContentView: View {
         Group {
             if showsServerPicker {
                 ServerPickerView(initial: naki.settings.majsoulServer) { server, pin in
-                    naki.settings.pinMajsoulServer = pin
-                    // 相同就只寫設定，不重載——`switchServer` 一定會整頁重載，
-                    // 而這時頁面根本還沒載過，重載沒有意義。
-                    if server == naki.settings.majsoulServer {
-                        naki.settings.majsoulServer = server
-                    } else {
-                        naki.actions.switchServer(server)
-                    }
+                    naki.actions.chooseServer(server, pin: pin)
                     serverChosen = true
                 }
             } else {
