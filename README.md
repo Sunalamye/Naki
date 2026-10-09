@@ -1,6 +1,6 @@
 # Naki（鳴き）
 
-**繁體中文** | [English](README.en.md)
+**繁體中文** | [English](README.en.md) | [日本語](README.ja.md)
 
 **雀魂的 AI 雀友。原生 macOS / iOS 應用，打開就能用。**
 

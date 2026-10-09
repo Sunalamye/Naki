@@ -1,6 +1,6 @@
 # Naki（鳴き）
 
-**English** | [繁體中文](README.md)
+**English** | [繁體中文](README.md) | [日本語](README.ja.md)
 
 **Your AI mahjong companion for Mahjong Soul. A native macOS and iOS app, with on-device inference by default.**
 
