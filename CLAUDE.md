@@ -194,7 +194,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.swift:168`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.swift:265`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.swift:381`）。
-- **Debug server**（`DebugServer.swift`）：Origin 與 Host 由 `NakiMCPRequestGuard` 單一入口檢查，非 loopback 回 403（沒有 Host header 放行）；chunked 或「無 Content-Length 卻帶 body」回 411（無 body 的 POST 照常）；每連線 30 秒內必須收齊 request。`execute_js` 有 `timeout`（預設 30、上限 60，`UITools.swift:66`），逾時後頁面端 Promise 仍可能在跑。`/js` 回傳非 JSON 型別（Date 等）經 `JSONSanitizer` 轉字串，不再崩潰。以上 403／411／逾時**未對 live server 測**。
+- **Debug server**（`DebugServer.swift`）：Origin 與 Host 由 `NakiMCPRequestGuard` 單一入口檢查，非 loopback 回 403（沒有 Host header 放行）；chunked 或「無 Content-Length 卻帶 body」回 411（無 body 的 POST 照常）；每連線 30 秒內必須收齊 request。`execute_js` 有 `timeout`（預設 30、上限 60，`UITools.swift:66`），逾時後頁面端 Promise 仍可能在跑。`/js` 回傳非 JSON 型別（Date 等）經 `JSONSanitizer` 轉字串，不再崩潰。403／411 已有單測在 loopback 高位 port 起真 server 驗過（`DebugServerFramingTests`）；逾時與 live server 仍未測。
 - **負分**：`LiqiWire.decodeSignedVarint`（`LiqiEnvelope.swift:106`）讓 int32 欄位（scores）能解負數；`decodeVarint` 維持非負契約。
 - **分數／場風解析失敗**（例如超出 Int32、`chang`／`ju` 型別錯）：`MajsoulBridge.roundBlocked` 讓**本局**不餵 bot，但 `end_kyoku` 與 oplist 照常處理，所以伺服器授權的和牌仍會送（`MajsoulBridge.swift:514`）。
 
@@ -221,7 +221,7 @@ UI 文字 draw 的識別特徵是 `_TextureSampleAdd`，不是 `_Tint`／`_Color
 
 `#Preview` 的內容在 **Release 也會被編譯**（`ENABLE_PREVIEWS = YES` 兩個 configuration 都開，而 `DEBUG` 只在 Debug 定義）。用到 `#if DEBUG` 才存在的東西（例如 Action 的 `init(stub:)`）的 Preview 必須自己包一層 `#if DEBUG`，否則 `xcodebuild -configuration Release` 會失敗，而 Debug build 完全看不出來。
 
-`Naki.xcodeproj` 的 `membershipExceptions` 是**包含清單**不是排除清單——新增的 Swift 檔要手動加進對應的 exception set（跟著同目錄既有檔案加），否則不會被編譯，錯誤訊息是 `cannot find 'X' in scope`，看起來像 import 問題。
+`Naki.xcodeproj` 的 `membershipExceptions` 是**包含清單**不是排除清單——新增的 Swift 檔要手動加進對應的 exception set（跟著同目錄既有檔案加），否則不會被編譯，錯誤訊息是 `cannot find 'X' in scope`，看起來像 import 問題。這只適用於 app target；`NakiTests` 是 synchronized group、沒有 exception set，新測試檔不必登記（2026-10-09 實測）。
 
 MCP 工具需要 `import MCPKit`。
 
