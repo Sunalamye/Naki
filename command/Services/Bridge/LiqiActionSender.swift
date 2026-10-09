@@ -48,6 +48,9 @@ struct LiqiSendResult {
     let success: Bool
     let detail: String?
 
+    /// 頁面上沒有開著的雀魂 WebSocket（被擠下線、斷線）：重送不會有結果
+    var isOffline: Bool { detail == "no_open_majsoul_connection" }
+
     var logLine: String {
         let state = success ? "✅" : "❌"
         return "\(state) \(method) msgId=\(msgId) bytes=\(byteCount)\(detail.map { " (\($0))" } ?? "")"

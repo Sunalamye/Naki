@@ -213,9 +213,10 @@ enum LiqiRequestBuilder {
         selfOperation(type: LiqiOperationType.kyushu.rawValue, timeuse: timeuse)
     }
 
-    /// 拔北（type=11，三麻）
-    static func babei(timeuse: UInt32 = 0) -> LiqiRequestSpec {
-        selfOperation(type: LiqiOperationType.babei.rawValue, timeuse: timeuse)
+    /// 拔北（type=11，三麻）。`moqie` 區分拔剛摸到的北還是手裡的北：
+    /// 只帶 type（`080b`）時，剛摸到的北不被執行（2026-10-09 房 30887、13364）。
+    static func babei(moqie: Bool = false, timeuse: UInt32 = 0) -> LiqiRequestSpec {
+        selfOperation(type: LiqiOperationType.babei.rawValue, moqie: moqie, timeuse: timeuse)
     }
 
     /// 吃（type=2）：`index` 為 `OptionalOperation.combination` 的索引

@@ -81,6 +81,7 @@ final class LiqiActionSenderTests: XCTestCase {
         XCTAssertEqual(LiqiEncoder.hexString(LiqiRequestBuilder.ron().payload), "0809")
         XCTAssertEqual(LiqiEncoder.hexString(LiqiRequestBuilder.kyushu().payload), "080a")
         XCTAssertEqual(LiqiEncoder.hexString(LiqiRequestBuilder.babei().payload), "080b")
+        XCTAssertEqual(LiqiEncoder.hexString(LiqiRequestBuilder.babei(moqie: true).payload), "080b2801")
     }
 
     /// 跳過：cancel_operation 在兩個 message 裡是**不同欄位號**

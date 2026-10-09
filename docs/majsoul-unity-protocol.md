@@ -153,7 +153,7 @@ f2955c3d10cf2d42bee9309f672c062540941ea0cffe1bd62e3f436c7afc404c
 | 8 | tsumo | protocol 送出曾成功；「AI 想打牌時由 resolver 強制自摸」尚未端到端驗證 |
 | 9 | ron | 已見 `inputOperation` payload `0809` → RESPONSE → `ActionHule` |
 | 10 | kyushu | 未驗證 |
-| 11 | babei | 三麻模型本身不支援，未驗證 |
+| 11 | babei | `080b`（只帶 type）在北早已在手時成功過（房 13364 三次），剛摸到的北（含嶺上）不被執行（房 30887、13364）。現送摸到北時 `moqie=true`（`080b2801`／在手維持 `080b`），未 live 驗證；回音窗 1.5 秒 |
 
 赤五 chi／pon、多個 chi variant 的 combination index，以及三種槓都不可寫成已驗證。
 
