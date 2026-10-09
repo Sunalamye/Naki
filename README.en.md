@@ -397,6 +397,17 @@ The repository specifies **[AGPL-3.0 with Commons Clause](LICENSE)**. The additi
 
 **Account risk.** Use may violate Mahjong Soul's terms of service and may result in suspension or a permanent ban. Do not use your main account. No account or operating mode is guaranteed to avoid enforcement.
 
+- **Case:** On 2026-08-30 a user in the Japanese channel reported using Naki on iPhone with cloud v8, in-game auto-play only, about 6 East-only games per day. After roughly one week the account was suspended for two weeks and dropped from Expert 3 to Novice 3.
+- **Community speculation (unverified):** the following detection surfaces are speculation from community discussion, not established causes.
+  - `timeuse` and move-timing distribution
+  - not returning to the lobby after a game ends
+  - long continuous play; another user reported bans after 8 hours per day for 3 days to 1 week, and about 1 month after cutting to 4 hours per day
+  - high agreement with public models
+- **Confirmed:** The 2026-08 ban wave is tied to MITM certificate telemetry; Naki uses a WebView and does not go through MITM, so it is not affected by that item.
+- None of this promises that any delay or setting avoids bans.
+
+**API key sent to the wrong server.** If you ever entered a Mahjong Soul URL in the Server URL field, your key may have been sent to an unintended server. The endpoint guard only prevents future mistakes; it cannot recall a key already sent. Revoke or rotate the key at the service that issued it (for the default service, the Discord command `!api_new`, which applies only to the default service). Mask your key when reporting problems.
+
 **Your responsibility.** You are responsible for checking the applicable game rules, terms, and local legal requirements before use.
 
 **No warranty.** The software is provided “as is,” without express or implied warranties. The author accepts no responsibility for claims, damages, or other liabilities arising from its use.
