@@ -46,11 +46,11 @@ curl -X POST http://127.0.0.1:8765/js \
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |
 | Web client | Unity WebGL `chs_t-WebGL-release-4.0.45(45)`（2026-08-01 live） |
-| AI package | MortalSwift 0.5.3／`51cf407…`（由已提交的 `Package.resolved` 釘住；含紅五 decode／振聽／食い替え等修正） |
+| AI package | MortalSwift 0.6.0／`da7238c…`（含 AkagiSanma 三麻引擎；由已提交的 `Package.resolved` 釘住） |
 | Debug／MCP | loopback port 8765，same process／same port |
 | MCP 協定 | 雙版本並存：帶 `_meta.io.modelcontextprotocol/protocolVersion` 走 2026-07-28（stateless、`server/discover`、`resultType`），`initialize` handshake 服務 2025-03-26～2025-11-25 |
 
-Xcode dependency requirement 是 MortalSwift `[0.5.3,0.6.0)`（`upToNextMinorVersion`、`minimumVersion = 0.5.3`，`project.pbxproj:1203`），不是 exact——**0.5.0 會編不過**，因為 `NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API。範圍下界只是保護，真正決定 revision 的是 `Package.resolved`（`Naki.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`）：它已從 `.gitignore` 移出並提交，clean clone 會拿到同一個 `51cf407`。**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**，否則 lockfile 又會跟 requirement 漂開。
+Xcode dependency requirement 是 MortalSwift `[0.6.0,0.7.0)`（`upToNextMinorVersion`、`minimumVersion = 0.6.0`，`project.pbxproj:1230`），不是 exact——**0.5.0 會編不過**，因為 `NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API。範圍下界只是保護，真正決定 revision 的是 `Package.resolved`（`Naki.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`）：它已從 `.gitignore` 移出並提交，clean clone 會拿到同一個 `da7238c`。**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**，否則 lockfile 又會跟 requirement 漂開。
 
 ## Build／test
 
@@ -174,7 +174,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## MortalSwift／模型
 
-- 目前解到 0.5.3／`51cf407`（`Package.resolved`）；bundled Core ML 仍是固定 Mortal v4 四麻模型。
+- 目前解到 0.6.0／`da7238c`（`Package.resolved`）；bundled Core ML 仍是固定 Mortal v4 四麻模型。
 - 0.5.2 移除 `PlayerState` 的 `isAllLast`／`isWRiichi`／`kansOnBoard`／`dorasOwned`／`dorasSeen`／`atIppatsu`，Naki 全都沒用到。
 - 0.5.3：`handleReach` 在自家宣言後打開 `canDiscard`，`BundledCoreMLBot` 因此在 `react` 回 `reach` 時餵合成 `reach` 再 `inferCurrentState()`，推薦列的打牌項是立直後的第二次推論（失敗退回立直前的打牌項）。
 - observation `1012 × 34`，action mask 46。
