@@ -393,6 +393,47 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
     XCTAssertEqual(decision, .send(action: .discard, tile: "9s"))
   }
 
+  // MARK: - 槓種
+
+  private func kan(_ kind: LiqiOperationType?) -> Recommendation {
+    Recommendation(tile: "kan", probability: 0.6, actionType: .kan, kanKind: kind)
+  }
+
+  func testKanWithAuthorizedKindIsSent() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard, .ankan, .kakan]),
+      recommendations: [kan(.kakan), rec(.discard, "5p", 0.3)],
+      mode: .auto,
+      seat: 0,
+      recommendationsOplistSequence: 1)
+
+    XCTAssertEqual(decision, .send(action: .kan, tile: "kan"))
+  }
+
+  /// 槓種未授權 → 不選槓，落到同一批推論的打牌
+  func testKanWithUnauthorizedKindFallsBack() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard, .ankan]),
+      recommendations: [kan(.kakan), rec(.discard, "5p", 0.3)],
+      mode: .auto,
+      seat: 0,
+      recommendationsOplistSequence: 1)
+
+    XCTAssertEqual(decision, .send(action: .discard, tile: "5p"))
+  }
+
+  /// 沒帶槓種（本地 Mortal）→ 任一槓都算授權
+  func testKanWithoutKindAcceptsAnyKan() {
+    let decision = AutoPlayDecisionResolver.resolve(
+      snapshot: snapshot(types: [.discard, .kakan]),
+      recommendations: [kan(nil), rec(.discard, "5p", 0.3)],
+      mode: .auto,
+      seat: 0,
+      recommendationsOplistSequence: 1)
+
+    XCTAssertEqual(decision, .send(action: .kan, tile: "kan"))
+  }
+
   // MARK: - 首選不在 oplist 時退次選（C3）
 
   func testFallsBackToNextSupportedRecommendation() {

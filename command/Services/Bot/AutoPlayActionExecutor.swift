@@ -42,7 +42,7 @@ enum AutoPlayActionExecutor {
     ///   - log: 逐步細節（主路徑接 `debugServer.addLog`）
     ///   - event: 「為什麼沒送出」這種必須留在 events.log 的關鍵事件
     /// - Returns: 送出結果；**`nil` 代表一個 request 都沒組出來**（牌字串轉不了、
-    ///   找不到宣言牌、未知動作）。這與「送出失敗」不同，但兩者都不會消化 oplist。
+    ///   找不到宣言牌、推薦的槓種未獲授權、未知動作）。這與「送出失敗」不同，但兩者都不會消化 oplist。
     /// - Parameter awaitResponseMs: > 0 時等同 msgId 的 RESPONSE 並驗第 2 層（伺服器有沒有
     ///   受理）。0＝只驗第 1 層（`sendRaw` 送進 WebSocket）——測試預設值，
     ///   保留舊語意。正式路徑傳 > 0，讓「送成功但伺服器拒絕」不再被靜默當成功。
@@ -62,7 +62,7 @@ enum AutoPlayActionExecutor {
         event: (String) -> Void = { _ in }
     ) async -> LiqiSendResult? {
 
-        // ① 把動作組成 request spec（組不出來的三種情況一律 return nil，不消化 oplist）
+        // ① 把動作組成 request spec（組不出來一律 return nil，不消化 oplist）
         let spec: LiqiRequestSpec
 
         switch action {
@@ -115,7 +115,16 @@ enum AutoPlayActionExecutor {
             spec = LiqiRequestBuilder.pon()
 
         case .kan:
-            let kanType = snapshot?.kanOperation ?? .ankan
+            let kanType: LiqiOperationType
+            if let wanted = recommendations.first(where: { $0.actionType == .kan })?.kanKind {
+                guard snapshot?.contains(wanted) == true else {
+                    event("❌ 槓: 推薦的槓種 type=\(wanted.rawValue) 不在伺服器授權內 \(snapshot?.rawTypes ?? [])，未送出，保留 oplist")
+                    return nil
+                }
+                kanType = wanted
+            } else {
+                kanType = snapshot?.kanOperation ?? .ankan
+            }
             log("執行: 槓 (type=\(kanType.rawValue))")
             spec = LiqiRequestBuilder.kan(type: kanType)
 
