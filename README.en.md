@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/github/v/release/Sunalamye/Naki?color=green" alt="Latest release"></a>
+  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/badge/version-2.15.0-green" alt="Version 2.15.0"></a>
   <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS 26.0 or later">
   <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS 17.0 or later">
   <img src="https://img.shields.io/badge/Mac-Apple%20Silicon-red" alt="Apple Silicon required on Mac">
@@ -39,7 +39,9 @@ Naki brings Mahjong Soul and a mahjong AI into one window. **No Python environme
 
 The local engine is based on [Mortal](https://github.com/Equim-chan/Mortal), running through Core ML on the Apple Neural Engine. **Local inference is the default:** model computation stays on your device and does not require an external inference service. Mahjong Soul itself still requires an internet connection.
 
-You can optionally connect to an [Akagi](https://github.com/shinkuan/Akagi)-compatible inference server for hosted models, including dedicated three-player models. Cloud inference is **off by default** and has different privacy and availability implications; see [Cloud inference](#optional-cloud-inference).
+Three-player mahjong is handled by a separate local engine: Akagi v3's three-player behavior-cloning model, at **default strength**. It imitates human Tenhou play and is **not Mortal-level**; see [About three-player mahjong](#about-three-player-mahjong).
+
+You can optionally connect to an [Akagi](https://github.com/shinkuan/Akagi)-compatible inference server for stronger hosted models, including a true three-player model. Cloud inference is **off by default** and has different privacy and availability implications; see [Cloud inference](#optional-cloud-inference).
 
 ---
 
@@ -92,7 +94,7 @@ Suggested tiles are highlighted on the table, while the sidebar explains the dec
 
 - Read from top to bottom: best choice → alternatives → expandable round details.
 - Recognizable tile artwork, with separate assets for red fives.
-- Action support includes discards, chi, pon, kan, riichi, wins, north extraction, and the nine-terminals abortive draw, subject to the game mode and server-authorized actions.
+- Action support includes discards, chi, pon, kan, riichi, wins, north extraction, and the nine-terminals abortive draw (not yet live-verified), subject to the game mode and server-authorized actions.
 
 </td>
 <td width="48%">
@@ -137,6 +139,8 @@ Naki supports the **Chinese, Japanese, and International** servers. By default, 
 
 Select the option to always use the chosen server to skip the prompt. You can change servers or restore the launch prompt in Advanced Settings.
 
+<sub>Observation: all three servers run the same client (<code>version.json</code> reports <code>0.11.252.w</code> on each), so the protocol is identical and Naki needs no per-server parsing.</sub>
+
 <table>
 <tr>
 <td width="50%">
@@ -163,7 +167,7 @@ The toolbar also offers a **delay baseline** control, from 0.5 to 3.0 seconds. T
 
 ### Other tools
 
-- **Hide player names:** protocol-level rewriting replaces names with `Player 1`–`Player 4` for matches started after enabling the option. Render-level hiding can take effect immediately. If the relevant render layer cannot be identified, the app leaves the display unchanged rather than hiding unrelated UI. This is a display feature, not a guarantee of anonymity.
+- **Hide player names:** an Advanced Settings switch that works on two layers. Protocol-level rewriting replaces names with `Player 1`–`Player 4` before the game parses packets, and applies only to matches started after enabling the option. Render-level hiding (added in 2.8.0) takes effect the moment you switch it on. The Unity client has no hookable UI layer, so Naki calibrates itself: it tries masking candidates one at a time, compares the screen, and picks the one whose masking changes all four seat positions with very few changed pixels. If it cannot identify one, it hides nothing rather than hiding unrelated UI. This is a display feature, not a guarantee of anonymity.
 - **Protocol-level emotes:** MCP tools can send emotes and inspect received broadcasts. The older automatic-reply path is not available with the Unity client.
 - **MCP integration:** connect an AI assistant such as Claude Code to inspect state and use the app's exposed tools.
 - **Local Debug API:** the HTTP server binds to loopback, not to other devices on your network.
@@ -181,18 +185,12 @@ Open **Advanced Settings → Cloud Inference** and supply your own API key. The 
 |---|---|
 | Opt-in | Disabled by default. Obtain your own key; the app does not include a purchase or redemption flow. |
 | Key storage | Stored in Keychain. Logs show only the last four characters of the key. |
-| Four-player fallback | The local model remains available. Timeouts, rate limits, or connection failures fall back to local decisions, with exponential retry backoff from 5 to 120 seconds. |
+| Local fallback | The local model stays loaded throughout. Timeouts, rate limits, or connection failures fall back to local decisions, with an exponential-backoff circuit breaker from 5 to 120 seconds, so the match never stalls. Three-player matches fall back to the local Akagi three-player engine. |
 | Decision source | The sidebar and `/bot/status` identify the effective source as `local` or `cloud:<model>`. |
-| Failure visibility | A prominent warning indicates degraded cloud service and consecutive fallback decisions. The API exposes `cloudDegraded` and `cloudFallbackStreak`. |
+| Failure visibility | The sidebar turns into a red warning ("Cloud failed — using the local model", with the consecutive-hand count and automatic retry) so degradation is not left to a small hint. The API exposes `cloudDegraded` and `cloudFallbackStreak`. |
 | Key status | After a key is entered, settings query `/v3/key` to show the plan, expiry, remaining days, and daily usage. |
-| Model selection | Test Connection checks the endpoint and key, and lists the models available to the plan, including three-player models where available. |
-| Live changes | The toolbar can switch cloud inference on or off during a match. Changes to the key or model take effect without restarting the match. |
-
-### Three-player mahjong requires a cloud model
-
-**Naki does not ship a local three-player model.** Three-player and four-player models use different observation layouts, so a four-player model is not a valid substitute. The local four-player model is not started for a three-player match.
-
-Without an effective cloud result, there is no AI recommendation for that decision and no local-model fallback. North extraction is wired through the action pipeline, but three-player live-match validation remains incomplete. Do not interpret cloud integration as proof of fully validated three-player play; see [`AUDIT.md`](AUDIT.md).
+| Model selection | Test Connection checks the endpoint and key, and lists the models available to the plan, including three-player (3p) models, selectable from the dropdown next to the model field. |
+| Live changes | The toolbar has a cloud switch that can return to local decisions at any time; its icon reflects the effective state (active, enabled but missing a prerequisite, or off). Changes to the key or model take effect without restarting the match. |
 
 ### Settings on Mac and iPhone
 
@@ -219,7 +217,7 @@ On iPhone, the same form uses a single-column layout:
 
 The floating status message bar at the bottom of the table is **off by default**. It is intended for transient feedback and diagnostics. Persistent errors use a top banner and are not hidden by this setting.
 
-For optional macOS notifications about cloud failures, reconnects, or stalled action submission, see [`scripts/cloud-watch.sh`](scripts/cloud-watch.sh). Cloud implementation and verification notes are tracked in [`AUDIT.md`](AUDIT.md) and [`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md).
+For optional macOS notifications about cloud failures, reconnects, or stalled action submission, see [`scripts/cloud-watch.sh`](scripts/cloud-watch.sh), which watches the event log in the background and posts macOS notifications. Cloud implementation and verification notes are tracked in [`AUDIT.md`](AUDIT.md) §20 and [`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md).
 
 ---
 
@@ -251,9 +249,11 @@ The Unity WebGL client keeps game logic in WebAssembly rather than exposing the 
 
 Tile highlighting hooks WebGL draw calls, identifies tile types from atlas UV coordinates, and temporarily changes draw colors. It does not depend on fixed screen coordinates. The hook is implemented, but screenshot-regression coverage has not established correct targeting for every tile and button.
 
-**The server's available-action list, not the model, determines action legality.** The decision resolver fails closed when that list is missing and gives server-authorized wins priority over model suggestions. Regression fixtures cover important integration paths, but an adversarial live sequence that overrides a discard suggestion with a win and verifies the resulting server action has not been fully reproduced. This is not a claim that every missed-win issue has been eliminated.
+**The server's available-action list, not the model, determines action legality.** The decision resolver fails closed when that list is missing and gives server-authorized wins priority over model suggestions.
 
-The legacy backend shares decision logic but disables automatic action submission pending validation.
+Two earlier integration gaps are closed at the source level: an empty recommendation could keep a self-draw win from reaching the resolver, and a failed hora send was marked as handled. Now `AutoPlayGate` takes the forced-win path when the recommendation is empty but the available-action list contains a win, and an action is marked handled only after the send succeeds. Injected fixtures cover both. **The adversarial live fixture required by the project's `CLAUDE.md` (server `[1,7,8]`, AI wants to discard, the resolver overrides it to a win, then RESPONSE and `ActionHule`) has still not been reproduced live, so Naki does not claim that missed self-draw wins are fully eliminated.**
+
+The legacy iOS 17–25 backend uses the same resolver, also without physical-device validation, and disables automatic action submission pending validation.
 
 Further reading: [`docs/majsoul-unity-protocol.md`](docs/majsoul-unity-protocol.md), [`docs/architecture-deep-dive.md`](docs/architecture-deep-dive.md), and [`AUDIT.md`](AUDIT.md).
 
@@ -274,6 +274,9 @@ curl http://localhost:8765/bot/ops
 # Manually trigger an automatic-play cycle; this can submit a game action
 curl -X POST http://localhost:8765/bot/trigger
 
+# Open a given screen and switch language (DEBUG builds only; not in Release)
+curl -X POST http://localhost:8765/debug/ui -d '{"screen":"settings","language":"en"}'
+
 # Execute JavaScript in the game page; use return to retrieve a value
 curl -X POST http://localhost:8765/js -d 'return window.location.href'
 ```
@@ -285,23 +288,23 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 <details>
 <summary><b>MCP server: connect Claude Code or another MCP client</b></summary>
 
-The built-in [Model Context Protocol](https://modelcontextprotocol.io/) server shares port 8765 with the Debug API. Tool results use `structuredContent`, and non-loopback Origin requests are rejected.
+The built-in [Model Context Protocol](https://modelcontextprotocol.io/) server shares port 8765 with the Debug API. The protocol is **2026-07-28 (stateless)** and remains compatible with the older `initialize` handshake. Tool results use `structuredContent` rather than JSON wrapped in a JSON string, and non-loopback Origin requests receive 403.
 
 ```bash
 claude mcp add --transport http naki http://localhost:8765/mcp
 ```
 
-Discover the current tool inventory with `tools/list` or inspect `get_status.toolsCount`; a static count can become outdated as tools change.
+Discover the current tool inventory with `tools/list` or inspect `get_status.toolsCount`; a static count can become outdated as tools change (2.7.0 registered 40 tools statically, and six obsolete highlight stubs have since been removed).
 
-| Area | Example tools |
-|---|---|
-| System | `get_status`, `get_logs`, `replay_game` |
-| Bot control | `bot_status`, `bot_ops`, `bot_trigger` |
-| Game state and actions | `game_state`, `game_action`, `game_confirm_new_round` |
-| Lobby | `lobby_start_match`, `lobby_account_info` |
-| Friendly rooms | `room_create`, `room_add_robot`, `room_quick_test` |
-| Emotes | `game_emoji`, `game_emoji_listen` |
-| Utilities | `execute_js`, `lobby_anti_idle` |
+| Area | Count | Example tools |
+|---|:---:|---|
+| System | 6 | `get_status`, `get_logs`, `replay_game` |
+| Bot control | 7 | `bot_status`, `bot_ops`, `bot_trigger` |
+| Game state and actions | 8 | `game_state`, `game_action`, `game_confirm_new_round` |
+| Lobby | 8 | `lobby_start_match`, `lobby_account_info` |
+| Friendly rooms | 7 | `room_create`, `room_add_robot`, `room_quick_test` |
+| Emotes | 2 | `game_emoji`, `game_emoji_listen` |
+| Utilities | 2 | `execute_js`, `lobby_anti_idle` |
 
 `room_quick_test` creates a room, adds bots, and starts a test match. It does **not** validate reconnection, AI decisions, server responses, or authoritative game actions by itself.
 
@@ -347,19 +350,32 @@ Feature availability is not the same as complete end-to-end verification. [`AUDI
 | Automatic play and between-round confirmation | Available on macOS / iOS 26+; live validation gaps remain. |
 | Full Auto rematching | Implemented as a separate opt-in mode from Auto. |
 | In-game tile highlighting | Implemented; complete visual-regression coverage is still missing. |
-| Optional cloud inference | Available, with explicit upload disclosure and four-player local fallback. |
-| Three-player mahjong | Cloud-model inference only; no local fallback and incomplete live-match validation. |
+| Optional cloud inference | Available, with explicit upload disclosure and local fallback. Live-verified for four-player matches; no live three-player match with a cloud model. |
+| Three-player AI recommendations | Available locally at default strength; see below. |
 | Hide player names | Protocol-level rewriting and render-level hiding. |
 | MCP server and Debug API | Available through the local loopback server. |
 | iOS 17–25 | Recommendations only; automatic action submission is disabled. |
 | Game-record review and analysis | Not yet implemented as a user-facing analysis workflow. |
+
+### About three-player mahjong
+
+**Three-player mahjong uses a separate local engine and does not borrow the four-player model.** The bundled four-player Mortal model is not used for three-player matches, because the observation layouts differ and the result would be structurally invalid. Three-player matches run on `AkagiSanma`, a pure-Swift port inside [MortalSwift](https://github.com/Sunalamye/MortalSwift) 0.6.0 of Akagi v3's three-player behavior-cloning model (Apache 2.0; 37×27 observation, 60 actions).
+
+- **Strength is default strength.** It imitates human Tenhou play and is **not Mortal-level**, so do not compare it with four-player recommendations. The sidebar labels the model name accordingly.
+- With cloud inference enabled, the cloud is tried first, and the local engine decides only when the cloud times out or fails. With it disabled, the local engine decides. Only if the engine fails to build does Naki fall back to cloud-only.
+- Legal actions are authorized by the server's available-action list. A win is judged by tile shape only, and the server decides the yaku. If the list is missing, only discard and pass remain.
+- Three-player friendly rooms need three-player rules (2 red fives, 35000 start, 40000 return), otherwise the server answers error 1112. `room_quick_test` with `player_count=3` supplies them automatically.
+- North extraction: a freshly drawn north tile carries `moqie`. On disconnect, Naki stops immediately, marks the stall, and retries with backoff until reconnection.
+
+**Live verification (2026-10-09, three matches against bots):** the local engine's decisions, riichi, wins, pon, and north extraction (11 of 11, including a freshly drawn north) form a complete chain. **Not yet verified:** backoff and stall display after being kicked offline, an occasional resend on the dealer's first discard (three occurrences, cause unknown), and physical iOS devices. See [`AUDIT.md`](AUDIT.md) and [`sanma-implementation-notes.md`](sanma-implementation-notes.md).
 
 ---
 
 ## Acknowledgments
 
 - [Mortal](https://github.com/Equim-chan/Mortal) — mahjong AI engine and libriichi.
-- [Akagi](https://github.com/shinkuan/Akagi) — reference implementation, optional cloud inference, and the `/v3` protocol.
+- [Akagi](https://github.com/shinkuan/Akagi) — reference implementation, optional cloud inference server, and the `/v3` protocol. The local three-player engine uses the behavior-cloning weights from its v3 branch and ported tile / observation / action logic (Apache 2.0; the full license text ships as `Sources/AkagiSanma/LICENSE-Akagi.txt` in MortalSwift).
+- [RiichiEnv](https://github.com/smly/RiichiEnv) (`riichienv-core`) — reference implementation for three-player state and legal-action enumeration, which Akagi's three-player engine depends on; same license notice as above.
 - [riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles) by FluffyStuff — tile artwork used in the sidebar, released under CC0 1.0.
 - Mahjong Soul (Majsoul) — the mahjong game Naki integrates with.
 
@@ -367,7 +383,7 @@ Feature availability is not the same as complete end-to-end verification. [`AUDI
 
 The sidebar uses 40 SVG assets from FluffyStuff's tile set: 27 numbered tiles, 3 red fives, 7 honor tiles, and 3 additional assets such as tile backs.
 
-These replace the earlier Unicode mahjong symbols, which depended on system-font rendering and could not represent red fives as distinct tiles. Asset names follow the same MJAI convention as `Tile.mjaiString`, including `5mr`, `5pr`, and `5sr`.
+These replace the earlier Unicode mahjong characters (`🀇🀙🀐`). System fonts draw them as black-and-white line art, so at recommendation-row size you had to recognize the glyph before matching it to a tile on the table. They also **cannot represent red fives**: `5mr` and `5m` are the same code point, so the only option was tinting the whole tile red. With image assets, red fives are separate assets. Asset names follow the same MJAI convention as `Tile.mjaiString`, including `5mr`, `5pr`, and `5sr`.
 
 Import notes and the asset mapping are documented in [`docs/third-party/riichi-mahjong-tiles.md`](docs/third-party/riichi-mahjong-tiles.md). Attribution is included for traceability, even though CC0 does not require it.
 
