@@ -1016,35 +1016,6 @@
         }
       }
     },
-    "URL 無法解析": {
-      "comment": "測試連線結果（L10n.text）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cannot parse the URL"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "URL を解析できません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "URL을 해석할 수 없습니다"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法解析 URL"
-          }
-        }
-      }
-    },
     "WebSocket 連線狀態": {
       "comment": "連線指示 a11y",
       "localizations": {
@@ -1476,35 +1447,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "settings.%@ schema 无效（type 或 default 不合）"
-          }
-        }
-      }
-    },
-    "——可用模型欄旁的箭頭直接選": {
-      "comment": "測試連線結果後綴",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": " — pick one with the arrow next to the model field"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "——モデル欄の横の矢印から選べます"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "——모델 입력란 옆의 화살표로 바로 선택하세요"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "——可直接用模型栏旁的箭头选择"
           }
         }
       }
@@ -11152,31 +11094,298 @@
         }
       }
     },
-    "（但開關未開，對局仍走本地模型）": {
-      "comment": "測試連線結果後綴",
+    "選擇四麻模型": {
+      "comment": "模型欄選單按鈕標籤（四麻）（機器翻譯，未經母語校對）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": " (but the switch is off, so games still use the local model)"
+            "value": "Choose Yonma model"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "（ただしスイッチがオフのため、対局はローカルモデルのままです）"
+            "value": "四麻モデルを選択"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "(하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)"
+            "value": "4인 마작 모델 선택"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "（但开关未开，对局仍使用本地模型）"
+            "value": "选择四麻模型"
+          }
+        }
+      }
+    },
+    "選擇三麻模型": {
+      "comment": "模型欄選單按鈕標籤（三麻）（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Sanma model"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三麻モデルを選択"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3인 마작 모델 선택"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择三麻模型"
+          }
+        }
+      }
+    },
+    "已啟用": {
+      "comment": "插件列狀態標籤（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용 중"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已启用"
+          }
+        }
+      }
+    },
+    "%lld 次/分・top-%lld": {
+      "comment": "雲端限額；兩個 %lld 依序為每分鐘請求數、top-k（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld req/min · top-%lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 回/分・top-%lld"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld회/분・top-%lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 次/分・top-%lld"
+          }
+        }
+      }
+    },
+    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本地模型）": {
+      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單；由既有三段譯文組合（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the local model)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局はローカルモデルのままです）"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本地模型）"
+          }
+        }
+      }
+    },
+    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本地模型）——可用模型欄旁的箭頭直接選": {
+      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單；由既有三段譯文組合（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the local model) — pick one with the arrow next to the model field"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局はローカルモデルのままです）——モデル欄の横の矢印から選べます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)——모델 입력란 옆의 화살표로 바로 선택하세요"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本地模型）——可直接用模型栏旁的箭头选择"
+          }
+        }
+      }
+    },
+    "正在初始化...": {
+      "comment": "WebView 尚未建立時的載入指示（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Initializing..."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "初期化中..."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "초기화하는 중..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在初始化..."
+          }
+        }
+      }
+    },
+    "Log": {
+      "comment": "桌面日誌面板標題（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Log"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로그"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日誌"
+          }
+        }
+      }
+    },
+    "revision：%@": {
+      "comment": "插件匯入預覽；%@ 為 revision 前 12 碼（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision：%@"
+          }
+        }
+      }
+    },
+    "%@，%@": {
+      "comment": "最佳選擇卡無障礙值；兩個 %@ 依序為推薦動作、機率百分比（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@、%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@，%@"
           }
         }
       }
