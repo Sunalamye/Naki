@@ -42,7 +42,7 @@ private struct StatusDot: View {
     var body: some View {
         if differentiate {
             Image(systemName: isOn ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .font(.system(size: 8))
+                .font(.caption2)
                 .foregroundStyle(isOn ? onColor : offColor)
         } else {
             Circle()
@@ -512,17 +512,16 @@ struct ContentView: View {
             //
             // identifier 與面板內那顆收合鈕共用：兩者互斥出現，測試永遠只找得到一顆。
             if !showGamePanel {
-                Button {
+                Button("顯示決策面板", systemImage: "sidebar.right") {
                     withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { showGamePanel = true }
-                } label: {
-                    Image(systemName: "sidebar.right")
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
                 }
+                .labelStyle(.iconOnly)
+                .padding(10)
+                .background(.ultraThinMaterial, in: Circle())
+                .iOSTapTarget()
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .accessibilityIdentifier("toolbar-game-panel-toggle")
-                .accessibilityLabel("顯示決策面板")
                 .accessibilityValue("已隱藏")
             }
         }

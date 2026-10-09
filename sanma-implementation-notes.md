@@ -80,6 +80,32 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 2. M 系列：`48add0a..HEAD` 邏輯檔用手工變異 harness（`.swfd/logs/s1b-sanma-state/mutation/mutate.py` 改成 xcodebuild 版）逐檔跑，改動內存活補測試；範圍外列清單。
 3. S1c：oplist 逐組合對應（若 S2 未涵蓋）。
 
+## U 系列（UI 修正包）
+
+### 可見行為變化
+
+- 到期時間改隨 locale 格式。
+- 測試連線結果改每次重繪產生，隨開關與語言更新。
+- 限額欄改整句 key。
+- 插件頁 log 格式改「HH:mm:ss.SSS 訊息」，不含日期與分類。
+- 插件狀態點改 SF Symbol。
+- 日誌搜尋改 `localizedStandardContains`。
+- macOS 重新載入鈕改 `primaryAction`。
+- 延遲顯示「1.0 秒」最小寬 40。
+- 決策面板寬 300–480，可拖。
+- 警示字級改 caption。
+- iOS 面板：regular 300pt；compact 寬＋regular 高啟動即收起；控制列 44pt；Reduce Motion 時淡入淡出。
+- 全自動表與 ServerPicker 可捲動，按鈕列固定在底部。
+- iOS 完成鈕改 `confirmationAction`。
+- 不以顏色區分時，MCP 狀態點畫符號。
+
+### 復驗殘留（未處理）
+
+- 8 處 `clipShape(RoundedRectangle)` 寫法不一致。
+- LogPanel 的 Picker 標題為空。
+- 五個新 Action 未標 `@MainActor`（app target 預設隔離，功能不受影響）。
+- iPad 執行中改分割不會重新判斷面板。
+
 ## Deviations
 
 - **S2 復驗（2026-10-09）**：裁決「要修正」。存活變異體 `NativeBotController.swift:159`（`serverAuthorization` 閉包）不是等價而是測試缺口——雲端啟用後三麻每手都不會問雲端且無提示；本家槓後嶺上摸牌前仍回捨牌（stale guard 不擋 nil provenance）；局間確認與續局仍寫死「三麻只有雲端」；強度標示未上 UI；新文案未進 xcstrings；多處註解仍寫雲端-only。全部交回 S2 修正。

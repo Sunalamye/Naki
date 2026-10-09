@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-// MARK: - JS 注入失敗橫幅
+// MARK: - 頁面載入失敗橫幅
 
 /// 頁面載不起來時的常駐橫幅。
 ///
@@ -68,11 +68,9 @@ struct UpdateAvailableBanner: View {
                     naki.store.availableUpdate = nil
                 }
                 .buttonStyle(.bordered)
-                Button { naki.store.availableUpdate = nil } label: {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("關閉提示")
+                Button("關閉提示", systemImage: "xmark") { naki.store.availableUpdate = nil }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -104,6 +102,8 @@ struct BotFailureBanner: View {
         }
     }
 }
+
+// MARK: - JS 注入失敗橫幅
 
 /// JavaScript 模組載入失敗時的常駐紅色橫幅。
 ///
