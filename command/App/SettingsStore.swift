@@ -358,8 +358,8 @@ final class SettingsStore {
 
     /// 預設四麻。
     ///
-    /// 不是隨手挑的預設：bundled Core ML 是四麻模型，三麻走雲端-only（見 CLAUDE.md），
-    /// 雲端沒設定時三麻一手都不會打。把預設放在「一定能打」的那一邊。
+    /// 不是隨手挑的預設：bundled Core ML 是四麻模型，三麻靠本地 Akagi 三麻（default strength）
+    /// 或雲端 3p。預設放在行為最熟悉、有 Mortal 強度的那一邊。
     nonisolated static func loadFullAutoPrefersSanma(
         from defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: fullAutoPrefersSanmaKey)

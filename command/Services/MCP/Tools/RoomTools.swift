@@ -26,11 +26,37 @@
 //  與 desktop.matchmode 配置表一致（見 docs/majsoul-config-tables.md）。
 //  `pre_rule` 的合法值列在 desktop.friend_room（"" / xuezhandaodi / dora3 / …）。
 //
+//  mode 與人數綁定（docs/majsoul-config-tables.md）：四人 1=東風、2=半莊；三人 11=東風、12=半莊。
+//  `player_count=3` 卻送 mode=2 時伺服器開的是四人房（2026-10-09 live 證實，整局跑成四麻），
+//  所以 mode 一律經 `RoomMode.resolve` 對齊人數。
+//
 //  ⚠️ **仍未驗證**：`ai_level` 的有效範圍、伺服器是否會因缺 `client_version_string` 而拒絕。
 //
 
 import Foundation
 import MCPKit
+
+// MARK: - Room Mode
+
+/// GameMode.mode 與人數的對應
+enum RoomMode {
+    /// - Returns: 實際送出的 mode，與是否由呼叫端給的值改寫（三人房給 1／2 → 11／12）
+    nonisolated static func resolve(playerCount: Int, requested: Int?) throws -> (mode: Int, adjusted: Bool) {
+        if playerCount == 3 {
+            switch requested {
+            case nil: return (12, false)
+            case 1?, 2?: return (requested! + 10, true)
+            case 11?, 12?: return (requested!, false)
+            default: throw MCPToolError.invalidParameter("mode", expected: "三人房：11=三人東、12=三人南（1／2 會映射成 11／12）")
+            }
+        }
+        switch requested {
+        case nil: return (2, false)
+        case 1?, 2?: return (requested!, false)
+        default: throw MCPToolError.invalidParameter("mode", expected: "四人房：1=四人東、2=四人南")
+        }
+    }
+}
 
 // MARK: - Room Create Tool
 
@@ -41,19 +67,20 @@ struct RoomCreateTool: MCPTool {
         建立友人房。送出 .lq.Lobby.createRoom。\
         預設 4 人、半莊(mode=2)、思考時間 300+0 秒。\
         建房成功後用 room_add_robot 加人機、room_start 開局。\
-        mode：1=東風戰、2=半莊戰（依 desktop.matchmode 配置表 + 真實對局驗證）。
+        mode：四人 1=東風戰、2=半莊戰；三人 11=東風戰、12=半莊戰（依 desktop.matchmode 配置表）。\
+        三人房預設 12，給 1／2 會映射成 11／12（結果附 modeAdjusted）；人數與 mode 不符回 invalidParameter。
         """
     static let inputSchema = MCPInputSchema(
         properties: [
             "player_count": .integer("人數：4=四麻、3=三麻（預設 4）"),
-            "mode": .integer("GameMode.mode：1=東風戰、2=半莊戰（預設 2；current config + runtime 已交叉確認）"),
+            "mode": .integer("GameMode.mode：四人 1=東風戰、2=半莊戰（預設 2）；三人 11=東風戰、12=半莊戰（預設 12，給 1／2 會映射成 11／12）"),
             "time_fixed": .integer("固定思考時間秒數（預設 300）"),
             "time_add": .integer("每巡加時秒數（預設 0）"),
             "ai_level": .integer("AI 等級 GameDetailRule.ai_level（不填則不送此欄位）"),
-            "dora_count": .integer("赤寶牌數量（預設 3）"),
+            "dora_count": .integer("赤寶牌數量（預設 四麻 3、三麻 2）"),
             "shiduan": .integer("是否允許食斷：1=允許（預設 1）"),
-            "init_point": .integer("起始點數（預設 25000）"),
-            "fandian": .integer("返點／原點（預設 30000）"),
+            "init_point": .integer("起始點數（預設 四麻 25000、三麻 35000）"),
+            "fandian": .integer("返點／原點（預設 四麻 30000、三麻 40000）"),
             "public_live": .boolean("是否公開觀戰（預設 false）"),
             "enable_ai": .boolean("GameMode.ai：是否允許 AI 代打（預設 false）"),
             "client_version_string": .string("客戶端版本字串（可選）"),
@@ -78,15 +105,15 @@ struct RoomCreateTool: MCPTool {
             throw MCPToolError.invalidParameter("player_count", expected: "3 或 4")
         }
 
-        var config = LiqiFriendRoomConfig()
-        config.playerCount = UInt32(playerCount)
-        config.mode = try MCPArguments.uint32(arguments, "mode", default: 2)
+        var config = LiqiFriendRoomConfig(playerCount: UInt32(playerCount))
+        let resolved = try RoomMode.resolve(playerCount: playerCount, requested: arguments["mode"] as? Int)
+        config.mode = UInt32(resolved.mode)
         config.timeFixed = try MCPArguments.uint32(arguments, "time_fixed", default: 300)
         config.timeAdd = try MCPArguments.uint32(arguments, "time_add")
-        config.doraCount = try MCPArguments.uint32(arguments, "dora_count", default: 3)
+        config.doraCount = try MCPArguments.uint32(arguments, "dora_count", default: Int(config.doraCount))
         config.shiduan = try MCPArguments.uint32(arguments, "shiduan", default: 1)
-        config.initPoint = try MCPArguments.uint32(arguments, "init_point", default: 25000)
-        config.fandian = try MCPArguments.uint32(arguments, "fandian", default: 30000)
+        config.initPoint = try MCPArguments.uint32(arguments, "init_point", default: Int(config.initPoint))
+        config.fandian = try MCPArguments.uint32(arguments, "fandian", default: Int(config.fandian))
         config.publicLive = arguments["public_live"] as? Bool ?? false
         config.enableAI = arguments["enable_ai"] as? Bool ?? false
         config.clientVersionString = arguments["client_version_string"] as? String ?? ""
@@ -114,6 +141,7 @@ struct RoomCreateTool: MCPTool {
                 "enable_ai": config.enableAI
             ] as [String: Any]
         ])
+        if resolved.adjusted { result["modeAdjusted"] = true }
         result["nextSteps"] = ["room_info", "room_add_robot", "room_start"]
         return result
     }
@@ -309,12 +337,14 @@ struct RoomQuickTestTool: MCPTool {
     static let description = """
         一鍵開測試局：createRoom → addRoomRobot 補滿 → startRoom，逐步回報結果。\
         只建立測試局，不驗證 AI 動作、RESPONSE 或權威 action。\
+        三人房預設 mode=12（三人南），四人房預設 2；mode 規則同 room_create。\
         ⚠️ 這會真的開一局；請只在測試帳號使用。\
         開局後客戶端需重連才會進入對局（reconnect_hint 會提示）。
         """
     static let inputSchema = MCPInputSchema(
         properties: [
             "player_count": .integer("人數：4=四麻、3=三麻（預設 4）"),
+            "mode": .integer("GameMode.mode：四人 1／2（預設 2）；三人 11／12（預設 12，給 1／2 會映射成 11／12）"),
             "time_fixed": .integer("固定思考時間秒數（預設 60，測試用短一點）"),
             "time_add": .integer("每巡加時秒數（預設 0）"),
             "ai_level": .integer("AI 等級（不填則不送此欄位）")
@@ -353,8 +383,9 @@ struct RoomQuickTestTool: MCPTool {
         }
 
         // 1. 建房
-        var config = LiqiFriendRoomConfig()
-        config.playerCount = UInt32(playerCount)
+        var config = LiqiFriendRoomConfig(playerCount: UInt32(playerCount))
+        let resolved = try RoomMode.resolve(playerCount: playerCount, requested: arguments["mode"] as? Int)
+        config.mode = UInt32(resolved.mode)
         config.timeFixed = try MCPArguments.uint32(arguments, "time_fixed", default: 60)
         config.timeAdd = try MCPArguments.uint32(arguments, "time_add")
         if let aiLevel = arguments["ai_level"] as? Int, aiLevel >= 0 {
@@ -392,13 +423,16 @@ struct RoomQuickTestTool: MCPTool {
         }
 
         context.log("🧪 room_quick_test 完成：\(playerCount) 人房已開局")
-        return [
+        var result: [String: Any] = [
             "success": true,
             "playerCount": playerCount,
+            "mode": resolved.mode,
             "steps": steps,
             "reconnect_hint": "客戶端尚未進入對局。請執行 execute_js: "
                 + NakiWebSocketScript.forceReconnect
                 + " 讓客戶端以斷線重連路徑進入該局，之後 bot_status 才會有手牌與推薦。"
         ]
+        if resolved.adjusted { result["modeAdjusted"] = true }
+        return result
     }
 }

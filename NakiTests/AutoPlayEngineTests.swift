@@ -42,6 +42,7 @@ final class AutoPlayEngineTests: XCTestCase {
                             mode: AutoPlayMode = .auto,
                             recommendations: [Recommendation] = [],
                             isSanma: Bool = false,
+                            sanmaCapableDecision: Bool = false,
                             isReady: Bool = true,
                             maxAttempts: Int = 15,
                             poll: TimeInterval = 1.0) -> AutoPlayEngine {
@@ -54,6 +55,7 @@ final class AutoPlayEngineTests: XCTestCase {
                                        recommendations: recommendations,
                                        seat: 0,
                                        isSanma: isSanma,
+                                       sanmaCapableDecision: sanmaCapableDecision,
                                        tsumoTile: nil,
                                        isReady: isReady,
                                        // 預設「推薦對應當前 oplist」＝ production 常態
@@ -386,6 +388,28 @@ final class AutoPlayEngineTests: XCTestCase {
                        "內建模型只有四麻一份；手動觸發不經閘門，得自己擋")
         XCTAssertEqual(sends, 0)
         XCTAssertNotNil(store.pending)
+    }
+
+    /// 三麻引擎（本地 Akagi 三麻）算的那一手：手動觸發放行
+    func testManualTriggerSendsOnSanmaWhenDecisionIsSanmaCapable() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var sends = 0
+        sender.sendHandler = { _ in
+            sends += 1
+            return self.ok()
+        }
+        discardSnapshot(store)
+
+        let engine = makeEngine(store: store, sender: sender,
+                                recommendations: discardRecommendation,
+                                isSanma: true, sanmaCapableDecision: true)
+        let run = await engine.runManualCycle()
+
+        guard case .sent = run.outcome else {
+            return XCTFail("三麻引擎的決策應放行，實際: \(run.outcome)")
+        }
+        XCTAssertEqual(sends, 1)
     }
 
     func testManualTriggerWithoutOplistDoesNotSchedule() async {
@@ -795,6 +819,144 @@ final class AutoPlayEngineTests: XCTestCase {
         XCTAssertEqual(run.outcome, .sendFailed(action: .none, attempts: 2))
         XCTAssertFalse(run.log.contains { $0.contains("Pass 已發送") })
         XCTAssertTrue(run.log.contains { $0.contains("Pass 送出失敗") })
+    }
+
+    // MARK: - K1：跨輪退避與斷線（live 房 30887：拔北 5 分鐘重送 1246 次）
+
+    private func backoffEngine(store: LiqiOperationStore,
+                               sender: LiqiActionSender,
+                               recommendations: [Recommendation],
+                               clock: @escaping () -> Date,
+                               maxAttempts: Int = 15,
+                               cap: TimeInterval = 30,
+                               onStall: @escaping (AutoPlayStall?) -> Void = { _ in }) -> AutoPlayEngine {
+        var t = timing(maxAttempts: maxAttempts)
+        t.failureBackoff = 2
+        t.failureBackoffCap = cap
+        t.clock = clock
+        return AutoPlayEngine(
+            store: store, sender: sender, timing: t,
+            context: {
+                AutoPlayEngine.Context(mode: .auto, recommendations: recommendations,
+                                       seat: 0, isSanma: false, tsumoTile: "N", isReady: true,
+                                       recommendationsOplistSequence: store.pending?.sequence)
+            },
+            onStallChanged: onStall)
+    }
+
+    private func babeiSnapshot(_ store: LiqiOperationStore) {
+        store.record(seat: 0, operations: [LiqiOperation(type: .babei)],
+                     timeFixed: 300_000, contextTile: "4z", source: "test")
+    }
+
+    /// 送出通道不存在：本輪立刻停手、停滯立刻上畫面、退避期間一個 byte 都不送；
+    /// 重連後的新 oplist 立刻恢復，送出成功清掉停滯。
+    func testOfflineStopsRetryingFlagsStallAndResumesOnNewOplist() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var sends = 0
+        var online = false
+        sender.sendHandler = { _ in
+            sends += 1
+            return online ? self.ok() : .failure("no_open_majsoul_connection")
+        }
+        var now = Date()
+        var reported: [AutoPlayStall?] = []
+        let engine = backoffEngine(
+            store: store, sender: sender,
+            recommendations: [Recommendation(tile: "kita", probability: 0.99, actionType: .kita)],
+            clock: { now }, onStall: { reported.append($0) })
+        babeiSnapshot(store)
+
+        let first = await engine.runCycle(now: now)
+        XCTAssertEqual(first.outcome, .sendFailed(action: .kita, attempts: 1))
+        XCTAssertEqual(sends, 1, "沒有連線就不在本輪重送")
+        XCTAssertEqual(reported.last??.reason, "no_open_majsoul_connection")
+        XCTAssertEqual(reported.last??.consecutiveTicks, 1, "斷線不等 4 拍門檻")
+
+        for _ in 0..<3 {
+            now += 0.6
+            let blocked = await engine.runCycle(now: now)
+            XCTAssertEqual(blocked.outcome, .notSent(reason: "backoff"))
+        }
+        XCTAssertEqual(sends, 1, "退避期間不送")
+        XCTAssertEqual(reported.last??.reason, "no_open_majsoul_connection", "退避期間停滯照亮")
+
+        now += 0.3   // 2.1 秒：第一段退避（2 秒）到期，探一次
+        _ = await engine.runCycle(now: now)
+        XCTAssertEqual(sends, 2)
+        now += 3.9   // 第二段退避加倍成 4 秒
+        let doubled = await engine.runCycle(now: now)
+        XCTAssertEqual(doubled.outcome, .notSent(reason: "backoff"))
+        XCTAssertEqual(sends, 2)
+
+        online = true
+        babeiSnapshot(store)   // 重連後 resync 帶來新的一批 oplist
+        let resumed = await engine.runCycle(now: now)
+        XCTAssertEqual(resumed.outcome, .sent(action: .kita, tile: "kita", attempts: 1))
+        XCTAssertEqual(sends, 3)
+        XCTAssertEqual(reported.last, .some(nil), "送出成功要清掉停滯")
+    }
+
+    /// 非斷線的失敗（例如受理但沒回音）：本輪照舊重試，跨輪退避加倍到上限
+    func testFailedCycleBacksOffDoublingUpToCap() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var sends = 0
+        sender.sendHandler = { _ in sends += 1; return .failure("no channel") }
+        var now = Date()
+        var reported: [AutoPlayStall?] = []
+        let engine = backoffEngine(store: store, sender: sender,
+                                   recommendations: discardRecommendation,
+                                   clock: { now }, maxAttempts: 2, cap: 5,
+                                   onStall: { reported.append($0) })
+        discardSnapshot(store)
+
+        let first = await engine.runCycle(now: now)
+        XCTAssertEqual(first.outcome, .sendFailed(action: .discard, attempts: 2))
+        XCTAssertEqual(sends, 2)
+        XCTAssertTrue(first.log.contains { $0.contains("2 秒後再試") }, "退避要留下痕跡")
+        XCTAssertTrue(reported.compactMap { $0 }.isEmpty, "非斷線失敗照 4 拍門檻，不立刻報停滯")
+
+        var expectedSends = 2
+        for delay in [2.0, 4.0, 5.0, 5.0] {
+            now += delay - 0.1
+            let blocked = await engine.runCycle(now: now)
+            XCTAssertEqual(blocked.outcome, .notSent(reason: "backoff"), "退避 \(delay) 秒內")
+            XCTAssertEqual(sends, expectedSends)
+            now += 0.2
+            _ = await engine.runCycle(now: now)
+            expectedSends += 2
+            XCTAssertEqual(sends, expectedSends, "退避 \(delay) 秒到期要再試一輪")
+        }
+    }
+
+    /// 和牌例外：伺服器拒絕之類的失敗不退避（漏和不可逆）；斷線時本輪仍重送，
+    /// 用完才退避。
+    func testHoraBacksOffOnlyWhenOffline() async {
+        for (detail, nextOutcomeIsBackoff) in [("no channel", false), ("no_open_majsoul_connection", true)] {
+            let store = LiqiOperationStore()
+            let sender = LiqiActionSender()
+            var sends = 0
+            sender.sendHandler = { _ in sends += 1; return .failure(detail) }
+            let now = Date()
+            let engine = backoffEngine(store: store, sender: sender, recommendations: [],
+                                       clock: { now }, maxAttempts: 2)
+            tsumoSnapshot(store)
+
+            let first = await engine.runCycle(now: now)
+            XCTAssertEqual(first.outcome, .sendFailed(action: .hora, attempts: 2), detail)
+            XCTAssertEqual(sends, 2, "\(detail)：和牌在本輪要重送")
+
+            let next = await engine.runCycle(now: now)
+            if nextOutcomeIsBackoff {
+                XCTAssertEqual(next.outcome, .notSent(reason: "backoff"), detail)
+                XCTAssertEqual(sends, 2)
+            } else {
+                XCTAssertEqual(next.outcome, .sendFailed(action: .hora, attempts: 2), detail)
+                XCTAssertEqual(sends, 4)
+            }
+        }
     }
 }
 

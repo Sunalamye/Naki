@@ -32,7 +32,7 @@ protocol MahjongBot: AnyObject {
     var cloudHost: String? { get }
 
     /// 雲端已設定但目前**退化中**（斷路器不健康或退避中）——決策正在用
-    /// rollback 的本地模型（三麻＝沒有推薦）。UI 依此顯示紅色警示。
+    /// rollback 的本地模型（三麻＝本地 Akagi 三麻引擎）。UI 依此顯示紅色警示。
     var cloudDegraded: Bool { get }
 
     /// 雲端啟用期間**連續**以非雲端來源結束的決策數；0＝雲端正常服務。

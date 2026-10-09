@@ -30,6 +30,10 @@ struct NakiMCPDependencies {
   /// 牌局狀態的唯一真實來源（SwiftUI 側欄讀同一個物件）
   let store: GameStore
 
+  /// 畫面開關與語言（`/debug/ui` 寫入；View 讀同一份）
+  let ui: UIState
+  let settings: SettingsStore
+
   /// 在遊戲頁面執行 JS（`execute_js` / `POST /js`）
   let executeJavaScript: ExecuteJavaScriptAction
 

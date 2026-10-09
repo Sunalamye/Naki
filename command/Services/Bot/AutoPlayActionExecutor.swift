@@ -26,6 +26,9 @@ import Foundation
 /// 「哪個動作送出哪一種 request」「成功才 markHandled」就有機械驗收依據。
 enum AutoPlayActionExecutor {
 
+    /// 拔北的權威回音窗下限（毫秒）
+    static let kitaEchoTimeoutMs = 1500
+
     /// 送出一個已經決定好的動作。
     ///
     /// - Parameters:
@@ -129,13 +132,14 @@ enum AutoPlayActionExecutor {
 
         case .kita:
             // 拔北（三麻）：ReqSelfOperation type=11（babei）。
-            // 只有雲端 3p 推薦會走到這裡（gate/resolver 已確認 oplist 有 babei）。
-            log("執行: 拔北")
-            spec = LiqiRequestBuilder.babei()
+            // 只有三麻引擎的推薦會走到這裡（gate/resolver 已確認 oplist 有 babei）。
+            let moqie = (tsumoTile == "N")
+            log("執行: 拔北 (moqie=\(moqie))")
+            spec = LiqiRequestBuilder.babei(moqie: moqie)
 
         case .ryukyoku:
             // 九種九牌：ReqSelfOperation type=10（kyushu）。
-            // 同樣只有雲端推薦會走到這裡（resolver 已確認 oplist 有 kyushu）。
+            // 同樣只有三麻引擎的推薦會走到這裡（resolver 已確認 oplist 有 kyushu）。
             log("執行: 九種九牌")
             spec = LiqiRequestBuilder.kyushu()
 
@@ -207,9 +211,12 @@ enum AutoPlayActionExecutor {
             // `SelfActionEchoTracker`）。不消化 oplist 就會由重試框架重送，
             // 而它每次都重驗 `isStillValid`，所以不會雙送。
             // 「過」跳過：伺服器不為 cancel 廣播我方 action，等它必然逾時。
+            // 拔北首送 0.98 秒後才見回音時，700ms 窗已重送第二次（2026-10-09 房 13364）；
+            // 手裡有兩張北時多送一次可能多拔一張。
+            let echoWindow = action == .kita ? max(echoTimeoutMs, kitaEchoTimeoutMs) : echoTimeoutMs
             if let echo, echoTimeoutMs > 0, action != .none,
-               await !echo.waitForEcho(after: echoBaseline, timeoutMs: echoTimeoutMs) {
-                event("⚠️ \(action.rawValue) 已受理但 \(echoTimeoutMs)ms 內沒有權威回音（疑似丟單）→ 保留 oplist 重送")
+               await !echo.waitForEcho(after: echoBaseline, timeoutMs: echoWindow) {
+                event("⚠️ \(action.rawValue) 已受理但 \(echoWindow)ms 內沒有權威回音（疑似丟單）→ 保留 oplist 重送")
                 return LiqiSendResult(method: raw.method, msgId: raw.msgId, byteCount: raw.byteCount,
                                       success: false, detail: "no_echo")
             }

@@ -119,7 +119,7 @@ enum NakiGameAction {
             return LiqiRequestBuilder.kyushu(timeuse: timeuse)
 
         case "babei":
-            return LiqiRequestBuilder.babei(timeuse: timeuse)
+            return LiqiRequestBuilder.babei(moqie: arguments["moqie"] as? Bool ?? false, timeuse: timeuse)
 
         case "pass", "none", "cancel":
             // 回應他家打牌走 inputChiPengGang，自家回合的選項走 inputOperation
@@ -278,7 +278,7 @@ struct GameActionTool: MCPTool {
         properties: [
             "action": .string("動作名稱：discard / riichi / chi / pon / kan / tsumo / ron / hora / kyushu / babei / pass"),
             "tile": .string("discard / riichi 必填；kan 可選。MJAI 或雀魂記法"),
-            "moqie": .boolean("discard / riichi：是否摸切（預設 false）"),
+            "moqie": .boolean("discard / riichi：是否摸切；babei：剛摸到的北要 true（預設 false）"),
             "index": .integer("chi / pon / kan：組合索引（預設 0）"),
             "kanType": .string("kan：ankan（暗槓）/ kakan（加槓）/ minkan（大明槓）；不填則由 game_ops 推導"),
             "timeuse": .integer("思考秒數（預設 0）"),

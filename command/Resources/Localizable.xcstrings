@@ -1016,35 +1016,6 @@
         }
       }
     },
-    "URL 無法解析": {
-      "comment": "測試連線結果（L10n.text）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cannot parse the URL"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "URL を解析できません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "URL을 해석할 수 없습니다"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法解析 URL"
-          }
-        }
-      }
-    },
     "WebSocket 連線狀態": {
       "comment": "連線指示 a11y",
       "localizations": {
@@ -1480,35 +1451,6 @@
         }
       }
     },
-    "——可用模型欄旁的箭頭直接選": {
-      "comment": "測試連線結果後綴",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": " — pick one with the arrow next to the model field"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "——モデル欄の横の矢印から選べます"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "——모델 입력란 옆의 화살표로 바로 선택하세요"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "——可直接用模型栏旁的箭头选择"
-          }
-        }
-      }
-    },
     "⚠️ 安裝＝信任作者。插件能用你的帳號送動作、讀頁面上任何資料，Naki 無法阻止。": {
       "comment": "匯入警告",
       "localizations": {
@@ -1914,59 +1856,147 @@
         }
       }
     },
-    "三麻僅雲端推論：本地四麻模型不啟動，雲端未生效時沒有推薦。": {
+    "Akagi 三麻・default strength": {
+      "comment": "側欄模型名：本地 Akagi 三麻引擎；強度如實標示（機器翻譯，未經母語校對）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sanma runs on cloud inference only: the local Yonma model is not started, so there are no recommendations when the cloud isn't active."
+            "value": "Akagi 3P・default strength"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻はクラウド推論のみ：ローカルの四麻モデルは起動せず、クラウドが有効でない間はおすすめが出ません。"
+            "value": "Akagi 三麻・default strength"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "3인 마작은 클라우드 추론만 지원: 로컬 4인 마작 모델은 시작되지 않으며, 클라우드가 동작하지 않으면 추천이 없습니다."
+            "value": "Akagi 3인 마작・default strength"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻仅云端推理：本地四麻模型不启动，云端未生效时没有推荐。"
+            "value": "Akagi 三麻・default strength"
           }
         }
       }
     },
-    "三麻提醒：雲端 3p 模型是目前唯一的真三麻路徑；雲端失敗退回的本地模型仍是四麻模型，側欄的決策來源會如實顯示。": {
-      "comment": "雲端區塊提醒",
+    "三麻提醒：本地有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的決策來源會如實顯示。": {
+      "comment": "設定頁雲端區塊提醒（機器翻譯，未經母語校對）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sanma note: the cloud 3p model is currently the only true Sanma path; the local model used when the cloud fails is still the Yonma model, and the sidebar shows the decision source accurately."
+            "value": "3P note: the local Akagi 3P engine (default strength, imitates Tenhou players) takes over, and the cloud has priority when enabled; the sidebar shows the real decision source."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻に関する注意: クラウドの 3p モデルが現在唯一の本当の三麻経路です。クラウドが失敗したときに戻るローカルモデルは依然として四麻モデルで、サイドバーの判断元には実際のものが表示されます。"
+            "value": "三麻の注意：ローカルの Akagi 三麻（default strength、天鳳プレイヤーを模倣）が引き継ぎ、クラウド有効時はクラウド優先です。サイドバーに実際の判断元が表示されます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "3인 마작 안내: 클라우드 3p 모델이 현재 유일한 진짜 3인 마작 경로입니다. 클라우드 실패 시 돌아가는 로컬 모델은 여전히 4인 마작 모델이며, 사이드바의 판단 출처에 실제 값이 표시됩니다."
+            "value": "3인 마작 안내: 로컬 Akagi 3인 마작(default strength, 텐호 플레이어 모방)이 이어받으며, 클라우드가 켜져 있으면 클라우드가 우선입니다. 사이드바에 실제 결정 출처가 표시됩니다."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻提醒：云端 3p 模型是目前唯一真正的三麻路径；云端失败时退回的本地模型仍是四麻模型，侧栏的决策来源会如实显示。"
+            "value": "三麻提醒：本地有 Akagi 三麻（default strength，模仿天凤玩家）接手，云端启用时云端优先；侧栏的决策来源会如实显示。"
+          }
+        }
+      }
+    },
+    "雲端失敗——正在用本地 Akagi 三麻（連續 %lld 手）": {
+      "comment": "側欄紅色警示：三麻雲端失敗改用本地（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud failed — using the local Akagi 3P engine (%lld in a row)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クラウド失敗——ローカルの Akagi 三麻を使用中（%lld 手連続）"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "클라우드 실패 — 로컬 Akagi 3인 마작 사용 중 (%lld수 연속)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端失败——正在使用本地 Akagi 三麻（连续 %lld 手）"
+          }
+        }
+      }
+    },
+    "三麻尚無推薦：本地 Akagi 三麻引擎在下一個決策點才會產出。": {
+      "comment": "側欄提示：三麻還沒有推薦（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No 3P recommendation yet: the local Akagi 3P engine produces one at the next decision point."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三麻の推奨はまだありません：ローカルの Akagi 三麻エンジンは次の決定点で推奨を出します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3인 마작 추천이 아직 없습니다: 로컬 Akagi 3인 마작 엔진이 다음 결정 시점에 추천을 만듭니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三麻暂无推荐：本地 Akagi 三麻引擎会在下一个决策点给出推荐。"
+          }
+        }
+      }
+    },
+    "選了三麻但沒有三麻引擎，不排隊——排進去也不會出手。": {
+      "comment": "全自動續局：選了三麻但沒有三麻引擎（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3P selected but no 3P engine is available; not queuing, since it would not play."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三麻が選択されていますが三麻エンジンがないため、キューに入りません。入っても打てません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3인 마작을 선택했지만 3인 마작 엔진이 없어 대기열에 넣지 않습니다. 들어가도 패를 치지 못합니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选了三麻但没有三麻引擎，不排队——排进去也不会出手。"
           }
         }
       }
@@ -6112,31 +6142,31 @@
         }
       }
     },
-    "搜索...": {
+    "搜尋…": {
       "comment": "日誌搜尋框 placeholder",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Search..."
+            "value": "Search…"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "検索..."
+            "value": "検索…"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "검색..."
+            "value": "검색…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "搜索..."
+            "value": "搜索…"
           }
         }
       }
@@ -6617,7 +6647,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "無効"
+            "value": "オフ"
           }
         },
         "ko": {
@@ -9616,31 +9646,31 @@
         }
       }
     },
-    "運行中，連接埠 %lld": {
-      "comment": "MCP a11y value；%lld 為連接埠",
+    "運行中，連接埠 %@": {
+      "comment": "MCP a11y value；%@ 為連接埠（字串，避免千分位）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Running, port %lld"
+            "value": "Running, port %@"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "稼働中、ポート %lld"
+            "value": "稼働中、ポート %@"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "실행 중, 포트 %lld"
+            "value": "실행 중, 포트 %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "运行中，端口 %lld"
+            "value": "运行中，端口 %@"
           }
         }
       }
@@ -9670,35 +9700,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "过"
-          }
-        }
-      }
-    },
-    "選了三麻但雲端推論未啟用，不排隊——三麻只有雲端路徑，排進去也不會出手。": {
-      "comment": "續局失敗原因",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sanma selected but cloud inference is off — not queuing. Sanma only works via cloud; queuing would just sit idle."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "三麻を選択していますがクラウド推論が無効のため、マッチングしません——三麻はクラウド経由のみで、入っても打牌できません。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "3인 마작을 선택했지만 클라우드 추론이 꺼져 있어 대기열에 넣지 않습니다. 3인 마작은 클라우드 경로뿐이라 들어가도 손을 쓰지 않습니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选了三麻但云端推理未启用，不排队——三麻只有云端路径，排进去也不会出手。"
           }
         }
       }
@@ -10427,34 +10428,6 @@
         }
       }
     },
-    "雲端失敗——本手無推薦（三麻不用本地，連續 %lld 手）": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cloud failed — no recommendation this turn (Sanma doesn't use local; %lld in a row)"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "クラウド失敗——この手はおすすめなし（三麻はローカル不使用、%lld 手連続）"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "클라우드 실패 — 이번 수는 추천 없음 (3인 마작은 로컬 미사용, %lld수 연속)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "云端失败——本手无推荐（三麻不用本地，连续 %lld 手）"
-          }
-        }
-      }
-    },
     "雲端失敗——正在用本地模型（連續 %lld 手）": {
       "localizations": {
         "en": {
@@ -10711,35 +10684,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "云端推理已关闭，当前使用内置本地模型"
-          }
-        }
-      }
-    },
-    "雲端推論未啟用，三麻不會排隊——三麻只有雲端路徑，排進去也不會出手。": {
-      "comment": "全自動設定表警告",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cloud inference is off, so Sanma games won't be queued — Sanma only has the cloud path, and a queued game would make no moves."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "クラウド推論がオフのため、三麻はマッチングされません——三麻はクラウド経由のみで、マッチングしても打牌しません。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "클라우드 추론이 꺼져 있어 3인 마작은 대기열에 들어가지 않습니다——3인 마작은 클라우드 경로만 있어 대기열에 들어가도 패를 치지 않습니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "云端推理未启用，三麻不会排队——三麻只有云端路径，排进去也不会出手。"
           }
         }
       }
@@ -11150,31 +11094,298 @@
         }
       }
     },
-    "（但開關未開，對局仍走本地模型）": {
-      "comment": "測試連線結果後綴",
+    "選擇四麻模型": {
+      "comment": "模型欄選單按鈕標籤（四麻）（機器翻譯，未經母語校對）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": " (but the switch is off, so games still use the local model)"
+            "value": "Choose Yonma model"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "（ただしスイッチがオフのため、対局はローカルモデルのままです）"
+            "value": "四麻モデルを選択"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "(하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)"
+            "value": "4인 마작 모델 선택"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "（但开关未开，对局仍使用本地模型）"
+            "value": "选择四麻模型"
+          }
+        }
+      }
+    },
+    "選擇三麻模型": {
+      "comment": "模型欄選單按鈕標籤（三麻）（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Sanma model"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三麻モデルを選択"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3인 마작 모델 선택"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择三麻模型"
+          }
+        }
+      }
+    },
+    "已啟用": {
+      "comment": "插件列狀態標籤（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용 중"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已启用"
+          }
+        }
+      }
+    },
+    "%lld 次/分・top-%lld": {
+      "comment": "雲端限額；兩個 %lld 依序為每分鐘請求數、top-k（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld req/min · top-%lld"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 回/分・top-%lld"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld회/분・top-%lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 次/分・top-%lld"
+          }
+        }
+      }
+    },
+    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本地模型）": {
+      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單；由既有三段譯文組合（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the local model)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局はローカルモデルのままです）"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本地模型）"
+          }
+        }
+      }
+    },
+    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本地模型）——可用模型欄旁的箭頭直接選": {
+      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單；由既有三段譯文組合（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the local model) — pick one with the arrow next to the model field"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局はローカルモデルのままです）——モデル欄の横の矢印から選べます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)——모델 입력란 옆의 화살표로 바로 선택하세요"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本地模型）——可直接用模型栏旁的箭头选择"
+          }
+        }
+      }
+    },
+    "正在初始化...": {
+      "comment": "WebView 尚未建立時的載入指示（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Initializing..."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "初期化中..."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "초기화하는 중..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在初始化..."
+          }
+        }
+      }
+    },
+    "Log": {
+      "comment": "桌面日誌面板標題（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Log"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "로그"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日誌"
+          }
+        }
+      }
+    },
+    "revision：%@": {
+      "comment": "插件匯入預覽；%@ 為 revision 前 12 碼（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision：%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "revision：%@"
+          }
+        }
+      }
+    },
+    "%@，%@": {
+      "comment": "最佳選擇卡無障礙值；兩個 %@ 依序為推薦動作、機率百分比（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@、%@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@, %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@，%@"
           }
         }
       }

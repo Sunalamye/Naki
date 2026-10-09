@@ -46,11 +46,11 @@ curl -X POST http://127.0.0.1:8765/js \
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |
 | Web client | Unity WebGL `chs_t-WebGL-release-4.0.45(45)`（2026-08-01 live） |
-| AI package | MortalSwift 0.5.3／`51cf407…`（由已提交的 `Package.resolved` 釘住；含紅五 decode／振聽／食い替え等修正） |
+| AI package | MortalSwift 0.6.0／`da7238c…`（含 AkagiSanma 三麻引擎；由已提交的 `Package.resolved` 釘住） |
 | Debug／MCP | loopback port 8765，same process／same port |
 | MCP 協定 | 雙版本並存：帶 `_meta.io.modelcontextprotocol/protocolVersion` 走 2026-07-28（stateless、`server/discover`、`resultType`），`initialize` handshake 服務 2025-03-26～2025-11-25 |
 
-Xcode dependency requirement 是 MortalSwift `[0.5.3,0.6.0)`（`upToNextMinorVersion`、`minimumVersion = 0.5.3`，`project.pbxproj:1203`），不是 exact——**0.5.0 會編不過**，因為 `NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API。範圍下界只是保護，真正決定 revision 的是 `Package.resolved`（`Naki.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`）：它已從 `.gitignore` 移出並提交，clean clone 會拿到同一個 `51cf407`。**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**，否則 lockfile 又會跟 requirement 漂開。
+Xcode dependency requirement 是 MortalSwift `[0.6.0,0.7.0)`（`upToNextMinorVersion`、`minimumVersion = 0.6.0`，`project.pbxproj:1230`），不是 exact——**0.5.0 會編不過**，因為 `NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API。範圍下界只是保護，真正決定 revision 的是 `Package.resolved`（`Naki.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`）：它已從 `.gitignore` 移出並提交，clean clone 會拿到同一個 `da7238c`。**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**，否則 lockfile 又會跟 requirement 漂開。
 
 ## Build／test
 
@@ -148,7 +148,7 @@ OptionalOperationList
 
 `WebSession.init` 的 `#available`：OS 26+ 用 `WebPageBackend`（WebPage），iOS 17–25 用 `LegacyWebBackend`（WKWebView）。macOS deployment target 是 26，所以 macOS 不走 Legacy。p3-4 之後**兩條 path 只差三件事**：怎麼執行 JS（WebPage 原生函式體 vs WKWebView 的 IIFE 包裝）、怎麼重連（關 WebSocket vs 整頁重載）、交出哪個 View。其餘（bot、event stream、autoplay engine、MCP、狀態）全部共用一份。
 
-兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（動作 switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、bounded retry 15 次）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
+兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（動作 switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、每輪 bounded retry 15 次；同一批 oplist 跨輪退避 2→30 秒，`no_open_majsoul_connection` 時非和牌動作立刻停手並立即報停滯，換批才恢復）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
 
 ## 自摸問題的 current truth
 
@@ -174,19 +174,27 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## MortalSwift／模型
 
-- 目前解到 0.5.3／`51cf407`（`Package.resolved`）；bundled Core ML 仍是固定 Mortal v4 四麻模型。
+- 目前解到 0.6.0／`da7238c`（`Package.resolved`）；bundled Core ML 仍是固定 Mortal v4 四麻模型。
 - 0.5.2 移除 `PlayerState` 的 `isAllLast`／`isWRiichi`／`kansOnBoard`／`dorasOwned`／`dorasSeen`／`atIppatsu`，Naki 全都沒用到。
 - 0.5.3：`handleReach` 在自家宣言後打開 `canDiscard`，`BundledCoreMLBot` 因此在 `react` 回 `reach` 時餵合成 `reach` 再 `inferCurrentState()`，推薦列的打牌項是立直後的第二次推論（失敗退回立直前的打牌項）。
 - observation `1012 × 34`，action mask 46。
 - libriichi parity 是兩套固定 fixtures 的逐格測試；Debug／Release 各 47 tests 通過，不是全狀態證明。
 - 0.5.x 沒換 model blobs；沒有千局級 strength benchmark。不得稱「最新最強模型」。
-- **三麻走雲端-only**（2026-08-05 D15）：`NativeBotController` 在 `is3P` 時建的是
-  `CloudBot(local: nil, …)`，bundled 四麻模型連建構都不呼叫。雲端不可用時那一手
-  誠實無推薦，**不會**退回四麻模型（obs 1012×34 對三麻是結構性無效）。
-  自動送出另有三層 fail-closed（gate 逐決策看 `cloudDecision`、resolver 降級、
-  `runManualCycle` 自己擋），**但伺服器授權的和牌三層都放行**（和牌不需要模型）：
+- **三麻本地引擎是 Akagi 三麻**（2026-10-09 D23，取代 D15 的雲端-only）：
+  `NativeBotController` 在 `is3P` 時建 `CloudBot(local: AkagiSanmaBot, …)`，雲端優先、
+  本地接手；bundled 四麻模型仍不碰三麻（obs 1012×34 對三麻是結構性無效）。
+  `AkagiSanmaBot` 是 MortalSwift `AkagiSanma`（純 Swift、Akagi v3 三麻 BC 權重，
+  **模仿天鳳人類，強度不是 Mortal 等級**），動作類別由 `LiqiOperationStore.pending`
+  授權（和牌只看形狀、不判役）；pending 缺失或不是本家時只剩捨牌與 pass。
+  自動送出另有三層 fail-closed（gate 逐決策看 `sanmaCapableDecision`＝推薦來自雲端 3p
+  或 `source == "local-akagi3p"`、resolver 降級、`runManualCycle` 自己擋），
+  **伺服器授權的和牌三層都放行**（和牌不需要模型）：
   `AutoPlayGate.swift:86`、`AutoPlayDecisionResolver.swift:86-95`、`AutoPlayEngine.swift:570`。
-  其餘動作仍擋。三麻仍**沒有 live 對局驗證**。
+  其餘動作仍擋。**三麻 live 已驗（2026-10-09，三局，`.swfd/logs/s3-live-{4,5,6}/`）**：
+  本地引擎建構、立直、自摸／榮和、碰、拔北 11/11（含剛摸到北 `080b2801` 與在手北
+  `080b`）鏈路完整；三麻友人房要帶三麻細則（赤寶 2、起點 35000、返點 40000），
+  四麻值會回 error 1112。仍未驗證：被擠下線後的退避與停滯顯示（live 未遇到）、
+  親家局首第一打偶發「受理卻無權威回音、700ms 後重送才打出」（三次，原因未明）。
 
 ## 2026-09-30 審查修正後的行為
 

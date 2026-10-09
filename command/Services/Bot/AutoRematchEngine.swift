@@ -30,9 +30,9 @@ final class AutoRematchEngine {
         let isReady: Bool
         /// 全自動要排三麻還是四麻（使用者在切到全自動時選的；預設四麻）
         let prefersSanma: Bool
-        /// 雲端推論是否啟用。三麻**只有**雲端路徑（見 CLAUDE.md），
-        /// 沒有雲端就不該自動排三麻——排得進去但一手都不會打。
-        let cloudInferenceActive: Bool
+        /// 目前引擎是否支援三麻（雲端 3p 或本地 Akagi 三麻，`NativeBotController.supports3P`）。
+        /// 沒有三麻引擎就不該自動排三麻——排得進去但一手都不會打。
+        let sanmaEngineAvailable: Bool
         /// 段位允許的房間裡要挑最低還是最高
         let roomPreference: RoomPreference
         /// 東風戰（true）還是半莊。預設東風：一場快得多，續局的意義才明顯。
@@ -41,13 +41,13 @@ final class AutoRematchEngine {
         init(mode: AutoPlayMode,
              isReady: Bool,
              prefersSanma: Bool = false,
-             cloudInferenceActive: Bool = false,
+             sanmaEngineAvailable: Bool = false,
              roomPreference: RoomPreference = .lowest,
              prefersEast: Bool = true) {
             self.mode = mode
             self.isReady = isReady
             self.prefersSanma = prefersSanma
-            self.cloudInferenceActive = cloudInferenceActive
+            self.sanmaEngineAvailable = sanmaEngineAvailable
             self.roomPreference = roomPreference
             self.prefersEast = prefersEast
         }
@@ -59,8 +59,8 @@ final class AutoRematchEngine {
         case notFullAuto
         /// 還沒有「已確認是這個人數」的 match_sid——**不猜**，見 `ObservedMatchSids`
         case noObservedSid(sanma: Bool)
-        /// 選了三麻但雲端推論沒開：排得進去卻一手都不會打
-        case sanmaWithoutCloud
+        /// 選了三麻但沒有三麻引擎：排得進去卻一手都不會打
+        case sanmaEngineMissing
         /// 頁面／送出通道沒就緒
         case notReady
         /// 大廳 session 探針一直不通
@@ -201,11 +201,11 @@ final class AutoRematchEngine {
         let sanma = context().prefersSanma
         let kind = sanma ? "三麻" : "四麻"
 
-        // 三麻只有雲端路徑（bundled 模型的 obs 1012×34 對三麻結構性無效）。
-        // 沒有雲端還自動排三麻＝把帳號送進一場自己不會出手的對局。
-        if sanma && !context().cloudInferenceActive {
-            return fail("選了三麻但雲端推論未啟用，不排隊——三麻只有雲端路徑，排進去也不會出手。",
-                        .sanmaWithoutCloud)
+        // 四麻 bundled 模型的 obs 1012×34 對三麻結構性無效，三麻需要雲端 3p 或本地 Akagi 三麻。
+        // 沒有三麻引擎還自動排三麻＝把帳號送進一場自己不會出手的對局。
+        if sanma && !context().sanmaEngineAvailable {
+            return fail("選了三麻但沒有三麻引擎，不排隊——排進去也不會出手。",
+                        .sanmaEngineMissing)
         }
 
         // 段位決定能進哪些房間；取不到就讓 resolver 退回「沿用上次那個房間」

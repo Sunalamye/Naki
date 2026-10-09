@@ -136,13 +136,13 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 
 | Tool | 作用 |
 |------|------|
-| `room_create` | 建立友人房 |
+| `room_create` | 建立友人房（mode：四人 1／2，三人 11／12；三人預設 12，給 1／2 會映射並回 `modeAdjusted`） |
 | `room_add_robot` | 加入機器人 |
 | `room_start` | 開局 |
 | `room_info` | 查房間資訊 |
 | `room_join` | 加入房間 |
 | `room_leave` | 離開房間 |
-| `room_quick_test` | 建房 → 補機器人 → 開局 |
+| `room_quick_test` | 建房 → 補機器人 → 開局（mode 規則同 `room_create`） |
 
 ### 表情（2）
 

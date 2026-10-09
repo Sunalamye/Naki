@@ -17,7 +17,7 @@
 //  `pon`、`chi_low|chi_mid|chi_high`、`kan`、`hora`、`ryukyoku`、`nukidora`、
 //  `none`。`nukidora`（拔北）對應 `.kita`（2026-08-05 三麻自動打鏈）；
 //  `ryukyoku`（九種九牌）對應 `.ryukyoku`（2026-08-07 補齊；在此之前它落 default
-//  回 nil，而三麻雲端-only 沒有本地兜底，於是整手無推薦、停擺到雀魂逾時代打）。
+//  回 nil，而當時三麻雲端-only 沒有本地兜底，於是整手無推薦、停擺到雀魂逾時代打）。
 //  未知標籤一律略過，不猜。
 //
 

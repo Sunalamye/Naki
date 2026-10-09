@@ -74,6 +74,31 @@ final class CloudBotTests: XCTestCase {
         return try await bot.react(events: [["type": "tsumo", "actor": 0, "pai": "1m"]])
     }
 
+    // MARK: identity
+
+    /// 設定生效後：本地引擎支援三麻就維持 true；否則只看雲端是否選了 3p 模型
+    func test_identity_supports3P_followsLocalOrCloud3pModel() async throws {
+        for (localSupports, model3P, expected) in [(true, "", true), (false, "", false),
+                                                    (false, "3p-x", true)] {
+            CloudMockURLProtocol.reset(script: [(500, "", [:])])
+            let local = StubEngine()
+            local.identity = BotIdentity(name: "stub", displayName: "Stub",
+                                         supports3P: localSupports, isLocal: true)
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [CloudMockURLProtocol.self]
+            let bot = CloudBot(
+                local: local, playerId: 0, is3P: false,
+                configProvider: {
+                    CloudInferenceConfig(enabled: true, baseURL: "http://mock.test",
+                                         apiKey: "SECRETKEY", model4P: "4p-x", model3P: model3P)
+                },
+                clientConfiguration: config)
+            try await feedOpening(bot)
+            _ = try await decide(bot, local: local, reaction: localDahai("1m"))
+            XCTAssertEqual(bot.identity.supports3P, expected, "local=\(localSupports) model3P=\(model3P)")
+        }
+    }
+
     // MARK: 閘門
 
     func test_nonDecisionPoints_neverCallAPI() async throws {

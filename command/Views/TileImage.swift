@@ -58,7 +58,7 @@ struct TileImage: View {
 
     /// 跟著 Dynamic Type 縮放，但**封頂 1.6×**。
     ///
-    /// 側欄是固定寬度（macOS 320pt、iOS 140pt），不封頂的話最大字級會把整列推爆。
+    /// 側欄寬度有限（macOS 面板 300–480pt、iOS 側欄 220–300pt），不封頂的話最大字級會把整列推爆。
     /// 舊版是用寫死的 `.font(.system(size: 28))` 迴避這件事（`RecommendationView`
     /// 當時的註解就說「改用 Dynamic Type 會與機率條錯位」）——那等於完全不支援。
     /// 封頂讓牌面在放大字級下仍然跟著長大，只是不會無限長。
@@ -101,11 +101,11 @@ struct TileImage: View {
     private var fallback: some View {
         RoundedRectangle(cornerRadius: 3)
             .fill(Color.white)
-            .overlay(
+            .overlay {
                 RoundedRectangle(cornerRadius: 3)
                     .strokeBorder(Color.secondary.opacity(0.45), lineWidth: 1)
-            )
-            .overlay(
+            }
+            .overlay {
                 Text(tile.displayNameKey)
                     .font(.system(size: max(7, width * 0.34), weight: .semibold))
                     .foregroundStyle(.black)
@@ -113,7 +113,7 @@ struct TileImage: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .padding(1)
-            )
+            }
     }
 
     // MARK: - Asset Mapping

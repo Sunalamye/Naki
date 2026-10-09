@@ -43,6 +43,8 @@ final class NakiActionLayerTests: XCTestCase {
         let send = sendAction ?? .unavailable("test_not_wired")
         return NakiMCPDependencies(
             store: store,
+            ui: UIState(),
+            settings: SettingsStore(),
             executeJavaScript: executeJavaScript ?? .unavailable,
             captureScreenshot: captureScreenshot ?? .unavailable,
             sendAction: send,

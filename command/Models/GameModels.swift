@@ -191,9 +191,14 @@ struct BotStatus: Equatable {
 
     // MARK: - Computed Properties
 
-    /// 這批推薦是否由雲端模型算出。三麻放行與 UI 警告的共同判準，
-    /// 規則見 `AutoPlayGate.Input.cloudDecision`。
+    /// 這批推薦是否由雲端模型算出。
     var isCloudDecision: Bool { decisionSource.hasPrefix("cloud:") }
+
+    /// 這批推薦是否由支援三麻的引擎算出（雲端 3p 或本地 Akagi 三麻）。
+    /// 三麻放行與 UI 警告的共同判準，規則見 `AutoPlayGate.Input.sanmaCapableDecision`。
+    var isSanmaCapableDecision: Bool {
+        isCloudDecision || decisionSource == AkagiSanmaBot.source
+    }
 
     /// 模型顯示名稱
     ///
@@ -202,10 +207,14 @@ struct BotStatus: Equatable {
     /// 拿四麻模型去推三麻，輸出不是「稍微偏差」而是**結構上無效**。
     /// 標成 "Mortal (3P)" 會讓人誤以為有專用模型。
     var modelDisplayKey: LocalizedStringKey {
-        let warn = is3P && !isCloudDecision
-        if modelName == "cloud-3p" {
-            return warn ? "雲端推論 (3P) ⚠️ 未生效，無推論" : "雲端推論 (3P)"
+        if is3P && modelName.hasSuffix("akagi-sanma-bc") {
+            // 雲端啟用時，雲端算的那一手標雲端 3p；其餘是本地 Akagi 三麻（強度如實標示）
+            return isCloudDecision ? "雲端推論 (3P)" : "Akagi 三麻・default strength"
         }
+        if is3P && modelName == "cloud-only" {
+            return isCloudDecision ? "雲端推論 (3P)" : "雲端推論 (3P) ⚠️ 未生效，無推論"
+        }
+        let warn = is3P && !isSanmaCapableDecision
         let base = modelName == "mortal" ? "Mortal (4P)" : modelName == "mortal3p" ? "Mortal (3P)" : modelName
         return warn ? "\(base) ⚠️ 三麻無專用模型" : LocalizedStringKey(base)
     }
@@ -257,13 +266,13 @@ struct Recommendation: Identifiable, Equatable {
         case pon = "pon"
         case kan = "kan"
         case hora = "hora"
-        /// 拔北（三麻）。只有雲端 3p 模型會產出（本地 action space 46 無此槽位）。
+        /// 拔北（三麻）。只有三麻引擎（雲端 3p／本地 Akagi 三麻）會產出（四麻 action space 46 無此槽位）。
         case kita = "kita"
         /// 九種九牌（配牌時么九牌 ≥ 9 種可宣告流局）。
         ///
         /// rawValue 取 `ryukyoku` 對齊雲端 API 與 MJAI 的動作名；送到雀魂時是
         /// `ReqSelfOperation type=10`（liqi 叫 kyushu）。與 `.kita` 同一個形狀：
-        /// 本地 action space 46 沒有這個槽位，只有雲端模型會產出。
+        /// 四麻 action space 46 沒有這個槽位，只有三麻引擎會產出。
         case ryukyoku = "ryukyoku"
         case none = "none"
         case unknown = "unknown"

@@ -199,6 +199,8 @@ fallback 到本地四麻模型的那一手**自動關回 fail-closed**。理由�
 
 ## D15. （2026-08-05 深夜）三麻改雲端-only：本地模型連啟動都不啟動
 
+> 2026-10-09 起由 D23 取代：本地引擎改為 Akagi 三麻，雲端-only 不再成立。
+
 live 三麻首戰揭露的病理（events.log 20260805-230638）：本地 4p 模型推三麻
 會**幻覺出吃窗口**（三麻沒有吃、伺服器也沒授權），CloudBot 把幻覺當決策點
 問伺服器 → null reaction ×3；一次真決策（拔北）在脫節時序下被伺服器
@@ -370,3 +372,32 @@ mask 可量，不在本輪範圍（立直後伺服器是否還送 oplist 未驗�
 mutation（拔掉 forced 短路）紅在該測試。**Mortal mask 在立直後真的是單元素**
 這件事沒有單測覆蓋（要造立直中盤局面），屬未驗證——但方向 fail-safe：
 mask 不是單元素就 `forced == false`，行為與修前完全相同。
+
+## D23. （2026-10-09）三麻本地推論接入：Akagi 三麻取代雲端-only
+
+**D15 的理由不再成立**：D15 擋掉的是「四麻 Mortal 模型推三麻」（幻覺吃窗口、
+結構性無效輸出）。MortalSwift 新 target `AkagiSanma` 是三麻專用的純 Swift 引擎
+（Akagi v3 三麻 BC 權重，37×27 obs、60 格動作空間，含拔北與九種九牌），
+問題出在模型而不是「本地」。
+
+**決定**：
+- `NativeBotController.createBot` 三麻建 `CloudBot(local: AkagiSanmaBot, is3P: true)`，
+  與四麻同形：雲端優先、本地閘門與接手；無雲端設定來源（Replay／單測）時 bot 就是
+  `AkagiSanmaBot` 本身。決策點改由本地引擎閘門，不再由 oplist sequence 驅動雲端。
+- 動作類別授權：`LiqiOperationStore.pending`（本家座位）的 oplist 型別映射成
+  引擎 `Kind`，discard／riichi／pon／ankan／minkan→daiminkan／kakan／tsumo／ron／
+  kyushu／babei→kita；chi 與 none 不授權。捨牌與 pass 永遠保留；pending 缺失或
+  不是本家時授權為空（fail-closed）。和牌只看形狀，役由伺服器 oplist 決定。
+- 三層 fail-closed 的判準由「雲端決策」擴成「三麻引擎的決策」：
+  `cloudDecision` 更名 `sanmaCapableDecision`，來源＝雲端 3p 或 `source == "local-akagi3p"`。
+  本地四麻 source（`local`）仍擋，原防線不變。
+- 強度如實標示：identity 的顯示名寫明「default strength：模仿天鳳人類，非 Mortal 等級」。
+- `CloudBot` 的 identity：本地引擎支援三麻時 `supports3P` 為真，不再只看雲端 `model3P`。
+
+**邊界**：局間確認與續局的三麻條件看「目前引擎支援三麻」，不再看雲端是否啟用。自家槓之後、嶺上牌之前本地引擎不回推薦。本地引擎建構失敗時退回雲端-only。本地 `forced` 量在授權閘之後的動作集，所以 pending 缺失時回應窗口只剩 pass
+會被視為強制手（不問雲端）。碰／槓的 consumed 與赤五 copy 逐組合對應、立直宣言牌與
+oplist 的比對仍未做（S1c）。
+
+**驗證**：`AkagiSanmaBotTests`（授權映射、捨牌、和牌授權／未授權、pending 缺失、榮和窗口
+forced、三層來源判準）。**沒有 live 三麻對局驗證。**
+

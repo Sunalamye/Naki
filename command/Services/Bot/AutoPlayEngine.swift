@@ -132,10 +132,10 @@ final class AutoPlayEngine {
         /// 自家座位（`GameStore.autoPlaySeat`，兩條 path 同一份定義）
         var seat: Int = 0
         var isSanma: Bool = false
-        /// 這批推薦是否由雲端模型算出（`BotStatus.isCloudDecision`，每輪重取）
-        var cloudDecision: Bool = false
-        /// 雲端推論是否已設定啟用（設定層，局間確認用；見 `AutoPlayGate.allowsConfirm`）
-        var cloudInferenceActive: Bool = false
+        /// 這批推薦是否由三麻引擎算出（`BotStatus.isSanmaCapableDecision`，每輪重取）
+        var sanmaCapableDecision: Bool = false
+        /// 目前引擎是否支援三麻（局間確認用；見 `AutoPlayGate.allowsConfirm`）
+        var sanmaEngineAvailable: Bool = false
         /// 這一巡摸到的牌，用來判斷 moqie
         var tsumoTile: String?
         /// WebView 是否已就緒（正式路徑 `webPage != nil`）
@@ -187,6 +187,11 @@ final class AutoPlayEngine {
         /// 第 3 層：受理後等我方權威動作廣播的毫秒數；0＝停用（測試預設）。
         /// 700ms 來自實測——正常回音 < 100ms，丟單那次是 16 秒，門檻不必精算。
         var actionEchoTimeoutMs: Int = 0
+        /// 同一批 oplist 一輪送不出去之後，下一輪要先等這麼久；之後每輪加倍，
+        /// 上限 `failureBackoffCap`。0＝不退避（測試預設）。
+        /// 沒有它，每輪 15 次的上限會被下一輪歸零，live 拔北 5 分鐘重送 1246 次。
+        var failureBackoff: TimeInterval = 0
+        var failureBackoffCap: TimeInterval = 30
         /// 「過」最多送幾次（伺服器逾時會代打，不必跟和牌一樣拚）
         var passAttempts: Int = 5
         /// 閘門判定「模型判斷不做副露」時的送出策略；nil＝`AutoPassDispatcher` 的預設
@@ -231,7 +236,7 @@ final class AutoPlayEngine {
         /// 「成功清 pending／失敗保留」在單測裡不必碰 `LiqiResponseStore` 單例。
         var confirmSend: (() async -> LiqiToolSendOutcome)?
 
-        static let live = Timing(actionEchoTimeoutMs: 700)
+        static let live = Timing(actionEchoTimeoutMs: 700, failureBackoff: 2)
     }
 
     // MARK: - 依賴
@@ -250,6 +255,8 @@ final class AutoPlayEngine {
 
     /// 目前這段停滯已經連續幾拍
     private var stallTicks = 0
+    /// 送不出去的那批 oplist 與下一次可以再試的時間；換批即失效，送出成功就清掉
+    private var backoff: (sequence: UInt64, delay: TimeInterval, until: Date, offline: Bool)?
     /// 目前回報出去的停滯（用來去重，只在真的變化時通知）
     private var reportedStall: AutoPlayStall?
     private let timing: Timing
@@ -464,7 +471,7 @@ final class AutoPlayEngine {
         let gate = AutoPlayGate.evaluate(.init(
             isAutoMode: ctx.mode.isFullAuto,
             isSanma: ctx.isSanma,
-            cloudDecision: ctx.cloudDecision,
+            sanmaCapableDecision: ctx.sanmaCapableDecision,
             hasActionInFlight: state != .idle,
             snapshot: snapshot,
             recommendations: ctx.recommendations,
@@ -477,6 +484,9 @@ final class AutoPlayEngine {
             // 刻意不記 log：這條路一秒跑一次，記下來會把 log 淹掉。
             // 要看被哪一關擋住時，改用 /bot/deep（回傳同一組輸入）重新判一次。
             return finish(gate: gate, outcome: .skipped(reason))
+
+        case _ where isBackingOff(snapshot):
+            return finish(gate: gate, outcome: .notSent(reason: "backoff"))
 
         case .forceHora:
             guard let snapshot else {
@@ -566,9 +576,9 @@ final class AutoPlayEngine {
         }
 
         // 三麻 fail-closed（同 `AutoPlayGate` 規則）。手動觸發不經閘門，
-        // 要自己擋一次；雲端 3p 決策放行，伺服器授權的和牌也放行（resolver 會排在推薦之上）。
-        guard !ctx.isSanma || ctx.cloudDecision || store.pending?.horaOperation != nil else {
-            note("⏭️ 三麻對局：本批推薦來自本地四麻模型，自動送出停用（雲端推薦才放行）", to: .log)
+        // 要自己擋一次；三麻引擎的決策放行，伺服器授權的和牌也放行（resolver 會排在推薦之上）。
+        guard !ctx.isSanma || ctx.sanmaCapableDecision || store.pending?.horaOperation != nil else {
+            note("⏭️ 三麻對局：本批推薦不是三麻引擎算的，自動送出停用（雲端 3p 或本地 Akagi 三麻才放行）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "sanma_unsupported"))
         }
 
@@ -666,7 +676,7 @@ final class AutoPlayEngine {
         }
 
         switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.isFullAuto, isSanma: ctx.isSanma,
-                                          cloudInferenceActive: ctx.cloudInferenceActive) {
+                                          sanmaEngineAvailable: ctx.sanmaEngineAvailable) {
         case .skip(let reason):
             // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。
             // 使用者在 `.off`/`.recommend`/三麻自己確認，ActionNewRound 到達會清 pending。
@@ -782,7 +792,7 @@ final class AutoPlayEngine {
                 mode: ctx.mode,
                 seat: ctx.seat,
                 isSanma: ctx.isSanma,
-                cloudDecision: ctx.cloudDecision,
+                sanmaCapableDecision: ctx.sanmaCapableDecision,
                 recommendationsOplistSequence: ctx.recommendationsOplistSequence)
 
             let action: Recommendation.ActionType
@@ -827,6 +837,7 @@ final class AutoPlayEngine {
             note(result?.logLine ?? "❌ 未送出（組不出 request）: \(action.rawValue)", to: .traceOnly)
 
             if result?.success == true {
+                backoff = nil
                 if action == .hora { note("✅ 已宣告和牌", to: .event) }
                 return finish(gate: gate,
                               outcome: .sent(action: action, tile: tile, attempts: attempt))
@@ -835,6 +846,14 @@ final class AutoPlayEngine {
             // 失敗：下一輪用 resolver 裁決後的動作（舊實作的遞迴也是這樣傳）
             requested = action
             requestedTile = tile
+
+            let offline = result?.isOffline == true
+            // 沒有連線就停手等重連；和牌例外（漏和不可逆，短暫斷線仍值得在本輪重送）
+            if offline, action != .hora {
+                note("❌ 與雀魂的連線已中斷，停止重送 \(action.rawValue)，等重連", to: .event)
+                deferRetry(snapshot.sequence, offline: true)
+                return finish(gate: gate, outcome: .sendFailed(action: action, attempts: attempt))
+            }
 
             let limit = retryLimit(for: action)
             guard attempt < limit else {
@@ -850,6 +869,7 @@ final class AutoPlayEngine {
                 default:
                     note("❌ 已達最大重試次數 (\(attempt)), ops=\(snapshot.rawTypes)", to: .log)
                 }
+                if action != .hora || offline { deferRetry(snapshot.sequence, offline: offline) }
                 return finish(gate: gate,
                               outcome: .sendFailed(action: action, attempts: attempt))
             }
@@ -904,6 +924,20 @@ final class AutoPlayEngine {
         timing.actionDelay?(action, scale, deadline)
             ?? ActionDelayModel.delay(for: action, tile: tile,
                                       tsumogiri: tsumogiri, scale: scale, deadline: deadline)
+    }
+
+    /// 換批代表局面變了（含重連後的 resync），舊批的退避不再適用
+    private func isBackingOff(_ snapshot: LiqiOperationSnapshot?) -> Bool {
+        guard let backoff, backoff.sequence == snapshot?.sequence else { return false }
+        return timing.clock() < backoff.until
+    }
+
+    /// 這批 oplist 送不出去：下一輪退避，同一批連續失敗就加倍
+    private func deferRetry(_ sequence: UInt64, offline: Bool) {
+        let previous = backoff?.sequence == sequence ? backoff?.delay ?? 0 : 0
+        let delay = min(previous > 0 ? previous * 2 : timing.failureBackoff, timing.failureBackoffCap)
+        backoff = (sequence, delay, timing.clock().addingTimeInterval(delay), offline)
+        if delay > 0 { note("⏳ \(String(format: "%.0f", delay)) 秒後再試 (seq=\(sequence))", to: .log) }
     }
 
     private func retryLimit(for action: Recommendation.ActionType) -> Int {
@@ -1000,12 +1034,14 @@ final class AutoPlayEngine {
         }
 
         stallTicks += 1
-        // 和牌送不出去不可逆：不等門檻，訊息直說要手動操作
+        // 和牌送不出去不可逆、連線中斷重送無望：都不等門檻
         let horaFailed = horaFailedSequence == pending.sequence
-        guard horaFailed || stallTicks >= Self.stallTickThreshold else { return }
+        let offline = backoff?.offline == true && backoff?.sequence == pending.sequence
+        guard horaFailed || offline || stallTicks >= Self.stallTickThreshold else { return }
 
         let stall = AutoPlayStall(
-            reason: horaFailed ? L10n.text("和牌送不出去，請手動操作") : reason,
+            reason: horaFailed ? L10n.text("和牌送不出去，請手動操作")
+                : offline ? "no_open_majsoul_connection" : reason,
             consecutiveTicks: stallTicks,
             sinceSequence: pending.sequence,
             elapsedSeconds: Int(timing.clock().timeIntervalSince(pending.capturedAt)))

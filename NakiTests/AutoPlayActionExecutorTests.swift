@@ -67,6 +67,28 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         XCTAssertNil(store.pending, "送出成功才消化這批 oplist")
     }
 
+    /// 拔北兩種情境：剛摸到北（含嶺上、立直後）要帶 moqie=true——只帶 type 的 `080b`
+    /// 在房 30887／13364 都沒被執行；北早已在手（摸到別張或沒有摸牌）不帶 moqie，
+    /// 這是 13364 三次成功的形狀。
+    @MainActor
+    func testKitaSendsBabeiWithMoqieFromTsumo() async {
+        for (tsumo, payload) in [("N", "080b2801"), ("5p", "080b"), (nil, "080b")] {
+            let store = LiqiOperationStore()
+            var captured: [String] = []
+            let sender = recordingSender { captured.append($0) }
+            let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .babei)], source: "test")
+
+            let result = await AutoPlayActionExecutor.execute(
+                action: .kita, tile: "kita", snapshot: snapshot, recommendations: [],
+                tsumoTile: tsumo, sender: sender, store: store)
+
+            XCTAssertEqual(result?.success, true)
+            XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputOperation")
+            XCTAssertTrue(hex(captured.first).hasSuffix("12\(String(format: "%02x", payload.count / 2))\(payload)"),
+                          "tsumo=\(tsumo ?? "nil") 實際 bytes=\(hex(captured.first))")
+        }
+    }
+
     /// 非摸切：tsumoTile 不同就不能帶 moqie（proto3 省略 false）
     @MainActor
     func testDiscardWithoutMoqieOmitsField() async {
@@ -386,9 +408,11 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         var count: UInt64 = 0
         var echoed: Bool
         private(set) var waitCalls = 0
+        private(set) var lastTimeoutMs: Int?
         init(echoed: Bool) { self.echoed = echoed }
         func waitForEcho(after baseline: UInt64, timeoutMs: Int) async -> Bool {
             waitCalls += 1
+            lastTimeoutMs = timeoutMs
             return echoed
         }
         nonisolated deinit {}
@@ -430,6 +454,26 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         XCTAssertEqual(result?.success, true)
         XCTAssertEqual(result?.detail, "confirmed")
         XCTAssertNil(store.pending)
+        LiqiResponseStore.shared.reset()
+    }
+
+    /// 拔北回音窗至少 1.5 秒（live 實測回音 0.98 秒，700ms 會重送）；其他動作維持原窗
+    @MainActor
+    func testKitaWaitsLongerForEchoThanOtherActions() async {
+        for (action, tile, op, expected) in [(Recommendation.ActionType.kita, "kita", LiqiOperationType.babei, 1500),
+                                             (.discard, "5m", .discard, 700)] {
+            LiqiResponseStore.shared.reset()
+            let store = LiqiOperationStore()
+            let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: op)], source: "test")
+            let echo = StubEcho(echoed: true)
+
+            await AutoPlayActionExecutor.execute(
+                action: action, tile: tile, snapshot: snapshot, recommendations: [],
+                tsumoTile: "N", sender: injectResponseForSend(hasError: false), store: store,
+                awaitResponseMs: 500, echoTimeoutMs: 700, echo: echo)
+
+            XCTAssertEqual(echo.lastTimeoutMs, expected, action.rawValue)
+        }
         LiqiResponseStore.shared.reset()
     }
 

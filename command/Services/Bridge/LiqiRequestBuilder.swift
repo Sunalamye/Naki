@@ -80,7 +80,16 @@ struct LiqiFriendRoomConfig {
     /// 其他 GameDetailRule 欄位的逃生口（欄位編號查 liqi.json）
     var extraDetailRuleFields: [LiqiField] = []
 
-    init() {}
+    /// 三麻房用三麻細則預設（赤寶 2、35000 起手、40000 返點）；四麻不變。
+    /// 三麻值為推測（四麻值送三麻房 live 全回 error 1112），待 live 驗證。
+    init(playerCount: UInt32 = 4) {
+        self.playerCount = playerCount
+        if playerCount == 3 {
+            doraCount = 2
+            initPoint = 35000
+            fandian = 40000
+        }
+    }
 }
 
 // MARK: - Request Builder
@@ -204,9 +213,10 @@ enum LiqiRequestBuilder {
         selfOperation(type: LiqiOperationType.kyushu.rawValue, timeuse: timeuse)
     }
 
-    /// 拔北（type=11，三麻）
-    static func babei(timeuse: UInt32 = 0) -> LiqiRequestSpec {
-        selfOperation(type: LiqiOperationType.babei.rawValue, timeuse: timeuse)
+    /// 拔北（type=11，三麻）。`moqie` 區分拔剛摸到的北還是手裡的北：
+    /// 只帶 type（`080b`）時，剛摸到的北不被執行（2026-10-09 房 30887、13364）。
+    static func babei(moqie: Bool = false, timeuse: UInt32 = 0) -> LiqiRequestSpec {
+        selfOperation(type: LiqiOperationType.babei.rawValue, moqie: moqie, timeuse: timeuse)
     }
 
     /// 吃（type=2）：`index` 為 `OptionalOperation.combination` 的索引

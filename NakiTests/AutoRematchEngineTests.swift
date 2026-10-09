@@ -31,7 +31,7 @@ final class AutoRematchEngineTests: XCTestCase {
         mode: AutoPlayMode = .fullAuto,
         isReady: Bool = true,
         prefersSanma: Bool = false,
-        cloudActive: Bool = true,
+        sanmaEngine: Bool = true,
         room: RoomPreference = .lowest,
         // 雀士1／三麻初心2：實測帳號的段位
         yonmaLevel: Int? = 10201,
@@ -48,7 +48,7 @@ final class AutoRematchEngineTests: XCTestCase {
                 .init(mode: modeBox?() ?? mode,
                       isReady: isReady,
                       prefersSanma: prefersSanma,
-                      cloudInferenceActive: cloudActive,
+                      sanmaEngineAvailable: sanmaEngine,
                       roomPreference: room)
             },
             observations: { sids },
@@ -89,23 +89,23 @@ final class AutoRematchEngineTests: XCTestCase {
         XCTAssertFalse(sent, "沒有任何觀察時不得送出任何請求")
     }
 
-    /// 三麻是雲端-only：雲端沒開就不排三麻，排進去也一手都不會打
+    /// 沒有三麻引擎（雲端 3p 或本地 Akagi 三麻）就不排三麻，排進去也一手都不會打
     @MainActor
-    func testSanmaWithoutCloudDoesNotSend() async {
+    func testSanmaWithoutSanmaEngineDoesNotSend() async {
         var sent = false
         let engine = makeEngine(prefersSanma: true,
-                                cloudActive: false,
+                                sanmaEngine: false,
                                 sids: [Self.obs("1:17", is3P: true)],
                                 accepts: { _, _ in sent = true; return true })
         let outcome = await engine.run()
-        XCTAssertEqual(outcome, .sanmaWithoutCloud)
+        XCTAssertEqual(outcome, .sanmaEngineMissing)
         XCTAssertFalse(sent)
     }
 
     /// 四麻不受雲端設定影響（bundled 模型就是四麻）
     @MainActor
     func testYonmaWorksWithoutCloud() async {
-        let engine = makeEngine(cloudActive: false, sids: [Self.obs("1:2", is3P: false)])
+        let engine = makeEngine(sanmaEngine: false, sids: [Self.obs("1:2", is3P: false)])
         let outcome = await engine.run()
         XCTAssertEqual(outcome, .queued(sid: "1:2", attempts: 1))
     }

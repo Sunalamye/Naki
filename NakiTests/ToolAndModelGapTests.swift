@@ -129,12 +129,15 @@ final class ToolAndModelGapTests: XCTestCase {
         XCTAssertEqual(key(status("mortal").modelDisplayKey), "Mortal (4P)")
         XCTAssertEqual(key(status("mortal3p").modelDisplayKey), "Mortal (3P)")
         XCTAssertEqual(key(status("custom-x").modelDisplayKey), "custom-x")
-        XCTAssertEqual(key(status("cloud-3p").modelDisplayKey), "雲端推論 (3P)")
+        XCTAssertEqual(key(status("cloud-only").modelDisplayKey), "cloud-only", "四麻沒有三麻專用名稱")
     }
 
     func testModelDisplayWarnsOnlyWhenThreePlayerRunsWithoutCloudDecision() {
-        XCTAssertEqual(key(status("cloud-3p", is3P: true, source: "local").modelDisplayKey), "雲端推論 (3P) ⚠️ 未生效，無推論")
-        XCTAssertEqual(key(status("cloud-3p", is3P: true, source: "cloud:m").modelDisplayKey), "雲端推論 (3P)")
+        XCTAssertEqual(key(status("cloud-only", is3P: true, source: "local").modelDisplayKey), "雲端推論 (3P) ⚠️ 未生效，無推論")
+        XCTAssertEqual(key(status("cloud-only", is3P: true, source: "cloud:m").modelDisplayKey), "雲端推論 (3P)")
+        XCTAssertEqual(key(status("akagi-sanma-bc", is3P: true, source: "local-akagi3p").modelDisplayKey), "Akagi 三麻・default strength")
+        XCTAssertEqual(key(status("cloud+akagi-sanma-bc", is3P: true, source: "cloud:m").modelDisplayKey), "雲端推論 (3P)")
+        XCTAssertEqual(key(status("mortal", is3P: true, source: "local-akagi3p").modelDisplayKey), "Mortal (4P)")
         XCTAssertTrue(key(status("mortal", is3P: true, source: "local").modelDisplayKey).hasSuffix("⚠️ 三麻無專用模型"))
         XCTAssertEqual(key(status("mortal", is3P: true, source: "cloud:m").modelDisplayKey), "Mortal (4P)")
     }

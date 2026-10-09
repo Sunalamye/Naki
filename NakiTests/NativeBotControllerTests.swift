@@ -100,7 +100,7 @@ final class NativeBotControllerTests: XCTestCase {
 
         _ = try await controller.react(event: tsumo(seq: pending + 1, pai: "N"))
         XCTAssertEqual(server.requests, 0, "授權已被取代的決策點不問雲端")
-        XCTAssertEqual(controller.lastDecisionSource, "local")
+        XCTAssertEqual(controller.lastDecisionSource, AkagiSanmaBot.source, "改由本地 Akagi 三麻回答")
 
         _ = try await controller.react(event: tsumo(seq: pending, pai: "N"))
         XCTAssertEqual(server.requests, 1)
@@ -137,7 +137,7 @@ final class NativeBotControllerTests: XCTestCase {
 
         server.body = "{}"
         _ = try await controller.react(event: tsumo(seq: pendingSequence(), pai: "N"))
-        XCTAssertEqual(controller.lastDecisionSource, "local", "新授權沒有雲端決策＝不得黏著 cloud:")
+        XCTAssertEqual(controller.lastDecisionSource, AkagiSanmaBot.source, "新授權沒有雲端決策＝不得黏著 cloud:，改標本地 Akagi 三麻")
     }
 
     // MARK: react 丟錯

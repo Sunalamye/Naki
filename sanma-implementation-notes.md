@@ -102,6 +102,32 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 3. S1c：oplist 逐組合對應（若 S2 未涵蓋）。
 4. U1（使用者 2026-10-09 補充）：用 twostraws `swiftui-pro` skill（已裝到 `.claude/skills/swiftui-pro`，上游 `f980071`）審查現行畫面設計：`command/Views/*`、`App/*`、SettingsStore 介面；依 skill 的 11 步流程，產出必修／建議清單，再開修正包。評估基準沿用使用者認可的 @Observable Store + Action + @Entry 架構（不引入 ViewModel）。
 
+## U 系列（UI 修正包）
+
+### 可見行為變化
+
+- 到期時間改隨 locale 格式。
+- 測試連線結果改每次重繪產生，隨開關與語言更新。
+- 限額欄改整句 key。
+- 插件頁 log 格式改「HH:mm:ss.SSS 訊息」，不含日期與分類。
+- 插件狀態點改 SF Symbol。
+- 日誌搜尋改 `localizedStandardContains`。
+- macOS 重新載入鈕改 `primaryAction`。
+- 延遲顯示「1.0 秒」最小寬 40。
+- 決策面板寬 300–480，可拖。
+- 警示字級改 caption。
+- iOS 面板：regular 300pt；compact 寬＋regular 高啟動即收起；控制列 44pt；Reduce Motion 時淡入淡出。
+- 全自動表與 ServerPicker 可捲動，按鈕列固定在底部。
+- iOS 完成鈕改 `confirmationAction`。
+- 不以顏色區分時，MCP 狀態點畫符號。
+
+### 復驗殘留（未處理）
+
+- 8 處 `clipShape(RoundedRectangle)` 寫法不一致。
+- LogPanel 的 Picker 標題為空。
+- 五個新 Action 未標 `@MainActor`（app target 預設隔離，功能不受影響）。
+- iPad 執行中改分割不會重新判斷面板。
+
 ## Deviations
 
 - **拔北修法（K1，2026-10-09，統帥代決）**：三局 log 加錄影逐手核對，三次失敗的拔北都是「手中無北、北是剛摸到的那張」，三次成功都是北早已在手；伺服器的 `ActionBaBei` 帶 `moqie`。修法只加 `moqie=true`（剛摸到）→ `080b2801`，**不加 `tile=4z`**：8/05 與今天三次成功都不帶 tile，tile 零證據，不用未驗證欄位去賭；seq 103「送 080b 後被摸切 E」的異常留 live 觀察。拔北回音窗 700ms→1.5 秒（實測回音最長 0.98 秒；過早重送在手有兩張北時會多拔一張）。斷線重試：15 次是每輪上限、輪間無退避是根因；改斷線立刻停手報停滯、跨輪退避 2→30 秒、和牌維持本輪重送（既有夾具 A）。

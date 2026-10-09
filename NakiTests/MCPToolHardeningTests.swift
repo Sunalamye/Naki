@@ -49,6 +49,15 @@ final class MCPToolHardeningTests: XCTestCase {
             action: "hora", arguments: [:], snapshot: snapshot([.discard])))
     }
 
+    /// MCP 拔北：剛摸到的北由呼叫端帶 moqie=true，不帶時維持在手北的 `080b`
+    @MainActor
+    func testBabeiPassesMoqieArgument() throws {
+        let drawn = try NakiGameAction.spec(action: "babei", arguments: ["moqie": true], snapshot: nil)
+        XCTAssertEqual(LiqiEncoder.hexString(drawn.payload), "080b2801")
+        let inHand = try NakiGameAction.spec(action: "babei", arguments: [:], snapshot: nil)
+        XCTAssertEqual(LiqiEncoder.hexString(inHand.payload), "080b")
+    }
+
     @MainActor
     func testHoraFollowsServerAuthorization() throws {
         let tsumo = try NakiGameAction.spec(action: "hora", arguments: [:], snapshot: snapshot([.tsumo]))
