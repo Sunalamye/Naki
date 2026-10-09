@@ -9,7 +9,7 @@
 //  `/v3/redeem` 與購買流程不做（key 由使用者自行取得貼上）。`/v3/key` 額度
 //  查詢已補上（設定頁的方案／到期／今日用量）。proxy 不做——少一整類「錯誤訊息回顯 proxy 密碼」的風險面。
 //
-//  逾時：react 2 秒（雀魂回合計時器 ~5s，立直要兩次呼叫，兩次都要擠進同一
+//  逾時：react 3 秒（雀魂回合計時器 ~5s，立直要兩次呼叫，兩次都要擠進同一
 //  回合——Akagi 生產環境的推導，沿用）；管理端點 8 秒（不在對局關鍵路徑）。
 //
 //  安全不變式：key 只進 `Authorization` header，**永不**進 URL、log 或錯誤訊息。
@@ -142,7 +142,7 @@ final class AkagiApiClient {
 
     /// react 在對局關鍵路徑上：掛掉的伺服器要**立刻**退回本地模型，
     /// 不能讓 bot 錯過回合。
-    static let reactTimeout: TimeInterval = 2.0
+    static let reactTimeout: TimeInterval = 3.0
     /// 管理端點（models / health）從 UI 呼叫，等得起慢伺服器。
     static let requestTimeout: TimeInterval = 8.0
 

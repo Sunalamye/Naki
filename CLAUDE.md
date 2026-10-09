@@ -125,7 +125,8 @@ OptionalOperationList
   schema 正確**：那個 CDN 資源（`res/proto/liqi.json`）是 Laya 時代的遺留檔，resource
   prefix `v0.11.243.w` 落後 client `4.0.45` 好幾版；雀魂遷 Unity 後真正的 descriptor 改放
   asset bundle 的 `Protol/*_pb.lua`，那個 JSON 不再更新。實證：repo 這份的
-  `ReqSelfOperation` 缺 `auto_operation`。`scripts/check-liqi-drift.sh` 比對的是同一個
+  `ReqSelfOperation` 曾缺 `auto_operation`（2026-10-09 依 Akagi 的 liqi.proto 4.0.47 補上，
+  其餘 Naki 用到的 26 個訊息逐欄一致）。`scripts/check-liqi-drift.sh` 比對的是同一個
   過期基準，**結構上驗不到這種漂移**（見 task #16）。
 - MJAI 字牌 `E/S/W/N/P/F/C`；雀魂字牌 `1z`–`7z`。
 - **段位場入口已換人**（2026-08-09 實測）：`.lq.Lobby.matchGame` 對 match_mode
