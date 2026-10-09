@@ -59,7 +59,10 @@ protocol WebSessionBackend: AnyObject {
     /// 執行一段 **函式體** 語意的 JS（要值就自己寫 `return`）
     func callJavaScript(_ functionBody: String) async throws -> Any?
 
-    func load(_ url: URL)
+    /// `nil`＝WebKit 預設。設定後要重新載入才會對既有頁面生效。
+    var customUserAgent: String? { get set }
+
+    func load(_ request: URLRequest)
     func reload()
 
     /// 強制斷線重連的手段（WebPage 關 WebSocket、Legacy 整頁重載）
@@ -193,10 +196,24 @@ final class WebSession {
     /// 載入目前選定的區服（URL 的唯一定義點在 `MajsoulServer`）。
     func loadMajsoul() {
         let server = settings.majsoulServer
-        guard let url = server.url else { return }
-        hasRequestedInitialLoad = true
-        backend.load(url)
+        guard load(server) else { return }
         store.statusMessage = L10n.text("正在載入\(server.displayName)…")
+    }
+
+    /// 不帶自訂 UA 的 WebKit 預設值，讀自一個用完即丟的 WKWebView。
+    func defaultUserAgent() async -> String? {
+        let probe = WKWebView(frame: .zero)
+        return try? await probe.evaluateJavaScript("navigator.userAgent") as? String
+    }
+
+    /// 組請求並載入；URL 無效時回 false。UA 每次載入前同步，設定變更後重載即生效。
+    private func load(_ server: MajsoulServer) -> Bool {
+        guard let url = server.url else { return false }
+        backend.customUserAgent = MajsoulRequestBuilder.userAgent(settings.majsoulUserAgent)
+        hasRequestedInitialLoad = true
+        backend.load(MajsoulRequestBuilder.request(
+            url: url, extraHeaders: settings.majsoulExtraHeaders))
+        return true
     }
 
     /// 換區服。
@@ -206,9 +223,7 @@ final class WebSession {
     /// 不會在對局中自己發生。
     func switchServer(to server: MajsoulServer) {
         settings.majsoulServer = server
-        guard let url = server.url else { return }
-        hasRequestedInitialLoad = true
-        backend.load(url)
+        guard load(server) else { return }
         store.statusMessage = L10n.text("正在切換到\(server.localizedRegionName)…")
     }
 

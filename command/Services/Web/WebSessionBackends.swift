@@ -63,8 +63,13 @@ final class WebPageBackend: WebSessionBackend {
         try await page.callJavaScript(functionBody)
     }
 
-    func load(_ url: URL) {
-        page.load(url)
+    var customUserAgent: String? {
+        get { page.customUserAgent }
+        set { page.customUserAgent = newValue }
+    }
+
+    func load(_ request: URLRequest) {
+        page.load(request)
     }
 
     func reload() {
@@ -255,8 +260,13 @@ final class LegacyWebBackend: NSObject, WebSessionBackend, WKNavigationDelegate,
         }
     }
 
-    func load(_ url: URL) {
-        webView.load(URLRequest(url: url))
+    var customUserAgent: String? {
+        get { webView.customUserAgent }
+        set { webView.customUserAgent = newValue }
+    }
+
+    func load(_ request: URLRequest) {
+        webView.load(request)
     }
 
     func reload() {

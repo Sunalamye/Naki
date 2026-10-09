@@ -68,12 +68,12 @@ final class WebLayerGapTests: XCTestCase {
         backend.sink = sink
         let dead = try XCTUnwrap(URL(string: "http://127.0.0.1:9/"))
 
-        backend.load(dead)
+        backend.load(URLRequest(url: dead))
         await waitUntil(15) { !sink.failures.isEmpty }
         XCTAssertEqual(sink.failures.count, 1, "第一次導覽失敗要回報")
         XCTAssertGreaterThanOrEqual(sink.starts, 1)
 
-        backend.load(dead)
+        backend.load(URLRequest(url: dead))
         await waitUntil(15) { sink.failures.count >= 2 }
         XCTAssertGreaterThanOrEqual(sink.failures.count, 2, "失敗之後必須重新訂閱，否則之後的導覽都收不到")
     }
