@@ -190,7 +190,11 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
   或 `source == "local-akagi3p"`、resolver 降級、`runManualCycle` 自己擋），
   **伺服器授權的和牌三層都放行**（和牌不需要模型）：
   `AutoPlayGate.swift:86`、`AutoPlayDecisionResolver.swift:86-95`、`AutoPlayEngine.swift:570`。
-  其餘動作仍擋。三麻仍**沒有 live 對局驗證**。
+  其餘動作仍擋。**三麻 live 已驗（2026-10-09，三局，`.swfd/logs/s3-live-{4,5,6}/`）**：
+  本地引擎建構、立直、自摸／榮和、碰、拔北 11/11（含剛摸到北 `080b2801` 與在手北
+  `080b`）鏈路完整；三麻友人房要帶三麻細則（赤寶 2、起點 35000、返點 40000），
+  四麻值會回 error 1112。仍未驗證：被擠下線後的退避與停滯顯示（live 未遇到）、
+  親家局首第一打偶發「受理卻無權威回音、700ms 後重送才打出」（三次，原因未明）。
 
 ## 2026-09-30 審查修正後的行為
 
