@@ -14,15 +14,15 @@ struct AdvancedSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     /// 「測試連線」的結果（只活在這張 sheet 裡；nil＝還沒測）
-    @State private var cloudTestResult: String?
+    @State private var cloudTest: CloudConnectionTest?
     @State private var cloudTestRunning = false
     @State private var updateCheckRunning = false
     /// 測試連線取回的模型清單（供模型欄的下拉選擇；空＝還沒取到）
     @State private var cloudModels: [CloudModelInfo] = []
     /// `GET /v3/key` 的方案／到期／今日用量（nil＝還沒查到或查不到）
     @State private var cloudKeyStatus: CloudKeyStatus?
-    /// 自動探測的結果訊息（與手動「測試連線」共用顯示區）
-    @State private var cloudProbeError: String?
+    /// 自動探測失敗的原因（nil＝沒失敗）
+    @State private var cloudProbeFailure: CloudKeyProbe?
     @State private var cloudProbing = false
 
     var body: some View {
@@ -72,7 +72,7 @@ struct AdvancedSettingsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .task(id: cloudProbeToken) { await autoProbeCloud() }
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
                         dismiss()
                     }
@@ -82,12 +82,6 @@ struct AdvancedSettingsSheet: View {
         }
     }
     #endif
-
-    /// 狀態訊息列的顯示與否。純顯示設定，沒有副作用要走 Action。
-    private var showStatusBar: Binding<Bool> {
-        Binding(get: { naki.settings.showStatusBar },
-                set: { naki.settings.showStatusBar = $0 })
-    }
 
 #if os(macOS)
     /// 語言。setter 走 Action，與其他會影響執行期行為的設定同一條路。
@@ -103,11 +97,6 @@ struct AdvancedSettingsSheet: View {
                 set: { naki.actions.setKeepAliveInBackground($0) })
     }
 
-    private var autoCheckUpdate: Binding<Bool> {
-        Binding(get: { naki.settings.autoCheckUpdate },
-                set: { naki.settings.autoCheckUpdate = $0 })
-    }
-
     @ViewBuilder private var updateCheckResultText: some View {
         switch naki.store.updateCheckResult {
         case .upToDate: Text("已是最新版本").font(.caption).foregroundStyle(.secondary)
@@ -117,40 +106,17 @@ struct AdvancedSettingsSheet: View {
         }
     }
 
+    private var pinnedServerNote: Text {
+        naki.settings.pinMajsoulServer
+            ? Text("已固定為 \(Text(naki.settings.majsoulServer.regionNameKey))，啟動時直接進入。關掉這個開關就會恢復每次詢問。")
+            : Text("每次啟動都會問要連哪個伺服器，上次選的會預先選起來。")
+    }
+
     /// 區服。setter 走 Action 而不是直接寫 settings——換服要整頁重載，
     /// 那是副作用，屬於 `SwitchServerAction`（它自己會寫設定）。
     private var majsoulServer: Binding<MajsoulServer> {
         Binding(get: { naki.settings.majsoulServer },
                 set: { naki.actions.switchServer($0) })
-    }
-
-    /// 「啟動時不再詢問」。純設定，下次啟動才生效。
-    private var pinMajsoulServer: Binding<Bool> {
-        Binding(get: { naki.settings.pinMajsoulServer },
-                set: { naki.settings.pinMajsoulServer = $0 })
-    }
-
-    // ☁️ 雲端推論設定：讀寫都是 `SettingsStore` 那一份（key 進 Keychain，
-    // 見 `SettingsStore.cloudAPIKey`）。改動在**下一個決策點**生效並 reset 斷路器。
-    private var cloudEnabled: Binding<Bool> {
-        Binding(get: { naki.settings.cloudInferenceEnabled },
-                set: { naki.settings.cloudInferenceEnabled = $0 })
-    }
-    private var cloudServerURL: Binding<String> {
-        Binding(get: { naki.settings.cloudServerURL },
-                set: { naki.settings.cloudServerURL = $0 })
-    }
-    private var cloudAPIKey: Binding<String> {
-        Binding(get: { naki.settings.cloudAPIKey },
-                set: { naki.settings.cloudAPIKey = $0 })
-    }
-    private var cloudModel4P: Binding<String> {
-        Binding(get: { naki.settings.cloudModel4P },
-                set: { naki.settings.cloudModel4P = $0 })
-    }
-    private var cloudModel3P: Binding<String> {
-        Binding(get: { naki.settings.cloudModel3P },
-                set: { naki.settings.cloudModel3P = $0 })
     }
 
     /// 模型欄：手動輸入為底、伺服器清單為加速器，兩者並存。
@@ -159,14 +125,15 @@ struct AdvancedSettingsSheet: View {
     /// 清單），而自架伺服器可能根本沒有這個端點——純下拉在這兩種情境會把
     /// 使用者卡死。所以自由輸入永遠可用，「測試連線」成功後箭頭選單才亮起。
     @ViewBuilder
-    private func cloudModelRow(placeholder: LocalizedStringKey, text: Binding<String>,
-                               game: String, accessibilityId: String) -> some View {
+    private func cloudModelRow(placeholder: LocalizedStringKey, pickerLabel: LocalizedStringKey,
+                               text: Binding<String>, game: String,
+                               accessibilityId: String) -> some View {
         HStack {
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
                 .accessibilityIdentifier(accessibilityId)
-            Menu {
+            Menu(pickerLabel, systemImage: "chevron.down.circle") {
                 Button("伺服器預設（清空）") { text.wrappedValue = "" }
                 ForEach(cloudModels.filter { $0.game.isEmpty || $0.game == game },
                         id: \.id) { model in
@@ -174,18 +141,14 @@ struct AdvancedSettingsSheet: View {
                         text.wrappedValue = model.id
                     }
                 }
-            } label: {
-                Image(systemName: "chevron.down.circle")
             }
+            .labelStyle(.iconOnly)
             .disabled(cloudModels.isEmpty)
             .help(cloudModels.isEmpty ? "先按「測試連線」取得模型清單" : "從伺服器清單選擇")
             .accessibilityIdentifier("\(accessibilityId)-picker")
         }
     }
 
-    /// 測試連線：`/healthz`（無認證，驗伺服器活不活）＋有 key 時再打
-    /// `/v3/models`（驗 key、列可用模型）。對局開始前就能發現問題，
-    /// 不必等到第一手。
     /// 「現在到底有沒有在用雲端」——把 `enabled && url && key` 這個三段條件
     /// 直接寫成一句話。
     ///
@@ -198,13 +161,13 @@ struct AdvancedSettingsSheet: View {
         if missing.isEmpty {
             Label("雲端推論已生效——對局中會以雲端決策為準", systemImage: "checkmark.circle.fill")
                 .font(.caption)
-                .foregroundColor(.green)
+                .foregroundStyle(.green)
                 .accessibilityIdentifier("cloud-effective-state")
         } else {
             Label("雲端推論尚未生效，仍在用內建本地模型。還缺：\(missingList(missing))",
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
-                .foregroundColor(.orange)
+                .foregroundStyle(.orange)
                 .accessibilityIdentifier("cloud-effective-state")
         }
     }
@@ -226,33 +189,26 @@ struct AdvancedSettingsSheet: View {
     /// `task(id:)` 在 token 變動時會取消上一個 task，所以前面那段 sleep 同時也是
     /// debounce——打字過程中不會每個字元都打一次伺服器。
     private func autoProbeCloud() async {
-        cloudProbeError = nil
+        cloudProbeFailure = nil
         guard naki.settings.cloudInferenceEnabled else { cloudKeyStatus = nil; return }
         let key = naki.settings.cloudAPIKey.trimmingCharacters(in: .whitespaces)
         guard !key.isEmpty else { cloudKeyStatus = nil; return }
 
-        try? await Task.sleep(nanoseconds: 700_000_000)
+        try? await Task.sleep(for: .milliseconds(700))
         guard !Task.isCancelled else { return }
 
-        guard let client = AkagiApiClient(baseURL: naki.settings.cloudServerURL, key: key) else {
-            cloudKeyStatus = nil
-            cloudProbeError = L10n.text("伺服器 URL 無法解析")
-            return
-        }
         cloudProbing = true
         defer { cloudProbing = false }
-        do {
-            let status = try await client.keyStatus()
-            guard !Task.isCancelled else { return }
+        let result = await naki.actions.probeCloud(baseURL: naki.settings.cloudServerURL, key: key)
+        guard !Task.isCancelled else { return }
+        switch result {
+        case .ok(let status, let models):
             cloudKeyStatus = status
             // 順手把模型清單也帶回來，模型欄的下拉就不必再按一次「測試連線」
-            if let models = try? await client.models(), !Task.isCancelled {
-                cloudModels = models
-            }
-        } catch {
-            guard !Task.isCancelled else { return }
+            if let models { cloudModels = models }
+        case .invalidURL, .failed:
             cloudKeyStatus = nil
-            cloudProbeError = error.localizedDescription
+            cloudProbeFailure = result
         }
     }
 
@@ -279,7 +235,7 @@ struct AdvancedSettingsSheet: View {
                 if let s = cloudKeyStatus {
                     keyRow("方案", Text(verbatim: s.plan.isEmpty ? "—" : s.plan))
                     if !s.expiresAtRaw.isEmpty {
-                        keyRow("到期時間", Text(verbatim: formattedExpiry(s)))
+                        keyRow("到期時間", expiryText(s))
                         if let days = s.daysRemaining {
                             keyRow("剩餘", s.isExpired ? Text("已過期") : Text("\(days) 天"),
                                    tint: s.isExpired ? .red : (days <= 3 ? .orange : nil))
@@ -296,86 +252,90 @@ struct AdvancedSettingsSheet: View {
                         keyRow("今日用量", Text(verbatim: "\(s.usageToday)"))
                     }
                     if s.rpm > 0 || s.topK > 0 {
-                        keyRow("限額",
-                               Text(verbatim: [s.rpm > 0 ? L10n.text("\(Int(s.rpm.rounded())) 次/分") : nil,
-                                               s.topK > 0 ? "top-\(s.topK)" : nil]
-                                .compactMap { $0 }.joined(separator: "・")))
+                        keyRow("限額", limitText(rpm: Int(s.rpm.rounded()), topK: s.topK))
                     }
-                } else if let err = cloudProbeError {
+                } else if let failure = cloudProbeFailure {
                     // 查不到就說查不到。留白會讓人以為「這個方案沒有額度資訊」，
                     // 而實際上多半是 key 打錯或伺服器連不上。
-                    Text("讀不到金鑰狀態：\(err)")
+                    probeFailureText(failure)
                         .font(.caption2)
-                        .foregroundColor(.orange)
+                        .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !cloudProbing {
                     Text("填入 API Key 後會自動查詢方案與今日用量。")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.contentBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(.rect(cornerRadius: 8))
             .accessibilityIdentifier("cloud-key-status-card")
         }
     }
 
+    private func probeFailureText(_ probe: CloudKeyProbe) -> Text {
+        if case .failed(let reason) = probe { return Text("讀不到金鑰狀態：\(reason)") }
+        return Text("伺服器 URL 無法解析")
+    }
+
     private func keyRow(_ label: LocalizedStringKey, _ value: Text, tint: Color? = nil) -> some View {
         HStack {
-            Text(label).font(.caption2).foregroundColor(.secondary)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
             Spacer(minLength: 8)
             value
                 .font(.system(.caption, design: .monospaced))
                 .fontWeight(.medium)
-                .foregroundColor(tint)
+                .foregroundStyle(tint ?? .primary)
         }
         .accessibilityElement(children: .combine)
     }
 
+    private func limitText(rpm: Int, topK: Int) -> Text {
+        switch (rpm > 0, topK > 0) {
+        case (true, true): Text("\(rpm) 次/分・top-\(topK)")
+        case (true, false): Text("\(rpm) 次/分")
+        default: Text(verbatim: "top-\(topK)")
+        }
+    }
+
     /// 到期時間顯示成本地時間；解不出 `Date` 就照抄伺服器原字串，不隱藏。
-    private func formattedExpiry(_ s: CloudKeyStatus) -> String {
-        guard let d = s.expiresAt else { return s.expiresAtRaw }
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return f.string(from: d)
+    private func expiryText(_ s: CloudKeyStatus) -> Text {
+        guard let d = s.expiresAt else { return Text(verbatim: s.expiresAtRaw) }
+        return Text(d, format: .dateTime.year().month().day().hour().minute().second())
     }
 
     private func runCloudConnectionTest() {
-        let baseURL = naki.settings.cloudServerURL
-        let key = naki.settings.cloudAPIKey
         cloudTestRunning = true
-        cloudTestResult = nil
+        cloudTest = nil
         Task {
             defer { cloudTestRunning = false }
-            do {
-                let health = try await AkagiApiClient.health(baseURL: baseURL)
-                guard !key.trimmingCharacters(in: .whitespaces).isEmpty else {
-                    cloudTestResult = L10n.text("伺服器 \(health.status)（未填 key，略過模型查詢）")
-                    return
-                }
-                guard let client = AkagiApiClient(baseURL: baseURL, key: key) else {
-                    cloudTestResult = L10n.text("URL 無法解析")
-                    return
-                }
-                let models = try await client.models()
+            let result = await naki.actions.testCloudConnection(
+                baseURL: naki.settings.cloudServerURL, key: naki.settings.cloudAPIKey)
+            if case .ok(_, let models, let key) = result {
                 cloudModels = models   // 餵給模型欄的下拉（見 cloudModelRow）
                 // 手動測試也把金鑰狀態帶回來：否則按了按鈕卻看不到方案／用量，
-                // 會以為那張卡片壞了。失敗不影響這次測試的結論（模型清單已經拿到）。
-                cloudKeyStatus = try? await client.keyStatus()
-                let ids = models.map { "\($0.id)(\($0.game))" }.joined(separator: ", ")
-                let modelList = ids.isEmpty ? L10n.text("無") : ids
-                let base = L10n.text("伺服器 \(health.status)；可用模型：\(modelList)")
-                // 「連得上」不等於「有在用」。不附這一句的話，開關沒開時這則成功訊息
-                // 反而會強化「已經配置好了」的錯覺——這是本來就要修的那個問題的幫兇。
-                cloudTestResult = naki.settings.cloudInferenceEnabled
-                    ? base
-                    : base + L10n.text("（但開關未開，對局仍走本地模型）")
-                    + (models.isEmpty ? "" : L10n.text("——可用模型欄旁的箭頭直接選"))
-            } catch {
-                cloudTestResult = L10n.text("失敗：\(error.localizedDescription)")
+                // 會以為那張卡片壞了。
+                cloudKeyStatus = key
             }
+            cloudTest = result
+        }
+    }
+
+    /// 「連得上」不等於「有在用」：開關沒開時附上這一句，否則成功訊息會強化「已經配置好了」的錯覺。
+    private func cloudTestText(_ result: CloudConnectionTest) -> Text {
+        switch result {
+        case .healthOnly(let status):
+            return Text("伺服器 \(status)（未填 key，略過模型查詢）")
+        case .failed(let reason):
+            return Text("失敗：\(reason)")
+        case .ok(let status, let models, _):
+            let list = models.isEmpty ? L10n.text("無") : models.map { "\($0.id)(\($0.game))" }.joined(separator: ", ")
+            if naki.settings.cloudInferenceEnabled { return Text("伺服器 \(status)；可用模型：\(list)") }
+            return models.isEmpty
+                ? Text("伺服器 \(status)；可用模型：\(list)（但開關未開，對局仍走本地模型）")
+                : Text("伺服器 \(status)；可用模型：\(list)（但開關未開，對局仍走本地模型）——可用模型欄旁的箭頭直接選")
         }
     }
 
@@ -412,6 +372,8 @@ struct AdvancedSettingsSheet: View {
     /// 左欄：這台機器怎麼跑（畫面／自動操作／Bot／MCP）
     @ViewBuilder
     private var operationalSettings: some View {
+        @Bindable var settings = naki.settings
+
         // 自動打牌可用性（只有在這條路徑不支援時才出現）
         autoPlayAvailabilityBox
 
@@ -433,21 +395,19 @@ struct AdvancedSettingsSheet: View {
 
                     Text("換伺服器會**整頁重新載入**，等於登出重來——各服的帳號不互通。對局中不要換。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Divider()
 
-                    Toggle("啟動時不再詢問", isOn: pinMajsoulServer)
+                    Toggle("啟動時不再詢問", isOn: $settings.pinMajsoulServer)
                         .accessibilityIdentifier("pin-majsoul-server-toggle")
 
                     // 這行是「取消固定」的說明：關掉開關就會恢復每次啟動詢問。
                     // 沒有這句的話，勾過「以後都用這個」的人不會知道怎麼把它要回來。
-                    Text(naki.settings.pinMajsoulServer
-                         ? "已固定為 \(Text(naki.settings.majsoulServer.regionNameKey))，啟動時直接進入。關掉這個開關就會恢復每次詢問。"
-                         : "每次啟動都會問要連哪個伺服器，上次選的會預先選起來。")
+                    pinnedServerNote
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } label: {
@@ -480,14 +440,14 @@ struct AdvancedSettingsSheet: View {
 
                     Text("視窗被蓋住或 App 隱藏時，遊戲仍以低頻率運作，避免停止心跳而斷線；會持續耗用少量 CPU。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Divider()
 
                     Text("暱稱隱藏與牌面高亮已改由**插件**提供（工具列拼圖圖示 → 插件頁面）。裝「暱稱隱藏」「牌面變色」插件即可；底層 API 仍在，只是不再內建自動開。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
                     // 只有 iOS：那條狀態列疊在牌桌上。macOS 的是排版出來的一列，
@@ -495,12 +455,12 @@ struct AdvancedSettingsSheet: View {
                     #if os(iOS)
                     Divider()
 
-                    Toggle("顯示狀態訊息列", isOn: showStatusBar)
+                    Toggle("顯示狀態訊息列", isOn: $settings.showStatusBar)
                         .accessibilityIdentifier("show-status-bar-toggle")
 
                     Text("牌桌底部那條浮動訊息（連線狀態、未自動送出的原因等）。預設關閉——它疊在牌桌上，而內容多半是一次性回饋或診斷輸出。真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     #endif
                 }
             } label: {
@@ -510,7 +470,7 @@ struct AdvancedSettingsSheet: View {
             // 更新
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("自動檢查更新", isOn: autoCheckUpdate)
+                    Toggle("自動檢查更新", isOn: $settings.autoCheckUpdate)
                         .accessibilityIdentifier("auto-check-update-toggle")
 
                     HStack {
@@ -536,7 +496,7 @@ struct AdvancedSettingsSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Bot 會在遊戲開始時自動創建，通常不需要手動管理。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
 
                     HStack {
                         Button("重建 Bot") {
@@ -598,7 +558,7 @@ struct AdvancedSettingsSheet: View {
 
                             Text("curl http://localhost:\(naki.store.debugServerPort)/logs")
                                 .font(.system(.caption2, design: .monospaced))
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
                     }
@@ -611,18 +571,20 @@ struct AdvancedSettingsSheet: View {
     /// 右欄：雲端推論（唯一一組需要對外連線的設定）
     @ViewBuilder
     private var cloudSettings: some View {
+            @Bindable var settings = naki.settings
+
             // ☁️ 雲端推論（docs/cloud-inference-plan.md；key 在 Keychain）
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("啟用雲端推論", isOn: cloudEnabled)
+                    Toggle("啟用雲端推論", isOn: $settings.cloudInferenceEnabled)
                         .accessibilityIdentifier("cloud-inference-toggle")
 
                     Text("啟用後，每個決策點會把**本局至今的對局事件**（含自家手牌）上傳到下方伺服器換取決策；伺服器失敗時自動退回內建本地模型，對局不會停擺。API key 存在 Keychain，不會出現在 log 或設定檔。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
 
                     HStack {
-                        TextField("伺服器 URL", text: cloudServerURL)
+                        TextField("伺服器 URL", text: $settings.cloudServerURL)
                             .textFieldStyle(.roundedBorder)
                             .autocorrectionDisabled()
                             .accessibilityIdentifier("cloud-server-url-field")
@@ -639,17 +601,19 @@ struct AdvancedSettingsSheet: View {
                     }
                     Text("預設：\(SettingsStore.defaultCloudBaseURL)（Akagi 官方；也可填自架位址）")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
 
-                    SecureField("API Key（自行取得後貼上）", text: cloudAPIKey)
+                    SecureField("API Key（自行取得後貼上）", text: $settings.cloudAPIKey)
                         .textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("cloud-api-key-field")
 
                     cloudModelRow(placeholder: "四麻模型（空＝伺服器預設）",
-                                  text: cloudModel4P, game: "4p",
+                                  pickerLabel: "選擇四麻模型",
+                                  text: $settings.cloudModel4P, game: "4p",
                                   accessibilityId: "cloud-model-4p-field")
                     cloudModelRow(placeholder: "三麻模型（空＝伺服器預設）",
-                                  text: cloudModel3P, game: "3p",
+                                  pickerLabel: "選擇三麻模型",
+                                  text: $settings.cloudModel3P, game: "3p",
                                   accessibilityId: "cloud-model-3p-field")
 
                     HStack {
@@ -660,10 +624,10 @@ struct AdvancedSettingsSheet: View {
                         .disabled(cloudTestRunning)
                         .accessibilityIdentifier("cloud-test-button")
 
-                        if let result = cloudTestResult {
-                            Text(result)
+                        if let result = cloudTest {
+                            cloudTestText(result)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                                 .accessibilityIdentifier("cloud-test-result")
                         }
                     }
@@ -678,7 +642,7 @@ struct AdvancedSettingsSheet: View {
 
                     Text("三麻提醒：本地有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的決策來源會如實顯示。")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             } label: {
                 Label("雲端推論", systemImage: "icloud.and.arrow.up")
@@ -691,6 +655,8 @@ struct AdvancedSettingsSheet: View {
     /// toolbar 那顆只有數字，講不出合法範圍，也講不出隨機分布仍然會套用。
     @ViewBuilder
     private var autoPlaySettingsBox: some View {
+        @Bindable var settings = naki.settings
+
         GroupBox {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -712,8 +678,7 @@ struct AdvancedSettingsSheet: View {
                             .font(.system(.body, design: .monospaced))
                             .monospacedDigit()
                         Stepper("基準延遲",
-                                value: Binding(get: { naki.settings.actionDelaySeconds },
-                                               set: { naki.settings.actionDelaySeconds = $0 }),
+                                value: $settings.actionDelaySeconds,
                                 in: SettingsStore.actionDelayRange,
                                 step: SettingsStore.actionDelayStep)
                             .labelsHidden()
@@ -721,7 +686,7 @@ struct AdvancedSettingsSheet: View {
                     }
                     Text("這是縮放係數，不是固定值：實際送出仍會套用 ActionDelayModel 的隨機分布。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -744,11 +709,11 @@ struct AdvancedSettingsSheet: View {
                         .fontWeight(.semibold)
                     Text(AutoPlayAvailability.autoUnavailableReasonKey)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("模式選單只提供「關 / 推薦」。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             } label: {
                 Label("自動打牌", systemImage: "hand.raised")

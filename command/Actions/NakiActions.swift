@@ -1042,6 +1042,8 @@ struct NakiActions {
   var setAutoPlayMode: SetAutoPlayModeAction
   /// 全自動：立刻排一場（大廳按「開始」時用，不等 end_game）
   var startFullAutoNow: StartFullAutoNowAction
+  /// 全自動：寫入四麻／三麻與房間偏好、切到全自動、立刻排一場
+  var startFullAuto: StartFullAutoAction
   /// 手動要求自動打牌跑一輪
   var triggerAutoPlay: TriggerAutoPlayAction
   /// 刪除原生 Bot
@@ -1052,12 +1054,20 @@ struct NakiActions {
   var reloadPage: ReloadPageAction
   /// 換到另一個區服（換 URL，不是重載）
   var switchServer: SwitchServerAction
+  /// 啟動時的區服選擇：寫入「不再詢問」，區服不同才換服
+  var chooseServer: ChooseServerAction
   /// 隱藏玩家名稱開關
   var setHidePlayerNames: SetHidePlayerNamesAction
   /// 背景保活開關
   var setKeepAliveInBackground: SetKeepAliveInBackgroundAction
   /// 切換 App 內語言
   var setAppLanguage: SetAppLanguageAction
+  /// 雲端金鑰與模型探測（設定頁自動查詢）
+  var probeCloud: ProbeCloudAction
+  /// 雲端「測試連線」
+  var testCloudConnection: TestCloudConnectionAction
+  /// 插件頁的目前頁面診斷（可先重新注入已啟用插件）
+  var pluginDiagnostics: PluginDiagnosticsAction
   /// 交出這條 path 的 WebView
   var webView: WebViewAction
 
@@ -1079,14 +1089,19 @@ struct NakiActions {
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
     self.startFullAutoNow = StartFullAutoNowAction()
+    self.startFullAuto = StartFullAutoAction()
     self.triggerAutoPlay = TriggerAutoPlayAction()
     self.deleteBot = DeleteBotAction()
     self.toggleDebugServer = ToggleDebugServerAction()
     self.reloadPage = ReloadPageAction()
     self.switchServer = SwitchServerAction()
+    self.chooseServer = ChooseServerAction()
     self.setHidePlayerNames = SetHidePlayerNamesAction()
     self.setKeepAliveInBackground = SetKeepAliveInBackgroundAction()
     self.setAppLanguage = SetAppLanguageAction()
+    self.probeCloud = ProbeCloudAction()
+    self.testCloudConnection = TestCloudConnectionAction()
+    self.pluginDiagnostics = PluginDiagnosticsAction()
     self.webView = WebViewAction()
   }
 
@@ -1103,14 +1118,19 @@ struct NakiActions {
        forceReconnect: ForceReconnectAction,
        setAutoPlayMode: SetAutoPlayModeAction,
        startFullAutoNow: StartFullAutoNowAction,
+       startFullAuto: StartFullAutoAction,
        triggerAutoPlay: TriggerAutoPlayAction,
        deleteBot: DeleteBotAction,
        toggleDebugServer: ToggleDebugServerAction,
        reloadPage: ReloadPageAction,
        switchServer: SwitchServerAction,
+       chooseServer: ChooseServerAction,
        setHidePlayerNames: SetHidePlayerNamesAction,
        setKeepAliveInBackground: SetKeepAliveInBackgroundAction,
        setAppLanguage: SetAppLanguageAction,
+       probeCloud: ProbeCloudAction,
+       testCloudConnection: TestCloudConnectionAction,
+       pluginDiagnostics: PluginDiagnosticsAction,
        webView: WebViewAction) {
     self.executeJavaScript = executeJavaScript
     self.setPluginEnabled = setPluginEnabled
@@ -1124,14 +1144,19 @@ struct NakiActions {
     self.forceReconnect = forceReconnect
     self.setAutoPlayMode = setAutoPlayMode
     self.startFullAutoNow = startFullAutoNow
+    self.startFullAuto = startFullAuto
     self.triggerAutoPlay = triggerAutoPlay
     self.deleteBot = deleteBot
     self.toggleDebugServer = toggleDebugServer
     self.reloadPage = reloadPage
     self.switchServer = switchServer
+    self.chooseServer = chooseServer
     self.setHidePlayerNames = setHidePlayerNames
     self.setKeepAliveInBackground = setKeepAliveInBackground
     self.setAppLanguage = setAppLanguage
+    self.probeCloud = probeCloud
+    self.testCloudConnection = testCloudConnection
+    self.pluginDiagnostics = pluginDiagnostics
     self.webView = webView
   }
 }
@@ -1340,4 +1365,191 @@ struct RemovePluginAction {
   #endif
 
   func callAsFunction(_ id: String) { perform(id) }
+}
+
+// MARK: - 全自動開始
+
+/// 全自動的「開始」：兩個偏好一起寫、切到全自動、立刻排一場。
+///
+/// 偏好先於模式寫入：模式一切換引擎就可能讀到它們，只寫一半會排錯種類的對局。
+struct StartFullAutoAction {
+
+  private nonisolated(unsafe) let perform: (Bool, RoomPreference) -> Void
+
+  private init(perform: @escaping (Bool, RoomPreference) -> Void) {
+    self.perform = perform
+  }
+
+  init(settings: SettingsStore, setMode: SetAutoPlayModeAction, startNow: StartFullAutoNowAction) {
+    self.init(perform: { [weak settings] sanma, room in
+      settings?.fullAutoPrefersSanma = sanma
+      settings?.fullAutoRoomPreference = room
+      setMode(.fullAuto)
+      startNow()
+    })
+  }
+
+  nonisolated init() { self.perform = { _, _ in } }
+
+  #if DEBUG
+    init(stub: @escaping (Bool, RoomPreference) -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(sanma: Bool, room: RoomPreference) { perform(sanma, room) }
+}
+
+// MARK: - 啟動時選區服
+
+/// 啟動時區服選擇畫面按下確定。
+///
+/// 區服相同只寫設定：頁面還沒載過，`switchServer` 的整頁重載沒有意義。
+struct ChooseServerAction {
+
+  private nonisolated(unsafe) let perform: (MajsoulServer, Bool) -> Void
+
+  private init(perform: @escaping (MajsoulServer, Bool) -> Void) {
+    self.perform = perform
+  }
+
+  init(settings: SettingsStore, switchServer: SwitchServerAction) {
+    self.init(perform: { [weak settings] server, pin in
+      guard let settings else { return }
+      settings.pinMajsoulServer = pin
+      if server == settings.majsoulServer {
+        settings.majsoulServer = server
+      } else {
+        switchServer(server)
+      }
+    })
+  }
+
+  nonisolated init() { self.perform = { _, _ in } }
+
+  #if DEBUG
+    init(stub: @escaping (MajsoulServer, Bool) -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(_ server: MajsoulServer, pin: Bool) { perform(server, pin) }
+}
+
+// MARK: - 雲端探測
+
+/// 設定頁自動探測的結果。`models` 為 nil＝這次沒取到，呼叫端保留上一份清單。
+enum CloudKeyProbe: Equatable {
+  case invalidURL
+  case ok(CloudKeyStatus, models: [CloudModelInfo]?)
+  case failed(String)
+}
+
+/// 依 key 查方案與用量，順手帶回模型清單。只打網路，不碰任何狀態。
+struct ProbeCloudAction {
+
+  private nonisolated(unsafe) let perform: (String, String) async -> CloudKeyProbe
+
+  private init(perform: @escaping (String, String) async -> CloudKeyProbe) {
+    self.perform = perform
+  }
+
+  /// `configuration` 供測試注入 `URLProtocol`；正式路徑用 ephemeral。
+  static func live(configuration: URLSessionConfiguration = .ephemeral) -> ProbeCloudAction {
+    ProbeCloudAction(perform: { baseURL, key in
+      guard let client = AkagiApiClient(baseURL: baseURL, key: key, configuration: configuration)
+      else { return .invalidURL }
+      do {
+        let status = try await client.keyStatus()
+        return .ok(status, models: try? await client.models())
+      } catch {
+        return .failed(error.localizedDescription)
+      }
+    })
+  }
+
+  nonisolated init() { self.perform = { _, _ in .failed("") } }
+
+  #if DEBUG
+    init(stub: @escaping (String, String) async -> CloudKeyProbe) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(baseURL: String, key: String) async -> CloudKeyProbe {
+    await perform(baseURL, key)
+  }
+}
+
+/// 「測試連線」的結果。
+enum CloudConnectionTest: Equatable {
+  case healthOnly(status: String)
+  case ok(status: String, models: [CloudModelInfo], key: CloudKeyStatus?)
+  case failed(String)
+}
+
+/// `/healthz`（無認證）＋有 key 時再查模型與金鑰狀態。
+struct TestCloudConnectionAction {
+
+  private nonisolated(unsafe) let perform: (String, String) async -> CloudConnectionTest
+
+  private init(perform: @escaping (String, String) async -> CloudConnectionTest) {
+    self.perform = perform
+  }
+
+  static func live(configuration: URLSessionConfiguration = .ephemeral) -> TestCloudConnectionAction {
+    TestCloudConnectionAction(perform: { baseURL, key in
+      do {
+        let health = try await AkagiApiClient.health(baseURL: baseURL, configuration: configuration)
+        guard !key.trimmingCharacters(in: .whitespaces).isEmpty else {
+          return .healthOnly(status: health.status)
+        }
+        guard let client = AkagiApiClient(baseURL: baseURL, key: key, configuration: configuration)
+        else { throw CloudAPIError.invalidURL }
+        let models = try await client.models()
+        // 金鑰狀態失敗不影響結論：模型清單已經拿到
+        return .ok(status: health.status, models: models, key: try? await client.keyStatus())
+      } catch {
+        return .failed(error.localizedDescription)
+      }
+    })
+  }
+
+  nonisolated init() { self.perform = { _, _ in .failed("") } }
+
+  #if DEBUG
+    init(stub: @escaping (String, String) async -> CloudConnectionTest) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(baseURL: String, key: String) async -> CloudConnectionTest {
+    await perform(baseURL, key)
+  }
+}
+
+// MARK: - 插件頁診斷
+
+/// 目前遊戲頁面的插件診斷結果。
+enum PluginDiagnostics: Equatable {
+  case report(String)
+  case noData
+  case failed(String)
+}
+
+/// 讀目前頁面的 `__nakiPlugins.diagnostics()`；`reinject` 時先把已啟用的有效插件重新注入。
+struct PluginDiagnosticsAction {
+
+  private nonisolated(unsafe) let perform: (Bool) async -> PluginDiagnostics
+
+  private init(perform: @escaping (Bool) async -> PluginDiagnostics) {
+    self.perform = perform
+  }
+
+  init(runtime: NakiRuntime) {
+    self.init(perform: { [weak runtime] reinject in
+      guard let runtime else { return .noData }
+      return await runtime.pluginDiagnostics(reinject: reinject)
+    })
+  }
+
+  nonisolated init() { self.perform = { _ in .noData } }
+
+  #if DEBUG
+    init(stub: @escaping (Bool) async -> PluginDiagnostics) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(reinject: Bool) async -> PluginDiagnostics { await perform(reinject) }
 }
