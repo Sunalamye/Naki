@@ -73,6 +73,10 @@ void nb_string_free(char*);
 | U-P4 | 字串目錄：新增 10 key 四語、刪 3 個拼接片段；393 key 四語齊全；剩 11 條不翻譤項（純插值／URL／WebSocket）不入 catalog；832 tests | Sonnet low | 完成 `c0ca95c` |
 | U 復驗 | Release／iOS build 成功、832 tests、四必修全部成立、P0 純搬移與 P1b 順序等價成立、三語截圖無裸 key；列 4 個非阻斷跟進 | Opus medium | 完成，裁決可合併 |
 | U-P5 | 跟進：叫回鈕 44pt＋標題、StatusDot 字級 caption2、更新橫幅關閉鈕標題、日文「未啟用」→オフ、notes 補 14 項可見行為變化 | Sonnet low | 完成 `a18c667` |
+| U-hook | `UIState` 可注入；`POST/GET /debug/ui` 加 `screen`／`language`（DEBUG only）；844 tests | Sonnet medium | 完成 `0e23a33`，合進 `wp/u-fixes` |
+| S3-4／U-visual | 合成點擊一次登入成功；zh-Hant／en／ja 三語 UI 截圖與 AX 名稱核對全部通過；三麻建房 **error 1112**（三人房仍帶四麻細則：赤寶 3、起點 25000） | Opus medium | UI 完成；三麻 live 阻塞 |
+| R1 | 三人房細則預設（赤寶 2、起點 35000、返點 40000，推測修法待 live）、埠號「8,765」千分位改 verbatim、日誌欄 fixedSize 不折行、「搜索」→「搜尋…」、identifier 拆開；847 tests；變異 2 殺 2 | Sonnet medium | 完成 `abd0d3a` |
+| S3-5 | `/debug/ui` 三語開畫面成功；R1 三項顯示修正三語通過；三麻 live 一局打完（房 13364、第 2 位 41800）：`room_quick_test player_count=3` 一次成功（三麻細則生效）、`decisionSource` 107/108 為 local-akagi3p、榮和 2 次鏈路完整、立直 1 次、拔北成功 3 次；**P0**：暗槓後嶺上摸北的拔北不受理 → 60 秒逾時被判離開、後半局伺服器自動摸切 | Opus medium | 完成 |
 | S3 | live 三麻 smoke：S2 build、測試帳號、三人友人房＋人機一局 | Sonnet medium | 第 1 次：登入過期。第 2 次：開出**四麻**（工具 bug，見 S2b），該局四麻正常（11 分鐘、和牌 2 次、無停滯）。第 3 次進行中 |
 | S2b | `room_quick_test`／`room_create` 的 GameMode 依人數映射（三人 11／12，預設 12）；`RoomModeTests`；765 tests；變異 18 殺 18 | Sonnet medium | 完成；commit `4accbae` 在 `wp/s2-sanma` |
 
@@ -97,6 +101,10 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 4. U1（使用者 2026-10-09 補充）：用 twostraws `swiftui-pro` skill（已裝到 `.claude/skills/swiftui-pro`，上游 `f980071`）審查現行畫面設計：`command/Views/*`、`App/*`、SettingsStore 介面；依 skill 的 11 步流程，產出必修／建議清單，再開修正包。評估基準沿用使用者認可的 @Observable Store + Action + @Entry 架構（不引入 ViewModel）。
 
 ## Deviations
+
+- **三麻 live 首次成功（2026-10-09，房號 30887，`.swfd/logs/s3-live-4/live-*.log`）**：`room_create` 帶 mode 12、赤寶 2、起點 35000、返點 40000 一次成功（三欄一起改，無法分辨哪一欄造成 1112）；`start_game is3P=true`、`engine=akagi-sanma-bc`；側欄顯示「Akagi 三麻・default strength」；20 個決策點、立直 1 次（reach／reach_accepted）、和牌 1 次（type=9 → ActionHule）、打牌 9 次。**缺陷**：拔北請求只送 `080b`（type=11，無 tile／moqie），伺服器不受理，重送 75 次後被超時摸切；被另一處登入擠斷後 kita 無退避重試 1246 次且停滯指示未出現 → K1 修。
+- **S3-5 附帶發現（待 R2）**：終局後側欄退回「Mortal (4P)」與殘留「skip:sanmaUnsupported」；底部狀態列「已連線到雀魂伺服器」不隨語言切換；`/screenshot` 拍 sheet 時標籤文字消失（用 `screencapture -l` 可拍到）；拔北回音 0.98 秒 > 700ms 重送窗；被判離開後的「我回了」對話框 Naki 不會偵測。
+- **流程失誤（主線）**：s3-visual 回報「已結案」後又收到我晚到的授權而繼續跑 live，我同時派了 S3-5 用同一帳號，兩個實例互踢（`NotifyAnotherLogin`），對局在東 2 局被中斷。教訓：同一測試帳號同一時間只能有一個 live 工作包；派下一個前先 ListAgents 確認前一個真的 idle 且沒有待處理訊息。
 
 - **視覺驗證走 HTTP，不走 Accessibility（使用者定案 2026-10-09）**：Debug server 本來就是給 agent 用的，畫面卻卡在 ContentView 的 `@State`，HTTP 開不了 sheet。開 U-hook：畫面開關搬進可注入的 `UIState`，`POST /debug/ui` 加 `screen`／`language`，`GET /debug/ui` 查狀態，DEBUG only。why：Accessibility 點擊脆弱且每台機器權限不同；HTTP hook 可重現、可寫進 verify 腳本。
 - **登入與確認框可用 CGEventPost 合成點擊**：CLAUDE.md「不座標點擊」是針對牌局動作，登入／終局確認／「已在另一處登入」不在其內，且 8/12 已 live 驗證；先前三次 S3 因此受阻是主線過度保守。
