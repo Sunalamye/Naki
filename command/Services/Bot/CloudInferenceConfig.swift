@@ -31,6 +31,7 @@ struct CloudInferenceConfig: Equatable {
         enabled
             && !baseURL.trimmingCharacters(in: .whitespaces).isEmpty
             && !apiKey.trimmingCharacters(in: .whitespaces).isEmpty
+            && !AkagiApiClient.isForbiddenHost(baseURL)
     }
 
     /// 還缺哪些條件才會生效；空陣列代表 `isActive == true`。
@@ -48,6 +49,7 @@ struct CloudInferenceConfig: Equatable {
         var missing: [(text: String, key: LocalizedStringKey)] = []
         if !enabled { missing.append(("上方的「啟用雲端推論」開關", "上方的「啟用雲端推論」開關")) }
         if baseURL.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(("伺服器 URL", "伺服器 URL")) }
+        else if AkagiApiClient.isForbiddenHost(baseURL) { missing.append(("伺服器 URL 不可為雀魂網域", "伺服器 URL 不可為雀魂網域")) }
         if apiKey.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(("API Key", "API Key")) }
         return missing
     }

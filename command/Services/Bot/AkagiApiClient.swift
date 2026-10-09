@@ -159,7 +159,21 @@ final class AkagiApiClient {
         return trimmed
     }
 
-    /// URL 解析不出（或 scheme 不是 http/https）回 nil——設定錯誤重試無益，
+    /// 雀魂網域：把對局資料與 API key 送去那裡是填錯，拒絕（含子網域、大小寫不敏感）。
+    private static let forbiddenDomains = [
+        "maj-soul.com", "majsoul.com", "mahjongsoul.com", "yo-star.com",
+        "majsoul.union-game.com", "maj-soul.net",
+    ]
+
+    static func isForbiddenHost(_ baseURL: String) -> Bool {
+        let base = normalize(baseURL: baseURL)
+        guard var host = (URL(string: base)?.host ?? URL(string: "https://" + base)?.host)?.lowercased()
+        else { return false }
+        while host.hasSuffix(".") { host.removeLast() }
+        return forbiddenDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// URL 解析不出（或 scheme 不是 http/https、或是雀魂網域）回 nil——設定錯誤重試無益，
     /// 呼叫端應記 tombstone 只警告一次。
     /// `configuration` 供測試注入 `URLProtocol` stub；正式路徑用 ephemeral
     /// （不落 cache/cookie——上傳的是牌局資料，不留在磁碟上）。
@@ -169,7 +183,8 @@ final class AkagiApiClient {
         guard let url = URL(string: base),
               let scheme = url.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              let host = url.host else {
+              let host = url.host,
+              !Self.isForbiddenHost(base) else {
             return nil
         }
         self.base = base
