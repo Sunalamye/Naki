@@ -450,6 +450,10 @@ class DebugServer: MCPHTTPResponder {
         DebugEndpoint("POST", "/debug/ui", group: "Debug（僅 DEBUG build）",
                       summary: "注入側欄顯示狀態（純顯示層；下一次真實 bot 回應會覆蓋）") { server, request, conn in
             server.handleDebugUIState(body: request.body, connection: conn)
+        },
+        DebugEndpoint("GET", "/debug/ui", group: "Debug（僅 DEBUG build）",
+                      summary: "目前畫面開關與 App 語言") { server, _, conn in
+            server.sendDebugUIStatus(connection: conn)
         }
     ]
     #else
@@ -467,7 +471,9 @@ class DebugServer: MCPHTTPResponder {
     ///
     /// Body（全部欄位可選，缺省不動）：
     /// ```json
-    /// { "recommendations": [{"action_type":"discard","tile":"5mr","prob":0.42}],
+    /// { "screen": "settings|plugins|log|fullauto|none",   // 互斥；fullauto 只開確認表、不啟動全自動
+    ///   "language": "system|zh-Hant|zh-Hans|en|ja|ko",    // 寫 settings.appLanguage（會存進 UserDefaults）
+    ///   "recommendations": [{"action_type":"discard","tile":"5mr","prob":0.42}],
     ///   "isActive": true, "is3P": false,
     ///   "decisionSource": "cloud:4p-akg-v8", "cloudHost": "mjapi.shinkuan.me",
     ///   "available": ["discard","riichi","chi","pon","kan","hora","kita"],
@@ -481,7 +487,16 @@ class DebugServer: MCPHTTPResponder {
                          contentType: "application/json")
             return
         }
+        let request: (screen: UIState.Screen?, language: AppLanguage?)
+        switch Self.parseUIRequest(json) {
+        case .success(let parsed): request = parsed
+        case .failure(let failure):
+            sendJSON(connection: connection, status: 400, data: ["error": failure.message])
+            return
+        }
         let store = dependencies.store
+        if let screen = request.screen { dependencies.ui.apply(screen: screen) }
+        if let language = request.language { dependencies.settings.appLanguage = language }
 
         if let recs = json["recommendations"] as? [[String: Any]] {
             store.recommendations = recs.map { Recommendation(from: $0) }
@@ -507,9 +522,45 @@ class DebugServer: MCPHTTPResponder {
 
         if let tehai = json["tehai"] as? [String] { store.tehaiTiles = tehai }
 
-        sendResponse(connection: connection, status: 200,
-                     body: #"{"ok":true,"note":"顯示層注入；下一次真實 bot 回應會覆蓋"}"#,
-                     contentType: "application/json")
+        sendDebugUIStatus(connection: connection)
+    }
+
+    struct UIRequestError: Error { let message: String }
+
+    /// 解析 `screen`／`language`；未知值回錯誤並列出可用值。
+    static func parseUIRequest(_ json: [String: Any]) -> Result<(screen: UIState.Screen?, language: AppLanguage?), UIRequestError> {
+        var screen: UIState.Screen?
+        if let raw = json["screen"] {
+            guard let name = raw as? String, let value = UIState.Screen(rawValue: name) else {
+                let all = UIState.Screen.allCases.map(\.rawValue).joined(separator: "|")
+                return .failure(UIRequestError(message: "screen 未知值，可用：\(all)"))
+            }
+            screen = value
+        }
+        var language: AppLanguage?
+        if let raw = json["language"] {
+            guard let name = raw as? String, let value = AppLanguage(rawValue: name) else {
+                let all = AppLanguage.allCases.map(\.rawValue).joined(separator: "|")
+                return .failure(UIRequestError(message: "language 未知值，可用：\(all)"))
+            }
+            language = value
+        }
+        return .success((screen, language))
+    }
+
+    static func uiStatusPayload(ui: UIState, language: AppLanguage) -> [String: Any] {
+        ["ok": true,
+         "showGamePanel": ui.showGamePanel,
+         "showAdvancedSettings": ui.showAdvancedSettings,
+         "showPlugins": ui.showPlugins,
+         "showLog": ui.showLog,
+         "showFullAutoKindChoice": ui.showFullAutoKindChoice,
+         "language": language.rawValue]
+    }
+
+    private func sendDebugUIStatus(connection: NWConnection) {
+        sendJSON(connection: connection,
+                 data: Self.uiStatusPayload(ui: dependencies.ui, language: dependencies.settings.appLanguage))
     }
     #endif
 
@@ -765,7 +816,7 @@ class DebugServer: MCPHTTPResponder {
         })
     }
 
-    private func sendJSON(connection: NWConnection, data: [String: Any]) {
+    private func sendJSON(connection: NWConnection, status: Int = 200, data: [String: Any]) {
         do {
             if data.isEmpty {
                 throw NSError(domain: "MCPServer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Empty JSON data"])
@@ -773,7 +824,7 @@ class DebugServer: MCPHTTPResponder {
 
             let jsonData = try JSONSanitizer.data(data, options: .prettyPrinted)
             let body = String(data: jsonData, encoding: .utf8) ?? "{}"
-            sendResponse(connection: connection, status: 200, body: body, contentType: "application/json")
+            sendResponse(connection: connection, status: status, body: body, contentType: "application/json")
         } catch {
             sendResponse(connection: connection, status: 500, body: "{\"error\": \"JSON serialization failed\"}", contentType: "application/json")
         }

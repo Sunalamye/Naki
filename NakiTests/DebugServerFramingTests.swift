@@ -86,4 +86,22 @@ final class DebugServerFramingTests: XCTestCase {
         let line = try await statusLine(request("POST", "/", headers: ["Content-Length: 8"], body: "return 1"))
         XCTAssertFalse(line.contains(" 411 "), line)
     }
+    #if DEBUG
+    func testDebugUIRejectsUnknownScreenWith400() async throws {
+        let body = #"{"screen":"bogus"}"#
+        let line = try await statusLine(request("POST", "/debug/ui", headers: ["Content-Length: \(body.utf8.count)"], body: body))
+        XCTAssertTrue(line.contains(" 400 "), line)
+    }
+
+    func testDebugUIRejectsUnknownLanguageWith400() async throws {
+        let body = #"{"language":"fr"}"#
+        let line = try await statusLine(request("POST", "/debug/ui", headers: ["Content-Length: \(body.utf8.count)"], body: body))
+        XCTAssertTrue(line.contains(" 400 "), line)
+    }
+
+    func testDebugUIGetIsServed() async throws {
+        let line = try await statusLine(request("GET", "/debug/ui"))
+        XCTAssertTrue(line.contains(" 200 "), line)
+    }
+    #endif
 }

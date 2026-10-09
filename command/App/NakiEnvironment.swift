@@ -47,6 +47,9 @@ struct NakiEnvironment {
     /// ⇒ rescan 更新時自動重繪（見 `PluginStore` 檔頭為什麼不能用 struct 快照）。
     var pluginStore: PluginStore
 
+    /// 畫面開關（側欄與 sheet）；DEBUG 的 `/debug/ui` 寫同一份。
+    var ui: UIState
+
     /// 掃描到的插件（唯讀顯示用；開關寫進 `settings.enabledPluginIds`）。
     /// 讀的是 `pluginStore.descriptors`（class ref）⇒ reactive。
     var pluginDescriptors: [PluginDescriptor] { pluginStore.descriptors }
@@ -54,11 +57,12 @@ struct NakiEnvironment {
     /// 正式路徑：由 `NakiRuntime` 顯式提供。`pluginStore` 給預設值，
     /// 這樣現有呼叫端不必全部改。
     init(store: GameStore, settings: SettingsStore, actions: NakiActions,
-         pluginStore: PluginStore = PluginStore()) {
+         pluginStore: PluginStore = PluginStore(), ui: UIState = UIState()) {
         self.store = store
         self.settings = settings
         self.actions = actions
         self.pluginStore = pluginStore
+        self.ui = ui
     }
 
     /// **預設值只給 Preview。**
@@ -77,6 +81,7 @@ struct NakiEnvironment {
         self.settings = SettingsStore()
         self.actions = NakiActions()
         self.pluginStore = PluginStore()
+        self.ui = UIState()
     }
 
     /// `@Entry` 的預設值每讀一次都會重新求值；用同一份共用實例，讀取之間才相等，

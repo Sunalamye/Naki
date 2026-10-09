@@ -177,7 +177,7 @@ final class LogAndVersionSingleSourceTests: XCTestCase {
         ]
         // 顯示層注入只存在於 DEBUG build（Release 查表 404，見 DebugServer）
         #if DEBUG
-        expected.insert("POST /debug/ui")
+        expected.formUnion(["POST /debug/ui", "GET /debug/ui"])
         #endif
 
         XCTAssertEqual(actual, expected)

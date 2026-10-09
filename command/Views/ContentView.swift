@@ -67,18 +67,6 @@ struct ContentView: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 #endif
 
-    /// 決策面板／HUD 是否顯示。
-    ///
-    /// iOS 從 `false` 改成 `true`：它現在是浮在 WebView 上的 HUD，不再從牌桌
-    /// 切走寬度，所以預設藏起來只會讓人以為 Naki 沒在運作。
-    @State private var showGamePanel = true
-    @State private var showAdvancedSettings = false
-    @State private var showPlugins = false
-    @State private var showLog = false
-
-    /// 切到「全自動」時彈出的設定表（人數 × 房間偏好）
-    @State private var showFullAutoKindChoice = false
-
     // sheet 上的暫存選擇：按「開始」才寫進 settings，取消就整個丟掉。
     // 直接綁 settings 的話，滑一下 picker 就已經改掉正在生效的設定了。
     @State private var draftPrefersSanma = false
@@ -88,7 +76,7 @@ struct ContentView: View {
     /// 取消後也自然回到取消當下的實際模式（表單開著時 MCP 改了模式也不會被覆蓋）。
     private var autoPlayModeSelection: Binding<AutoPlayMode> {
         Binding(
-            get: { showFullAutoKindChoice ? .fullAuto : naki.store.autoPlayMode },
+            get: { naki.ui.showFullAutoKindChoice ? .fullAuto : naki.store.autoPlayMode },
             set: { newValue in
                 // 全自動會**主動把帳號排進伺服器隊列**，排哪一種必須是使用者當下說的，
                 // 不是沿用一個他看不到的舊設定。每次切進來都問（帶上次的選擇當預設）。
@@ -96,7 +84,7 @@ struct ContentView: View {
                 if newValue == .fullAuto && naki.store.autoPlayMode != .fullAuto {
                     draftPrefersSanma = naki.settings.fullAutoPrefersSanma
                     draftRoomPreference = naki.settings.fullAutoRoomPreference
-                    showFullAutoKindChoice = true
+                    naki.ui.showFullAutoKindChoice = true
                 } else {
                     naki.actions.setAutoPlayMode(newValue)
                 }
@@ -134,16 +122,16 @@ struct ContentView: View {
         // 「三人麻將・最高房」直接消失，而取消鈕被畫成「OK」。選項用 Picker 表達
         // 就不受按鈕數限制，也讓兩個維度看起來像兩個維度。
         // 按 Esc 或點視窗外關掉也走同一條：模式本來就沒動，取消不需要任何還原。
-        .sheet(isPresented: $showFullAutoKindChoice) {
+        .sheet(isPresented: Bindable(naki.ui).showFullAutoKindChoice) {
             FullAutoSetupSheet(
                 sanma: $draftPrefersSanma,
                 room: $draftRoomPreference,
                 sanmaEngineAvailable: AkagiSanmaBot.isBundled || naki.settings.cloudConfig.isActive,
                 onStart: {
-                    showFullAutoKindChoice = false
+                    naki.ui.showFullAutoKindChoice = false
                     naki.actions.startFullAuto(sanma: draftPrefersSanma, room: draftRoomPreference)
                 },
-                onCancel: { showFullAutoKindChoice = false })
+                onCancel: { naki.ui.showFullAutoKindChoice = false })
             .appLocale()
         }
         .accessibilityIdentifier("autoplay-mode-picker")
@@ -295,8 +283,8 @@ struct ContentView: View {
             .frame(minWidth: 600)
 
             // 決策面板（右側）
-            if showGamePanel {
-                GamePanel(showLog: $showLog)
+            if naki.ui.showGamePanel {
+                GamePanel(showLog: Bindable(naki.ui).showLog)
                     .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
             }
         }
@@ -304,11 +292,11 @@ struct ContentView: View {
         .safeAreaInset(edge: .bottom) {
             StatusBar()
         }
-        .animation(PanelLayout.animation(reduceMotion: reduceMotion), value: showGamePanel)
-        .sheet(isPresented: $showAdvancedSettings) {
+        .animation(PanelLayout.animation(reduceMotion: reduceMotion), value: naki.ui.showGamePanel)
+        .sheet(isPresented: Bindable(naki.ui).showAdvancedSettings) {
             AdvancedSettingsSheet().appLocale()
         }
-        .sheet(isPresented: $showPlugins) {
+        .sheet(isPresented: Bindable(naki.ui).showPlugins) {
             PluginsPageView().appLocale()
         }
         .toolbar {
@@ -325,7 +313,7 @@ struct ContentView: View {
 
         // 進階設定
         ToolbarItem(placement: .primaryAction) {
-            Button("進階設定", systemImage: "gearshape") { showAdvancedSettings = true }
+            Button("進階設定", systemImage: "gearshape") { naki.ui.showAdvancedSettings = true }
                 .labelStyle(.iconOnly)
                 .help("進階設定")
                 .accessibilityIdentifier("toolbar-settings")
@@ -333,7 +321,7 @@ struct ContentView: View {
 
         // 插件（獨立頁面：清單 + 熱插拔開關 + 即時 log）
         ToolbarItem(placement: .primaryAction) {
-            Button("插件", systemImage: "puzzlepiece.extension") { showPlugins = true }
+            Button("插件", systemImage: "puzzlepiece.extension") { naki.ui.showPlugins = true }
                 .labelStyle(.iconOnly)
                 .help("插件")
                 .accessibilityIdentifier("toolbar-plugins")
@@ -396,22 +384,22 @@ struct ContentView: View {
 
         // 右側：日誌切換
         ToolbarItem(placement: .primaryAction) {
-            Button("顯示或隱藏日誌", systemImage: showLog ? "terminal.fill" : "terminal") { showLog.toggle() }
+            Button("顯示或隱藏日誌", systemImage: naki.ui.showLog ? "terminal.fill" : "terminal") { naki.ui.showLog.toggle() }
                 .labelStyle(.iconOnly)
                 .help("顯示/隱藏日誌")
                 .accessibilityIdentifier("toolbar-log-toggle")
-                .accessibilityValue(showLog ? "已顯示" : "已隱藏")
+                .accessibilityValue(naki.ui.showLog ? "已顯示" : "已隱藏")
         }
 
         // 遊戲面板切換
         ToolbarItem(placement: .primaryAction) {
-            Button("顯示或隱藏遊戲面板", systemImage: showGamePanel ? "sidebar.trailing" : "sidebar.right") {
-                showGamePanel.toggle()
+            Button("顯示或隱藏遊戲面板", systemImage: naki.ui.showGamePanel ? "sidebar.trailing" : "sidebar.right") {
+                naki.ui.showGamePanel.toggle()
             }
             .labelStyle(.iconOnly)
             .help("顯示/隱藏遊戲面板")
             .accessibilityIdentifier("toolbar-game-panel-toggle")
-            .accessibilityValue(showGamePanel ? "已顯示" : "已隱藏")
+            .accessibilityValue(naki.ui.showGamePanel ? "已顯示" : "已隱藏")
         }
     }
 #endif
@@ -485,7 +473,7 @@ struct ContentView: View {
                         IOSStatusOverlay(bottomInset: bottomSafeInset)
                     }
 
-                if showGamePanel {
+                if naki.ui.showGamePanel {
                     Color.clear
                         .frame(width: iOSPanelWidth)
                         .allowsHitTesting(false)
@@ -498,7 +486,7 @@ struct ContentView: View {
             // 分成兩層的理由是高度：放同一個 HStack 裡的話，WebView 的
             // `ignoresSafeArea` 會把整個 HStack 撐成「含 safe area 的全螢幕高」，
             // 面板被一起拉到最下緣。
-            if showGamePanel {
+            if naki.ui.showGamePanel {
                 iOSSidePanel
                     .frame(width: iOSPanelWidth)
                     .transition(reduceMotion ? .opacity : .move(edge: .trailing))
@@ -511,9 +499,9 @@ struct ContentView: View {
             // 「公告」那一區。在這裡它貼的是螢幕右緣那條黑邊。
             //
             // identifier 與面板內那顆收合鈕共用：兩者互斥出現，測試永遠只找得到一顆。
-            if !showGamePanel {
+            if !naki.ui.showGamePanel {
                 Button("顯示決策面板", systemImage: "sidebar.right") {
-                    withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { showGamePanel = true }
+                    withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { naki.ui.showGamePanel = true }
                 }
                 .labelStyle(.iconOnly)
                 .padding(10)
@@ -549,16 +537,16 @@ struct ContentView: View {
         }
         .onAppear {
             if !PanelLayout.startsVisible(horizontal: horizontalSizeClass, vertical: verticalSizeClass) {
-                showGamePanel = false
+                naki.ui.showGamePanel = false
             }
         }
-        .sheet(isPresented: $showLog) {
+        .sheet(isPresented: Bindable(naki.ui).showLog) {
             iOSLogSheet.appLocale()
         }
-        .sheet(isPresented: $showAdvancedSettings) {
+        .sheet(isPresented: Bindable(naki.ui).showAdvancedSettings) {
             AdvancedSettingsSheet().appLocale()
         }
-        .sheet(isPresented: $showPlugins) {
+        .sheet(isPresented: Bindable(naki.ui).showPlugins) {
             PluginsPageView().appLocale()
         }
     }
@@ -599,25 +587,25 @@ struct ContentView: View {
                         .iOSTapTarget()
                         .accessibilityIdentifier("toolbar-reload")
 
-                    Button("顯示日誌", systemImage: "terminal") { showLog = true }
+                    Button("顯示日誌", systemImage: "terminal") { naki.ui.showLog = true }
                         .iOSTapTarget()
                         .accessibilityIdentifier("toolbar-log-toggle")
 
                     cloudQuickToggle
                         .iOSTapTarget()
 
-                    Button("進階設定", systemImage: "gearshape") { showAdvancedSettings = true }
+                    Button("進階設定", systemImage: "gearshape") { naki.ui.showAdvancedSettings = true }
                         .iOSTapTarget()
                         .accessibilityIdentifier("toolbar-settings")
 
                     Button("隱藏決策面板", systemImage: "sidebar.trailing") {
-                        withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { showGamePanel = false }
+                        withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { naki.ui.showGamePanel = false }
                     }
                     .iOSTapTarget()
                     .accessibilityIdentifier("toolbar-game-panel-toggle")
                     .accessibilityValue("已顯示")
 
-                    Button("插件", systemImage: "puzzlepiece.extension") { showPlugins = true }
+                    Button("插件", systemImage: "puzzlepiece.extension") { naki.ui.showPlugins = true }
                         .iOSTapTarget()
                         .accessibilityIdentifier("toolbar-plugins")
                 }
@@ -650,7 +638,7 @@ struct ContentView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("完成") { showLog = false }
+                        Button("完成") { naki.ui.showLog = false }
                             .accessibilityIdentifier("log-sheet-done-button")
                     }
                 }

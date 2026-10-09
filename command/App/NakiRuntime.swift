@@ -58,10 +58,12 @@ final class NakiRuntime {
     let pluginStore = PluginStore()
     var pluginDescriptors: [PluginDescriptor] { pluginStore.descriptors }
 
+    let ui = UIState()
+
     /// 注入 Scene 的值
     var environment: NakiEnvironment {
         NakiEnvironment(store: store, settings: settings, actions: actions,
-                        pluginStore: pluginStore)
+                        pluginStore: pluginStore, ui: ui)
     }
 
     // MARK: - 組裝
@@ -342,6 +344,8 @@ final class NakiRuntime {
 
         return NakiMCPDependencies(
             store: store,
+            ui: ui,
+            settings: settings,
             executeJavaScript: javaScript,
             captureScreenshot: CaptureScreenshotAction(),
             sendAction: send,
