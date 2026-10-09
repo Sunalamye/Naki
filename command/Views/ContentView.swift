@@ -166,6 +166,7 @@ struct ContentView: View {
                     in: SettingsStore.actionDelayRange,
                     step: SettingsStore.actionDelayStep)
                 .labelsHidden()
+                .controlSize(.small)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("autoplay-delay-stepper")
@@ -342,25 +343,23 @@ struct ContentView: View {
         if naki.settings.supportsAutoPlay {
             ToolbarItem(placement: .navigation) {
                 actionDelayStepper
-                    .frame(width: 96)
+                    .fixedSize()
+                    .padding(.horizontal, 4)
             }
         }
 
         // MCP Server
         ToolbarItem(placement: .navigation) {
             Button(action: { naki.actions.toggleDebugServer() }) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        StatusDot(isOn: naki.store.isDebugServerRunning, onColor: .green, offColor: .gray)
-                        Text(verbatim: String(naki.store.debugServerPort))
-                            .font(.system(.caption, design: .monospaced))
-                    }
-                    Text("MCP Server")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                ToolbarStatusPill(label: "MCP Server") {
+                    StatusDot(isOn: naki.store.isDebugServerRunning, onColor: .green, offColor: .gray)
+                } value: {
+                    Text(verbatim: String(naki.store.debugServerPort))
+                        .font(.system(.caption, design: .monospaced))
                 }
+                // 實測：toolbar 的 Button 把兩行內容擺得偏低，上移後與膠囊垂直置中。
+                .offset(y: -5.5)
             }
-            .frame(width: 80)
             .help(naki.store.isDebugServerRunning ? "MCP Server 運行中" : "MCP Server 已停止")
             .accessibilityIdentifier("mcp-server-toggle")
             .accessibilityLabel("MCP Server")
@@ -371,7 +370,6 @@ struct ContentView: View {
         // 連接狀態
         ToolbarItem(placement: .navigation) {
             ConnectionIndicator()
-                .frame(width: 80)
         }
 
         // 重新載入
@@ -851,6 +849,28 @@ func missingList(_ items: [LocalizedStringKey]) -> Text {
     }
 }
 
+// MARK: - Toolbar 狀態膠囊
+
+/// 左側狀態點（垂直置中於兩行）＋右側「值／標籤」兩行，兩行左緣同一條線。
+private struct ToolbarStatusPill<Dot: View, Value: View>: View {
+    let label: LocalizedStringKey
+    @ViewBuilder let dot: Dot
+    @ViewBuilder let value: Value
+
+    var body: some View {
+        HStack(spacing: 6) {
+            dot
+            VStack(alignment: .leading, spacing: 0) {
+                value
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+    }
+}
+
 // MARK: - Connection Indicator
 
 struct ConnectionIndicator: View {
@@ -859,18 +879,15 @@ struct ConnectionIndicator: View {
     private var isConnected: Bool { naki.store.isConnected }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(isConnected ? Color.green : Color.red)
-                    .frame(width: 6, height: 6)
-                Text(isConnected ? "已連接" : "未連接")
-                    .font(.caption2)
-            }
-            Text("WebSocket")
+        ToolbarStatusPill(label: "WebSocket") {
+            Circle()
+                .fill(isConnected ? Color.green : Color.red)
+                .frame(width: 6, height: 6)
+        } value: {
+            Text(isConnected ? "已連接" : "未連接")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
         }
+        .padding(.top, 3) // 實測：補償 toolbar 擺放偏高，與 MCP 膠囊同一中心
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("websocket-connection-indicator")
         .accessibilityLabel("WebSocket 連線狀態")
