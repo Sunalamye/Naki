@@ -102,6 +102,8 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 
 ## Deviations
 
+- **拔北修法（K1，2026-10-09，統帥代決）**：三局 log 加錄影逐手核對，三次失敗的拔北都是「手中無北、北是剛摸到的那張」，三次成功都是北早已在手；伺服器的 `ActionBaBei` 帶 `moqie`。修法只加 `moqie=true`（剛摸到）→ `080b2801`，**不加 `tile=4z`**：8/05 與今天三次成功都不帶 tile，tile 零證據，不用未驗證欄位去賭；seq 103「送 080b 後被摸切 E」的異常留 live 觀察。拔北回音窗 700ms→1.5 秒（實測回音最長 0.98 秒；過早重送在手有兩張北時會多拔一張）。斷線重試：15 次是每輪上限、輪間無退避是根因；改斷線立刻停手報停滯、跨輪退避 2→30 秒、和牌維持本輪重送（既有夾具 A）。
+
 - **三麻 live 首次成功（2026-10-09，房號 30887，`.swfd/logs/s3-live-4/live-*.log`）**：`room_create` 帶 mode 12、赤寶 2、起點 35000、返點 40000 一次成功（三欄一起改，無法分辨哪一欄造成 1112）；`start_game is3P=true`、`engine=akagi-sanma-bc`；側欄顯示「Akagi 三麻・default strength」；20 個決策點、立直 1 次（reach／reach_accepted）、和牌 1 次（type=9 → ActionHule）、打牌 9 次。**缺陷**：拔北請求只送 `080b`（type=11，無 tile／moqie），伺服器不受理，重送 75 次後被超時摸切；被另一處登入擠斷後 kita 無退避重試 1246 次且停滯指示未出現 → K1 修。
 - **S3-5 附帶發現（待 R2）**：終局後側欄退回「Mortal (4P)」與殘留「skip:sanmaUnsupported」；底部狀態列「已連線到雀魂伺服器」不隨語言切換；`/screenshot` 拍 sheet 時標籤文字消失（用 `screencapture -l` 可拍到）；拔北回音 0.98 秒 > 700ms 重送窗；被判離開後的「我回了」對話框 Naki 不會偵測。
 - **流程失誤（主線）**：s3-visual 回報「已結案」後又收到我晚到的授權而繼續跑 live，我同時派了 S3-5 用同一帳號，兩個實例互踢（`NotifyAnotherLogin`），對局在東 2 局被中斷。教訓：同一測試帳號同一時間只能有一個 live 工作包；派下一個前先 ListAgents 確認前一個真的 idle 且沒有待處理訊息。
