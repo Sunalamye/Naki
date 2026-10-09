@@ -130,6 +130,8 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 
 ## Deviations
 
+- **2.15.0 已發版（2026-10-09 20:10）**：https://github.com/Sunalamye/Naki/releases/tag/v2.15.0（DMG／ZIP／IPA）；main `5493ff3`、tag `v2.15.0`。release.sh 在 push 時被遠端新 PR（#4 英文 README）擋下非快轉，改手動合併 origin/main 後重打 tag、push、`gh release create`。產物建自合併前的樹（PR 只加 README.en.md，不影響 binary）。**後續**：`README.en.md` 是 PR 作者依 2.14.0 寫的，三麻等段落已與中文 README 不一致，待更新。
+
 - **安裝（2026-10-09 19:32）**：main `3c3acb4` 的 Release build 已裝到 `/Applications/Naki.app`（版號仍 2.14.0，未發版），舊版備份 `~/Library/Application Support/Naki/backup/Naki-2.14.0-release-20261009-1932.app`。
 - **/debug/ui 的 language 會污染正式設定**：它寫共用 UserDefaults `naki.appLanguage`，測試包切 en 沒還原就讓正式 App 啟動變英文（使用者回報）。決策：改成只影響該次行程、不持久化（待做 T2）；在此之前所有用它的工作包結束前必須設回 `system`。
 - **工具列排版（T1 進行中）**：延遲 stepper 箭頭膠囊與「0.5 秒」不垂直對齊；MCP／WebSocket 兩顆膠囊綠點只佔第一行造成兩行錯位。2.14.0 就有，P1 未修。
