@@ -31,7 +31,7 @@ struct PluginsPageView: View {
 
     // 移除插件的確認
     @State private var pendingRemoval: String?
-    @State private var diagnosticsText = L10n.text("尚未檢查目前遊戲頁面")
+    @State private var diagnostics: PluginDiagnostics?
     @State private var checkingDiagnostics = false
     @State private var tab: PluginTab = .plugins
     @State private var selectedPluginId: String?   // master-detail 選中的插件
@@ -70,9 +70,8 @@ struct PluginsPageView: View {
             tabBody
         }
         .frame(width: 900, height: 660)
-        .confirmationDialog(removeDialogTitle, isPresented: removeDialogBinding,
-                            presenting: pendingRemoval, actions: removeDialogActions,
-                            message: removeDialogMessage)
+        .confirmationDialog(removeDialogTitle, item: $pendingRemoval,
+                            actions: removeDialogActions, message: removeDialogMessage)
         #else
         NavigationStack {
             VStack(spacing: 0) {
@@ -87,25 +86,20 @@ struct PluginsPageView: View {
                         .accessibilityIdentifier("plugins-done-button")
                 }
             }
-            .confirmationDialog(removeDialogTitle, isPresented: removeDialogBinding,
-                                presenting: pendingRemoval, actions: removeDialogActions,
-                                message: removeDialogMessage)
+            .confirmationDialog(removeDialogTitle, item: $pendingRemoval,
+                                actions: removeDialogActions, message: removeDialogMessage)
         }
         #endif
     }
 
     // 移除確認對話（抽成可重用的片段，兩個平台共用）
     private var removeDialogTitle: LocalizedStringKey { "移除插件？" }
-    private var removeDialogBinding: Binding<Bool> {
-        Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })
-    }
     @ViewBuilder private func removeDialogActions(_ id: String) -> some View {
         Button("移除「\(id)」", role: .destructive) {
             naki.actions.removePlugin(id)
             if selectedPluginId == id { selectedPluginId = nil }
-            pendingRemoval = nil
         }
-        Button("取消", role: .cancel) { pendingRemoval = nil }
+        Button("取消", role: .cancel) {}
     }
     private func removeDialogMessage(_ id: String) -> some View {
         Text("會刪掉 \(id) 的整個插件目錄。可重新匯入或放檔案救回。")
@@ -140,7 +134,6 @@ struct PluginsPageView: View {
         .labelsHidden()
     }
 
-    @ViewBuilder
     // MARK: 插件 tab — master-detail（左清單、右詳情）
 
     private var pluginsSplitView: some View {
@@ -173,7 +166,7 @@ struct PluginsPageView: View {
                     .buttonStyle(.borderless)
                     .disabled(updateChecking)
                     if let msg = importMessage {
-                        Text(msg).font(.caption2).foregroundColor(.green)
+                        Text(msg).font(.caption2).foregroundStyle(.green)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -240,16 +233,21 @@ struct PluginsPageView: View {
     }
 #endif
 
-    private func statusColor(_ d: PluginDescriptor) -> Color {
-        if !d.isValid { return .red }
-        return naki.settings.enabledPluginIds.contains(d.id) ? .green : .secondary
+    private func status(_ d: PluginDescriptor) -> (symbol: String, color: Color, label: LocalizedStringKey) {
+        if !d.isValid { return ("exclamationmark.triangle.fill", .red, "無效插件") }
+        return naki.settings.enabledPluginIds.contains(d.id)
+            ? ("checkmark.circle.fill", .green, "已啟用")
+            : ("circle", .secondary, "未啟用")
     }
 
     /// 左欄一列：狀態點 + 名稱 + id（緊湊，好掃）。
-    @ViewBuilder
     private func sidebarRow(_ d: PluginDescriptor) -> some View {
-        HStack(spacing: 8) {
-            Circle().fill(statusColor(d)).frame(width: 8, height: 8)
+        let status = status(d)
+        return HStack(spacing: 8) {
+            Image(systemName: status.symbol)
+                .foregroundStyle(status.color)
+                .imageScale(.small)
+                .accessibilityLabel(status.label)
             VStack(alignment: .leading, spacing: 1) {
                 Text(d.manifest?.name ?? d.id).font(.callout)
                 Text(d.id).font(.system(.caption2, design: .monospaced))
@@ -334,7 +332,7 @@ struct PluginsPageView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(d.id).font(.title3).bold()
                 (d.failure.map { Text(verbatim: $0.text) } ?? Text("無效插件"))
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(role: .destructive) { pendingRemoval = d.id } label: {
                     Label("移除", systemImage: "trash")
@@ -357,7 +355,7 @@ struct PluginsPageView: View {
                     TextField("Sunalamye/naki-plugins 或 gist / plugin.json 網址", text: $importURL)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.caption, design: .monospaced))
-                        .disableAutocorrection(true)
+                        .autocorrectionDisabled()
                         .accessibilityIdentifier("plugin-import-url")
                     Button(importing ? "抓取中…" : "抓取") { Task { await fetchImport() } }
                         .disabled(importing || importURL.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -367,11 +365,11 @@ struct PluginsPageView: View {
                 }
 
                 if let err = importError {
-                    Text("匯入失敗：\(err)").font(.caption).foregroundColor(.red)
+                    Text("匯入失敗：\(err)").font(.caption).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let msg = importMessage {
-                    Text(msg).font(.caption).foregroundColor(.green)
+                    Text(msg).font(.caption).foregroundStyle(.green)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -384,14 +382,14 @@ struct PluginsPageView: View {
                             Text("\(u.id) · \(u.versionText)")
                                 .font(.system(.caption, design: .monospaced))
                             if let change = u.permissionChange {
-                                Text("權限變更：\(change)").font(.caption2).foregroundColor(.red)
+                                Text("權限變更：\(change)").font(.caption2).foregroundStyle(.red)
                             } else {
                                 Text("權限宣告未變").font(.caption2).foregroundStyle(.secondary)
                             }
                         }
                     }
                     Text("⚠️ 更新＝執行作者新寫的程式碼，等同重新信任。")
-                        .font(.caption2).foregroundColor(.red)
+                        .font(.caption2).foregroundStyle(.red)
                     HStack {
                         Button("更新這些（\(pendingUpdates.count)）") { confirmUpdates() }
                             .buttonStyle(.borderedProminent)
@@ -413,7 +411,7 @@ struct PluginsPageView: View {
                     }
                     ForEach(importPreview, id: \.id) { p in
                         HStack(alignment: .top, spacing: 8) {
-                            Toggle("", isOn: Binding(
+                            Toggle(p.manifest.name, isOn: Binding(
                                 get: { selectedImports.contains(p.id) },
                                 set: { on in
                                     if on { selectedImports.insert(p.id) } else { selectedImports.remove(p.id) }
@@ -446,7 +444,7 @@ struct PluginsPageView: View {
                     }
 
                     Text("⚠️ 安裝＝信任作者。插件能用你的帳號送動作、讀頁面上任何資料，Naki 無法阻止。")
-                        .font(.caption2).foregroundColor(.red)
+                        .font(.caption2).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack {
@@ -521,7 +519,7 @@ struct PluginsPageView: View {
                         Text("允許插件送出遊戲動作（L3）").font(.body).bold()
                         Text("開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request。預設關閉。只在測試帳號、且你信任插件時開。")
                             .font(.caption)
-                            .foregroundColor(naki.settings.pluginsMayModifyOutbound ? .red : .secondary)
+                            .foregroundStyle(naki.settings.pluginsMayModifyOutbound ? Color.red : Color.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -532,7 +530,7 @@ struct PluginsPageView: View {
                 Label {
                     Text("**安裝插件＝信任其作者。** 插件與遊戲跑在同一個 JS 環境裡，惡意插件可以用你的帳號送出任何遊戲動作、讀取頁面上任何資料（含 session token），Naki **無法阻止**。只裝你信任的插件。開關即時生效、免重新載入頁面。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -570,7 +568,7 @@ struct PluginsPageView: View {
             HStack {
                 Text(label).font(.caption)
                 Spacer()
-                TextField("", value: Binding(
+                TextField(label, value: Binding(
                     get: {
                         (naki.settings.pluginSettingValue(pluginId: pluginId, key: key) as? Double)
                             ?? { if case .number(let d) = field.defaultValue { return d }; return 0 }()
@@ -581,6 +579,7 @@ struct PluginsPageView: View {
                         naki.actions.setPluginSetting(pluginId, key, v)
                     }
                 ), format: .number)
+                .labelsHidden()
                 .frame(width: 100)
                 .font(.system(.caption, design: .monospaced))
                 #if os(iOS)
@@ -592,6 +591,7 @@ struct PluginsPageView: View {
                 Text(label).font(.caption)
                 Spacer()
                 PluginStringSettingField(
+                    label: label,
                     current: (naki.settings.pluginSettingValue(pluginId: pluginId, key: key) as? String)
                         ?? { if case .string(let s) = field.defaultValue { return s }; return "" }(),
                     commit: { v in
@@ -608,46 +608,13 @@ struct PluginsPageView: View {
     private var diagnosticsSection: some View {
         GroupBox("目前頁面診斷") {
             VStack(alignment: .leading, spacing: 10) {
-                Button("檢查 / 刷新狀態") {
-                    checkingDiagnostics = true
-                    Task { @MainActor in
-                        defer { checkingDiagnostics = false }
-                        do {
-                            let result = try await naki.actions.executeJavaScript("""
-                            return JSON.stringify(window.__nakiPlugins?.diagnostics?.()
-                              || {error: '插件診斷尚未載入，請確認 App 版本及遊戲頁面'}, null, 2);
-                            """)
-                            diagnosticsText = result as? String ?? L10n.text("頁面沒有回傳診斷資料")
-                        } catch { diagnosticsText = error.localizedDescription }
-                    }
-                }
-                .disabled(checkingDiagnostics)
-                Button("重新注入已啟用插件並檢查") {
-                    checkingDiagnostics = true
-                    Task { @MainActor in
-                        defer { checkingDiagnostics = false }
-                        do {
-                            for descriptor in naki.pluginDescriptors where naki.settings.enabledPluginIds.contains(descriptor.id) && descriptor.isValid {
-                                let overrides = descriptor.manifest?.settings.map {
-                                    naki.settings.pluginSettingOverrides(pluginId: descriptor.id, keys: Array($0.keys))
-                                } ?? [:]
-                                if let script = PluginRegistry.enableScript(for: descriptor, overrides: overrides,
-                                        mayModifyOutbound: naki.settings.pluginsMayModifyOutbound) {
-                                    _ = try await naki.actions.executeJavaScript(script)
-                                }
-                            }
-                            let result = try await naki.actions.executeJavaScript("""
-                            return JSON.stringify(window.__nakiPlugins?.diagnostics?.()
-                              || {error: '插件診斷尚未載入，請確認 App 版本及遊戲頁面'}, null, 2);
-                            """)
-                            diagnosticsText = result as? String ?? L10n.text("頁面沒有回傳診斷資料")
-                        } catch { diagnosticsText = error.localizedDescription }
-                    }
-                }
-                .disabled(checkingDiagnostics)
+                Button("檢查 / 刷新狀態") { runDiagnostics(reinject: false) }
+                    .disabled(checkingDiagnostics)
+                Button("重新注入已啟用插件並檢查") { runDiagnostics(reinject: true) }
+                    .disabled(checkingDiagnostics)
                 Text("設定中的啟用數：\(naki.settings.enabledPluginIds.count)。下方 registered 是目前頁面實際註冊結果。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text(diagnosticsText)
+                diagnosticsBody
                     .font(.system(.caption2, design: .monospaced))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -655,23 +622,45 @@ struct PluginsPageView: View {
         }
     }
 
+    private var diagnosticsBody: Text {
+        switch diagnostics {
+        case nil: Text("尚未檢查目前遊戲頁面")
+        case .noData: Text("頁面沒有回傳診斷資料")
+        case .report(let text), .failed(let text): Text(verbatim: text)
+        }
+    }
+
+    private func runDiagnostics(reinject: Bool) {
+        checkingDiagnostics = true
+        Task {
+            diagnostics = await naki.actions.pluginDiagnostics(reinject: reinject)
+            checkingDiagnostics = false
+        }
+    }
+
     // MARK: 即時 log
 
-    @ViewBuilder
+    /// 由新往舊掃，湊滿 300 筆就停：緩衝最多數千筆，body 每次重繪都會跑。
+    private func recentPluginLogs() -> [LogEntry] {
+        Array(LogManager.shared.entries.reversed().lazy
+            .filter { $0.message.contains("[Plugin]") }
+            .prefix(300).reversed())
+    }
+
     private var logSection: some View {
         GroupBox {
-            let lines = LogManager.shared.recentLogLines().filter { $0.contains("[Plugin]") }
+            let entries = recentPluginLogs()
             VStack(alignment: .leading, spacing: 6) {
-                if lines.isEmpty {
+                if entries.isEmpty {
                     Text("還沒有插件 log。啟用一個插件、進一局後，它經 ctx.log 送出的訊息會即時出現在這裡。")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(lines.suffix(300).enumerated()), id: \.offset) { _, line in
-                                Text(line)
+                            ForEach(entries) { entry in
+                                Text(verbatim: "\(entry.formattedTime) \(entry.message)")
                                     .font(.system(.caption2, design: .monospaced))
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -689,19 +678,22 @@ struct PluginsPageView: View {
 
 /// 字串設定欄位：提交（Return）或失焦才套用，避免每個鍵擊都熱重載＋寫 UserDefaults。
 private struct PluginStringSettingField: View {
+    let label: String
     let current: String
     let commit: (String) -> Void
     @State private var text: String
     @FocusState private var focused: Bool
 
-    init(current: String, commit: @escaping (String) -> Void) {
+    init(label: String, current: String, commit: @escaping (String) -> Void) {
+        self.label = label
         self.current = current
         self.commit = commit
         _text = State(initialValue: current)
     }
 
     var body: some View {
-        TextField("", text: $text)
+        TextField(label, text: $text)
+            .labelsHidden()
             .focused($focused)
             .onSubmit(apply)
             .onChange(of: focused) { _, isFocused in if !isFocused { apply() } }

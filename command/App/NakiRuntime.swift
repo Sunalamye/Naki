@@ -403,23 +403,50 @@ final class NakiRuntime {
         hotApplyPlugin(id: id, enabled: enabled)
     }
 
+    private func enableScript(for descriptor: PluginDescriptor) -> String? {
+        let overrides = descriptor.manifest?.settings.map {
+            settings.pluginSettingOverrides(pluginId: descriptor.id, keys: Array($0.keys))
+        } ?? [:]
+        return PluginRegistry.enableScript(for: descriptor, overrides: overrides,
+                                           mayModifyOutbound: settings.pluginsMayModifyOutbound)
+    }
+
     /// 只對當前頁面注入 enable／disable JS（不動持久化與 user script）。
     private func hotApplyPlugin(id: String, enabled: Bool) {
         let script: String?
         if enabled {
             guard let descriptor = pluginDescriptors.first(where: { $0.id == id }),
                   descriptor.isValid else { return }
-            let overrides = descriptor.manifest?.settings.map {
-                settings.pluginSettingOverrides(pluginId: id, keys: Array($0.keys))
-            } ?? [:]
-            script = PluginRegistry.enableScript(for: descriptor, overrides: overrides,
-                                                mayModifyOutbound: settings.pluginsMayModifyOutbound)
+            script = enableScript(for: descriptor)
         } else {
             script = PluginRegistry.disableScript(id: id)
         }
         guard let script else { return }
         Task { [weak self] in
             _ = try? await self?.session.callJavaScript(script)
+        }
+    }
+
+    private static let diagnosticsScript = """
+        return JSON.stringify(window.__nakiPlugins?.diagnostics?.()
+          || {error: '插件診斷尚未載入，請確認 App 版本及遊戲頁面'}, null, 2);
+        """
+
+    /// 讀目前頁面的插件診斷；`reinject` 時先重新注入已啟用的有效插件。
+    func pluginDiagnostics(reinject: Bool) async -> PluginDiagnostics {
+        do {
+            if reinject {
+                for descriptor in pluginDescriptors
+                where settings.enabledPluginIds.contains(descriptor.id) && descriptor.isValid {
+                    if let script = enableScript(for: descriptor) {
+                        _ = try await session.callJavaScript(script)
+                    }
+                }
+            }
+            let result = try await session.callJavaScript(Self.diagnosticsScript)
+            return (result as? String).map(PluginDiagnostics.report) ?? .noData
+        } catch {
+            return .failed(error.localizedDescription)
         }
     }
 
@@ -560,14 +587,22 @@ final class NakiRuntime {
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
             startFullAutoNow: StartFullAutoNowAction(runtime: self),
+            startFullAuto: StartFullAutoAction(
+                settings: settings, setMode: SetAutoPlayModeAction(runtime: self),
+                startNow: StartFullAutoNowAction(runtime: self)),
             triggerAutoPlay: TriggerAutoPlayAction(runtime: self),
             deleteBot: DeleteBotAction(coordinator: coordinator),
             toggleDebugServer: ToggleDebugServerAction(runtime: self),
             reloadPage: ReloadPageAction(session: session),
             switchServer: SwitchServerAction(session: session),
+            chooseServer: ChooseServerAction(
+                settings: settings, switchServer: SwitchServerAction(session: session)),
             setHidePlayerNames: SetHidePlayerNamesAction(session: session),
             setKeepAliveInBackground: SetKeepAliveInBackgroundAction(session: session),
             setAppLanguage: SetAppLanguageAction(settings: settings),
+            probeCloud: .live(),
+            testCloudConnection: .live(),
+            pluginDiagnostics: PluginDiagnosticsAction(runtime: self),
             webView: WebViewAction(session: session))
     }
 }
