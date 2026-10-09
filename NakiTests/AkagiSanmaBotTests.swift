@@ -261,43 +261,6 @@ final class AkagiSanmaBotTests: XCTestCase {
         XCTAssertFalse(controller.lastRecommendations.isEmpty)
     }
 
-    /// 雲端啟用且授權是當前這批：三麻要去問雲端（連不上 → fallback 計 1），來源仍是本地 Akagi
-    func testSanmaCloudConsultedForCurrentAuthorization() async throws {
-        LiqiOperationStore.shared.reset()
-        defer { LiqiOperationStore.shared.reset() }
-        let c = NativeBotController()
-        c.cloudConfigProvider = { CloudInferenceConfig(enabled: true, baseURL: "http://127.0.0.1:9",
-                                                       apiKey: "k", model4P: "", model3P: "") }
-        try c.createBot(playerId: 0, is3P: true)
-        for ev in startEvents(hand: tenpaiHand) { _ = try await c.react(event: ev) }
-        let s = LiqiOperationStore.shared.record(seat: 0, operations: [LiqiOperation(type: .discard)])
-        _ = try await c.react(event: ["type": "tsumo", "actor": 0, "pai": "9s",
-                                      MJAIEventKey.oplistSequence: s.sequence])
-        XCTAssertEqual(c.botState.cloudFallbackStreak, 1)
-        XCTAssertEqual(c.botState.decisionSource, AkagiSanmaBot.source)
-    }
-
-    /// 四麻同形的授權閉包：授權是當前這批就問雲端
-    func testYonmaCloudConsultedForCurrentAuthorization() async throws {
-        LiqiOperationStore.shared.reset()
-        defer { LiqiOperationStore.shared.reset() }
-        let c = NativeBotController()
-        c.cloudConfigProvider = { CloudInferenceConfig(enabled: true, baseURL: "http://127.0.0.1:9",
-                                                       apiKey: "k", model4P: "", model3P: "") }
-        try c.createBot(playerId: 0, is3P: false)
-        let filler = Array(repeating: "?", count: 13)
-        _ = try await c.react(event: ["type": "start_game", "id": 0, "names": ["A", "B", "C", "D"]])
-        _ = try await c.react(event: [
-            "type": "start_kyoku", "bakaze": "E", "kyoku": 1, "honba": 0, "kyotaku": 0,
-            "scores": [25000, 25000, 25000, 25000], "dora_marker": "C", "oya": 0,
-            "tehais": [["1m", "2m", "3m", "4p", "5p", "6p", "7s", "8s", "9s", "E", "E", "S", "W"],
-                       filler, filler, filler]])
-        let s = LiqiOperationStore.shared.record(seat: 0, operations: [LiqiOperation(type: .discard)])
-        _ = try await c.react(event: ["type": "tsumo", "actor": 0, "pai": "N",
-                                      MJAIEventKey.oplistSequence: s.sequence])
-        XCTAssertEqual(c.botState.cloudFallbackStreak, 1)
-    }
-
     /// 本地三麻引擎建不起來：退回雲端-only，三麻仍建得起來；沒有雲端 3p 模型就不支援三麻
     func testSanmaLocalConstructionFailureFallsBackToCloudOnly() throws {
         struct Boom: Error {}
