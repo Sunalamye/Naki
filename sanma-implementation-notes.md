@@ -77,6 +77,8 @@ void nb_string_free(char*);
 | S3-4／U-visual | 合成點擊一次登入成功；zh-Hant／en／ja 三語 UI 截圖與 AX 名稱核對全部通過；三麻建房 **error 1112**（三人房仍帶四麻細則：赤寶 3、起點 25000） | Opus medium | UI 完成；三麻 live 阻塞 |
 | R1 | 三人房細則預設（赤寶 2、起點 35000、返點 40000，推測修法待 live）、埠號「8,765」千分位改 verbatim、日誌欄 fixedSize 不折行、「搜索」→「搜尋…」、identifier 拆開；847 tests；變異 2 殺 2 | Sonnet medium | 完成 `abd0d3a` |
 | S3-5 | `/debug/ui` 三語開畫面成功；R1 三項顯示修正三語通過；三麻 live 一局打完（房 13364、第 2 位 41800）：`room_quick_test player_count=3` 一次成功（三麻細則生效）、`decisionSource` 107/108 為 local-akagi3p、榮和 2 次鏈路完整、立直 1 次、拔北成功 3 次；**P0**：暗槓後嶺上摸北的拔北不受理 → 60 秒逾時被判離開、後半局伺服器自動摸切 | Opus medium | 完成 |
+| K1 | 拔北帶 `moqie`（剛摸到北 `080b2801`）、回音窗 1.5 秒、斷線立刻停手＋跨輪退避 2→30 秒、MCP babei 吃 moqie；853 tests；變異 23 殺 23 | Opus medium | 完成 `23d9eb4`，合進 `wp/u-fixes` |
+| S3-6 | live 三麻一局（房 99869，第 1 名 59600）：拔北 11/11 收到 ActionBaBei（剛摸 5、在手 6，含嶺上與立直後），0 重送；和牌 5 次、立直 5 次；斷線退避無樣本 | Opus medium | 完成，**拔北修法 live 成立** |
 | S3 | live 三麻 smoke：S2 build、測試帳號、三人友人房＋人機一局 | Sonnet medium | 第 1 次：登入過期。第 2 次：開出**四麻**（工具 bug，見 S2b），該局四麻正常（11 分鐘、和牌 2 次、無停滯）。第 3 次進行中 |
 | S2b | `room_quick_test`／`room_create` 的 GameMode 依人數映射（三人 11／12，預設 12）；`RoomModeTests`；765 tests；變異 18 殺 18 | Sonnet medium | 完成；commit `4accbae` 在 `wp/s2-sanma` |
 
@@ -106,6 +108,7 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 
 - **三麻 live 首次成功（2026-10-09，房號 30887，`.swfd/logs/s3-live-4/live-*.log`）**：`room_create` 帶 mode 12、赤寶 2、起點 35000、返點 40000 一次成功（三欄一起改，無法分辨哪一欄造成 1112）；`start_game is3P=true`、`engine=akagi-sanma-bc`；側欄顯示「Akagi 三麻・default strength」；20 個決策點、立直 1 次（reach／reach_accepted）、和牌 1 次（type=9 → ActionHule）、打牌 9 次。**缺陷**：拔北請求只送 `080b`（type=11，無 tile／moqie），伺服器不受理，重送 75 次後被超時摸切；被另一處登入擠斷後 kita 無退避重試 1246 次且停滯指示未出現 → K1 修。
 - **S3-5 附帶發現（待 R2）**：終局後側欄退回「Mortal (4P)」與殘留「skip:sanmaUnsupported」；底部狀態列「已連線到雀魂伺服器」不隨語言切換；`/screenshot` 拍 sheet 時標籤文字消失（用 `screencapture -l` 可拍到）；拔北回音 0.98 秒 > 700ms 重送窗；被判離開後的「我回了」對話框 Naki 不會偵測。
+- **S3-6 新觀察（待查）**：親家局首第一打三次「首送回 7 bytes 受理卻無權威回音，700ms 後重送才打出」（17:33:03／17:34:00／17:36:05，其一前有「confirmNewRound RESPONSE 到達時對局已推進」）；原因未明，可能與局間確認時序有關。
 - **流程失誤（主線）**：s3-visual 回報「已結案」後又收到我晚到的授權而繼續跑 live，我同時派了 S3-5 用同一帳號，兩個實例互踢（`NotifyAnotherLogin`），對局在東 2 局被中斷。教訓：同一測試帳號同一時間只能有一個 live 工作包；派下一個前先 ListAgents 確認前一個真的 idle 且沒有待處理訊息。
 
 - **視覺驗證走 HTTP，不走 Accessibility（使用者定案 2026-10-09）**：Debug server 本來就是給 agent 用的，畫面卻卡在 ContentView 的 `@State`，HTTP 開不了 sheet。開 U-hook：畫面開關搬進可注入的 `UIState`，`POST /debug/ui` 加 `screen`／`language`，`GET /debug/ui` 查狀態，DEBUG only。why：Accessibility 點擊脆弱且每台機器權限不同；HTTP hook 可重現、可寫進 verify 腳本。
