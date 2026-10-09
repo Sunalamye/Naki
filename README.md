@@ -41,6 +41,9 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 推論引擎是 [Mortal](https://github.com/Equim-chan/Mortal)，透過 Core ML 跑在 Apple Neural Engine 上——
 **預設**模型和運算都在本機，不呼叫外部推論服務；雀魂遊戲本身仍需要網路連線。
 
+三麻由獨立的本地引擎處理（Akagi v3 的三麻行為克隆模型，**default strength，模仿天鳳人類，不是 Mortal 等級**），
+詳見〈關於三麻〉。
+
 另可**選配**接上 [Akagi](https://github.com/shinkuan/Akagi) 的雲端推論伺服器，
 用更強的託管模型（含真三麻模型）做決策；預設關閉，詳見下方〈雲端推論〉。
 
@@ -58,7 +61,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 - 側欄由上到下就是決策順序：最佳選擇 → 其他選項 → 牌局細節（可收合）
 - 牌面用真實牌圖，赤五有自己的圖
-- 涵蓋打牌 / 吃 / 碰 / 槓 / 立直 / 和牌 / 拔北 / 九種九牌
+- 涵蓋打牌 / 吃 / 碰 / 槓 / 立直 / 和牌 / 拔北 / 九種九牌（九種九牌尚未 live 驗證）
 
 </td>
 <td width="48%">
@@ -156,6 +159,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 - 工具列有**雲端開關**，對局中可隨時切回本地；圖示反映的是實際生效狀態
   （生效／開了但缺條件／已關閉三種各有不同圖示）
 - 局中改 key／換模型即時生效，不用重開對局
+- 三麻同樣**雲端優先、本地接手**：雲端逾時或失敗時，由本機 Akagi 三麻引擎決策
 - `scripts/cloud-watch.sh`（選用）在背景監看 event log，脫節／失敗／
   watchdog 重連／送出停滯會**發 macOS 通知**——不必自己盯 log
 
@@ -300,6 +304,9 @@ curl http://localhost:8765/bot/ops
 # 手動觸發一次自動打牌
 curl -X POST http://localhost:8765/bot/trigger
 
+# 直接開指定畫面、切語言（僅 DEBUG 建置，Release 沒有）
+curl -X POST http://localhost:8765/debug/ui -d '{"screen":"settings","language":"en"}'
+
 # 在遊戲頁面執行 JS（⚠️ 必須用 return 才有回傳值）
 curl -X POST http://localhost:8765/js -d 'return window.location.href'
 ```
@@ -362,12 +369,12 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 | 功能 | 狀態 |
 |---|---|
 | AI 推薦（四麻） | 可用 |
+| AI 推薦（三麻） | 本地可用（default strength），見下 |
 | 全自動打牌 · 局間自動確認 | 可用（macOS / iOS 26+） |
 | 遊戲內牌面高亮 | 可用 |
-| 雲端推論（可選） | 可用，含真三麻模型 |
+| 雲端推論（可選） | 可用；四麻已 live 驗證，三麻雲端模型無 live 對局 |
 | 隱藏玩家名稱 | 可用（協定層 + 渲染層） |
 | MCP Server · Debug API | 可用 |
-| 三麻 | 僅雲端，見下 |
 | iOS 17–25 | 只顯示推薦，不自動送出 |
 | 牌譜回放分析 | 尚未開始 |
 
@@ -375,18 +382,34 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 
 ### 關於三麻
 
-**三麻是雲端專用路徑。** Naki 沒有三麻權重，而拿四麻模型推三麻不是「稍微偏差」
-而是結構上無效（observation 佈局不同），所以三麻對局**連本地模型都不啟動**。
+**三麻用獨立的本地引擎，不借用四麻模型。** 內建的四麻 Mortal 模型不碰三麻——
+observation 佈局不同，拿它推三麻是結構性無效。三麻改走 `AkagiSanma`
+（[MortalSwift](https://github.com/Sunalamye/MortalSwift) 0.6.0 內的純 Swift 移植，
+Akagi v3 的三麻行為克隆模型，Apache 2.0；37×27 observation、60 個動作）。
 
-- 雲端未生效時，那一手誠實地沒有推薦，自動打牌停用
-- 拔北已接通整條鏈，側欄的可用動作列在三麻會多一個「拔北」
+- **強度是 default strength**：模仿天鳳人類的打法，**不是 Mortal 等級**，不要拿它和四麻推薦比強弱。
+  側欄的模型名稱也這樣標示
+- 雲端啟用時雲端優先、本地接手；雲端關閉時就是本地引擎。引擎建構失敗才退回雲端專用
+- 合法動作由伺服器 oplist 授權：和牌只看形狀、役由伺服器決定；oplist 缺失時只剩捨牌與 pass
+- 三麻友人房要帶三麻細則（赤寶 2、起點 35000、返點 40000），否則伺服器回 error 1112；
+  `room_quick_test` 的 `player_count=3` 已自動帶
+- 拔北：剛摸到的北會帶 `moqie`；斷線時立刻停手並標示停滯，重連前退避重試
+
+**live 驗證（2026-10-09，三局人機）**：本地引擎決策、立直、和牌、碰、拔北 11/11
+（含剛摸到北）鏈路完整。**尚未驗證**：被擠下線後的退避與停滯顯示、親家局第一打偶發的重送
+（三次，原因未明）、iOS 實機。細節見 [`AUDIT.md`](AUDIT.md) 與
+[`sanma-implementation-notes.md`](sanma-implementation-notes.md)。
 
 ---
 
 ## 致謝
 
 - [Mortal](https://github.com/Equim-chan/Mortal) — 麻將 AI 引擎與 libriichi
-- [Akagi](https://github.com/shinkuan/Akagi) — 參考實現，以及（可選的）雲端推論伺服器與 `/v3` 協定
+- [Akagi](https://github.com/shinkuan/Akagi) — 參考實現，以及（可選的）雲端推論伺服器與 `/v3` 協定；
+  三麻本地引擎使用其 v3 分支的三麻行為克隆權重與移植的 tile／obs／action 邏輯（Apache 2.0，
+  授權全文隨 MortalSwift 的 `Sources/AkagiSanma/LICENSE-Akagi.txt`）
+- [RiichiEnv](https://github.com/smly/RiichiEnv)（`riichienv-core`） — 三麻狀態與合法動作列舉的參考實現，
+  Akagi 三麻依賴它，授權聲明同上
 - [riichi-mahjong-tiles](https://github.com/FluffyStuff/riichi-mahjong-tiles)（FluffyStuff）
   — 側欄使用的麻將牌圖，**CC0 1.0／公有領域**
 - 雀魂（Majsoul） — 很好的麻將遊戲

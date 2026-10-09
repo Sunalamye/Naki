@@ -1,6 +1,6 @@
 # Naki 當前驗證報告
 
-**驗證日期**：2026-08-01（2026-10-01 補：測試數、已修差距與新增未驗證項；對局層行為仍以 2026-08 live 紀錄為準）
+**驗證日期**：2026-08-01（2026-10-01 補：測試數、已修差距與新增未驗證項；2026-10-09 補：三麻本地引擎與拔北 live 結果；其餘對局層行為仍以 2026-08 live 紀錄為準）
 
 **程式基準**：`main`，盤點起點 `7de0a04` 加目前工作樹
 
@@ -80,7 +80,29 @@ iOS 17–25 的 `LegacyWebViewModel` 曾直接使用 AI 第一推薦，沒有 re
 
 正確說法是「目前使用 MortalSwift 0.5.2 的 encoder/parity 修正版」；不能說「已換最新最強權重」。
 
-### P1：三麻沒有專用模型（2026-08-02 改為 fail-closed）
+### P1：三麻沒有專用模型（2026-10-09 已由本地 Akagi 三麻取代，本節以下為歷史記錄）
+
+**現況（2026-10-09，D23）**：三麻改用 MortalSwift 0.6.0 的 `AkagiSanma`（Akagi v3 三麻行為克隆模型，
+37×27 obs、60 動作；**default strength，模仿天鳳人類，不是 Mortal 等級**），bundled 四麻模型仍不碰三麻。
+自動送出的三層 fail-closed 判準由「雲端決策」擴成「三麻引擎決策」（`sanmaCapableDecision`），
+本地四麻 source 仍擋。
+
+**三麻 live（2026-10-09，三局人機，日誌在 `.swfd/logs/s3-live-4/5/6/`）**：
+
+| 局 | 房號 | 結果 |
+|---|---|---|
+| s3-live-4 | 30887 | 本地引擎建構、立直 1、和牌 1（`ActionHule`）、打牌 9；拔北 `080b` 不受理（剛摸到北），重送 75 次後被摸切 |
+| s3-live-5 | 13364 | 第 2 位 41800；`decisionSource` 107/108 為 `local-akagi3p`；榮和 2、立直 1、拔北 3 成功；暗槓後嶺上摸北的拔北不受理，60 秒逾時 |
+| s3-live-6 | 99869 | 第 1 名 59600；拔北 11/11 收到 `ActionBaBei`（剛摸到 5、在手 6，含嶺上與立直後），0 重送；和牌 5、立直 5 |
+
+拔北修法（剛摸到北帶 `moqie=true`，送 `080b2801`）live 成立；三麻友人房須帶三麻細則（赤寶 2、起點 35000、
+返點 40000），四麻細則會回 error 1112。依據：`sanma-implementation-notes.md` S3-5／S3-6、`kita-retry-implementation-notes.md`。
+
+**仍未驗證**：被擠下線後的退避與停滯顯示（live 沒遇到）、親家局第一打偶發「受理卻無權威回音、700ms 後重送」
+（三次，原因未明）、三麻雲端 3p 模型路徑、九種九牌（kyushu）、碰／槓 consumed 與赤五 copy 的逐組合對應、
+iOS 實機。
+
+以下為 2026-08-02 的舊記錄（當時推論仍建立四麻 model）：
 
 `is3P` 只改 Naki 狀態與標籤；推論仍建立同一個 Mortal v4 四麻 model。三麻不應宣稱支援。
 
@@ -164,7 +186,7 @@ iOS 17–25 的 `LegacyWebViewModel` 曾直接使用 AI 第一推薦，沒有 re
 - Legacy iOS 17–25 實機完整對局。
 - chi variants、赤五 combination、ankan／minkan／kakan。
 - WebGL 高亮與 action popup 的視覺正確性（含 `.off` 是否真的在畫面上清空、切回是否恢復）。
-- 三麻對局的 fail-closed 行為與和牌例外（只有單測）。
+- 三麻對局的 fail-closed 行為與和牌例外：2026-10-09 三局 live 已走過本地引擎、和牌與拔北送出（見 P1 三麻一節）；被擠下線的退避與停滯顯示仍無 live 樣本。
 - 三麻雲端事件過濾：`CloudBot` 把 `start_kyoku`／`reach` 等非決策事件排除在 seq 之外，伺服器實際行為未驗證（無真實三麻 log）。
 - **時限單位**：`timeFixed`／`timeAdd` 按毫秒處理（`AutoPlayEngine.swift:536`），依同訊息推定，**無 live 樣本**；寬限期與擬人延遲上限都依賴它。
 - 立直宣言牌：從 riichi operation 的 `combination`（以 `|` 拆、假設單張雀魂牌字串）取可宣言牌；格式未經 live 驗證，對不上時退回舊行為（取最高機率 discard）。
@@ -194,7 +216,7 @@ iOS 17–25 的 `LegacyWebViewModel` 曾直接使用 AI 第一推薦，沒有 re
 
 **未驗證**：
 
-- 三麻整條路徑（雲端未啟用，UI 直接停用「開始」鈕；只有單測）。
+- 三麻續局（全自動／統一匹配）：2026-10-09 起三麻本地引擎可用，雲端不再是前提，但三局 live 都是友人房人機，沒走過統一匹配續局。
 - 連續 3 場以上的穩定性（目前最多連續 2 場）。
 - 「偏好最高房」推導出來的 sid（例如銀之間 `1:5`）是否真的被伺服器接受——
   只有 `1:2` 被實際接受過，其餘 id 都是 `MatchModeTable` 推導的候選（`verified: false`）。
@@ -750,14 +772,14 @@ Akagi `/v3/react` 雲端推論接入完成。設計與偏差說明見
    有 iOS SDK 26.0 + Simulator SDK 26.0，`Naki-M` Debug/Release 都 `BUILD SUCCEEDED`。
    `Naki-M.xcscheme` 已補進 `xcshareddata`（先前只靠 Xcode autocreate，clean clone
    不一定有），`release.sh` 也加了 iOS 編譯步驟。
-3. **三麻雲端**：`model_3p` 路徑只有單測（補位到 4 家），無 live 對局。
+3. **三麻雲端**：`model_3p` 路徑只有單測（補位到 4 家），無 live 對局（2026-10-09 的三局 live 走本地引擎，雲端未啟用）。
 
 ### 20.3 live 事故記錄（2026-08-05 深夜，兩起，皆已修待驗）
 
 1. **三麻幻覺窗口＋丟單**：本地 4p 模型在三麻幻覺吃窗口→null reaction ×3；
    一次拔北在脫節時序下被伺服器靜默丟單（22 秒逾時代打、watchdog 自救）。
-   對策＝D15 三麻雲端-only 重構（本地不啟動、oplist 驅動決策點）。
-   拔北自動打另有 5 次 live 成功（鏈路本身已驗）。
+   對策＝D15 三麻雲端-only 重構（本地不啟動、oplist 驅動決策點）；2026-10-09 D23 改為本地 Akagi 三麻。
+   拔北自動打另有 5 次 live 成功（鏈路本身已驗）；剛摸到北的拔北缺 `moqie` 這個根因已在 2026-10-09 修並 live 驗證（房 99869，11/11）。
 2. **重連 seat 歸零 → 全局 422**：`MajsoulBridge.reset()` 歸零 seat 且無法
    恢復（syncGame 無 seatList）→ parseNewRound 手牌放錯座位 → 雲端 422
    拒收、本地退化成摸切。**先於雲端接入的既有 bug**，雲端 422 使其可見。
