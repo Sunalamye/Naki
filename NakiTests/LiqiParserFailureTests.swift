@@ -1041,4 +1041,74 @@ final class LiqiParserFailureTests: XCTestCase {
         let (event, _) = snapshotStartKyoku(seatList: [2, 3, 4, 5, accountId], scores: [1, 2, 3, 4], msgId: 96)
         XCTAssertEqual(event?["tehais"] as? [[String]], [unknownHand, unknownHand, unknownHand, unknownHand])
     }
+
+    // MARK: - 重連 actions 缺 ActionNewRound（Akagi 982ff48）
+
+    /// 座位 0 的 syncGame：snapshot（可省）＋ 未 XOR 的 actions
+    private func restoreEvents(hands: [String], doras: [String] = ["3p"], snapshot: Bool = true,
+                               actions: [(String, [LiqiField])]) -> [[String: Any]] {
+        let (bridge, _) = makeBridge()
+        authenticate(bridge)
+        let snapshotBytes = LiqiEncoder.encodeFields(
+            hands.map { .string(field: 6, value: $0) } + doras.map { .string(field: 7, value: $0) }
+            + (0..<4).map { _ in .message(field: 9, fields: [.int(field: 1, value: 25000)]) })
+        let restore: [LiqiField] = (snapshot ? [.bytes(field: 1, value: snapshotBytes)] : []) + actions.map { name, data in
+            .message(field: 2, fields: [.varint(field: 1, value: 1), .string(field: 2, value: name),
+                                        .bytes(field: 3, value: LiqiEncoder.encodeFields(data))])
+        }
+        let msgId: UInt16 = 120
+        _ = bridge.parse(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: msgId)))
+        return bridge.parse(Data(LiqiEncoder.encodeEnvelope(
+            type: .response, msgId: msgId, method: "",
+            payload: LiqiEncoder.encodeFields([.message(field: 4, fields: restore)])))) ?? []
+    }
+
+    private func types(_ events: [[String: Any]]) -> [String] {
+        events.map { $0["type"] as? String ?? "" }
+    }
+
+    func testRestoreActionsWithoutNewRoundStartFromSnapshotWithoutDuplicateDora() {
+        let events = restoreEvents(hands: Self.hand13, doras: ["3p", "4p"], actions: [
+            ("ActionDealTile", [.varint(field: 1, value: 1), .string(field: 6, value: "3p"), .string(field: 6, value: "4p")]),
+            ("ActionDiscardTile", [.varint(field: 1, value: 1), .string(field: 2, value: "5p")])
+        ])
+
+        XCTAssertEqual(types(events), ["start_kyoku", "dora", "tsumo", "dahai"],
+                       "start_kyoku 在重放事件之前；kan-dora 只由 snapshot 發一次")
+        XCTAssertEqual(events.first?["tehais"] as? [[String]], [Self.hand13] + [[String]](repeating: unknownHand, count: 3))
+        XCTAssertEqual(events[1]["dora_marker"] as? String, "4p")
+        XCTAssertEqual(events[3]["pai"] as? String, "5p")
+    }
+
+    func testRestoreActionsWithNewRoundIgnoreSnapshot() {
+        let actions: [(String, [LiqiField])] = [
+            ("ActionNewRound", [.varint(field: 1, value: 0), .varint(field: 2, value: 0), .varint(field: 3, value: 0)]
+                + Self.hand13.map { .string(field: 4, value: $0) }
+                + [.bytes(field: 6, value: packed([25000, 25000, 25000, 25000]))]),
+            ("ActionDiscardTile", [.varint(field: 1, value: 0), .string(field: 2, value: "1m")])
+        ]
+        let withSnapshot = restoreEvents(hands: ["9s"], actions: actions)
+        let replayOnly = restoreEvents(hands: [], snapshot: false, actions: actions)
+
+        XCTAssertEqual(types(withSnapshot), ["start_kyoku", "dahai"])
+        XCTAssertEqual(types(withSnapshot), types(replayOnly))
+        XCTAssertEqual(withSnapshot.first?["tehais"] as? [[String]], replayOnly.first?["tehais"] as? [[String]],
+                       "手牌來自 ActionNewRound，不是 snapshot")
+    }
+
+    func testSnapshotWithFourteenTilesEmitsTsumoForLastTile() {
+        let events = restoreEvents(hands: Self.hand13.reversed() + ["7z"], doras: ["3p", "4p"], actions: [])
+
+        XCTAssertEqual(types(events), ["start_kyoku", "dora", "tsumo"])
+        XCTAssertEqual((events.first?["tehais"] as? [[String]])?.first, Self.hand13, "前 13 張排序後進 tehai")
+        XCTAssertEqual(events.last?["actor"] as? Int, 0)
+        XCTAssertEqual(events.last?["pai"] as? String, "C")
+    }
+
+    func testSnapshotWithThirteenTilesEmitsNoTsumo() {
+        let events = restoreEvents(hands: Self.hand13, actions: [])
+
+        XCTAssertEqual(types(events), ["start_kyoku"])
+        XCTAssertEqual((events.first?["tehais"] as? [[String]])?.first, Self.hand13)
+    }
 }
