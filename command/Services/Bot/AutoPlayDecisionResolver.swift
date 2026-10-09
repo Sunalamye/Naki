@@ -116,7 +116,7 @@ nonisolated struct AutoPlayDecisionResolver {
         let fallbacks = recommendationsOplistSequence == snapshot.sequence
             ? recommendations.dropFirst().filter { $0.actionType == .discard || $0.actionType == .none }
             : []
-        guard let top = ([first] + fallbacks).first(where: { isSupported($0.actionType, by: snapshot) }) else {
+        guard let top = ([first] + fallbacks).first(where: { isSupported($0, by: snapshot) }) else {
             return .none(reason: "action_\(first.actionType.rawValue)_not_in_oplist\(snapshot.rawTypes)")
         }
 
@@ -130,10 +130,10 @@ nonisolated struct AutoPlayDecisionResolver {
         }
     }
 
-    /// 這批 oplist 是否支援該動作
-    static func isSupported(_ action: Recommendation.ActionType,
+    /// 這批 oplist 是否支援該推薦
+    static func isSupported(_ recommendation: Recommendation,
                             by snapshot: LiqiOperationSnapshot) -> Bool {
-        switch action {
+        switch recommendation.actionType {
         case .discard:
             return snapshot.contains(.discard)
         case .riichi:
@@ -143,7 +143,8 @@ nonisolated struct AutoPlayDecisionResolver {
         case .pon:
             return snapshot.contains(.pon)
         case .kan:
-            return snapshot.kanOperation != nil
+            // 帶槓種的推薦只認該 type；沒帶（本地 Mortal）任一槓都算
+            return recommendation.kanKind.map(snapshot.contains) ?? (snapshot.kanOperation != nil)
         case .hora:
             return snapshot.horaOperation != nil
         case .kita:

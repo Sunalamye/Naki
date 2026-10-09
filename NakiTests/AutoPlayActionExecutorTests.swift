@@ -194,6 +194,70 @@ final class AutoPlayActionExecutorTests: XCTestCase {
                       "加槓是 type=6，實際 bytes=\(hex(captured.first))")
     }
 
+    /// 暗槓與加槓並存：依推薦的槓種送 type，不是固定優先序的第一個
+    @MainActor
+    func testKanKindSelectsTypeWhenAnkanAndKakanCoexist() async {
+        for (kind, suffix) in [(LiqiOperationType.kakan, "12020806"), (.ankan, "12020804")] {
+            let store = LiqiOperationStore()
+            var captured: [String] = []
+            let sender = recordingSender { captured.append($0) }
+            let snapshot = store.record(seat: 0,
+                                        operations: [LiqiOperation(type: .ankan), LiqiOperation(type: .kakan)],
+                                        source: "test")
+
+            let result = await AutoPlayActionExecutor.execute(
+                action: .kan, tile: "kan", snapshot: snapshot,
+                recommendations: [Recommendation(tile: "kan", probability: 0.9, actionType: .kan, kanKind: kind)],
+                sender: sender, store: store)
+
+            XCTAssertEqual(result?.success, true)
+            XCTAssertTrue(hex(captured.first).hasSuffix(suffix),
+                          "\(kind) 應送 \(suffix)，實際 bytes=\(hex(captured.first))")
+            XCTAssertNil(store.pending)
+        }
+    }
+
+    /// 推薦的槓種不在 oplist → 不送、回 nil、保留 oplist、留下 event
+    @MainActor
+    func testUnauthorizedKanKindSendsNothingAndKeepsOplist() async {
+        let store = LiqiOperationStore()
+        var sendCount = 0
+        var events: [String] = []
+        let sender = recordingSender { _ in sendCount += 1 }
+        let snapshot = store.record(seat: 0,
+                                    operations: [LiqiOperation(type: .ankan)],
+                                    source: "test")
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .kan, tile: "kan", snapshot: snapshot,
+            recommendations: [Recommendation(tile: "kan", probability: 0.9, actionType: .kan, kanKind: .kakan)],
+            sender: sender, store: store, event: { events.append($0) })
+
+        XCTAssertNil(result)
+        XCTAssertEqual(sendCount, 0)
+        XCTAssertEqual(store.pending?.sequence, snapshot.sequence)
+        XCTAssertTrue(events.contains { $0.contains("保留 oplist") }, "不能靜默吃掉這批機會")
+    }
+
+    /// 推薦沒有槓種（本地 Mortal）→ 維持 oplist 優先序（暗槓先）
+    @MainActor
+    func testKanWithoutKindFallsBackToOplistPriority() async {
+        let store = LiqiOperationStore()
+        var captured: [String] = []
+        let sender = recordingSender { captured.append($0) }
+        let snapshot = store.record(seat: 0,
+                                    operations: [LiqiOperation(type: .kakan), LiqiOperation(type: .ankan)],
+                                    source: "test")
+
+        await AutoPlayActionExecutor.execute(
+            action: .kan, tile: "kan", snapshot: snapshot,
+            recommendations: [Recommendation(tile: "kan", probability: 0.9, actionType: .kan)],
+            sender: sender, store: store)
+
+        XCTAssertTrue(hex(captured.first).hasSuffix("12020804"),
+                      "無槓種走 kanOperation（暗槓優先），實際 bytes=\(hex(captured.first))")
+    }
+
     /// 和牌型也由 oplist 決定：oplist 只給榮和就送 type=9
     @MainActor
     func testHoraSendsRonWhenOplistOffersRon() async {

@@ -187,6 +187,39 @@ final class AkagiSanmaBotTests: XCTestCase {
         XCTAssertEqual(reaction?.recommendations[1].tile?.mjaiString, reaction?.action?["pai"] as? String)
     }
 
+    /// 槓推薦帶槓種：暗槓／大明槓／加槓各對應 oplist type（31＝1p 槓、42＝3s 槓）
+    func testKanRecommendationCarriesKanKind() async throws {
+        let ankanBot = try bot(favoring: 31) { self.snapshot([.discard, .ankan]) }
+        var closed = startEvents(hand: ["1p", "1p", "1p", "1p", "2p", "3p", "4p", "5p", "6p", "7p", "8p", "9p", "E"])
+        closed.append(["type": "tsumo", "actor": 0, "pai": "W"])
+        let ankan = try await ankanBot.react(events: closed)
+        XCTAssertEqual(ankan?.recommendations.first?.actionType, .kan)
+        XCTAssertEqual(ankan?.recommendations.first?.kanKind, .ankan)
+
+        let daiminkanBot = try bot(favoring: 42) { self.snapshot([.minkan]) }
+        var open = startEvents(hand: ["3s", "3s", "3s", "1p", "2p", "3p", "5p", "8p", "7s", "8s", "9s", "E", "W"])
+        open += [["type": "tsumo", "actor": 1, "pai": "?"],
+                 ["type": "dahai", "actor": 1, "pai": "3s", "tsumogiri": false]]
+        let daiminkan = try await daiminkanBot.react(events: open)
+        XCTAssertEqual(daiminkan?.recommendations.first?.actionType, .kan)
+        XCTAssertEqual(daiminkan?.recommendations.first?.kanKind, .minkan)
+
+        let kakanBot = try bot(favoring: 42) { self.snapshot([.discard, .kakan]) }
+        var pon = startEvents(hand: ponHand)
+        pon += [["type": "tsumo", "actor": 1, "pai": "?"],
+                ["type": "dahai", "actor": 1, "pai": "3s", "tsumogiri": false],
+                ["type": "pon", "actor": 0, "target": 1, "pai": "3s", "consumed": ["3s", "3s"]],
+                ["type": "dahai", "actor": 0, "pai": "C", "tsumogiri": false],
+                ["type": "tsumo", "actor": 1, "pai": "?"],
+                ["type": "dahai", "actor": 1, "pai": "?", "tsumogiri": true],
+                ["type": "tsumo", "actor": 2, "pai": "?"],
+                ["type": "dahai", "actor": 2, "pai": "?", "tsumogiri": true],
+                ["type": "tsumo", "actor": 0, "pai": "3s"]]
+        let kakan = try await kakanBot.react(events: pon)
+        XCTAssertEqual(kakan?.recommendations.first?.actionType, .kan)
+        XCTAssertEqual(kakan?.recommendations.first?.kanKind, .kakan)
+    }
+
     /// 自家槓之後、嶺上牌之前不是決策點（槓事件沒有 oplist seq，stale guard 擋不住）
     func testOwnKanBeforeRinshanIsNotDecisionPoint() async throws {
         let kanSnapshot = snapshot([.discard, .ankan, .kakan, .pon, .minkan])

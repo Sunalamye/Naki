@@ -148,7 +148,12 @@ final class AkagiSanmaBot: MahjongBot {
                 }
             case .pon: add(Recommendation(tile: "pon", probability: p, actionType: .pon, detail: detail))
             case .daiminkan, .ankan, .kakan:
-                add(Recommendation(tile: "kan", probability: p, actionType: .kan, detail: detail))
+                let kind: LiqiOperationType = switch action.kind {
+                case .ankan: .ankan
+                case .kakan: .kakan
+                default: .minkan
+                }
+                add(Recommendation(tile: "kan", probability: p, actionType: .kan, detail: detail, kanKind: kind))
             case .ron, .tsumo: add(Recommendation(tile: "hora", probability: p, actionType: .hora))
             case .kyushu: add(Recommendation(tile: "ryukyoku", probability: p, actionType: .ryukyoku))
             case .kita: add(Recommendation(tile: "kita", probability: p, actionType: .kita))

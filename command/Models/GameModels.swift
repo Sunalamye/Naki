@@ -257,6 +257,9 @@ struct Recommendation: Identifiable, Equatable {
     /// 只有資訊源頭真的知道牌組時才有值（雲端 reaction 帶 consumed；
     /// 本地 mask 只有粗變體 ⇒ nil）。純顯示，executor 不讀它。
     let detail: String?
+    /// 槓的種類（暗槓／加槓／大明槓）。只有來源分得出種類時才有值（雲端、三麻）；
+    /// 本地 Mortal 只給 `kan` ⇒ nil，executor 退回 oplist 的第一個可用槓。
+    let kanKind: LiqiOperationType?
 
     /// 動作類型
     enum ActionType: String, CaseIterable {
@@ -333,6 +336,7 @@ struct Recommendation: Identifiable, Equatable {
         self.probability = probability
         self.actionType = .discard
         self.detail = detail
+        self.kanKind = nil
     }
 
     /// 強類型初始化（非打牌動作）
@@ -343,11 +347,12 @@ struct Recommendation: Identifiable, Equatable {
         self.probability = probability
         self.actionType = actionType
         self.detail = detail
+        self.kanKind = nil
     }
 
     /// 從 MJAI 字串初始化（保持兼容性）
     init(tile tileString: String, probability: Double, actionType: ActionType,
-         detail: String? = nil) {
+         detail: String? = nil, kanKind: LiqiOperationType? = nil) {
         if actionType == .discard, let t = Tile(mjaiString: tileString) {
             self.tile = t
         } else {
@@ -357,6 +362,7 @@ struct Recommendation: Identifiable, Equatable {
         self.probability = probability
         self.actionType = actionType
         self.detail = detail
+        self.kanKind = kanKind
     }
 
     /// 從字典初始化（Legacy）
@@ -375,6 +381,7 @@ struct Recommendation: Identifiable, Equatable {
         self.probability = prob
         self.actionType = type
         self.detail = dict["detail"] as? String
+        self.kanKind = nil
     }
 
     // MARK: - Computed Properties

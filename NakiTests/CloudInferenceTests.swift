@@ -311,6 +311,17 @@ final class CloudDecisionMapperTests: XCTestCase {
         }
     }
 
+    func test_kanReactions_carryKanKind() {
+        for (type, kind) in [("daiminkan", LiqiOperationType.minkan), ("ankan", .ankan), ("kakan", .kakan)] {
+            let recs = CloudDecisionMapper.recommendations(
+                reaction: ["type": type, "actor": 0, "consumed": ["1m", "1m", "1m"]],
+                candidates: [], reachDiscard: nil)
+            XCTAssertEqual(recs?[0].kanKind, kind, "\(type) 的槓種")
+        }
+        XCTAssertNil(CloudDecisionMapper.recommendation(fromCandidate: "kan", prob: 0.5)?.kanKind,
+                     "粗標籤分不出槓種")
+    }
+
     /// 九種九牌：宣告流局也是一個真實的決策，不能當雜訊略過。
     ///
     /// 補這一段之前它落 default 回 nil，而三麻是雲端-only、沒有本地兜底，

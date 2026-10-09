@@ -85,8 +85,13 @@ enum CloudDecisionMapper {
 
         case "daiminkan", "ankan", "kakan":
             let detail = (reaction["consumed"] as? [String]).map { $0.joined(separator: "·") }
+            let kind: LiqiOperationType = switch type {
+            case "ankan": .ankan
+            case "kakan": .kakan
+            default: .minkan
+            }
             return [Recommendation(tile: "kan", probability: prob, actionType: .kan,
-                                   detail: detail)]
+                                   detail: detail, kanKind: kind)]
 
         case "hora":
             return [Recommendation(tile: "hora", probability: prob, actionType: .hora)]
