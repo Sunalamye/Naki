@@ -82,7 +82,7 @@ void nb_string_free(char*);
 | S3 | live 三麻 smoke：S2 build、測試帳號、三人友人房＋人機一局 | Sonnet medium | 第 1 次：登入過期。第 2 次：開出**四麻**（工具 bug，見 S2b），該局四麻正常（11 分鐘、和牌 2 次、無停滯）。第 3 次進行中 |
 | S2b | `room_quick_test`／`room_create` 的 GameMode 依人數映射（三人 11／12，預設 12）；`RoomModeTests`；765 tests；變異 18 殺 18 | Sonnet medium | 完成；commit `4accbae` 在 `wp/s2-sanma` |
 
-MortalSwift `feat/akagi-sanma`：`04bcdf6`（AkagiSanma）＋`da7238c`（版本 0.6.0、README）。未 push、未 tag——**等使用者授權**。
+MortalSwift `feat/akagi-sanma`：`04bcdf6`（AkagiSanma）＋`da7238c`（版本 0.6.0、README）。**2026-10-09 使用者授權後已 push** 到 `Sunalamye/MortalSwift`（分支 `feat/akagi-sanma`，tag `v0.6.0` → `da7238c`），未動 `master`。雲端路徑不另測（使用者定案）。N1 把 Naki 引用改回遠端 0.6.x。
 | M1 | `48add0a..d0072fa` 的 Bot／Bridge 改動（25 檔）in-diff 手工變異：137 個變異體 131 殺、2 等價（`MajsoulBridge:516` 只包 log）、4 個取反後語法不成立；補 19 條測試；產出 `scripts/mutate.py` | Sonnet medium | 完成；commit `a467802` 已 ff 合進 main（NakiTests 753） |
 | M2 | 其餘 23 個改動檔 in-diff 變異：128 個變異體初跑殺 69；補 33 條測試後剩 10 個未驗證（NakiRuntime init 起 8765／讀真實 Plugins 目錄 6 個、GitHub API 回應後空集合檢查、WebPage 退避、LogManager 不輪替判斷 2 個、NakiActions awaitMs 夾值）；非等價、無注入點 | Sonnet medium | 完成；commit `59425b3` 已 ff 合進 main（NakiTests 786）|
 
