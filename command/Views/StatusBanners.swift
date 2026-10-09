@@ -9,13 +9,6 @@ import SwiftUI
 
 // MARK: - JS 注入失敗橫幅
 
-/// JavaScript 模組載入失敗時的常駐紅色橫幅。
-///
-/// 為什麼要獨立於 `StatusBar`：`statusMessage` 會被載入、連線、Bot 建立等事件
-/// 一路覆蓋掉，錯誤看一眼就消失。而注入失敗是**不會自己好**的狀態
-/// ——在這個狀態下 Naki 收不到任何封包、送不出任何動作，
-/// 側欄的推薦、`/game/*`、`/bot/*` 全部不可信，所以必須一直掛著。
-///
 /// 頁面載不起來時的常駐橫幅。
 ///
 /// 在此之前這件事只寫進 `store.statusMessage`——那會被下一個事件蓋掉，
@@ -112,6 +105,13 @@ struct BotFailureBanner: View {
     }
 }
 
+/// JavaScript 模組載入失敗時的常駐紅色橫幅。
+///
+/// 為什麼要獨立於 `StatusBar`：`statusMessage` 會被載入、連線、Bot 建立等事件
+/// 一路覆蓋掉，錯誤看一眼就消失。而注入失敗是**不會自己好**的狀態
+/// ——在這個狀態下 Naki 收不到任何封包、送不出任何動作，
+/// 側欄的推薦、`/game/*`、`/bot/*` 全部不可信，所以必須一直掛著。
+///
 /// 資料來源是 `JSInjectionState.shared`（`@Observable`），
 /// 由 `WebSocketInterceptor.createUserScript()` 在建立 WebView 時寫入。
 struct JSInjectionFailureBanner: View {
@@ -205,7 +205,7 @@ struct StatusBar: View {
         if !message.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: statusIcon)
-                    .foregroundColor(statusColor)
+                    .foregroundStyle(statusColor)
                 Text(message)
                     .font(.system(.caption, design: .monospaced))
                     .lineLimit(1)
@@ -217,8 +217,7 @@ struct StatusBar: View {
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
-                        .background(Color.green.opacity(0.2))
-                        .cornerRadius(4)
+                        .background(Color.green.opacity(0.2), in: .rect(cornerRadius: 4))
                 }
             }
             .padding(.horizontal, 12)

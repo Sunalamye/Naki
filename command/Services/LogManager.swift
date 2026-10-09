@@ -261,11 +261,7 @@ class LogManager {
         // UI 只顯示 info 以上——trace 是給檔案看的
         if level >= .info {
             DispatchQueue.main.async {
-                self.entries.append(entry)
-
-                if self.entries.count > self.maxEntries {
-                    self.entries.removeFirst(self.entries.count - self.maxEntries)
-                }
+                Self.append(entry, to: &self.entries, limit: self.maxEntries)
             }
         }
 
@@ -279,6 +275,31 @@ class LogManager {
             // 訊息只能被組一次。
             print("[\(entry.formattedTime)] \(level.tag) [\(category.rawValue)] \(entry.message)")
         }
+    }
+
+    /// 附加一筆並保留最後 `limit` 筆。滿額後 count 恆定，只有 `last?.id` 會變。
+    nonisolated static func append(_ entry: LogEntry, to entries: inout [LogEntry], limit: Int) {
+        entries.append(entry)
+        if entries.count > limit {
+            entries.removeFirst(entries.count - limit)
+        }
+    }
+
+    /// 依類別與搜尋字串過濾後，取最後 `limit` 筆（時間序）。
+    ///
+    /// 從尾端往前掃，湊滿 `limit` 筆即停；回傳的 `LogEntry` 帶穩定 `id`，
+    /// 時間字串（`formattedTime`）由畫面在 row 出現時才格式化。
+    nonisolated static func recentEntries(_ entries: [LogEntry], category: LogCategory? = nil,
+                                          search: String = "", limit: Int = 300) -> [LogEntry] {
+        let matched = entries.reversed().lazy.filter { entry in
+            (category == nil || entry.category == category)
+                && (search.isEmpty || entry.message.localizedStandardContains(search))
+        }
+        return Array(matched.prefix(limit).reversed())
+    }
+
+    func recentEntries(category: LogCategory? = nil, search: String = "", limit: Int = 300) -> [LogEntry] {
+        Self.recentEntries(entries, category: category, search: search, limit: limit)
     }
 
     /// 清空日誌
