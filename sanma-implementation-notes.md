@@ -130,6 +130,10 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 
 ## Deviations
 
+- **安裝（2026-10-09 19:32）**：main `3c3acb4` 的 Release build 已裝到 `/Applications/Naki.app`（版號仍 2.14.0，未發版），舊版備份 `~/Library/Application Support/Naki/backup/Naki-2.14.0-release-20261009-1932.app`。
+- **/debug/ui 的 language 會污染正式設定**：它寫共用 UserDefaults `naki.appLanguage`，測試包切 en 沒還原就讓正式 App 啟動變英文（使用者回報）。決策：改成只影響該次行程、不持久化（待做 T2）；在此之前所有用它的工作包結束前必須設回 `system`。
+- **工具列排版（T1 進行中）**：延遲 stepper 箭頭膠囊與「0.5 秒」不垂直對齊；MCP／WebSocket 兩顆膠囊綠點只佔第一行造成兩行錯位。2.14.0 就有，P1 未修。
+
 - **合進 main（2026-10-09）**：`wp/u-fixes` 17 個 commit 以 merge commit `d032f78` 進 main；合併後全套 NakiTests 853 passed（`.swfd/logs/merge-main/nakitests.log`）。Naki 尚未 push（需另行授權）。MortalSwift worktree `MortalSwift-wt/akagi-sanma` 保留：`feat/akagi-sanma` 尚未合進 `master`。
 
 - **拔北修法（K1，2026-10-09，統帥代決）**：三局 log 加錄影逐手核對，三次失敗的拔北都是「手中無北、北是剛摸到的那張」，三次成功都是北早已在手；伺服器的 `ActionBaBei` 帶 `moqie`。修法只加 `moqie=true`（剛摸到）→ `080b2801`，**不加 `tile=4z`**：8/05 與今天三次成功都不帶 tile，tile 零證據，不用未驗證欄位去賭；seq 103「送 080b 後被摸切 E」的異常留 live 觀察。拔北回音窗 700ms→1.5 秒（實測回音最長 0.98 秒；過早重送在手有兩張北時會多拔一張）。斷線重試：15 次是每輪上限、輪間無退避是根因；改斷線立刻停手報停滯、跨輪退避 2→30 秒、和牌維持本輪重送（既有夾具 A）。
