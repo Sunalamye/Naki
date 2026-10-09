@@ -242,6 +242,36 @@ final class SettingsStore {
         }
     }
 
+    nonisolated static let majsoulUserAgentKey = "MajsoulUserAgent"
+    nonisolated static let majsoulExtraHeadersKey = "MajsoulExtraHeaders"
+
+    nonisolated static func loadExtraHeaders(from defaults: UserDefaults = .standard) -> [String: String] {
+        defaults.dictionary(forKey: majsoulExtraHeadersKey) as? [String: String] ?? [:]
+    }
+
+    nonisolated static func saveExtraHeaders(_ headers: [String: String], to defaults: UserDefaults = .standard) {
+        defaults.set(headers, forKey: majsoulExtraHeadersKey)
+    }
+
+    /// 載入雀魂時的 User-Agent；空字串＝用 WebKit 預設。套用到全部請求（含 WebSocket 握手）。
+    var majsoulUserAgent: String = UserDefaults.standard
+        .string(forKey: SettingsStore.majsoulUserAgentKey) ?? ""
+    {
+        didSet {
+            guard majsoulUserAgent != oldValue else { return }
+            UserDefaults.standard.set(majsoulUserAgent, forKey: Self.majsoulUserAgentKey)
+        }
+    }
+
+    /// 額外的請求 header（名稱大小寫原樣保留）。只作用於頁面主文件請求。
+    var majsoulExtraHeaders: [String: String] = SettingsStore.loadExtraHeaders()
+    {
+        didSet {
+            guard majsoulExtraHeaders != oldValue else { return }
+            Self.saveExtraHeaders(majsoulExtraHeaders)
+        }
+    }
+
     /// 啟動時是否**跳過**詢問，直接用 `majsoulServer`。
     ///
     /// 預設 false＝每次啟動都問。選擇畫面上那個「以後都用這個」勾選就是寫這個值，

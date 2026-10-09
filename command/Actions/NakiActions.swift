@@ -872,6 +872,48 @@ struct SwitchServerAction {
   }
 }
 
+// MARK: - 雀魂連線設定
+
+/// 套用 User-Agent 與額外 header（整頁重新載入），並提供 WebKit 的預設 UA 供設定頁當 placeholder。
+///
+/// 設定值本身由 View 直接寫 `SettingsStore`；這裡只負責「寫完之後讓它生效」的副作用。
+@MainActor
+struct ConnectionSettingsAction {
+
+  private nonisolated(unsafe) let applyNow: () -> Void
+  private nonisolated(unsafe) let readDefaultUserAgent: () async -> String?
+
+  private init(apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String?) {
+    self.applyNow = apply
+    self.readDefaultUserAgent = defaultUserAgent
+  }
+
+  /// 真實實作
+  init(session: WebSession) {
+    self.init(
+      apply: { [weak session] in session?.loadMajsoul() },
+      defaultUserAgent: { [weak session] in await session?.defaultUserAgent() })
+  }
+
+  /// Preview／未接線
+  static let noop = ConnectionSettingsAction()
+
+  nonisolated init() {
+    self.applyNow = {}
+    self.readDefaultUserAgent = { nil }
+  }
+
+  #if DEBUG
+    init(stub apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String? = { nil }) {
+      self.init(apply: apply, defaultUserAgent: defaultUserAgent)
+    }
+  #endif
+
+  func apply() { applyNow() }
+
+  func defaultUserAgent() async -> String? { await readDefaultUserAgent() }
+}
+
 // MARK: - SetHidePlayerNamesAction
 
 /// 隱藏玩家名稱開關（設定 Toggle）。
@@ -1054,6 +1096,8 @@ struct NakiActions {
   var reloadPage: ReloadPageAction
   /// 換到另一個區服（換 URL，不是重載）
   var switchServer: SwitchServerAction
+  /// 套用雀魂連線設定（User-Agent／額外 header）並重新載入
+  var connectionSettings: ConnectionSettingsAction
   /// 啟動時的區服選擇：寫入「不再詢問」，區服不同才換服
   var chooseServer: ChooseServerAction
   /// 隱藏玩家名稱開關
@@ -1095,6 +1139,7 @@ struct NakiActions {
     self.toggleDebugServer = ToggleDebugServerAction()
     self.reloadPage = ReloadPageAction()
     self.switchServer = SwitchServerAction()
+    self.connectionSettings = ConnectionSettingsAction()
     self.chooseServer = ChooseServerAction()
     self.setHidePlayerNames = SetHidePlayerNamesAction()
     self.setKeepAliveInBackground = SetKeepAliveInBackgroundAction()
@@ -1124,6 +1169,7 @@ struct NakiActions {
        toggleDebugServer: ToggleDebugServerAction,
        reloadPage: ReloadPageAction,
        switchServer: SwitchServerAction,
+       connectionSettings: ConnectionSettingsAction,
        chooseServer: ChooseServerAction,
        setHidePlayerNames: SetHidePlayerNamesAction,
        setKeepAliveInBackground: SetKeepAliveInBackgroundAction,
@@ -1150,6 +1196,7 @@ struct NakiActions {
     self.toggleDebugServer = toggleDebugServer
     self.reloadPage = reloadPage
     self.switchServer = switchServer
+    self.connectionSettings = connectionSettings
     self.chooseServer = chooseServer
     self.setHidePlayerNames = setHidePlayerNames
     self.setKeepAliveInBackground = setKeepAliveInBackground

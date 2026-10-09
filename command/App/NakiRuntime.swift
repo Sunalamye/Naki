@@ -599,6 +599,7 @@ final class NakiRuntime {
             toggleDebugServer: ToggleDebugServerAction(runtime: self),
             reloadPage: ReloadPageAction(session: session),
             switchServer: SwitchServerAction(session: session),
+            connectionSettings: ConnectionSettingsAction(session: session),
             chooseServer: ChooseServerAction(
                 settings: settings, switchServer: SwitchServerAction(session: session)),
             setHidePlayerNames: SetHidePlayerNamesAction(session: session),

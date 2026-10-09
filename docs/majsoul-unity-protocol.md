@@ -68,6 +68,10 @@ WebSocket frame
 
 macOS deployment target 是 26.0，所以 macOS 實際只走新路徑；iOS deployment target 是 17.0，仍會走 Legacy 路徑。決策層現在一致，但 Legacy 沒有 live 驗證（本機跑不到），不可宣稱兩條路徑等價。
 
+## 自訂連線（User-Agent／header）
+
+Naki 載入雀魂頁面時可設 User-Agent 與額外 header（`MajsoulRequestBuilder`）。WebKit 的限制：`URLRequest` 的自訂 header 只作用於**主文件請求**，子資源與 WebSocket 握手不帶；只有 User-Agent（`customUserAgent`）會套用到全部請求，含 WebSocket 握手。改完要整頁重新載入才生效。loopback 測試已驗證兩條 backend 的主文件請求都帶出 header 與 UA；真實雀魂伺服器的反應未驗證。
+
 ## Unity WebGL 可控面
 
 ### 存在

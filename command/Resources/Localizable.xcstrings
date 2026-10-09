@@ -10312,6 +10312,396 @@
         }
       }
     },
+    "雀魂連線": {
+      "comment": "設定頁 GroupBox 標題",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mahjong Soul Connection"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "雀魂接続"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "작혼 연결"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "雀魂连接"
+          }
+        }
+      }
+    },
+    "預設（WebKit）": {
+      "comment": "User-Agent 欄 placeholder：尚未取得預設 UA 時",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default (WebKit)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルト（WebKit）"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기본값(WebKit)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认（WebKit）"
+          }
+        }
+      }
+    },
+    "還原預設": {
+      "comment": "User-Agent 還原按鈕",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Default"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルトに戻す"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기본값 복원"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复默认"
+          }
+        }
+      }
+    },
+    "新增 Header": {
+      "comment": "新增額外請求 header 列",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Header"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ヘッダーを追加"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "헤더 추가"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加 Header"
+          }
+        }
+      }
+    },
+    "Header 名稱": {
+      "comment": "header 名稱欄（a11y 名稱）",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Header name"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ヘッダー名"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "헤더 이름"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Header 名称"
+          }
+        }
+      }
+    },
+    "Header 值": {
+      "comment": "header 值欄（a11y 名稱）",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Header value"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ヘッダー値"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "헤더 값"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Header 值"
+          }
+        }
+      }
+    },
+    "刪除 Header": {
+      "comment": "刪除 header 列按鈕（a11y 名稱）",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Header"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ヘッダーを削除"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "헤더 삭제"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除 Header"
+          }
+        }
+      }
+    },
+    "套用並重新載入": {
+      "comment": "設定頁按鈕：寫入 UA／header 並整頁重載",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply and Reload"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "適用して再読み込み"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "적용 후 다시 로드"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用并重新加载"
+          }
+        }
+      }
+    },
+    "額外 header 只套用在頁面主文件請求；User-Agent 會套用到全部請求，包含 WebSocket 握手。": {
+      "comment": "設定頁說明：WebKit 限制",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra headers apply only to the page's main document request. The User-Agent applies to all requests, including the WebSocket handshake."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追加ヘッダーはページのメインドキュメントのリクエストにのみ適用されます。User-Agent は WebSocket ハンドシェイクを含むすべてのリクエストに適用されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "추가 헤더는 페이지의 기본 문서 요청에만 적용됩니다. User-Agent는 WebSocket 핸드셰이크를 포함한 모든 요청에 적용됩니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额外 header 仅应用于页面主文档请求；User-Agent 会应用于所有请求，包括 WebSocket 握手。"
+          }
+        }
+      }
+    },
+    "變更後需重新載入才會生效。對局中不要套用。": {
+      "comment": "設定頁說明：重載才生效",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changes take effect after a reload. Don't apply during a game."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "変更は再読み込み後に有効になります。対局中は適用しないでください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "변경 사항은 다시 로드한 뒤에 적용됩니다. 대국 중에는 적용하지 마세요."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更改需重新加载后才会生效。对局中请勿应用。"
+          }
+        }
+      }
+    },
+    "名稱不合法：不可為空，也不可含空白、冒號或換行。": {
+      "comment": "header 列錯誤提示",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid name: it can't be empty or contain spaces, colons or line breaks."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名前が不正です：空にしたり、空白・コロン・改行を含めたりできません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이름이 올바르지 않습니다: 비워 둘 수 없으며 공백, 콜론, 줄바꿈을 포함할 수 없습니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "名称不合法：不可为空，也不可包含空格、冒号或换行。"
+          }
+        }
+      }
+    },
+    "此名稱由系統保留，不會送出。": {
+      "comment": "header 列錯誤提示：保留名稱",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This name is reserved by the system and won't be sent."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この名前はシステムに予約されているため、送信されません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 이름은 시스템에서 예약되어 있어 전송되지 않습니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此名称由系统保留，不会发送。"
+          }
+        }
+      }
+    },
+    "值不可為空或含換行。": {
+      "comment": "header 列錯誤提示：值",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The value can't be empty or contain line breaks."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "値を空にしたり、改行を含めたりできません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "값은 비워 둘 수 없으며 줄바꿈을 포함할 수 없습니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "值不可为空或包含换行。"
+          }
+        }
+      }
+    },
     "雀魂伺服器": {
       "comment": "設定頁 GroupBox 標題",
       "localizations": {

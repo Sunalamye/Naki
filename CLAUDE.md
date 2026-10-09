@@ -94,6 +94,7 @@ OptionalOperationList
 | 使用者設定 | `command/App/SettingsStore.swift` |
 | 頁面 service | `command/Services/Web/WebSession.swift`（載入／JS／導覽／高亮；`callJavaScript` 一律函式體語意） |
 | 平台分歧 | `command/Services/Web/WebSessionBackends.swift`（WebPage vs WKWebView，唯一 `#available` 在 `WebSession.init`） |
+| 雀魂連線 | `command/Services/Web/MajsoulRequestBuilder.swift`（自訂 UA／額外 header；header 只作用於主文件請求，UA 才含 WebSocket 握手；保留名稱被擋）＋ `Views/MajsoulConnectionSettingsBox.swift` |
 | 牌局狀態單一來源 | `command/ViewModels/GameStore.swift`（SwiftUI 與 MCP 讀同一份） |
 | coordinator | `command/Services/Bridge/NakiWebCoordinator.swift`（兩條 path 共用；持有 bot、直接寫 GameStore） |
 | WS injection | `command/Services/Bridge/WebSocketInterceptor.swift` |

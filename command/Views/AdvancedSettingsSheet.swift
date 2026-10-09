@@ -414,6 +414,8 @@ struct AdvancedSettingsSheet: View {
                 Label("雀魂伺服器", systemImage: "globe.asia.australia")
             }
 
+            MajsoulConnectionSettingsBox()
+
             #if os(macOS)
             // 語言
             GroupBox {
