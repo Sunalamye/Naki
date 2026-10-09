@@ -9,28 +9,14 @@
 import SwiftUI
 
 struct LogPanel: View {
-    @State private var logManager = LogManager.shared
+    private let logManager = LogManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var autoScroll = true
     @State private var filterCategory: LogCategory? = nil
     @State private var searchText = ""
 
-    var filteredEntries: [LogEntry] {
-        var entries = logManager.entries
-
-        // 過濾類別
-        if let category = filterCategory {
-            entries = entries.filter { $0.category == category }
-        }
-
-        // 搜索過濾
-        if !searchText.isEmpty {
-            entries = entries.filter { $0.message.localizedCaseInsensitiveContains(searchText) }
-        }
-
-        return entries
-    }
-
     var body: some View {
+        let shown = logManager.recentEntries(category: filterCategory, search: searchText, limit: .max)
         VStack(spacing: 0) {
             // 工具欄
             HStack(spacing: 8) {
@@ -53,23 +39,21 @@ struct LogPanel: View {
                 .accessibilityLabel("日誌分類")
 
                 // 自動滾動
-                Toggle(isOn: $autoScroll) {
-                    Image(systemName: autoScroll ? "arrow.down.circle.fill" : "arrow.down.circle")
-                }
-                .toggleStyle(.button)
+                Toggle("自動捲動",
+                       systemImage: autoScroll ? "arrow.down.circle.fill" : "arrow.down.circle",
+                       isOn: $autoScroll)
+                    .labelStyle(.iconOnly)
+                    .toggleStyle(.button)
                 .accessibilityIdentifier("log-autoscroll-toggle")
-                .accessibilityLabel("自動捲動")
                 .accessibilityValue(autoScroll ? Text("開") : Text("關"))
                 #if os(macOS)
                 .help("自動滾動到最新")
                 #endif
 
                 // 清除按鈕
-                Button(action: { logManager.clear() }) {
-                    Image(systemName: "trash")
-                }
+                Button("清除日誌", systemImage: "trash") { logManager.clear() }
+                    .labelStyle(.iconOnly)
                 .accessibilityIdentifier("log-clear-button")
-                .accessibilityLabel("清除日誌")
                 #if os(macOS)
                 .help("清除日誌")
                 #endif
@@ -83,18 +67,16 @@ struct LogPanel: View {
             // 搜索框
             HStack {
                 Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 TextField("搜索...", text: $searchText)
                     .textFieldStyle(.plain)
                     .accessibilityIdentifier("log-search-field")
                 if !searchText.isEmpty {
-                    Button(action: { searchText = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("log-clear-search-button")
-                    .accessibilityLabel("清除搜尋")
+                    Button("清除搜尋", systemImage: "xmark.circle.fill") { searchText = "" }
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("log-clear-search-button")
                 }
             }
             .padding(6)
@@ -106,7 +88,7 @@ struct LogPanel: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(filteredEntries) { entry in
+                        ForEach(shown) { entry in
                             LogEntryRow(entry: entry)
                                 .id(entry.id)
                         }
@@ -114,11 +96,13 @@ struct LogPanel: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                 }
-                .onChange(of: logManager.entries.count) {
-                    if autoScroll, let last = filteredEntries.last {
-                        withAnimation {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
+                // 觀察最後一筆的 id 而非 count：滿 `maxEntries` 後 count 恆定，只有 last.id 會變
+                .onChange(of: shown.last?.id) { _, lastID in
+                    guard autoScroll, let lastID else { return }
+                    if reduceMotion {
+                        proxy.scrollTo(lastID, anchor: .bottom)
+                    } else {
+                        withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
                     }
                 }
             }
@@ -135,7 +119,7 @@ struct LogEntryRow: View {
             // 時間戳
             Text(entry.formattedTime)
                 .font(.system(.caption2, design: .monospaced))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .frame(width: 70, alignment: .leading)
 
             // 類別標籤
@@ -144,14 +128,14 @@ struct LogEntryRow: View {
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(categoryColor.opacity(0.2))
-                .foregroundColor(categoryColor)
-                .cornerRadius(3)
+                .foregroundStyle(categoryColor)
+                .clipShape(.rect(cornerRadius: 3))
                 .frame(width: 45)
 
             // 消息內容
             Text(entry.message)
                 .font(.system(.caption, design: .monospaced))
-                .foregroundColor(.primary)
+                .foregroundStyle(.primary)
                 .lineLimit(3)
                 .textSelection(.enabled)
 

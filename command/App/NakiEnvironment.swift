@@ -78,11 +78,15 @@ struct NakiEnvironment {
         self.actions = NakiActions()
         self.pluginStore = PluginStore()
     }
+
+    /// `@Entry` 的預設值每讀一次都會重新求值；用同一份共用實例，讀取之間才相等，
+    /// 也不會每次都重建四個 reference type。
+    nonisolated static let preview = NakiEnvironment()
 }
 
 // MARK: - Environment Key
 
 extension EnvironmentValues {
     /// 預設值僅供 Preview；正式 Scene 由 App 層顯式注入。
-    @Entry var naki: NakiEnvironment = NakiEnvironment()
+    @Entry var naki: NakiEnvironment = .preview
 }

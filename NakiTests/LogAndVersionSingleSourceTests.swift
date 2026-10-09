@@ -263,4 +263,36 @@ final class LogAndVersionSingleSourceTests: XCTestCase {
         XCTAssertEqual(clean["port"] as? Int, 8765)
         XCTAssertEqual(clean["flag"] as? Bool, true)
     }
+
+    // MARK: - 日誌面板：自動捲動 key 與最近條目
+
+    private func entry(_ message: String, _ category: LogCategory = .system) -> LogEntry {
+        LogEntry(timestamp: Date(timeIntervalSince1970: 1_770_000_000), category: category, level: .info, message: message)
+    }
+
+    /// 滿額後 count 恆定，面板若只觀察 count 就不會捲動；`last?.id` 必須改變。
+    func testAppendAtCapKeepsCountButChangesLastID() {
+        var entries = (0..<5000).map { entry("e\($0)") }
+        let beforeID = entries.last?.id
+
+        LogManager.append(entry("new"), to: &entries, limit: 5000)
+
+        XCTAssertEqual(entries.count, 5000)
+        XCTAssertNotEqual(entries.last?.id, beforeID)
+        XCTAssertEqual(entries.last?.message, "new")
+        XCTAssertEqual(entries.first?.message, "e1")
+    }
+
+    func testRecentEntriesFiltersThenTakesLastLimitInOrder() {
+        let entries = [entry("a1", .ws), entry("b", .bot), entry("a2", .ws), entry("a3", .ws)]
+
+        let ws = LogManager.recentEntries(entries, category: .ws, limit: 2)
+        XCTAssertEqual(ws.map(\.message), ["a2", "a3"])
+        XCTAssertEqual(ws.map(\.id), [entries[2].id, entries[3].id])
+
+        XCTAssertEqual(LogManager.recentEntries(entries, search: "B").map(\.message), ["b"])
+        XCTAssertEqual(LogManager.recentEntries(entries).count, 4)
+        XCTAssertTrue(LogManager.recentEntries(entries, category: .liqi).isEmpty)
+        XCTAssertTrue(LogManager.recentEntries(entries, limit: 0).isEmpty)
+    }
 }
