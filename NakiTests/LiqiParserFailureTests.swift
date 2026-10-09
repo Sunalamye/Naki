@@ -998,4 +998,47 @@ final class LiqiParserFailureTests: XCTestCase {
         let doras = events?.filter { ($0["type"] as? String) == "dora" }.compactMap { $0["dora_marker"] as? String }
         XCTAssertEqual(doras, ["1m", "2m", "3m"], "一次翻三張要各發一個，且保持順序")
     }
+
+    // MARK: - 重連快照的人數與座位
+
+    /// 以 seatList 認座位後送 syncGame 快照，回傳 start_kyoku
+    private func snapshotStartKyoku(seatList: [Int], scores: [Int], msgId: UInt16) -> (event: [String: Any]?, state: LiqiParseFaultState) {
+        let (bridge, state) = makeBridge()
+        _ = bridge.parse(authGameRequest(msgId: msgId))
+        _ = bridge.parse(authGameResponse(msgId: msgId, fields: [.bytes(field: 3, value: packed(seatList))]))
+        let snapshot = LiqiEncoder.encodeFields(
+            [.string(field: 6, value: "1m"), .string(field: 6, value: "2m")]
+            + scores.map { .message(field: 9, fields: [.int(field: 1, value: $0)]) })
+        let syncId = msgId + 1
+        _ = bridge.parse(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: syncId)))
+        let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(
+            type: .response, msgId: syncId, method: "",
+            payload: LiqiEncoder.encodeFields([.message(field: 4, fields: [.bytes(field: 1, value: snapshot)])]))))
+        return (events?.first { ($0["type"] as? String) == "start_kyoku" }, state)
+    }
+
+    private let unknownHand = [String](repeating: "?", count: 13)
+
+    func testGameSnapshotSanmaPadsFourthScoreAndPlacesOwnHandAtSeat() {
+        let (event, state) = snapshotStartKyoku(seatList: [2, accountId, 3], scores: [28000, 26000, 24000], msgId: 90)
+        XCTAssertEqual(event?["scores"] as? [Int], [28000, 26000, 24000, 0])
+        XCTAssertEqual(event?["tehais"] as? [[String]], [unknownHand, ["1m", "2m"], unknownHand])
+        XCTAssertNil(state.blocking)
+    }
+
+    func testGameSnapshotYonmaPlacesOwnHandAtSeat() {
+        let (event, _) = snapshotStartKyoku(seatList: [2, 3, 4, accountId], scores: [1, 2, 3, 4], msgId: 92)
+        XCTAssertEqual(event?["tehais"] as? [[String]], [unknownHand, unknownHand, unknownHand, ["1m", "2m"]])
+    }
+
+    func testGameSnapshotYonmaWithThreeScoresBlocks() {
+        let (event, state) = snapshotStartKyoku(seatList: [accountId, 2, 3, 4], scores: [28000, 26000, 24000], msgId: 94)
+        XCTAssertNil(event)
+        XCTAssertEqual(state.blocking?.site, "GameSnapshot.players.score")
+    }
+
+    func testGameSnapshotSeatBeyondPlayerCountLeavesAllHandsUnknown() {
+        let (event, _) = snapshotStartKyoku(seatList: [2, 3, 4, 5, accountId], scores: [1, 2, 3, 4], msgId: 96)
+        XCTAssertEqual(event?["tehais"] as? [[String]], [unknownHand, unknownHand, unknownHand, unknownHand])
+    }
 }

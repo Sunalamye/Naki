@@ -477,4 +477,14 @@ final class LiqiActionSenderTests: XCTestCase {
         XCTAssertEqual(LiqiActionSender.loggablePayload(spec),
                        "payload=\(LiqiEncoder.hexString(spec.payload))")
     }
+
+    /// 心跳間隔夾在 30 秒到一天之間
+    @MainActor
+    func testAntiIdleIntervalIsClamped() {
+        let sender = LiqiActionSender()
+        for (requested, expected) in [(1.0, 30.0), (600.0, 600.0), (1e12, 86_400.0)] {
+            sender.setAntiIdle(enabled: false, intervalSeconds: requested)
+            XCTAssertEqual(sender.antiIdleInterval, expected, "requested=\(requested)")
+        }
+    }
 }

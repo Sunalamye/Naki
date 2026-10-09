@@ -236,6 +236,19 @@ final class AutoRematchEngineTests: XCTestCase {
         XCTAssertTrue(quiet.isEmpty, "成功排入不得回報失敗")
     }
 
+    /// 沒有觀察到 sid 時，訊息要指名是哪種麻將
+    @MainActor
+    func testNoObservedSidMessageNamesTheRequestedGameKind() async {
+        pinAppLanguage()
+        for (sanma, name) in [(true, "三麻"), (false, "四麻")] {
+            var messages: [String] = []
+            let engine = makeEngine(prefersSanma: sanma, sids: [], onFailure: { messages.append($0) })
+            _ = await engine.run()
+            XCTAssertEqual(messages.count, 1)
+            XCTAssertTrue(messages[0].contains("沒有可用的\(name) match_sid"), messages[0])
+        }
+    }
+
     /// 一直被拒就停手，不無限重試
     @MainActor
     func testGivesUpAfterMaxAttempts() async {

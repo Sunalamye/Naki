@@ -90,6 +90,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
     func testRiichiUsesTopDiscardRecommendationAsDeclarationTile() async {
         let store = LiqiOperationStore()
         var captured: [String] = []
+        var events: [String] = []
         let sender = recordingSender { captured.append($0) }
         let snapshot = store.record(seat: 0,
                                     operations: [LiqiOperation(type: .discard),
@@ -488,9 +489,10 @@ final class AutoPlayActionExecutorTests: XCTestCase {
     // MARK: - 立直宣言牌對照伺服器 combination
 
     @MainActor
-    private func riichiHex(combination: [String]) async -> String {
+    private func riichiHex(combination: [String]) async -> (hex: String, events: [String]) {
         let store = LiqiOperationStore()
         var captured: [String] = []
+        var events: [String] = []
         let sender = recordingSender { captured.append($0) }
         let snapshot = store.record(seat: 0,
                                     operations: [LiqiOperation(type: .discard),
@@ -500,14 +502,14 @@ final class AutoPlayActionExecutorTests: XCTestCase {
             action: .riichi, tile: "riichi", snapshot: snapshot,
             recommendations: [Recommendation(tile: "9m", probability: 0.9, actionType: .discard),
                               Recommendation(tile: "3s", probability: 0.5, actionType: .discard)],
-            sender: sender, store: store)
-        return hex(captured.first)
+            sender: sender, store: store, event: { events.append($0) })
+        return (hex(captured.first), events)
     }
 
     /// combination 可解析：只在伺服器可宣言的牌裡挑機率最高的（9m 不在其中，選 3s）
     @MainActor
     func testRiichiPicksHighestProbabilityWithinCombination() async {
-        let bytes = await riichiHex(combination: ["3s", "1p"])
+        let bytes = await riichiHex(combination: ["3s", "1p"]).hex
         XCTAssertTrue(bytes.hasSuffix("08071a023373"), "應宣言 3s，實際 bytes=\(bytes)")
     }
 
@@ -515,9 +517,20 @@ final class AutoPlayActionExecutorTests: XCTestCase {
     @MainActor
     func testRiichiKeepsTopDiscardWhenCombinationUnusable() async {
         for combination in [[], ["??"], ["1p"]] {
-            let bytes = await riichiHex(combination: combination)
+            let bytes = await riichiHex(combination: combination).hex
             XCTAssertTrue(bytes.hasSuffix("08071a02396d"),
                           "combination=\(combination) 應退回 9m，實際 bytes=\(bytes)")
+        }
+    }
+
+    /// 只有 combination 可解析卻沒有任何推薦落在其中時，才留下退回事件
+    @MainActor
+    func testRiichiFallbackEventOnlyWhenCombinationParsedButNoRecommendationInside() async {
+        let outside = await riichiHex(combination: ["1p"]).events
+        XCTAssertTrue(outside.contains { $0.contains("退回取最高機率") })
+        for combination in [["3s"], [], ["??"]] {
+            let events = await riichiHex(combination: combination).events
+            XCTAssertFalse(events.contains { $0.contains("退回取最高機率") }, "combination=\(combination)")
         }
     }
 }
