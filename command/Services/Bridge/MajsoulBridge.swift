@@ -970,27 +970,23 @@ class MajsoulBridge {
         // ⚠️ 不發送額外的 start_game！authGame 響應已經發送過 start_game。
 
         // 重連時 start_kyoku 只保留單一來源，避免重複 start_kyoku 破壞局狀態。
-        //   - 有 actions：只重放 actions 來發 start_kyoku（其中 ActionNewRound 會發一個），
-        //     不由 snapshot(gameState) 另發（兩者都發 → 兩個 start_kyoku）。
-        //   - 無 actions：才由 snapshot 的 parseGameState 發 start_kyoku（後備路徑）。
-        // kan-dora 補發與 start_kyoku「同一來源、二擇一」，避免雙重 dora 事件：
-        //   - actions 路徑：各 action 的 doras 欄位經 parseAction 內建的 dora 補發自然重現 kan-dora；
-        //   - snapshot 路徑：由 parseGameState 從 doraList 第 2 個(index 1)以後補發。
-        if let actions = gameRestore["actions"] as? [[String: Any]], !actions.isEmpty {
-            // 主路徑：重放歷史動作（與 Akagi 的 parse_syncGame 行為一致）
-            bridgeLog("[MajsoulBridge] 找到 \(actions.count) 個動作需要重播（start_kyoku/kan-dora 皆由重放產生）")
-            for action in actions {
-                if let name = action["name"] as? String,
-                   let data = action["data"] as? [String: Any] {
-                    if let events = parseAction(name: name, data: data) {
-                        results.append(contentsOf: events)
-                    }
-                }
-            }
-        } else if let gameState = gameRestore["gameState"] as? [String: Any] {
-            // 後備路徑：無 actions 時，才由 snapshot 發 start_kyoku 並補 kan-dora
-            bridgeLog("[MajsoulBridge] 無 actions，改用 snapshot gameState 發 start_kyoku: \(gameState.keys)")
+        //   - actions 含 ActionNewRound：只重放 actions，由它發 start_kyoku。
+        //   - 否則（無 actions，或 actions 從局中開始）：由 snapshot 的 parseGameState
+        //     發 start_kyoku，再接著重放 actions（Akagi 982ff48）。
+        // kan-dora 同樣只來自一邊：snapshot 先跑會把 doras 設成完整清單，
+        // 之後重放的 action 帶的 doras 不會再多於它，parseAction 不會重複補發。
+        let actions = gameRestore["actions"] as? [[String: Any]] ?? []
+        let hasNewRound = actions.contains { $0["name"] as? String == "ActionNewRound" }
+        if !hasNewRound, let gameState = gameRestore["gameState"] as? [String: Any] {
+            bridgeLog("[MajsoulBridge] actions 無 ActionNewRound（\(actions.count) 個），由 snapshot 發 start_kyoku: \(gameState.keys)")
             if let events = parseGameState(gameState) {
+                results.append(contentsOf: events)
+            }
+        }
+        for action in actions {
+            if let name = action["name"] as? String,
+               let data = action["data"] as? [String: Any],
+               let events = parseAction(name: name, data: data) {
                 results.append(contentsOf: events)
             }
         }
@@ -1023,7 +1019,7 @@ class MajsoulBridge {
         let kyoku = ju + 1
 
         // 與 `parseNewRound` 同一條規則：解不出點數就不發 start_kyoku。
-        // 這條是重連且沒有 actions 可重放時的後備路徑；`GameSnapshot` 的點數在
+        // 重連時 actions 不含 ActionNewRound 就走這條；`GameSnapshot` 的點數在
         // `players[].score`（liqi.json field 9 → PlayerSnapshot field 1）。
         guard var scores = gameState["scores"] as? [Int], scores.count == 4 || (is3P && scores.count == 3) else {
             recordBlockingFault(site: "GameSnapshot.players.score",
@@ -1049,9 +1045,14 @@ class MajsoulBridge {
 
         let playerCount = is3P ? 3 : 4
         var tehais = [[String]](repeating: [String](repeating: "?", count: 13), count: playerCount)
+        var tsumoTile: String?
         if seat >= 0 && seat < playerCount {
             tehais[seat] = myTiles.prefix(13).compactMap { LiqiTile.mjai(fromMajsoul: $0) }
                 .sorted(by: LiqiTile.compare)
+            // 14 張 = 本家剛摸牌：末張以 tsumo 補回，與 parseNewRound 的親家配牌同一做法
+            if myTiles.count == 14 {
+                tsumoTile = LiqiTile.mjai(fromMajsoul: myTiles[13])
+            }
         }
 
         // 處理寶牌：start_kyoku 只帶第一個 dora_marker
@@ -1080,10 +1081,8 @@ class MajsoulBridge {
         // 重連的局面接起來了 → 只收掉 start_kyoku 系列的常駐錯誤
         faultState.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
 
-        // 後備路徑（無 actions 重連）補發已翻的 kan-dora。
-        // start_kyoku 僅帶第一個 dora_marker，doraList 第 2 個(index 1)以後需逐一以 dora 事件補上，
-        // 讓 bot 正確計算寶牌。本路徑與 actions 重放互斥（見 parseSyncGameRestore 的
-        // 「同一來源、二擇一」註解），不會重複。
+        // start_kyoku 只帶第一個 dora_marker，其餘已翻的 kan-dora 逐一補發。
+        // 不會與重放重複：上面已把 doras 設成完整清單，重放 action 的 doras 不會更多。
         if let doraList = gameState["doras"] as? [String], doraList.count > 1 {
             for extraDora in doraList.dropFirst() {
                 if let mjaiExtra = LiqiTile.mjai(fromMajsoul: extraDora) {
@@ -1093,6 +1092,10 @@ class MajsoulBridge {
                     ])
                 }
             }
+        }
+
+        if let tsumoTile {
+            results.append(["type": "tsumo", "actor": seat, "pai": tsumoTile])
         }
 
         return results.isEmpty ? nil : results
