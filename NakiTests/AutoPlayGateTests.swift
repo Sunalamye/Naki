@@ -55,7 +55,7 @@ final class AutoPlayGateTests: XCTestCase {
                        recSeq: UInt64? = nil) -> AutoPlayGate.Input {
         .init(isAutoMode: auto,
               isSanma: sanma,
-              cloudDecision: cloud,
+              sanmaCapableDecision: cloud,
               hasActionInFlight: inFlight,
               snapshot: snapshot,
               recommendations: recs,
@@ -205,15 +205,15 @@ final class AutoPlayGateTests: XCTestCase {
             input(cloud: false, snapshot: s, recs: [rec(.discard)])), .proceed)
     }
 
-    /// 局間確認：三麻在雲端推論啟用（設定層）時放行；未啟用照舊擋
-    func testSanmaConfirmFollowsCloudInferenceSetting() {
+    /// 局間確認：三麻在引擎支援三麻（雲端 3p 或本地 Akagi 三麻）時放行；沒有三麻引擎照舊擋
+    func testSanmaConfirmFollowsSanmaEngineAvailability() {
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true,
-                                                  cloudInferenceActive: true), .proceed)
+                                                  sanmaEngineAvailable: true), .proceed)
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true,
-                                                  cloudInferenceActive: false),
+                                                  sanmaEngineAvailable: false),
                        .skip(.sanmaUnsupported))
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: false, isSanma: true,
-                                                  cloudInferenceActive: true),
+                                                  sanmaEngineAvailable: true),
                        .skip(.notAutoMode))
     }
 

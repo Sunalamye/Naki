@@ -289,12 +289,12 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       mode: .auto,
       seat: 0,
       isSanma: true,
-      cloudDecision: true)
+      sanmaCapableDecision: true)
 
     XCTAssertEqual(decision, .send(action: .discard, tile: "9s"))
   }
 
-  /// 逐決策：雲端 fallback 到本地的那一手（cloudDecision=false）照舊降級
+  /// 逐決策：雲端 fallback 到本地的那一手（sanmaCapableDecision=false）照舊降級
   func testSanmaDowngradesOnLocalFallbackEvenWithCloudConfigured() {
     let decision = AutoPlayDecisionResolver.resolve(
       snapshot: snapshot(types: [.discard]),
@@ -302,7 +302,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       mode: .auto,
       seat: 0,
       isSanma: true,
-      cloudDecision: false)
+      sanmaCapableDecision: false)
 
     XCTAssertEqual(decision, .surfaceOnly(action: .discard, tile: "9s"))
   }
@@ -315,7 +315,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       mode: .auto,
       seat: 0,
       isSanma: true,
-      cloudDecision: true)
+      sanmaCapableDecision: true)
 
     XCTAssertEqual(decision, .send(action: .kita, tile: "kita"))
   }
@@ -328,7 +328,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       mode: .auto,
       seat: 0,
       isSanma: true,
-      cloudDecision: true)
+      sanmaCapableDecision: true)
 
     if case .send = decision {
       XCTFail("oplist 沒有 babei 時不得送出拔北，實際: \(decision)")
@@ -348,7 +348,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       mode: .auto,
       seat: 0,
       isSanma: true,
-      cloudDecision: true)
+      sanmaCapableDecision: true)
 
     XCTAssertEqual(decision, .send(action: .ryukyoku, tile: "ryukyoku"))
   }
@@ -361,7 +361,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       mode: .auto,
       seat: 0,
       isSanma: true,
-      cloudDecision: true)
+      sanmaCapableDecision: true)
 
     if case .send = decision {
       XCTFail("oplist 沒有 kyushu 時不得宣告九種九牌，實際: \(decision)")
@@ -376,7 +376,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       mode: .auto,
       seat: 0,
       isSanma: false,
-      cloudDecision: false)
+      sanmaCapableDecision: false)
 
     XCTAssertEqual(decision, .send(action: .ryukyoku, tile: "ryukyoku"))
   }

@@ -129,13 +129,13 @@ enum AutoPlayActionExecutor {
 
         case .kita:
             // 拔北（三麻）：ReqSelfOperation type=11（babei）。
-            // 只有雲端 3p 推薦會走到這裡（gate/resolver 已確認 oplist 有 babei）。
+            // 只有三麻引擎的推薦會走到這裡（gate/resolver 已確認 oplist 有 babei）。
             log("執行: 拔北")
             spec = LiqiRequestBuilder.babei()
 
         case .ryukyoku:
             // 九種九牌：ReqSelfOperation type=10（kyushu）。
-            // 同樣只有雲端推薦會走到這裡（resolver 已確認 oplist 有 kyushu）。
+            // 同樣只有三麻引擎的推薦會走到這裡（resolver 已確認 oplist 有 kyushu）。
             log("執行: 九種九牌")
             spec = LiqiRequestBuilder.kyushu()
 

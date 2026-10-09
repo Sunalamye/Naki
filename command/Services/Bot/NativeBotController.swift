@@ -54,6 +54,14 @@ class NativeBotController {
     /// Bot 是否已初始化
     var isInitialized: Bool { bot != nil }
 
+    /// 目前（或，沒有 bot 時，將會建的）引擎是否支援三麻：局間確認與續局的判準
+    var supports3P: Bool { bot?.identity.supports3P ?? AkagiSanmaBot.isBundled }
+
+    /// 三麻本地引擎的工廠（測試縫：注入失敗以驗證退路）
+    var makeSanmaLocal: (UInt8) throws -> AkagiSanmaBot = { playerId in
+        try AkagiSanmaBot(playerId: playerId, snapshot: { LiqiOperationStore.shared.pending })
+    }
+
     /// 是否為 3P 模式
     private(set) var is3P: Bool = false
 
@@ -149,13 +157,23 @@ class NativeBotController {
         self.is3P = is3P
 
         if is3P {
-            // 三麻：本地 4p 模型推三麻結構上無效——**連啟動都不啟動**
-            // （2026-08-05 使用者定案）。引擎是雲端-only 的 CloudBot：
-            // 決策點由伺服器 oplist 驅動，雲端未生效＝誠實地沒有推薦，
-            // 不會有本地無效輸出頂上；設定啟用後下一批授權即生效。
-            bot = CloudBot(local: nil, playerId: playerId, is3P: true,
-                           configProvider: cloudConfigProvider ?? { nil },
-                           serverAuthorization: { LiqiOperationStore.shared.pending?.sequence == $0 })
+            // 三麻：本地 4p 模型推三麻結構上無效，本地引擎改用 Akagi 三麻（decisions D23）。
+            // 動作類別由 oplist 授權；雲端優先、本地接手，與四麻同形。
+            let serverAuthorization: (UInt64) -> Bool = { LiqiOperationStore.shared.pending?.sequence == $0 }
+            if let local = try? makeSanmaLocal(playerId) {
+                if let provider = cloudConfigProvider {
+                    bot = CloudBot(local: local, playerId: playerId, is3P: true,
+                                   configProvider: provider, serverAuthorization: serverAuthorization)
+                } else {
+                    bot = local
+                }
+            } else {
+                // 本地三麻引擎建不起來（模型檔缺失等）：退回雲端-only，不讓三麻整個起不來
+                botLog("[NativeBotController] ERROR: AkagiSanmaBot 建構失敗，三麻退回雲端-only")
+                bot = CloudBot(local: nil, playerId: playerId, is3P: true,
+                               configProvider: cloudConfigProvider ?? { nil },
+                               serverAuthorization: serverAuthorization)
+            }
         } else {
             // 內建引擎經 handProvider 讀 controller 的手牌——手牌是**遊戲**狀態，
             // 權威在 `updateInternalState`（UI/MCP 匯出也讀同一份），引擎只讀不寫。
@@ -276,8 +294,8 @@ class NativeBotController {
             // 讓推薦保持到下一次需要做決定時（provenance 也一起保持不動）
             // 只有在新的推薦產生時才會更新
             //
-            // 例外：三麻雲端-only 在新授權上回 nil ＝ 這一手沒有雲端決策（失敗／退避），
-            // 決策來源不能黏著上一手的 "cloud:"，否則 `AutoPlayGate` 會把它當雲端決策放行
+            // 例外：三麻在新授權上回 nil ＝ 這一手沒有三麻引擎的決策（本地建構失敗退回雲端-only
+            // 後雲端又失敗／退避），決策來源不能黏著上一手的三麻來源，否則 `AutoPlayGate` 會放行
             if is3P, let eventOplistSeq, eventOplistSeq != lastRecommendationsOplistSequence {
                 lastDecisionSource = "local"
             }
@@ -585,8 +603,8 @@ class NativeBotController {
         var status = BotStatus(
             isActive: isInitialized,
             // modelName 必須反映**實際載入的是哪個**：四麻＝內建 Mortal；
-            // 三麻＝雲端-only（本地模型不啟動，2026-08-05 起）
-            modelName: is3P ? "cloud-3p" : "mortal",
+            // 三麻＝bot 自述的引擎名
+            modelName: is3P ? (bot?.identity.name ?? "akagi-sanma-bc") : "mortal",
             playerId: Int(playerId),
             is3P: is3P
         )

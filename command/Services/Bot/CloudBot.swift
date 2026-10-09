@@ -33,10 +33,9 @@ final class CloudBot: MahjongBot {
 
     /// 本地引擎：閘門＋fallback，永遠先於雲端收到每一個事件。
     ///
-    /// **三麻時為 nil**（2026-08-05 使用者定案：本地只有四麻模型，推三麻
-    /// 結構上無效——連啟動都不啟動）。nil 時決策點改由**伺服器 oplist 驅動**
-    /// （事件上的 `MJAIEventKey.oplistSequence` 標記，每批授權恰問一次雲端），
-    /// 雲端失敗＝這一手沒有推薦（誠實留空），不會有本地的無效輸出頂上。
+    /// 三麻的本地引擎是 `AkagiSanmaBot`；只有它建構失敗時才為 nil（D23 退路）。
+    /// nil 時決策點改由**伺服器 oplist 驅動**（事件上的 `MJAIEventKey.oplistSequence`
+    /// 標記，每批授權恰問一次雲端），雲端失敗＝這一手沒有推薦（誠實留空）。
     private let local: (any MahjongBot)?
 
     private let playerId: UInt8
@@ -47,7 +46,7 @@ final class CloudBot: MahjongBot {
 
     /// 這批 oplist 授權（`MJAIEventKey.oplistSequence`）是否仍是伺服器當下待處理的那一批。
     ///
-    /// 兩個用途：三麻雲端-only 的決策點守門（授權已被消化，autopass 競態，不再問雲端）；
+    /// 兩個用途：三麻本地引擎退回雲端-only 時的決策點守門（授權已被消化，autopass 競態，不再問雲端）；
     /// 以及 syncGame 重放歷史事件時，過期決策點（授權早被後續動作取代）不重問伺服器。
     /// 預設 `{ _ in true }`＝不過濾（測試／Replay 用不到）。
     private let serverAuthorization: (UInt64) -> Bool
@@ -73,7 +72,7 @@ final class CloudBot: MahjongBot {
     /// 還剩幾個「重放中」的歷史事件要跳過雲端呼叫
     private var suppressRemaining = 0
 
-    /// 雲端-only 模式：已問過雲端的 oplist sequence（每批授權恰問一次，
+    /// 雲端-only 模式（本地引擎建構失敗的三麻退路）：已問過雲端的 oplist sequence（每批授權恰問一次，
     /// 避免同一授權 pending 期間每個事件都觸發一次 API）
     private var lastConsultedOplistSequence: UInt64?
 
@@ -109,7 +108,7 @@ final class CloudBot: MahjongBot {
             name: local == nil ? "cloud-only" : "cloud+\(base.name)",
             displayName: local == nil ? "雲端推論" : "\(base.displayName) ＋ 雲端",
             // 雲端只有在「啟用＋選了 3p 模型」時才如實支援三麻
-            supports3P: !cfg.model3P.trimmingCharacters(in: .whitespaces).isEmpty,
+            supports3P: base.supports3P || !cfg.model3P.trimmingCharacters(in: .whitespaces).isEmpty,
             isLocal: false)
     }
 
@@ -146,7 +145,7 @@ final class CloudBot: MahjongBot {
             kyokuStream.accumulate(event)
         }
 
-        // 本地引擎照餵（nil＝三麻雲端-only，見 `local` 註解）
+        // 本地引擎照餵（nil＝三麻本地引擎建構失敗的雲端-only 退路，見 `local` 註解）
         let localReaction = try await local?.react(events: events)
 
         // 重放抑制：照餵本地（重建狀態），跳過雲端
@@ -161,7 +160,7 @@ final class CloudBot: MahjongBot {
             .compactMap { $0[MJAIEventKey.oplistSequence] as? UInt64 }.last
 
         guard local != nil else {
-            // ── 雲端-only（三麻）：決策點由伺服器授權驅動 ──
+            // ── 雲端-only（三麻退路）：決策點由伺服器授權驅動 ──
             // 事件帶 oplistSequence ＝ 這個事件伴隨一批新授權抵達；
             // 每批恰問一次（同授權 pending 期間的後續事件不重複觸發）。
             guard let seq,
@@ -222,7 +221,7 @@ final class CloudBot: MahjongBot {
             let backoff = breaker.recordFailure(now: Date())
             recordHealth(ok: false, detail: error.localizedDescription)
             eventLog("[Bot] ☁️ 雲端推論失敗（\(error.localizedDescription)），"
-                   + "\(local == nil ? "本手無推薦（三麻不用本地）" : "改用本地模型")，"
+                   + "\(local == nil ? "本手無推薦（三麻本地引擎不可用）" : "改用本地模型")，"
                    + "\(Int(backoff))s 內不再嘗試")
             return nil
         }
@@ -286,7 +285,7 @@ final class CloudBot: MahjongBot {
     /// 兩段是毫秒內連發，第二段吃到 429 是 burst rate-limit 而非伺服器掛
     ///（Akagi #227）：短暫等待重試一次；再 429 仍不開斷路器——rate limit 的
     /// 伺服器是可達的，開 5s→120s 退避會把接下來幾手一起賠進去
-    ///（三麻雲端-only 時＝接下來幾手全部無推薦）。
+    ///（三麻退回雲端-only 時＝接下來幾手全部無推薦）。
     private func resolveReachDiscard(client: AkagiApiClient, model: String,
                                      events: [[String: Any]]) async -> String? {
         var followUp = events

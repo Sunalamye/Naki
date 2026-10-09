@@ -1,5 +1,5 @@
 {
-  "originHash" : "4365a4e563373cab0151cb1cdd12d91c43bad6758fba6930e352e70a6c2125ad",
+  "originHash" : "bfdd8a601be867b44678e2c603b6e04e7895c3d5d558f9fe8147ad2657f39118",
   "pins" : [
     {
       "identity" : "mcpkit",
@@ -8,15 +8,6 @@
       "state" : {
         "revision" : "0bf9df9f0c75058760a81a4e0854a8d1ccafcb82",
         "version" : "0.2.1"
-      }
-    },
-    {
-      "identity" : "mortalswift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Sunalamye/MortalSwift",
-      "state" : {
-        "revision" : "51cf4075f77540c64aeebb3356e2331b7ba2f21c",
-        "version" : "0.5.3"
       }
     }
   ],

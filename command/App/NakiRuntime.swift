@@ -182,8 +182,8 @@ final class NakiRuntime {
                     // 座位來源只有 `GameStore.autoPlaySeat` 一份定義
                     seat: self.store.autoPlaySeat,
                     isSanma: self.store.gameState.is3P,
-                    cloudDecision: self.store.botStatus.isCloudDecision,
-                    cloudInferenceActive: self.settings.cloudConfig.isActive,
+                    sanmaCapableDecision: self.store.botStatus.isSanmaCapableDecision,
+                    sanmaEngineAvailable: self.coordinator.bot.supports3P,
                     tsumoTile: self.store.tsumoTile,
                     isReady: self.session.isReady,
                     // 延遲 stepper 的讀取端：每輪重取，調一下下一手就生效
@@ -214,7 +214,7 @@ final class NakiRuntime {
                 return .init(mode: self.store.autoPlayMode,
                              isReady: self.session.isReady,
                              prefersSanma: self.settings.fullAutoPrefersSanma,
-                             cloudInferenceActive: self.settings.cloudConfig.isActive,
+                             sanmaEngineAvailable: self.coordinator.bot.supports3P,
                              roomPreference: self.settings.fullAutoRoomPreference)
             },
             // sid 的來源：遊戲自己送過的那些（Naki 自送的不算，見 ObservedMatchSids）。

@@ -91,7 +91,7 @@ struct ContentView: View {
             FullAutoSetupSheet(
                 sanma: $draftPrefersSanma,
                 room: $draftRoomPreference,
-                cloudActive: naki.settings.cloudConfig.isActive,
+                sanmaEngineAvailable: AkagiSanmaBot.isBundled || naki.settings.cloudConfig.isActive,
                 onStart: {
                     applyFullAutoChoice(sanma: draftPrefersSanma, room: draftRoomPreference)
                     showFullAutoKindChoice = false
@@ -1522,7 +1522,7 @@ struct AdvancedSettingsSheet: View {
 
                     cloudKeyStatusCard
 
-                    Text("三麻提醒：雲端 3p 模型是目前唯一的真三麻路徑；雲端失敗退回的本地模型仍是四麻模型，側欄的決策來源會如實顯示。")
+                    Text("三麻提醒：本地有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的決策來源會如實顯示。")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -1886,13 +1886,13 @@ private struct FullAutoSetupSheet: View {
 
     @Binding var sanma: Bool
     @Binding var room: RoomPreference
-    /// 雲端推論是否可用（決定要不要對三麻掛警告）
-    let cloudActive: Bool
+    /// 是否有三麻引擎（本地 Akagi 三麻或雲端 3p；決定要不要對三麻掛警告）
+    let sanmaEngineAvailable: Bool
     let onStart: () -> Void
     let onCancel: () -> Void
 
-    /// 選三麻但沒有雲端＝排進去也一手都不會打（三麻是雲端-only）
-    private var sanmaBlocked: Bool { sanma && !cloudActive }
+    /// 選三麻但沒有三麻引擎＝排進去也一手都不會打
+    private var sanmaBlocked: Bool { sanma && !sanmaEngineAvailable }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1923,7 +1923,7 @@ private struct FullAutoSetupSheet: View {
                 .foregroundStyle(.secondary)
 
             if sanmaBlocked {
-                Label("雲端推論未啟用，三麻不會排隊——三麻只有雲端路徑，排進去也不會出手。",
+                Label("選了三麻但沒有三麻引擎，不排隊——排進去也不會出手。",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
                     .foregroundStyle(.orange)

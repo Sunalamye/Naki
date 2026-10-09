@@ -24,7 +24,7 @@
 | AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.x 並不是新訓練模型 |
 | 「最新最強」 | **不能這樣宣稱**。0.5.x 只改 encoder／parity，權重未更新，也沒有牌力 benchmark |
 | 四麻 | 唯一有正確模型形狀與 parity 證據的模式 |
-| 三麻 | 沒有本地三麻模型；三麻走雲端-only（2026-08-05），雲端不可用就無推薦，不會退回四麻模型。自動打牌在三麻 fail-closed，但伺服器授權的和牌照送（2026-09-30）；無 live 三麻對局驗證 |
+| 三麻 | 本地引擎是 Akagi 三麻（`AkagiSanmaBot`，default strength：模仿天鳳人類，非 Mortal 等級；2026-10-09 D23），雲端啟用時雲端優先；不會退回四麻模型。自動打牌在三麻 fail-closed（推薦須來自雲端 3p 或本地 Akagi 三麻），伺服器授權的和牌照送（2026-09-30）；無 live 三麻對局驗證 |
 | 自摸保護 | resolver 純邏輯與整合的兩個漏洞（漏觸發、錯誤完成）在 source 層已收斂，有單測與注入式 fixture；**live 對局未驗證** |
 | 遊戲內高亮 | 現行 WebGL hook 會執行；尚未證明每次都染到正確牌／按鈕 |
 | MCP | 2026-08-01 live `tools/list` 為 42 個；2026-08-02 移除 6 個高亮失敗樁，靜態計數 38（未 live 複查） |
@@ -324,7 +324,7 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-08-02 靜態
 | 已處理 | 手動 `game_action(hora)` 無 snapshot 時會猜 tsumo | 已改 fail-closed（`GameTools.swift:109-114`）；單測覆蓋，live 未驗證 |
 | 已處理 | off mode 的顯示閘門（RecommendationView + GameHighlightScript） | source 與單測已確認；畫面未 live 驗證 |
 | P1 | pass／無效 discard／riichi failure path 會過早 mark handled | source code 已確認；尚缺 failure-path integration tests |
-| 已處理 | 三麻使用四麻模型 | 已改雲端-only；無 live 三麻驗證 |
+| 已處理 | 三麻使用四麻模型 | 已改本地 Akagi 三麻＋雲端 3p（原為雲端-only，D23 取代）；無 live 三麻驗證 |
 | 已處理 | Package.resolved 已納入版本控制、requirement 下界升到 0.5.2 | 0.5.1 時 clean clone → resolve → build 已機械驗過（`78b048e`）；0.5.2 未重做 |
 | 已處理 | 3 組無效設定已從 UI 移除；隱藏玩家名稱改以協定層重做（AUDIT §15.3） | source 已確認；協定層改寫只有合成 frame 測試，未 live 驗證 |
 | P1 | WebGL highlighter 可能誤染／重複染 | hook 執行已確認；視覺正確性未驗證 |

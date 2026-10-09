@@ -132,10 +132,10 @@ final class AutoPlayEngine {
         /// 自家座位（`GameStore.autoPlaySeat`，兩條 path 同一份定義）
         var seat: Int = 0
         var isSanma: Bool = false
-        /// 這批推薦是否由雲端模型算出（`BotStatus.isCloudDecision`，每輪重取）
-        var cloudDecision: Bool = false
-        /// 雲端推論是否已設定啟用（設定層，局間確認用；見 `AutoPlayGate.allowsConfirm`）
-        var cloudInferenceActive: Bool = false
+        /// 這批推薦是否由三麻引擎算出（`BotStatus.isSanmaCapableDecision`，每輪重取）
+        var sanmaCapableDecision: Bool = false
+        /// 目前引擎是否支援三麻（局間確認用；見 `AutoPlayGate.allowsConfirm`）
+        var sanmaEngineAvailable: Bool = false
         /// 這一巡摸到的牌，用來判斷 moqie
         var tsumoTile: String?
         /// WebView 是否已就緒（正式路徑 `webPage != nil`）
@@ -464,7 +464,7 @@ final class AutoPlayEngine {
         let gate = AutoPlayGate.evaluate(.init(
             isAutoMode: ctx.mode.isFullAuto,
             isSanma: ctx.isSanma,
-            cloudDecision: ctx.cloudDecision,
+            sanmaCapableDecision: ctx.sanmaCapableDecision,
             hasActionInFlight: state != .idle,
             snapshot: snapshot,
             recommendations: ctx.recommendations,
@@ -566,9 +566,9 @@ final class AutoPlayEngine {
         }
 
         // 三麻 fail-closed（同 `AutoPlayGate` 規則）。手動觸發不經閘門，
-        // 要自己擋一次；雲端 3p 決策放行，伺服器授權的和牌也放行（resolver 會排在推薦之上）。
-        guard !ctx.isSanma || ctx.cloudDecision || store.pending?.horaOperation != nil else {
-            note("⏭️ 三麻對局：本批推薦來自本地四麻模型，自動送出停用（雲端推薦才放行）", to: .log)
+        // 要自己擋一次；三麻引擎的決策放行，伺服器授權的和牌也放行（resolver 會排在推薦之上）。
+        guard !ctx.isSanma || ctx.sanmaCapableDecision || store.pending?.horaOperation != nil else {
+            note("⏭️ 三麻對局：本批推薦不是三麻引擎算的，自動送出停用（雲端 3p 或本地 Akagi 三麻才放行）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "sanma_unsupported"))
         }
 
@@ -666,7 +666,7 @@ final class AutoPlayEngine {
         }
 
         switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.isFullAuto, isSanma: ctx.isSanma,
-                                          cloudInferenceActive: ctx.cloudInferenceActive) {
+                                          sanmaEngineAvailable: ctx.sanmaEngineAvailable) {
         case .skip(let reason):
             // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。
             // 使用者在 `.off`/`.recommend`/三麻自己確認，ActionNewRound 到達會清 pending。
@@ -782,7 +782,7 @@ final class AutoPlayEngine {
                 mode: ctx.mode,
                 seat: ctx.seat,
                 isSanma: ctx.isSanma,
-                cloudDecision: ctx.cloudDecision,
+                sanmaCapableDecision: ctx.sanmaCapableDecision,
                 recommendationsOplistSequence: ctx.recommendationsOplistSequence)
 
             let action: Recommendation.ActionType

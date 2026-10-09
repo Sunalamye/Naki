@@ -818,7 +818,7 @@ class MajsoulBridge {
         //
         // fallback 的「上家」必須用本局人數算：寫死 `% 4` 在三麻會算出座位 3
         // ——那個座位不存在，而這個 target 會原樣進 MJAI 的 pon/daiminkan 事件，
-        // 三麻雲端-only 還會照原樣上傳給伺服器。
+        // 三麻送雲端時還會照原樣上傳給伺服器。
         let playerCount = is3P ? 3 : 4
         var target = lastDiscard ?? ((actor + playerCount - 1) % playerCount)
         var pai = ""

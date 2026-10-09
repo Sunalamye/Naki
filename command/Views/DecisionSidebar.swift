@@ -656,7 +656,7 @@ struct DecisionAlerts: View {
                 alert(icon: "icloud.slash.fill",
                       tone: .red,
                       text: botStatus.is3P
-                        ? "雲端失敗——本手無推薦（三麻不用本地，連續 \(botStatus.cloudFallbackStreak) 手）"
+                        ? "雲端失敗——正在用本地 Akagi 三麻（連續 \(botStatus.cloudFallbackStreak) 手）"
                         : "雲端失敗——正在用本地模型（連續 \(botStatus.cloudFallbackStreak) 手）")
                     .accessibilityIdentifier("cloud-degraded-indicator")
             } else if let host = botStatus.cloudHost {
@@ -677,10 +677,10 @@ struct DecisionAlerts: View {
                     .accessibilityIdentifier("autoplay-stall-indicator")
             }
 
-            if botStatus.is3P && !botStatus.isCloudDecision {
+            if botStatus.is3P && !botStatus.isSanmaCapableDecision {
                 alert(icon: "exclamationmark.triangle.fill",
                       tone: .orange,
-                      text: "三麻僅雲端推論：本地四麻模型不啟動，雲端未生效時沒有推薦。")
+                      text: "三麻尚無推薦：本地 Akagi 三麻引擎在下一個決策點才會產出。")
                     .accessibilityIdentifier("sanma-unsupported-notice")
             }
         }
@@ -689,7 +689,7 @@ struct DecisionAlerts: View {
 
     private var hasAny: Bool {
         botStatus.cloudHost != nil || autoPlayStall != nil
-            || (botStatus.is3P && !botStatus.isCloudDecision)
+            || (botStatus.is3P && !botStatus.isSanmaCapableDecision)
     }
 
     private func alert(icon: String, tone: Color, text: LocalizedStringKey) -> some View {

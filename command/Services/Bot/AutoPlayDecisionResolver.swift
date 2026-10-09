@@ -55,7 +55,7 @@ nonisolated struct AutoPlayDecisionResolver {
                         mode: AutoPlayMode,
                         seat: Int,
                         isSanma: Bool = false,
-                        cloudDecision: Bool = false,
+                        sanmaCapableDecision: Bool = false,
                         recommendationsOplistSequence: UInt64? = nil) -> AutoPlayDecision {
 
         // 三麻 fail-closed：自動模式降級成「只顯示、不送出」。
@@ -66,10 +66,10 @@ nonisolated struct AutoPlayDecisionResolver {
         // 這裡刻意不整條 return `.none`：伺服器授權仍然要看得見，
         // 使用者可以自己決定要不要照做。
         //
-        // 例外：`cloudDecision`（雲端 3p 算出的那一手）不降級，
-        // 規則見 `AutoPlayGate.Input.cloudDecision`。
+        // 例外：`sanmaCapableDecision`（三麻引擎算出的那一手）不降級，
+        // 規則見 `AutoPlayGate.Input.sanmaCapableDecision`。
         let effectiveMode: AutoPlayMode =
-            (isSanma && !cloudDecision && mode.isFullAuto) ? .recommend : mode
+            (isSanma && !sanmaCapableDecision && mode.isFullAuto) ? .recommend : mode
 
         // 缺少權威資料一律 fail closed。
         // 舊行為是「沒有 snapshot 時預設當自摸送出」，那等於在沒有伺服器授權的
@@ -147,12 +147,12 @@ nonisolated struct AutoPlayDecisionResolver {
         case .hora:
             return snapshot.horaOperation != nil
         case .kita:
-            // 拔北（三麻）：oplist type 11（babei）。只有雲端 3p 模型會產出
-            // 這種推薦（本地 action space 46 沒有拔北槽位）。
+            // 拔北（三麻）：oplist type 11（babei）。只有三麻引擎（雲端 3p／本地 Akagi 三麻）
+            // 會產出這種推薦（四麻 action space 46 沒有拔北槽位）。
             return snapshot.contains(.babei)
         case .ryukyoku:
             // 九種九牌：oplist type 10（kyushu）。與 `.kita` 同一個形狀——
-            // 本地 action space 沒有這個槽位，只有雲端模型會產出。
+            // 四麻 action space 沒有這個槽位，只有三麻引擎會產出。
             return snapshot.contains(.kyushu)
         case .none:
             // 「過」永遠可以送（前提是這批確實是副露機會）

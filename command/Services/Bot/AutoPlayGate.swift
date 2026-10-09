@@ -32,7 +32,7 @@ enum AutoPlayGate {
 
     enum Reason: String, Equatable {
         case notAutoMode = "非自動模式"
-        case sanmaUnsupported = "三麻不支援自動打牌（只有四麻模型）"
+        case sanmaUnsupported = "三麻不支援自動打牌（這批推薦不是三麻引擎算的）"
         case actionInFlight = "已有動作執行中"
         case noOplist = "尚無 oplist"
         case awaitingInference = "推論尚未完成（寬限期內）"
@@ -49,12 +49,12 @@ enum AutoPlayGate {
         ///
         /// 預設 false：舊的呼叫點與測試不必逐一改，但**正式路徑必須明確傳入**。
         var isSanma: Bool = false
-        /// 這批推薦是否由雲端 3p 模型算出（`BotStatus.isCloudDecision`）。
+        /// 這批推薦是否由支援三麻的引擎算出：雲端 3p 或本地 Akagi 三麻（`BotStatus.isSanmaCapableDecision`）。
         ///
-        /// 三麻放行的唯一條件：雲端 3p 推薦是有效決策，本地四麻模型推三麻
-        /// 仍然結構上無效——所以是**逐決策**判斷，雲端失敗 fallback 到本地
-        /// 的那一手自動關回 fail-closed。
-        var cloudDecision: Bool = false
+        /// 三麻放行的唯一條件：三麻引擎的推薦是有效決策，本地四麻模型推三麻
+        /// 仍然結構上無效——所以是**逐決策**判斷，來源不明或四麻模型的那一手
+        /// 自動關回 fail-closed。
+        var sanmaCapableDecision: Bool = false
         /// 是否已有動作在執行（`currentExecutionId != nil`）
         let hasActionInFlight: Bool
         let snapshot: LiqiOperationSnapshot?
@@ -78,11 +78,11 @@ enum AutoPlayGate {
         // 拿四麻模型推三麻不是「稍微偏差」而是**結構上無效**，
         // 而這條閘門下游的 `.sendPass` 會**繞過 resolver 直接送出**，
         // 所以擋必須擋在這裡，不能只擋在 resolver。
-        // 例外：雲端 3p 決策放行（逐決策，見 `Input.cloudDecision`）。
+        // 例外：三麻引擎（雲端 3p／本地 Akagi 三麻）的決策放行（逐決策，見 `Input.sanmaCapableDecision`）。
         //
         // 和牌例外：能不能和的權威是伺服器 oplist，不需要模型，擋掉就是漏和（不可逆）。
         // resolver 對和牌同樣不吃三麻降級，其餘三麻動作維持原限制。
-        if input.isSanma && !input.cloudDecision {
+        if input.isSanma && !input.sanmaCapableDecision {
             if !input.hasActionInFlight, input.snapshot?.horaOperation != nil { return .forceHora }
             return .skip(.sanmaUnsupported)
         }
@@ -147,14 +147,14 @@ enum AutoPlayGate {
     /// 三麻 fail-closed」與打牌同一條規則，故共用同一組 `Reason`，收斂在同一個檔案：
     ///
     /// - `.off` / `.recommend`：不自動送（使用者要自己在遊戲內確認）→ `.skip(.notAutoMode)`
-    /// - 三麻：fail-closed，除非雲端推論已啟用——局間確認不是模型決策，
-    ///   看設定層而非逐決策 → `.skip(.sanmaUnsupported)`
+    /// - 三麻：fail-closed，除非目前引擎支援三麻（雲端 3p 或本地 Akagi 三麻）——局間確認
+    ///   不是模型決策，看引擎能力而非逐決策 → `.skip(.sanmaUnsupported)`
     ///
     /// - Returns: `.proceed` 表示可以送；否則 `.skip(reason)`（永遠不會回 `.forceHora`/`.sendPass`）
     static func allowsConfirm(isAutoMode: Bool, isSanma: Bool,
-                              cloudInferenceActive: Bool = false) -> Decision {
+                              sanmaEngineAvailable: Bool = false) -> Decision {
         guard isAutoMode else { return .skip(.notAutoMode) }
-        guard !isSanma || cloudInferenceActive else { return .skip(.sanmaUnsupported) }
+        guard !isSanma || sanmaEngineAvailable else { return .skip(.sanmaUnsupported) }
         return .proceed
     }
 }

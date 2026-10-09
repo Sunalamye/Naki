@@ -180,11 +180,15 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 - observation `1012 × 34`，action mask 46。
 - libriichi parity 是兩套固定 fixtures 的逐格測試；Debug／Release 各 47 tests 通過，不是全狀態證明。
 - 0.5.x 沒換 model blobs；沒有千局級 strength benchmark。不得稱「最新最強模型」。
-- **三麻走雲端-only**（2026-08-05 D15）：`NativeBotController` 在 `is3P` 時建的是
-  `CloudBot(local: nil, …)`，bundled 四麻模型連建構都不呼叫。雲端不可用時那一手
-  誠實無推薦，**不會**退回四麻模型（obs 1012×34 對三麻是結構性無效）。
-  自動送出另有三層 fail-closed（gate 逐決策看 `cloudDecision`、resolver 降級、
-  `runManualCycle` 自己擋），**但伺服器授權的和牌三層都放行**（和牌不需要模型）：
+- **三麻本地引擎是 Akagi 三麻**（2026-10-09 D23，取代 D15 的雲端-only）：
+  `NativeBotController` 在 `is3P` 時建 `CloudBot(local: AkagiSanmaBot, …)`，雲端優先、
+  本地接手；bundled 四麻模型仍不碰三麻（obs 1012×34 對三麻是結構性無效）。
+  `AkagiSanmaBot` 是 MortalSwift `AkagiSanma`（純 Swift、Akagi v3 三麻 BC 權重，
+  **模仿天鳳人類，強度不是 Mortal 等級**），動作類別由 `LiqiOperationStore.pending`
+  授權（和牌只看形狀、不判役）；pending 缺失或不是本家時只剩捨牌與 pass。
+  自動送出另有三層 fail-closed（gate 逐決策看 `sanmaCapableDecision`＝推薦來自雲端 3p
+  或 `source == "local-akagi3p"`、resolver 降級、`runManualCycle` 自己擋），
+  **伺服器授權的和牌三層都放行**（和牌不需要模型）：
   `AutoPlayGate.swift:86`、`AutoPlayDecisionResolver.swift:86-95`、`AutoPlayEngine.swift:570`。
   其餘動作仍擋。三麻仍**沒有 live 對局驗證**。
 

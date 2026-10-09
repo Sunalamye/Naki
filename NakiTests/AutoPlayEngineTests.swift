@@ -42,6 +42,7 @@ final class AutoPlayEngineTests: XCTestCase {
                             mode: AutoPlayMode = .auto,
                             recommendations: [Recommendation] = [],
                             isSanma: Bool = false,
+                            sanmaCapableDecision: Bool = false,
                             isReady: Bool = true,
                             maxAttempts: Int = 15,
                             poll: TimeInterval = 1.0) -> AutoPlayEngine {
@@ -54,6 +55,7 @@ final class AutoPlayEngineTests: XCTestCase {
                                        recommendations: recommendations,
                                        seat: 0,
                                        isSanma: isSanma,
+                                       sanmaCapableDecision: sanmaCapableDecision,
                                        tsumoTile: nil,
                                        isReady: isReady,
                                        // 預設「推薦對應當前 oplist」＝ production 常態
@@ -386,6 +388,28 @@ final class AutoPlayEngineTests: XCTestCase {
                        "內建模型只有四麻一份；手動觸發不經閘門，得自己擋")
         XCTAssertEqual(sends, 0)
         XCTAssertNotNil(store.pending)
+    }
+
+    /// 三麻引擎（本地 Akagi 三麻）算的那一手：手動觸發放行
+    func testManualTriggerSendsOnSanmaWhenDecisionIsSanmaCapable() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var sends = 0
+        sender.sendHandler = { _ in
+            sends += 1
+            return self.ok()
+        }
+        discardSnapshot(store)
+
+        let engine = makeEngine(store: store, sender: sender,
+                                recommendations: discardRecommendation,
+                                isSanma: true, sanmaCapableDecision: true)
+        let run = await engine.runManualCycle()
+
+        guard case .sent = run.outcome else {
+            return XCTFail("三麻引擎的決策應放行，實際: \(run.outcome)")
+        }
+        XCTAssertEqual(sends, 1)
     }
 
     func testManualTriggerWithoutOplistDoesNotSchedule() async {
