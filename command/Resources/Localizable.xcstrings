@@ -2668,6 +2668,41 @@
         }
       }
     },
+    "伺服器 URL 不可為雀魂網域": {
+      "comment": "雲端缺項：URL 填成雀魂網域（會把對局資料與 API key 送去雀魂）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server URL must not be a Mahjong Soul domain"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバー URL に雀魂のドメインは使えません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버 URL에 작혼 도메인은 사용할 수 없습니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器 URL 不可为雀魂域名"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "伺服器 URL 不可為雀魂網域"
+          }
+        }
+      }
+    },
     "伺服器 URL 無法解析": {
       "comment": "雲端自動探測錯誤（L10n.text 存入 State）",
       "localizations": {

@@ -569,4 +569,37 @@ final class CloudInferenceConfigTests: XCTestCase {
     func testAllThreeMissingAreAllReported() {
         XCTAssertEqual(config(enabled: false, baseURL: "", apiKey: "").missingRequirements.count, 3)
     }
+
+    func testMahjongSoulHostIsForbidden() {
+        let forbidden = [
+            "https://maj-soul.com", "https://game.maj-soul.com/1/", "HTTPS://Game.MajSoul.COM",
+            "https://maj-soul.com:8443/v3", "http://majsoul.union-game.com", "maj-soul.net",
+            "https://www.yo-star.com/path?q=1", "https://maj-soul.com.", "https://game.maj-soul.com./x",
+            "https://evil.com@maj-soul.com"
+        ]
+        for url in forbidden {
+            XCTAssertTrue(AkagiApiClient.isForbiddenHost(url), url)
+            let c = config(baseURL: url)
+            XCTAssertFalse(c.isActive, url)
+            XCTAssertEqual(c.missingRequirements, ["伺服器 URL 不可為雀魂網域"], url)
+            XCTAssertNil(AkagiApiClient(baseURL: url, key: "K"), url)
+        }
+    }
+
+    func testLegitHostIsNotForbidden() {
+        let allowed = [
+            "https://mjapi.shinkuan.me", "http://127.0.0.1:8080", "https://notmaj-soul.com",
+            "https://maj-soul.com.evil.example", "https://api.example.com/maj-soul.com",
+            "https://maj-soul.com@evil.com"
+        ]
+        for url in allowed {
+            XCTAssertFalse(AkagiApiClient.isForbiddenHost(url), url)
+            XCTAssertTrue(config(baseURL: url).isActive, url)
+        }
+    }
+
+    func testNormalizeIsIdempotent() {
+        let once = AkagiApiClient.normalize(baseURL: "  https://maj-soul.com/  ")
+        XCTAssertEqual(AkagiApiClient.normalize(baseURL: once), once)
+    }
 }
