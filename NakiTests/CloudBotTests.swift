@@ -529,6 +529,28 @@ final class CloudBotTests: XCTestCase {
         }
     }
 
+    /// 雲端-only 路徑的取消：沒問到雲端不是 fallback，斷路器也不動，下一批授權照問
+    func testCancelledCloudOnlyReactDoesNotCountFallback() async throws {
+        let kita = (200, #"{"reaction":{"type":"kita","actor":0,"pai":"N"},"#
+            + #""candidates":[{"action":"nukidora","prob":0.5}],"model":"3p-x"}"#, [String: String]())
+        CloudMockURLProtocol.reset(script: [kita, kita])
+        let bot = makeCloudOnlyBot()
+        try await feedSanmaOpening(bot)
+
+        func tsumo(_ seq: UInt64) -> [[String: Any]] {
+            [["type": "tsumo", "actor": 0, "pai": "N", MJAIEventKey.oplistSequence: seq]]
+        }
+        let cancelled = Task { try await bot.react(events: tsumo(5)) }
+        cancelled.cancel()
+        let first = try await cancelled.value
+        XCTAssertNil(first, "取消的決策不採雲端結果")
+        XCTAssertEqual(bot.cloudFallbackStreak, 0, "取消不是 fallback")
+        XCTAssertFalse(bot.cloudDegraded)
+
+        let second = try await bot.react(events: tsumo(6))
+        XCTAssertEqual(second?.source, "cloud:3p-x", "斷路器未開：下一批授權照問雲端")
+    }
+
     /// 雲端失敗＝本手誠實沒有推薦（不會有本地無效輸出頂上）
     func test_cloudOnly_failureYieldsNoRecommendation() async throws {
         CloudMockURLProtocol.reset(script: [(500, #"{"error":"boom"}"#, [:])])
