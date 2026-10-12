@@ -78,7 +78,7 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
 
             // ── 格 3：自動送出（同一份合法 oplist + 推薦，唯一變因是 mode）
             let sendDecision = AutoPlayGate.evaluate(.init(
-                isAutoMode: row.mode.isFullAuto,
+                isAutoMode: row.mode.sendsActions,
                 isSanma: false,
                 hasActionInFlight: false,
                 snapshot: snapshot,
@@ -92,7 +92,7 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
 
             // ── 格 4：局間確認（p2-5：只有 .auto 自動送 confirmNewRound）
             let confirmDecision = AutoPlayGate.allowsConfirm(
-                isAutoMode: row.mode.isFullAuto, isSanma: false)
+                isAutoMode: row.mode.sendsActions, isSanma: false)
             let expectedConfirm: AutoPlayGate.Decision = row.confirm ? .proceed : .skip(.notAutoMode)
             XCTAssertEqual(confirmDecision, expectedConfirm,
                            "[\(row.mode.rawValue)] 局間確認格")
@@ -104,11 +104,11 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
     /// 與矩陣重疊是刻意的——這一欄是本 task 補充特別點名要對齊的，單獨留一條讓回歸時
     /// 一眼看得出是哪一格破。
     func testBetweenRoundConfirmOnlyInAutoMode() {
-        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.off.isFullAuto,
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.off.sendsActions,
                                                   isSanma: false), .skip(.notAutoMode))
-        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.recommend.isFullAuto,
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.recommend.sendsActions,
                                                   isSanma: false), .skip(.notAutoMode))
-        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.auto.isFullAuto,
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.auto.sendsActions,
                                                   isSanma: false), .proceed)
     }
 }

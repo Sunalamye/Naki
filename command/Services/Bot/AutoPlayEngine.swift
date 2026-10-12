@@ -457,7 +457,7 @@ final class AutoPlayEngine {
             ? max(0, min(timing.callPassGrace, windowSeconds - 1)) : timing.callPassGrace
 
         let gate = AutoPlayGate.evaluate(.init(
-            isAutoMode: ctx.mode.isFullAuto,
+            isAutoMode: ctx.mode.sendsActions,
             isSanma: ctx.isSanma,
             sanmaCapableDecision: ctx.sanmaCapableDecision,
             hasActionInFlight: state != .idle,
@@ -633,7 +633,7 @@ final class AutoPlayEngine {
         }
 
         let ctx = context()
-        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.isFullAuto, isSanma: ctx.isSanma,
+        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.sendsActions, isSanma: ctx.isSanma,
                                           sanmaEngineAvailable: ctx.sanmaEngineAvailable) {
         case .skip(let reason):
             // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。
@@ -961,7 +961,7 @@ final class AutoPlayEngine {
         }
         // 等推論的寬限期不算停滯；非自動類模式本來就不會送，不累計
         if outcome != .skipped(.awaitingInference) {
-            updateStall(reason: context().mode.isFullAuto ? reason : nil)
+            updateStall(reason: context().mode.sendsActions ? reason : nil)
         }
         return AutoPlayCycle(gate: gate, outcome: outcome, log: trace, overrode: overrode)
     }

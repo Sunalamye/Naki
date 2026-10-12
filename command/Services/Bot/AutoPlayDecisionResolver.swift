@@ -68,7 +68,7 @@ nonisolated enum AutoPlayDecisionResolver {
         // 例外：`sanmaCapableDecision`（三麻引擎算出的那一手）不降級，
         // 規則見 `AutoPlayGate.Input.sanmaCapableDecision`。
         let effectiveMode: AutoPlayMode =
-            (isSanma && !sanmaCapableDecision && mode.isFullAuto) ? .recommend : mode
+            (isSanma && !sanmaCapableDecision && mode.sendsActions) ? .recommend : mode
 
         // 缺少權威資料一律 fail closed。
         // 舊行為是「沒有 snapshot 時預設當自摸送出」，那等於在沒有伺服器授權的
@@ -103,7 +103,7 @@ nonisolated enum AutoPlayDecisionResolver {
         guard let first = recommendations.first else {
             // 有副露機會但模型沒有意見 → 送「過」，否則對局會停在那裡等我們回應
             if snapshot.isCallOpportunity {
-                return effectiveMode.isFullAuto
+                return effectiveMode.sendsActions
                     ? .send(action: .none, tile: "")
                     : .none(reason: "no_recommendation_mode_\(mode.rawValue)\(isSanma ? "_sanma" : "")")
             }

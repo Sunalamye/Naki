@@ -396,10 +396,10 @@ final class FullAutoModeTests: XCTestCase {
 
     /// `.fullAuto` 必須也算「自動送出」，否則閘門會把它當手動模式擋掉
     func testFullAutoSendsActions() {
-        XCTAssertTrue(AutoPlayMode.fullAuto.isFullAuto)
-        XCTAssertTrue(AutoPlayMode.auto.isFullAuto)
-        XCTAssertFalse(AutoPlayMode.recommend.isFullAuto)
-        XCTAssertFalse(AutoPlayMode.off.isFullAuto)
+        XCTAssertTrue(AutoPlayMode.fullAuto.sendsActions)
+        XCTAssertTrue(AutoPlayMode.auto.sendsActions)
+        XCTAssertFalse(AutoPlayMode.recommend.sendsActions)
+        XCTAssertFalse(AutoPlayMode.off.sendsActions)
     }
 
     /// 只有 `.fullAuto` 續局：自動打「這一手」與自動開「下一場」是兩種授權
