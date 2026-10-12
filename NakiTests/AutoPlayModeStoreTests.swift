@@ -73,7 +73,7 @@ final class AutoPlayModeStoreTests: XCTestCase {
         XCTAssertEqual(AutoPlayModeStore.load(defaults), AutoPlayModeStore.defaultMode)
     }
 
-    /// 遷移會被呼叫多次（App init 一次、`load()` 每次一次），第二次起必須是 no-op。
+    /// 遷移會被呼叫多次（`load()` 每次都會呼叫），第二次起必須是 no-op。
     func testMigrationIsIdempotent() {
         defaults.set(AutoPlayMode.recommend.rawValue, forKey: AutoPlayModeStore.legacyKey)
 
@@ -98,7 +98,7 @@ final class AutoPlayModeStoreTests: XCTestCase {
             AutoPlayModeStore.save(mode, to: defaults)
             XCTAssertEqual(AutoPlayModeStore.load(defaults), mode)
             XCTAssertEqual(defaults.string(forKey: AutoPlayModeStore.key), mode.rawValue,
-                           "@AppStorage 直接讀這個 key 的字串，格式必須是 rawValue")
+                           "持久化格式必須是 rawValue 字串，load 靠它還原")
         }
     }
 }

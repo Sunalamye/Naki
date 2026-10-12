@@ -78,7 +78,12 @@ final class WebPageBackend: WebSessionBackend {
 
     /// 關掉所有雀魂 WebSocket，伺服器會以 authGame + syncGame 重建整局
     func forceReconnect() async -> ForceReconnectOutcome {
-        await ForceReconnectAction(javaScript: ExecuteJavaScriptAction(backend: self))()
+        do {
+            return .closed(NakiWebSocketScript.closedCount(
+                from: try await callJavaScript(NakiWebSocketScript.forceReconnect)))
+        } catch {
+            return .failed(error.localizedDescription)
+        }
     }
 
     func makeView() -> AnyView {

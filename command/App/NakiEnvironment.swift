@@ -4,8 +4,9 @@
 //
 //  View 層看得到的整個 Naki（狀態＋設定＋副作用），一個 Environment 值。
 //
-//  View 只讀三樣東西：狀態（`GameStore`）、設定（`SettingsStore`）、
-//  副作用（`NakiActions`）。三者都是具體型別，**沒有 optional，也沒有向下轉型**
+//  View 只讀五樣東西：狀態（`GameStore`）、設定（`SettingsStore`）、
+//  副作用（`NakiActions`）、插件清單（`PluginStore`）、畫面開關（`UIState`）。
+//  全是具體型別，**沒有 optional，也沒有向下轉型**
 //  ——一顆按鈕的行為因此不必把整個 App 的型別拖進 View 的簽章，也不會有
 //  「轉型失敗於是什麼都沒發生」這種沒有編譯錯誤、沒有例外的失敗。
 //
@@ -54,10 +55,9 @@ struct NakiEnvironment {
     /// 讀的是 `pluginStore.descriptors`（class ref）⇒ reactive。
     var pluginDescriptors: [PluginDescriptor] { pluginStore.descriptors }
 
-    /// 正式路徑：由 `NakiRuntime` 顯式提供。`pluginStore` 給預設值，
-    /// 這樣現有呼叫端不必全部改。
+    /// 正式路徑：由 `NakiRuntime` 五樣全部顯式提供。
     init(store: GameStore, settings: SettingsStore, actions: NakiActions,
-         pluginStore: PluginStore = PluginStore(), ui: UIState = UIState()) {
+         pluginStore: PluginStore, ui: UIState) {
         self.store = store
         self.settings = settings
         self.actions = actions

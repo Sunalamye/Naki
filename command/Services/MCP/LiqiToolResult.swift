@@ -47,6 +47,9 @@ enum LiqiToolResult {
         !response.hasError
     }
 
+    /// ⚠️ 有副作用：伺服器拒絕時寫一行 `eventLog`（見檔頭）。名稱沒有表達這點是因為二十多處呼叫端
+    /// 在 `Tools/`，改名留給擁有那些檔案的後續工作包。
+    ///
     /// - Parameters:
     ///   - outcome: 送出結果
     ///   - spec: 送出的請求（用來附上 method 與 payload hex，方便對拍）

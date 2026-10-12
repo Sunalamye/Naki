@@ -12,7 +12,6 @@
 //    · `callJavaScript` 封裝——**統一函式體語意**
 //    · 導覽事件（開始／committed／完成／失敗）與狀態列文字
 //    · 遊戲畫面內高亮同步
-//    · 隱藏玩家名稱的推送與重載後補推
 //
 //  ## 為什麼「函式體語意」要收在這裡
 //
@@ -109,11 +108,6 @@ final class WebSession {
     /// 頁面重新導覽時要重置的牌局側（由 `NakiRuntime` 注入 coordinator）
     weak var lifecycle: (any WebNavigationLifecycle)?
 
-    /// 這次載入是否已經把持久化的「隱藏名稱」推回 JS。
-    ///
-    /// JS 模組的開關是 closure 內的變數，reload 會歸零；不重推的話設定只在當次載入有效。
-    private var hasAppliedHideNames = false
-
     private var keepAliveTask: Task<Void, Never>?
     private var keepAliveActivity: NSObjectProtocol?
 
@@ -186,6 +180,17 @@ final class WebSession {
     /// Debug Server 的 `POST /js` 與 MCP 的 `execute_js` 也是）。
     func callJavaScript(_ functionBody: String) async throws -> Any? {
         try await backend.callJavaScript(functionBody)
+    }
+
+    /// 射後不理：失敗一律寫 `bridgeLog`（`label` 說明這次在做什麼），不靜默吞掉。
+    /// 回傳的 Task 只給測試等待用。
+    @discardableResult
+    func fireJavaScript(_ script: String, label: String) -> Task<Void, Never> {
+        let backend = backend
+        return Task {
+            do { _ = try await backend.callJavaScript(script) }
+            catch { bridgeLog("[WebSession] \(label)錯誤: \(error.localizedDescription)") }
+        }
     }
 
     // MARK: - 載入
@@ -362,34 +367,6 @@ final class WebSession {
         return s
     }
 
-    // MARK: - 隱藏玩家名稱
-
-    /// 兩層一起開：
-    ///
-    /// - **協定層**（`__nakiHideNames`）在遊戲解析封包前改 `ResAuthGame` 的 nickname
-    ///   bytes。只對「開啟之後才開始的對局」生效——名牌在 authGame 當下就設定完了。
-    /// - **渲染層**（`__nakiNameMask`）把名字字型圖層的 draw alpha 設 0，**即時生效**，
-    ///   中途開關也有效；認不到圖層就什麼都不遮（`locked: false`），不會遮錯東西。
-    ///
-    /// 兩層並存而不是二擇一：協定層連斷線重連後的 syncGame 也蓋得掉（名字根本沒進
-    /// 客戶端），渲染層負責「現在就要看不到」。
-    func setHidePlayerNames(_ hide: Bool) {
-        settings.hidePlayerNames = hide
-        Task {
-            do {
-                let result = try await backend.callJavaScript(
-                    """
-                    const proto = window.__nakiHideNames?.setEnabled(\(hide)) ?? null;
-                    const mask = window.__nakiHighlight?.setNameMask(\(hide)) ?? null;
-                    return JSON.stringify({ proto: proto, mask: mask });
-                    """)
-                bridgeLog("[WebSession] 隱藏玩家名稱: \(hide), 結果: \(String(describing: result))")
-            } catch {
-                bridgeLog("[WebSession] 設定隱藏名稱錯誤: \(error.localizedDescription)")
-            }
-        }
-    }
-
     // MARK: - 背景保活
 
     /// 寫入設定並推給 JS。JS 預設就是開，所以載入後只需要在關閉時真的改變狀態，
@@ -401,14 +378,7 @@ final class WebSession {
 
     private func pushKeepAlive() {
         let enabled = settings.keepAliveInBackground
-        Task {
-            do {
-                _ = try await backend.callJavaScript(
-                    "window.__nakiKeepAlive?.set(\(enabled)); return null;")
-            } catch {
-                bridgeLog("[WebSession] 設定背景保活錯誤: \(error.localizedDescription)")
-            }
-        }
+        fireJavaScript("window.__nakiKeepAlive?.set(\(enabled)); return null;", label: "設定背景保活")
         if enabled { startKeepAliveLoop() } else { stopKeepAliveLoop() }
     }
 
@@ -449,13 +419,6 @@ final class WebSession {
         }
     }
 
-    /// 內建暱稱隱藏**已移除**（2026-08-10，交給插件）：頁面載入後不再自動套用。
-    /// 底層 API（`__nakiHideNames` 協定層、`__nakiHighlight.setNameMask` 渲染層）仍保留，
-    /// 插件可自行呼叫。`setHidePlayerNames` 方法留著但已無內建呼叫端。
-    private func applyHideNamesIfNeeded() {
-        hasAppliedHideNames = true
-        // no-op：內建自動遮名字已關閉。
-    }
 }
 
 // MARK: - 導覽事件
@@ -466,7 +429,6 @@ extension WebSession: WebNavigationSink {
         // 牌局側的重置（WS handler、event stream、bot）交給 coordinator，
         // 這裡只管頁面與狀態列。
         lifecycle?.webNavigationDidStart()
-        hasAppliedHideNames = false
         store.statusMessage = L10n.text("正在加載雀魂...")
         systemLog("[生命週期] 頁面開始載入")
     }
@@ -479,8 +441,6 @@ extension WebSession: WebNavigationSink {
         systemLog("[生命週期] 頁面載入完成")
         // 載起來了就把失敗橫幅收掉——它不該在成功之後還掛著
         store.pageLoadFailure = nil
-        // JS 模組的開關是 closure 內的變數，reload 會歸零，必須重新套用
-        applyHideNamesIfNeeded()
         // 同上：JS 端的開關 reload 後回到預設（開），使用者關掉的話要重推
         pushKeepAlive()
         if !store.isConnected {
