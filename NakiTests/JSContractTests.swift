@@ -104,10 +104,14 @@ final class JSContractTests: XCTestCase {
     }
 
     /// 賦值寫進去就沒有「呼叫不到」的錯誤，JS 改名後只是沒人讀：被賦值的全域必須在注入的 JS 裡出現過。
-    /// 只比對名稱出現（定義或讀取都算，註解裡的也算），不證明讀的行為正確。
+    /// 只比對名稱出現（定義或讀取都算，純註解行不算），不證明讀的行為正確。
     func testEverySwiftAssignedGlobalAppearsInJavaScript() throws {
         let source = try WebSocketInterceptor.jsModules
             .map { try WebSocketInterceptor.loadJavaScript(named: $0) }.joined(separator: "\n")
+            .split(separator: "\n").filter { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return !(trimmed.hasPrefix("//") || trimmed.hasPrefix("*") || trimmed.hasPrefix("/*"))
+            }.joined(separator: "\n")
         let assigned = try swiftAssignedGlobals()
         for known in ["__nakiPluginsMayModifyOutbound", "__nakiPluginGrants",
                       "__nakiRecommendations", "__nakiRecommendationContext"] {
