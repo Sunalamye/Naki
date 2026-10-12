@@ -510,11 +510,21 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     }
 
     private func handleWebSocketMessage(_ data: [String: Any]) {
-        guard let base64Data = data["data"] as? String,
-              let direction = data["direction"] as? String else { return }
+        guard let direction = data["direction"] as? String,
+              let base64Data = data["data"] as? String else {
+            warnMalformed("websocket_message 缺少 direction 或 data")
+            return
+        }
 
         // 沒有 socketId 也照常處理；-1 只用於 log
         let socketId = data["socketId"] as? Int ?? -1
+
+        // text frame 送來的是原始字串不是 base64；硬解要嘛每筆失敗洗版，要嘛把字串當封包解。
+        // 雀魂封包都是 binary，`type` 缺席時照舊當 binary 處理
+        guard data["type"] as? String != "text" else {
+            wsLog("[WS] socket \(socketId) text frame，不解析", level: .trace)
+            return
+        }
 
         // 解碼 Base64 數據
         guard let binaryData = Data(base64Encoded: base64Data) else {
@@ -567,9 +577,9 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         if method == ".lq.ActionPrototype",
            let data = parsed["data"] as? [String: Any] {
             if let actionName = data["name"] as? String {
-                wsLog("[Action] \(actionName): \(data)")
+                wsLog("[Action] socket \(socketId) \(actionName): \(data)")
             } else {
-                wsLog("[Action] No name found in data: \(data)")
+                wsLog("[Action] socket \(socketId) No name found in data: \(data)")
             }
         }
     }
