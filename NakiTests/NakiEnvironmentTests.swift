@@ -96,18 +96,25 @@ final class NakiEnvironmentSourceTests: XCTestCase {
     /// View 不得直讀單例：狀態一律經 `@Environment(\.naki)` 取得（2026-08-02 決策），
     /// 否則 Preview 與單測換不掉它。白名單只放系統 API；先去掉白名單字樣再比對，
     /// 同一行另有單例照樣抓。
+    ///
+    /// 比對 `\bshared\b`（不要求前面有點，`extension X { static var y { shared } }` 這種轉出也抓）；
+    /// 四個名稱並列是為了 regex 日後被放寬時，已知的單例與直呼的 `fetchAny` 仍有保護。
     func testViewsDoNotReadSingletons() throws {
         let root = try repoRoot()
         let allowed = ["UIApplication.shared"]
-        let hits = codeLines(under: root.appendingPathComponent("command/Views"))
-            .filter { line in
-                let rest = allowed.reduce(line.text) { $0.replacingOccurrences(of: $1, with: "") }
-                return rest.range(of: #"\.shared\b"#, options: .regularExpression) != nil
-            }
+        let banned = ["LogManager.shared", "JSInjectionState.shared", "LiqiParseFaultState.shared",
+                      "PluginImportSource.fetchAny"]
+        let lines = codeLines(under: root.appendingPathComponent("command/Views"))
+        XCTAssertFalse(lines.isEmpty, "command/Views 掃不到任何行，路徑變了或目錄不存在，lint 會空轉通過")
+        let hits = lines.filter { line in
+            let rest = allowed.reduce(line.text) { $0.replacingOccurrences(of: $1, with: "") }
+            return rest.range(of: #"\bshared\b"#, options: .regularExpression) != nil
+                || banned.contains { rest.contains($0) }
+        }
 
         XCTAssertTrue(
             hits.isEmpty,
-            "command/Views 不得出現 `.shared`（改經 `NakiEnvironment`）；實際: "
+            "command/Views 不得出現 `shared` 或 \(banned.joined(separator: "／"))（改經 `NakiEnvironment`）；實際: "
                 + hits.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
     }
 

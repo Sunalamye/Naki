@@ -105,11 +105,11 @@ final class WebLayerGapTests: XCTestCase {
     }
 
     func testKeepAliveLoopTicksWhileHiddenAndHoldsActivityOnlyWhileEnabled() async throws {
-        let defaults = UserDefaults.standard
-        let saved = defaults.object(forKey: SettingsStore.keepAliveInBackgroundKey)
-        defer { defaults.set(saved, forKey: SettingsStore.keepAliveInBackgroundKey) }
+        let suite = "naki.tests.web.keepalive.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
 
-        let settings = SettingsStore()
+        let settings = SettingsStore(defaults: defaults)
         let session = WebSession(store: GameStore(), settings: settings, messageHandler: handler)
         _ = try await session.callJavaScript(
             "window.__n = 0; window.__nakiKeepAlive = { tick() { window.__n++; return true; }, set(v) {} }; return null;")

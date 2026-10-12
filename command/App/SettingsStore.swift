@@ -75,7 +75,7 @@ enum MajsoulServer: String, CaseIterable, Identifiable, Sendable {
 @MainActor
 final class SettingsStore {
 
-    /// 唯一一處 `.standard`：inline 初值（`init()` 路徑）與 `defaults` 的預設都從這裡取。
+    /// `.standard` 的唯一出入口：inline 初值（`init()` 路徑）、`defaults`，以及所有 `load…(from:)`／`save…(to:)` 的預設參數都從這裡取。
     private nonisolated static var standard: UserDefaults { UserDefaults.standard }
 
     /// 所有寫入與 plugin 設定讀取的落點；正式碼是 `standard`，測試用 `init(defaults:)` 換成獨立 suite。
@@ -84,11 +84,11 @@ final class SettingsStore {
     /// App 內語言的持久化 key。
     nonisolated static let appLanguageKey = "naki.appLanguage"
 
-    nonisolated static func loadAppLanguage(from defaults: UserDefaults = .standard) -> AppLanguage {
+    nonisolated static func loadAppLanguage(from defaults: UserDefaults = SettingsStore.standard) -> AppLanguage {
         defaults.string(forKey: appLanguageKey).flatMap(AppLanguage.init(rawValue:)) ?? .system
     }
 
-    nonisolated static func saveAppLanguage(_ language: AppLanguage, to defaults: UserDefaults = .standard) {
+    nonisolated static func saveAppLanguage(_ language: AppLanguage, to defaults: UserDefaults = SettingsStore.standard) {
         defaults.set(language.rawValue, forKey: appLanguageKey)
     }
 
@@ -116,7 +116,7 @@ final class SettingsStore {
 
     /// 預設開：未設定過的 key 視為 true（`UserDefaults.bool` 會回 false，所以不能直接用）。
     nonisolated static func loadKeepAliveInBackground(
-        from defaults: UserDefaults = .standard) -> Bool {
+        from defaults: UserDefaults = SettingsStore.standard) -> Bool {
         defaults.object(forKey: keepAliveInBackgroundKey) as? Bool ?? true
     }
 
@@ -136,7 +136,7 @@ final class SettingsStore {
     nonisolated static let skippedUpdateVersionKey = "naki.skippedUpdateVersion"
 
     /// 預設開：未設定過的 key 視為 true。
-    nonisolated static func loadAutoCheckUpdate(from defaults: UserDefaults = .standard) -> Bool {
+    nonisolated static func loadAutoCheckUpdate(from defaults: UserDefaults = SettingsStore.standard) -> Bool {
         defaults.object(forKey: autoCheckUpdateKey) as? Bool ?? true
     }
 
@@ -232,11 +232,11 @@ final class SettingsStore {
     nonisolated static let majsoulUserAgentKey = "MajsoulUserAgent"
     nonisolated static let majsoulExtraHeadersKey = "MajsoulExtraHeaders"
 
-    nonisolated static func loadExtraHeaders(from defaults: UserDefaults = .standard) -> [String: String] {
+    nonisolated static func loadExtraHeaders(from defaults: UserDefaults = SettingsStore.standard) -> [String: String] {
         defaults.dictionary(forKey: majsoulExtraHeadersKey) as? [String: String] ?? [:]
     }
 
-    nonisolated static func saveExtraHeaders(_ headers: [String: String], to defaults: UserDefaults = .standard) {
+    nonisolated static func saveExtraHeaders(_ headers: [String: String], to defaults: UserDefaults = SettingsStore.standard) {
         defaults.set(headers, forKey: majsoulExtraHeadersKey)
     }
 
@@ -325,7 +325,7 @@ final class SettingsStore {
     }
 
     /// 讀取持久化的基準秒數（沒有存檔回預設 1.0s；越界值夾回區間）。
-    nonisolated static func loadActionDelaySeconds(_ defaults: UserDefaults = .standard) -> Double {
+    nonisolated static func loadActionDelaySeconds(_ defaults: UserDefaults = SettingsStore.standard) -> Double {
         guard defaults.object(forKey: actionDelaySecondsKey) != nil else {
             return defaultActionDelaySeconds
         }
@@ -334,7 +334,7 @@ final class SettingsStore {
 
     /// 寫入基準秒數（寫入即夾回區間，永不持久化越界值）。
     nonisolated static func saveActionDelaySeconds(_ value: Double,
-                                                   to defaults: UserDefaults = .standard) {
+                                                   to defaults: UserDefaults = SettingsStore.standard) {
         defaults.set(clampActionDelay(value), forKey: actionDelaySecondsKey)
     }
 
@@ -378,7 +378,7 @@ final class SettingsStore {
     /// 不是隨手挑的預設：bundled Core ML 是四麻模型，三麻靠本地 Akagi 三麻（default strength）
     /// 或雲端 3p。預設放在行為最熟悉、有 Mortal 強度的那一邊。
     nonisolated static func loadFullAutoPrefersSanma(
-        from defaults: UserDefaults = .standard) -> Bool {
+        from defaults: UserDefaults = SettingsStore.standard) -> Bool {
         defaults.bool(forKey: fullAutoPrefersSanmaKey)
     }
 
@@ -402,7 +402,7 @@ final class SettingsStore {
     /// 段位場輸了會掉分，掉到門檻以下就退房。挑最低＝對手最弱、掉段風險最小，
     /// 是「放著讓它一直打」這個情境下唯一不會愈打愈糟的預設。
     nonisolated static func loadFullAutoRoomPreference(
-        from defaults: UserDefaults = .standard) -> RoomPreference {
+        from defaults: UserDefaults = SettingsStore.standard) -> RoomPreference {
         (defaults.string(forKey: fullAutoRoomPreferenceKey))
             .flatMap(RoomPreference.init(rawValue:)) ?? .lowest
     }

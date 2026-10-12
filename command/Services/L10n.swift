@@ -41,12 +41,15 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
 nonisolated enum L10n {
 
+    /// 語言來源；正式碼是 `.standard`，測試換成獨立 suite 釘語言，不碰真實設定檔。
+    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+
     /// 目前生效的 locale：使用者選的語言，`system` 時用系統的。iOS 一律系統的。
     ///
     /// 走 nonisolated 的 `loadAppLanguage`：Services 在任意 actor 呼叫，不該為了拿語言碰 MainActor。
     static var locale: Locale {
         #if os(macOS)
-        SettingsStore.loadAppLanguage().locale ?? .current
+        SettingsStore.loadAppLanguage(from: defaults).locale ?? .current
         #else
         .current
         #endif

@@ -26,7 +26,8 @@
     const sendToSwift = window.__nakiCore?.sendToSwift || window.__nakiSendToSwift || function() {};
     const arrayBufferToBase64 = window.__nakiCore?.arrayBufferToBase64 || window.__nakiArrayBufferToBase64 || function(b) { return ''; };
     const blobToBase64 = window.__nakiCore?.blobToBase64 || window.__nakiBlobToBase64 || function(b, cb) { cb(''); };
-    // 缺了就 fail-open：遮名停擺，封包照常轉給 Swift
+    // core 跑完但沒匯出這兩個函式時 fail-open：遮名停擺、插件不派發（naki-plugins 共用同一份 parseEnvelope），
+    // 封包照常轉給 Swift。core 整個缺席時 sendToSwift 也退成空函式（既有行為），Swift 就收不到封包。
     const readVarint = window.__nakiCore?.readVarint || function() { return null; };
     const parseEnvelope = window.__nakiCore?.parseEnvelope || function() { return null; };
 
