@@ -317,13 +317,7 @@ final class WebSession {
         ]
         let contextJSON = (try? JSONSerialization.data(withJSONObject: context))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let recoScript = """
-        window.__nakiRecommendations = \(json);
-        window.__nakiRecommendationContext = \(contextJSON);
-        if (window.__nakiPlugins && window.__nakiPlugins.recommendationsChanged) {
-          window.__nakiPlugins.recommendationsChanged(window.__nakiRecommendations, window.__nakiRecommendationContext);
-        }
-        """
+        let recoScript = NakiWebSocketScript.publishRecommendations(json: json, contextJSON: contextJSON)
         let tail = show ? "" : "\n" + GameHighlightScript.clear
 
         do {
@@ -364,7 +358,7 @@ final class WebSession {
 
     private func pushKeepAlive() {
         let enabled = settings.keepAliveInBackground
-        fireJavaScript("window.__nakiKeepAlive?.set(\(enabled)); return null;", label: "設定背景保活")
+        fireJavaScript(NakiWebSocketScript.setKeepAlive(enabled), label: "設定背景保活")
         if enabled { startKeepAliveLoop() } else { stopKeepAliveLoop() }
     }
 
@@ -377,8 +371,7 @@ final class WebSession {
             var hidden = false
             while !Task.isCancelled {
                 guard let self else { return }
-                if let value = try? await self.backend.callJavaScript(
-                    "return window.__nakiKeepAlive ? window.__nakiKeepAlive.tick() : false") as? Bool {
+                if let value = try? await self.backend.callJavaScript(NakiWebSocketScript.keepAliveTick) as? Bool {
                     hidden = value
                 }
                 // stop 已在 await 期間釋放過 activity，這裡不能再建一個沒人收的

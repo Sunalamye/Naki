@@ -25,8 +25,10 @@
     var sendToSwift = (window.__nakiCore && window.__nakiCore.sendToSwift)
         || window.__nakiSendToSwift
         || function () {};
+    // envelope 解析與 naki-websocket 共用 naki-core 那一份；缺了就不派發（fail-open）
+    var parseEnvelope = (window.__nakiCore && window.__nakiCore.parseEnvelope)
+        || function () { return null; };
 
-    var TYPE_NOTIFY = 1;
     var TYPE_REQUEST = 2;
     var TYPE_RESPONSE = 3;
 
@@ -57,10 +59,11 @@
 
     // ---- L3 送出側（injectSend，§7.6/§7.7b）----
     // 插件注入用 msgId 區段 64000–65500（Naki 自送收窄為 60000–63999）。
-    var pluginMsgId = 64000;
+    var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500;
+    var pluginMsgId = PLUGIN_MSGID_FIRST;
     function nextPluginMsgId() {
         var v = pluginMsgId;
-        pluginMsgId = (v >= 65500) ? 64000 : (v + 1);
+        pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
         return v;
     }
     // 插件注入的 msgId -> 發起插件 id（回應路由，§7.7b）
@@ -120,76 +123,6 @@
     function noteSuccess(id, hook) {
         var f = failures.get(id);
         if (f) f[hook] = 0;
-    }
-
-    // ---- 輕量 envelope 解析（自包含，不依賴 naki-websocket 的私有符號）----
-
-    function readVarint(b, i, end) {
-        var shift = 0, result = 0;
-        while (i < end) {
-            var byte = b[i];
-            result |= (byte & 0x7f) << shift;
-            i++;
-            if ((byte & 0x80) === 0) return [result >>> 0, i];
-            shift += 7;
-            if (shift > 35) return null;
-        }
-        return null;
-    }
-
-    function decodeAscii(b, from, to) {
-        var s = '';
-        for (var i = from; i < to; i++) s += String.fromCharCode(b[i]);
-        return s;
-    }
-
-    // 掃 envelope body 的 field 1(method) 與 field 2(payload byte range)
-    function parseBody(b, start) {
-        var i = start, method = null, payload = null;
-        while (i < b.length) {
-            var tag = readVarint(b, i, b.length);
-            if (!tag) break;
-            var field = Math.floor(tag[0] / 8);
-            var wire = tag[0] & 7;
-            i = tag[1];
-            if (wire === 2) {
-                var len = readVarint(b, i, b.length);
-                if (!len) break;
-                var from = len[1];
-                var to = from + len[0];
-                if (to > b.length) break;
-                if (field === 1) method = decodeAscii(b, from, to);
-                else if (field === 2) payload = { from: from, to: to };
-                i = to;
-            } else if (wire === 0) {
-                var v = readVarint(b, i, b.length);
-                if (!v) break;
-                i = v[1];
-            } else if (wire === 5) { i += 4; }
-            else if (wire === 1) { i += 8; }
-            else break;
-        }
-        return { method: method, payload: payload };
-    }
-
-    // bytes(Uint8Array) -> { type, msgId, method, payload }
-    // NOTIFY 無 msgId，body 從 index 1；REQUEST/RESPONSE 跳過 2 bytes msgId，body 從 index 3。
-    function parseEnvelope(bytes) {
-        if (!bytes || bytes.length < 1) return null;
-        var type = bytes[0];
-        var msgId = null;
-        var bodyStart;
-        if (type === TYPE_NOTIFY) {
-            bodyStart = 1;
-        } else if (type === TYPE_REQUEST || type === TYPE_RESPONSE) {
-            if (bytes.length < 3) return null;
-            msgId = bytes[1] | (bytes[2] << 8);
-            bodyStart = 3;
-        } else {
-            return null; // 非 liqi envelope，不派發
-        }
-        var body = parseBody(bytes, bodyStart);
-        return { type: type, msgId: msgId, method: body.method, payload: body.payload };
     }
 
     function rememberIfRequest(env, direction) {
@@ -374,7 +307,11 @@
             rememberIfRequest(env, raw.direction);
             var method = resolveMethod(env, raw.direction);
             diagnostics.lastMethod = method;
-            var isNaki = (env.msgId != null && env.msgId >= 60000);
+            // Naki 自送看 sendRaw 的登記；插件號段另計（websocket 模組缺席時只剩號段）
+            var ws = window.__nakiWebSocket;
+            var isNaki = env.msgId != null
+                && ((env.msgId >= PLUGIN_MSGID_FIRST && env.msgId <= PLUGIN_MSGID_LAST)
+                    || !!(ws && ws.isNakiSent && ws.isNakiSent(env.msgId)));
 
             // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
             // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。

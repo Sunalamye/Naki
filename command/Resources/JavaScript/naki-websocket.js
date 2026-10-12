@@ -7,10 +7,10 @@
  *     → command/Services/Bridge/LiqiEnvelope.swift
  *   - msgId → method 對照表 → LiqiParser.pendingRequests
  *
- * 本檔的 `parseEnvelopeBody` / `attributeSend` / `sendRaw` / `nakiNicknameMask.pendingMethods`
- * 各自留著一份**刻意的**重複：它們必須在遊戲解析封包之前、在頁面裡同步跑完
- * （改暱稱 bytes、選連線），繞去 Swift 再回來就來不及了。跨語言邊界的同步成本
- * 高於重複成本，所以保留——但格式一改，改的是 Swift 那份，這裡跟著對齊。
+ * 本檔的 envelope 解析（naki-core 的 `parseEnvelope`／`readVarint`）、`attributeSend`、
+ * `sendRaw`、`nakiNicknameMask.pendingMethods` 是**刻意的**重複：它們必須在遊戲解析封包之前、
+ * 在頁面裡同步跑完（改暱稱 bytes、選連線），繞去 Swift 再回來就來不及了。跨語言邊界的
+ * 同步成本高於重複成本，所以保留——但格式一改，改的是 Swift 那份，這裡跟著對齊。
  */
 (function() {
     'use strict';
@@ -26,6 +26,9 @@
     const sendToSwift = window.__nakiCore?.sendToSwift || window.__nakiSendToSwift || function() {};
     const arrayBufferToBase64 = window.__nakiCore?.arrayBufferToBase64 || window.__nakiArrayBufferToBase64 || function(b) { return ''; };
     const blobToBase64 = window.__nakiCore?.blobToBase64 || window.__nakiBlobToBase64 || function(b, cb) { cb(''); };
+    // 缺了就 fail-open：遮名停擺，封包照常轉給 Swift
+    const readVarint = window.__nakiCore?.readVarint || function() { return null; };
+    const parseEnvelope = window.__nakiCore?.parseEnvelope || function() { return null; };
 
     /**
      * Base64 → Uint8Array（不依賴 naki-core，避免載入順序造成的空實作 fallback）
@@ -213,61 +216,6 @@
         const TYPE_RESPONSE = 3;
         const AUTH_GAME = '.lq.FastTest.authGame';
 
-        // 回傳 [value, nextOffset]，讀不完整回 null。
-        // 用乘法而非 <<：JS 位移是 32-bit，長 varint 會靜默算錯。
-        function readVarint(b, i, end) {
-            let result = 0;
-            let shift = 1;
-            while (i < end) {
-                const byte = b[i++];
-                result += (byte & 0x7f) * shift;
-                if ((byte & 0x80) === 0) return [result, i];
-                shift *= 128;
-                if (shift > 1e15) return null;
-            }
-            return null;
-        }
-
-        // 找出 wrapper `{1: method, 2: payload}` 的兩個欄位。
-        function parseEnvelopeBody(b, start) {
-            let i = start;
-            let method = null;
-            let payload = null;
-            while (i < b.length) {
-                const tag = readVarint(b, i, b.length);
-                if (!tag) return null;
-                const field = Math.floor(tag[0] / 8);
-                const wire = tag[0] & 7;
-                i = tag[1];
-                if (wire === 2) {
-                    const len = readVarint(b, i, b.length);
-                    if (!len) return null;
-                    const from = len[1];
-                    const to = from + len[0];
-                    if (to > b.length) return null;
-                    if (field === 1) method = decodeAscii(b, from, to);
-                    else if (field === 2) payload = [from, to];
-                    i = to;
-                } else if (wire === 0) {
-                    const v = readVarint(b, i, b.length);
-                    if (!v) return null;
-                    i = v[1];
-                } else if (wire === 5) i += 4;
-                else if (wire === 1) i += 8;
-                else return null;
-            }
-            return { method: method, payload: payload };
-        }
-
-        function decodeAscii(b, from, to) {
-            let out = '';
-            for (let k = from; k < to; k++) {
-                if (b[k] > 127) return null;   // method name 一定是 ASCII
-                out += String.fromCharCode(b[k]);
-            }
-            return out;
-        }
-
         // 把 [from,to) 當成 PlayerGameView，改寫 field 4 (nickname)。
         function maskPlayerGameView(b, from, to, seat) {
             let i = from;
@@ -347,8 +295,8 @@
             const msgId = bytes[1] | (bytes[2] << 8);
 
             if (direction === 'send' && type === TYPE_REQUEST) {
-                const env = parseEnvelopeBody(bytes, 3);
-                if (env && env.method) {
+                const env = parseEnvelope(bytes);
+                if (env && env.complete && env.method) {
                     pendingMethods.set(msgId, env.method);
                     if (pendingMethods.size > 256) {
                         pendingMethods.delete(pendingMethods.keys().next().value);
@@ -362,9 +310,9 @@
             if (method) pendingMethods.delete(msgId);
             if (!enabled || method !== AUTH_GAME) return;
 
-            const env = parseEnvelopeBody(bytes, 3);
-            if (!env || !env.payload) return;
-            maskAuthGame(bytes, env.payload[0], env.payload[1]);
+            const env = parseEnvelope(bytes);
+            if (!env || !env.complete || !env.payload) return;
+            maskAuthGame(bytes, env.payload.from, env.payload.to);
         }
 
         return {
@@ -389,6 +337,17 @@
     window.__nakiHideNames = nakiNicknameMask;
 
 
+    // Naki 自送登記（bridge D9）：遊戲自己的 msgId 跑久了也會進 60000+，號段猜不準。
+    // 只記最近 256 筆送出；被淘汰的 id 之後再出現，一律當成遊戲自己的。
+    const nakiSentIds = new Set();
+    function rememberNakiSent(bytes) {
+        if (bytes[0] !== 2 || bytes.length < 3) return;
+        const msgId = bytes[1] | (bytes[2] << 8);
+        nakiSentIds.delete(msgId);
+        nakiSentIds.add(msgId);
+        if (nakiSentIds.size > 256) nakiSentIds.delete(nakiSentIds.values().next().value);
+    }
+
     /// 從送出的 REQUEST 認出方法名，記錄這條線是 lobby 線還是對局線
     function attributeSend(info, data) {
         try {
@@ -397,7 +356,7 @@
                        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
             if (!b || b.length < 6 || b[0] !== 2 || b[3] !== 0x0a) return;
             const msgId = b[1] | (b[2] << 8);
-            if (msgId >= 60000) return;   // Naki 自己送的，不能當證據
+            if (nakiSentIds.has(msgId)) return;   // Naki 自己送的，不能當證據
             const len = b[4];
             let m = '';
             for (let i = 0; i < len; i++) m += String.fromCharCode(b[5 + i]);
@@ -456,7 +415,7 @@
         // 時間戳常常完全相同，平手就退回順序——等於沒判。
         //
         // 真正有鑑別力的是「**遊戲自己**在哪條線上送 lobby 請求」：那條必然是
-        // 完成 oauth2Login 的那條。Naki 自己送的不算（msgId 從 60000 起跳），
+        // 完成 oauth2Login 的那條。Naki 自己送的不算（sendRaw 登記過的 msgId），
         // 否則會把自己送錯的那次記成正確答案，錯誤自我強化。
         const info = wsConnections.get(ws);
         if (info) {
@@ -536,6 +495,7 @@
 
     window.__nakiWebSocket = {
         diagnostics: function () { return JSON.parse(JSON.stringify(messageTypes)); },
+        isNakiSent: function (msgId) { return nakiSentIds.has(msgId); },
         // 獲取連接信息
         getConnections: function() {
             const result = [];
@@ -629,6 +589,9 @@
             if (isGameMethod && pick.length === 0) {
                 return { success: false, reason: 'no_game_gateway_connection' };
             }
+
+            // 先登記再送：包過的 send 會同步跑 attributeSend 與插件 dispatch
+            rememberNakiSent(bytes);
 
             // 優先選「遊戲自己在上面送過同類請求」的那條——那是登入完成的證據。
             // 退而求其次才看「最近收到過訊息」，最後才是建立順序。

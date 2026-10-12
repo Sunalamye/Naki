@@ -15,11 +15,14 @@ function setup() {
   const events = [], renders = [];
   const c = { console: { log(){}, error(){} }, Uint8Array, ArrayBuffer, DataView, Blob,
     btoa: s => Buffer.from(s, 'binary').toString('base64'), atob: s => Buffer.from(s, 'base64').toString('binary'),
-    __nakiCore: { sendToSwift: (type, data) => events.push({type,data}) },
-    __nakiRecommendations: [], __nakiRecommendationContext: {}, __nakiPluginGrants: {},
-    __nakiHighlight: { set: (marks,popup) => renders.push(plain({marks,popup})), clear: () => renders.push(null), state: () => ({}) }
+    document: { getElementById: () => null },
+    __nakiRecommendations: [], __nakiRecommendationContext: {}, __nakiPluginGrants: {}
   };
-  c.window = c; vm.createContext(c); vm.runInContext(source('naki-plugins.js'),c);
+  // 照正式注入順序先載 naki-core（envelope 解析在那裡），再換掉 bridge 與 WebGL 高亮
+  c.window = c; vm.createContext(c); vm.runInContext(source('naki-core.js'),c);
+  c.__nakiCore.sendToSwift = (type, data) => events.push({type,data});
+  c.__nakiHighlight = { set: (marks,popup) => renders.push(plain({marks,popup})), clear: () => renders.push(null), state: () => ({}) };
+  vm.runInContext(source('naki-plugins.js'),c);
   function register(settings={}) {
     c.__nakiPlugins.setGrant(id,{capabilities:['observe'],methods:['.lq.ActionPrototype'],settings});
     vm.runInContext(plugin(id),c);
@@ -74,8 +77,8 @@ test('each recommendation hook gets an isolated snapshot',()=>{
   c.__nakiPlugins.recommendationsChanged([rec()],{hand:['7p']});assert.equal(seen.recommendations.length,1);assert.equal(seen.context.hand[0],'7p');
 });
 test('Swift injection template evaluates JSON, then notifies plugins',()=>{
-  const s=fs.readFileSync(path.join(root,'command/Services/Web/WebSession.swift'),'utf8');
-  const body=s.match(/let recoScript = """([\s\S]*?)"""/)[1];
+  const s=fs.readFileSync(path.join(root,'command/Services/Bridge/NakiWebSocketScript.swift'),'utf8');
+  const body=s.match(/func publishRecommendations[\s\S]*?"""([\s\S]*?)"""/)[1];
   assert.ok(body.includes('\\(json)'));assert.ok(body.includes('\\(contextJSON)'));
   const {c,renders,register}=setup();register();
   vm.runInContext(body.replace('\\(json)',JSON.stringify([rec()])).replace('\\(contextJSON)',JSON.stringify({hand:['7p','E']})),c);
@@ -141,11 +144,13 @@ function rewriteSetup(methods) {
   return { ...s, ctxs };
 }
 function dispatch(c, direction, bytes) { c.__nakiPlugins.dispatch({ direction, wsId: 1, url: '', bytes }); }
-test('Naki traffic (msgId >= 60000) never gets ctx.replace', () => {
-  const { c, ctxs } = rewriteSetup(['.lq.Foo']);
-  const m = Buffer.from('.lq.Foo');
-  const mk = type => new Uint8Array([type, 0x61, 0xEA, 10, m.length, ...m, 18, 1, 0]);
-  dispatch(c, 'send', mk(2)); dispatch(c, 'receive', mk(3));
+test('Naki traffic (msgId registered by sendRaw) never gets ctx.replace', () => {
+  const { c, socket } = page(); const ctxs = [];
+  c.__nakiPlugins.setGrant('rw', { capabilities: ['observe', 'rewriteReceive'], methods: ['.lq.Foo'], observeNakiTraffic: true });
+  c.__nakiPlugins.register({ id: 'rw', onReceive(ctx) { ctxs.push(ctx); } });
+  const ws = socket('wss://game.example/gateway');
+  c.__nakiWebSocket.sendRaw(b64(request(60001, '.lq.Foo', [0])));
+  ws.listeners.message({ data: response(60001, [0]).buffer });
   assert.equal(ctxs.length, 1); assert.equal(ctxs[0].isNaki, true); assert.equal(ctxs[0].replace, undefined);
 });
 test('replace that swaps the method is reverted and counted as a failure', () => {
@@ -172,4 +177,99 @@ test('failures are counted per hook: a healthy hook does not reset a failing one
     c.__nakiPlugins.recommendationsChanged([rec()]);
   }
   assert.equal(c.__nakiPlugins.list().length, 0);
+});
+// ---- envelope 解析（naki-core 共用一份，websocket 遮名與插件派發都走它）----
+function page() {
+  const s = setup();
+  class Socket { constructor(url) { this.url = url; this.readyState = 1; this.listeners = {}; this.sent = []; }
+    addEventListener(k, f) { this.listeners[k] = f; } send(d) { this.sent.push(new Uint8Array(d)); } }
+  Socket.OPEN = 1; s.c.WebSocket = Socket;
+  vm.runInContext(source('naki-websocket.js'), s.c);
+  return { ...s, socket: url => new s.c.WebSocket(url) };
+}
+function request(msgId, method, payload = []) {
+  const m = Buffer.from(method);
+  return new Uint8Array([2, msgId & 0xff, msgId >> 8, 10, m.length, ...m, 18, payload.length, ...payload]);
+}
+const b64 = u8 => Buffer.from(u8).toString('base64');
+function response(msgId, payload = []) { return new Uint8Array([3, msgId & 0xff, msgId >> 8, 10, 0, 18, payload.length, ...payload]); }
+test('core parseEnvelope: corpus locks shared semantics', () => {
+  const { c } = setup(); const P = b => plain(c.__nakiCore.parseEnvelope(new Uint8Array(b)));
+  const m = [...Buffer.from('.lq.Foo')], A = [10, 1, 0x41];
+  const env = (type, msgId, method, payload, complete) => ({ type, msgId, method, payload, complete });
+  assert.deepEqual(P([1, 10, 7, ...m, 18, 1, 9]), env(1, null, '.lq.Foo', { from: 12, to: 13 }, true));
+  assert.deepEqual(P([2, 0x61, 0xEA, 10, 7, ...m, 18, 0]), env(2, 60001, '.lq.Foo', { from: 14, to: 14 }, true));
+  assert.deepEqual(P([2, 1, 0, 10, 9, ...m]), env(2, 1, null, null, false), 'length past end');
+  assert.deepEqual(P([1, ...A, 18, 5, 1]), env(1, null, 'A', null, false), 'partial fields survive');
+  assert.deepEqual(P([1, 10, 2, 0xC3, 0xA9]), env(1, null, 'Ã©', null, true), 'non-ASCII method is latin1');
+  assert.deepEqual(P([1, 8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1, ...A]), env(1, null, 'A', null, true), '7-byte varint');
+  assert.deepEqual(P([1, 8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1]), env(1, null, null, null, false), 'varint too long');
+  assert.deepEqual(P([1, 11, ...A]), env(1, null, null, null, false), 'wire 3');
+  assert.deepEqual(P([1, 0xC2, 0x3E, 1, 0, ...A]), env(1, null, 'A', null, true), 'field 1000');
+  assert.deepEqual(P([1, 13, 1]), env(1, null, null, null, true), 'fixed32 past end');
+  for (const b of [[], [4, 10, 0], [2, 1]]) assert.equal(c.__nakiCore.parseEnvelope(new Uint8Array(b)), null);
+  assert.deepEqual(plain(c.__nakiCore.readVarint(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x10]), 0, 5)), [2 ** 32, 5]);
+});
+test('authGame nickname is masked in place; malformed response is left alone', () => {
+  const { c, socket } = page(); const ws = socket('wss://game.example/game-gateway');
+  c.__nakiHideNames.setEnabled(true);
+  const name = [...Buffer.from('Alice12')], view = [0x22, name.length, ...name];
+  ws.send(request(7, '.lq.FastTest.authGame'));
+  const bytes = response(7, [18, view.length, ...view]);
+  ws.listeners.message({ data: bytes.buffer });
+  assert.equal(Buffer.from(bytes.slice(-7)).toString(), 'P1     ');
+  ws.send(request(8, '.lq.FastTest.authGame'));
+  const bad = new Uint8Array([...response(8, [18, view.length, ...view]), 11]);
+  ws.listeners.message({ data: bad.buffer });
+  assert.equal(Buffer.from(bad.slice(-8, -1)).toString(), 'Alice12');
+  assert.equal(c.__nakiHideNames.getStatus().maskedFields, 1);
+});
+// ---- D9：Naki 自送登記（sendRaw 送出前登記最近 256 筆 msgId）----
+const LOBBY = '.lq.Lobby.fetchInfo';
+function traffic() {
+  const p = page(); const general = [], watcher = [];
+  p.c.__nakiPlugins.setGrant('general', { capabilities: ['observe'], methods: [LOBBY] });
+  p.c.__nakiPlugins.register({ id: 'general', onSend(ctx) { general.push(ctx.msgId); }, onReceive(ctx) { general.push(ctx.msgId); } });
+  p.c.__nakiPlugins.setGrant('watcher', { capabilities: ['observe'], methods: [LOBBY], observeNakiTraffic: true });
+  p.c.__nakiPlugins.register({ id: 'watcher', onSend(ctx) { watcher.push([ctx.msgId, ctx.isNaki]); }, onReceive(ctx) { watcher.push([ctx.msgId, ctx.isNaki]); } });
+  const ws = p.socket('wss://game.example/gateway');
+  const lobbySendAt = () => p.c.__nakiWebSocket.getMajsoulConnections()[0].lastLobbySendAt;
+  return { ...p, ws, general, watcher, lobbySendAt };
+}
+test('D9 Naki send: registered before ws.send, never lobby evidence, isNaki both ways', () => {
+  const { c, ws, general, watcher, lobbySendAt } = traffic();
+  assert.equal(c.__nakiWebSocket.sendRaw(b64(request(60005, LOBBY))).success, true);
+  ws.listeners.message({ data: response(60005).buffer });
+  assert.equal(ws.sent.length, 1); assert.equal(lobbySendAt(), 0);
+  assert.deepEqual(watcher, [[60005, true], [60005, true]]); assert.deepEqual(general, []);
+});
+test('D9 page send is the game\'s own at any msgId: lobby evidence, visible to plugins', () => {
+  for (const msgId of [100, 60001, 65535]) {
+    const { ws, general, watcher, lobbySendAt } = traffic();
+    ws.send(request(msgId, LOBBY)); ws.listeners.message({ data: response(msgId).buffer });
+    assert.ok(lobbySendAt() > 0, String(msgId));
+    assert.deepEqual(watcher, [[msgId, false], [msgId, false]]); assert.deepEqual(general, [msgId, msgId]);
+  }
+});
+test('D9 plugin send: registered via sendRaw; plugin range stays Naki without registration', () => {
+  const { c, ws, general, watcher, lobbySendAt } = traffic(); let notify;
+  c.__nakiPluginsMayModifyOutbound = true;
+  c.__nakiPlugins.setGrant('injector', { capabilities: ['observe', 'injectSend'], methods: ['.lq.NotifyFoo'] });
+  c.__nakiPlugins.register({ id: 'injector', onReceive(ctx) { notify = ctx; } });
+  ws.listeners.message({ data: notifyEnvelope('.lq.NotifyFoo').buffer });
+  assert.deepEqual(plain(notify.sendRequest(LOBBY, new Uint8Array(0))), { ok: true, msgId: 64000 });
+  assert.equal(c.__nakiWebSocket.isNakiSent(64000), true); assert.equal(lobbySendAt(), 0);
+  ws.send(request(64001, LOBBY));
+  assert.ok(lobbySendAt() > 0, 'unregistered id is the game\'s own for line selection');
+  assert.deepEqual(watcher, [[64000, true], [64001, true]]); assert.deepEqual(general, []);
+});
+test('D9 registry keeps the latest 256 sends; re-sending refreshes; evicted ids count as the game\'s', () => {
+  const { c, ws, watcher } = traffic(); const sent = id => c.__nakiWebSocket.sendRaw(b64(request(id, LOBBY)));
+  sent(60005); sent(60006); ws.listeners.message({ data: response(60005).buffer });
+  assert.deepEqual(watcher.at(-1), [60005, true]);
+  for (let id = 60100; id < 60355; id++) sent(id);
+  sent(60006); sent(60355);
+  assert.equal(c.__nakiWebSocket.isNakiSent(60005), false, 'oldest evicted after 256 newer sends');
+  assert.equal(c.__nakiWebSocket.isNakiSent(60006), true, 're-send moved it to the newest slot');
+  assert.equal(c.__nakiWebSocket.isNakiSent(60100), false); assert.equal(c.__nakiWebSocket.isNakiSent(60101), true);
 });
