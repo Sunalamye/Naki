@@ -125,7 +125,7 @@ nonisolated enum AutoPlayAvailability {
     @discardableResult
     static func commit(_ mode: AutoPlayMode,
                        autoPlaySupported: Bool,
-                       defaults: UserDefaults = .standard) -> AutoPlayMode {
+                       defaults: UserDefaults = AutoPlayModeStore.defaults) -> AutoPlayMode {
         let effective = clamp(mode, autoPlaySupported: autoPlaySupported)
         AutoPlayModeStore.save(effective, to: defaults)
         return effective
@@ -146,6 +146,9 @@ nonisolated enum AutoPlayModeStore {
     /// 被合併掉的舊 key（ContentView 舊版 `@AppStorage("AutoPlayMode")`）
     static let legacyKey = "AutoPlayMode"
 
+    /// 預設的存檔位置；正式碼是 `.standard`，測試換成獨立 suite，不碰真實設定檔。
+    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+
     /// 沒有任何存檔時的預設模式
     static let defaultMode: AutoPlayMode = .auto
 
@@ -154,7 +157,7 @@ nonisolated enum AutoPlayModeStore {
     /// 冪等，重複呼叫安全。正式路徑只有 `load()` 呼叫它。
     /// - Returns: 是否真的把舊值搬進新 key。
     @discardableResult
-    static func migrateLegacyKeyIfNeeded(_ defaults: UserDefaults = .standard) -> Bool {
+    static func migrateLegacyKeyIfNeeded(_ defaults: UserDefaults = AutoPlayModeStore.defaults) -> Bool {
         guard defaults.object(forKey: legacyKey) != nil else { return false }
         // 舊 key 一律清掉：留著只會讓下次啟動再判一次「還沒遷移」。
         defer { defaults.removeObject(forKey: legacyKey) }
@@ -170,13 +173,13 @@ nonisolated enum AutoPlayModeStore {
     }
 
     /// 讀取持久化的模式（含一次性遷移）
-    static func load(_ defaults: UserDefaults = .standard) -> AutoPlayMode {
+    static func load(_ defaults: UserDefaults = AutoPlayModeStore.defaults) -> AutoPlayMode {
         migrateLegacyKeyIfNeeded(defaults)
         return defaults.string(forKey: key).flatMap(AutoPlayMode.init(rawValue:)) ?? defaultMode
     }
 
     /// 寫入模式
-    static func save(_ mode: AutoPlayMode, to defaults: UserDefaults = .standard) {
+    static func save(_ mode: AutoPlayMode, to defaults: UserDefaults = AutoPlayModeStore.defaults) {
         defaults.set(mode.rawValue, forKey: key)
     }
 }

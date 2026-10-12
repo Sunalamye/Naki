@@ -12,6 +12,11 @@ import XCTest
 @MainActor
 final class BotToolsTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        isolateAutoPlayDefaults()
+    }
+
     /// Legacy path 的 `TriggerAutoPlayAction` 是空閉包；沒有這個短碼，工具會回假的 `queued: true`。
     /// 用「在 .normal path 一定會成功」的 oplist，才能證明擋下的是 path 而不是別的閘門。
     func testBotTriggerReportsLegacyShortCode() async throws {
@@ -76,12 +81,6 @@ final class BotToolsTests: XCTestCase {
 
     /// 不支援自動送出時：模式降級、存檔寫回降級值，狀態列留的是降級提示而不是被「模式已變更」蓋掉。
     func testSetAutoPlayModeDegradeKeepsNoticeAndPersistsClampedMode() {
-        let defaults = UserDefaults.standard
-        let backup = defaults.object(forKey: AutoPlayModeStore.key)
-        defer {
-            if let backup { defaults.set(backup, forKey: AutoPlayModeStore.key) }
-            else { defaults.removeObject(forKey: AutoPlayModeStore.key) }
-        }
         let runtime = NakiRuntime()
         runtime.settings.adoptAutoPlaySupport(false)
 

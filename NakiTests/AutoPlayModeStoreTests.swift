@@ -110,4 +110,40 @@ final class AutoPlayModeStoreTests: XCTestCase {
                            "持久化格式必須是 rawValue 字串，load 靠它還原")
         }
     }
+
+    // MARK: - 注入點
+
+    /// 不帶參數的呼叫（正式路徑的寫法）必須落在注入的 suite，四個預設參數各驗一次。
+    func testCommitAndLoadUseInjectedDefaults() {
+        let injected = isolateAutoPlayDefaults()
+
+        AutoPlayAvailability.commit(.recommend, autoPlaySupported: true)
+        XCTAssertEqual(injected.string(forKey: AutoPlayModeStore.key), AutoPlayMode.recommend.rawValue,
+                       "commit/save 的預設參數沒走注入點")
+
+        injected.set(AutoPlayMode.off.rawValue, forKey: AutoPlayModeStore.key)
+        XCTAssertEqual(AutoPlayModeStore.load(), .off, "load 的預設參數沒走注入點")
+
+        injected.removeObject(forKey: AutoPlayModeStore.key)
+        injected.set(AutoPlayMode.recommend.rawValue, forKey: AutoPlayModeStore.legacyKey)
+        XCTAssertTrue(AutoPlayModeStore.migrateLegacyKeyIfNeeded(), "migrate 的預設參數沒走注入點")
+        XCTAssertEqual(injected.string(forKey: AutoPlayModeStore.key), AutoPlayMode.recommend.rawValue)
+    }
+}
+
+extension XCTestCase {
+    /// `AutoPlayModeStore.defaults` 換成獨立 suite，測試結束還原。
+    /// 建構正式 `NakiRuntime()` 或呼叫 `commit` 的測試用它，避免寫到 `.standard`（用戶真實設定檔）。
+    @discardableResult
+    func isolateAutoPlayDefaults() -> UserDefaults {
+        let suite = "naki.tests.autoplay.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let original = AutoPlayModeStore.defaults
+        AutoPlayModeStore.defaults = defaults
+        addTeardownBlock {
+            AutoPlayModeStore.defaults = original
+            defaults.removePersistentDomain(forName: suite)
+        }
+        return defaults
+    }
 }
