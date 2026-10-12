@@ -59,10 +59,11 @@
 
     // ---- L3 送出側（injectSend，§7.6/§7.7b）----
     // 插件注入用 msgId 區段 64000–65500（Naki 自送收窄為 60000–63999）。
-    var pluginMsgId = 64000;
+    var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500;
+    var pluginMsgId = PLUGIN_MSGID_FIRST;
     function nextPluginMsgId() {
         var v = pluginMsgId;
-        pluginMsgId = (v >= 65500) ? 64000 : (v + 1);
+        pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
         return v;
     }
     // 插件注入的 msgId -> 發起插件 id（回應路由，§7.7b）
@@ -306,7 +307,11 @@
             rememberIfRequest(env, raw.direction);
             var method = resolveMethod(env, raw.direction);
             diagnostics.lastMethod = method;
-            var isNaki = (env.msgId != null && env.msgId >= 60000);
+            // Naki 自送看 sendRaw 的登記；插件號段另計（websocket 模組缺席時只剩號段）
+            var ws = window.__nakiWebSocket;
+            var isNaki = env.msgId != null
+                && ((env.msgId >= PLUGIN_MSGID_FIRST && env.msgId <= PLUGIN_MSGID_LAST)
+                    || !!(ws && ws.isNakiSent && ws.isNakiSent(env.msgId)));
 
             // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
             // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。

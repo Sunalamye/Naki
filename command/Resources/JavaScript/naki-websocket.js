@@ -337,6 +337,17 @@
     window.__nakiHideNames = nakiNicknameMask;
 
 
+    // Naki 自送登記（bridge D9）：遊戲自己的 msgId 跑久了也會進 60000+，號段猜不準。
+    // 只記最近 256 筆送出；被淘汰的 id 之後再出現，一律當成遊戲自己的。
+    const nakiSentIds = new Set();
+    function rememberNakiSent(bytes) {
+        if (bytes[0] !== 2 || bytes.length < 3) return;
+        const msgId = bytes[1] | (bytes[2] << 8);
+        nakiSentIds.delete(msgId);
+        nakiSentIds.add(msgId);
+        if (nakiSentIds.size > 256) nakiSentIds.delete(nakiSentIds.values().next().value);
+    }
+
     /// 從送出的 REQUEST 認出方法名，記錄這條線是 lobby 線還是對局線
     function attributeSend(info, data) {
         try {
@@ -345,7 +356,7 @@
                        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
             if (!b || b.length < 6 || b[0] !== 2 || b[3] !== 0x0a) return;
             const msgId = b[1] | (b[2] << 8);
-            if (msgId >= 60000) return;   // Naki 自己送的，不能當證據
+            if (nakiSentIds.has(msgId)) return;   // Naki 自己送的，不能當證據
             const len = b[4];
             let m = '';
             for (let i = 0; i < len; i++) m += String.fromCharCode(b[5 + i]);
@@ -404,7 +415,7 @@
         // 時間戳常常完全相同，平手就退回順序——等於沒判。
         //
         // 真正有鑑別力的是「**遊戲自己**在哪條線上送 lobby 請求」：那條必然是
-        // 完成 oauth2Login 的那條。Naki 自己送的不算（msgId 從 60000 起跳），
+        // 完成 oauth2Login 的那條。Naki 自己送的不算（sendRaw 登記過的 msgId），
         // 否則會把自己送錯的那次記成正確答案，錯誤自我強化。
         const info = wsConnections.get(ws);
         if (info) {
@@ -484,6 +495,7 @@
 
     window.__nakiWebSocket = {
         diagnostics: function () { return JSON.parse(JSON.stringify(messageTypes)); },
+        isNakiSent: function (msgId) { return nakiSentIds.has(msgId); },
         // 獲取連接信息
         getConnections: function() {
             const result = [];
@@ -577,6 +589,9 @@
             if (isGameMethod && pick.length === 0) {
                 return { success: false, reason: 'no_game_gateway_connection' };
             }
+
+            // 先登記再送：包過的 send 會同步跑 attributeSend 與插件 dispatch
+            rememberNakiSent(bytes);
 
             // 優先選「遊戲自己在上面送過同類請求」的那條——那是登入完成的證據。
             // 退而求其次才看「最近收到過訊息」，最後才是建立順序。
