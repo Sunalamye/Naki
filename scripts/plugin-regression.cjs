@@ -74,8 +74,8 @@ test('each recommendation hook gets an isolated snapshot',()=>{
   c.__nakiPlugins.recommendationsChanged([rec()],{hand:['7p']});assert.equal(seen.recommendations.length,1);assert.equal(seen.context.hand[0],'7p');
 });
 test('Swift injection template evaluates JSON, then notifies plugins',()=>{
-  const s=fs.readFileSync(path.join(root,'command/Services/Web/WebSession.swift'),'utf8');
-  const body=s.match(/let recoScript = """([\s\S]*?)"""/)[1];
+  const s=fs.readFileSync(path.join(root,'command/Services/Bridge/NakiWebSocketScript.swift'),'utf8');
+  const body=s.match(/func publishRecommendations[\s\S]*?"""([\s\S]*?)"""/)[1];
   assert.ok(body.includes('\\(json)'));assert.ok(body.includes('\\(contextJSON)'));
   const {c,renders,register}=setup();register();
   vm.runInContext(body.replace('\\(json)',JSON.stringify([rec()])).replace('\\(contextJSON)',JSON.stringify({hand:['7p','E']})),c);

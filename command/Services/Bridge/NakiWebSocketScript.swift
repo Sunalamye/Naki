@@ -2,7 +2,11 @@
 //  NakiWebSocketScript.swift
 //  Naki
 //
-//  `window.__nakiWebSocket` 這一層 JS 片段的唯一來源。
+//  Swift 呼叫頁面 API（`window.__naki*`）的 JS 片段集中處。
+//
+//  例外：`GameHighlightScript`（高亮 payload 的純函式）與 `NakiRuntime`／`PluginRegistry`
+//  的插件腳本留在原處；`JSContractTests` 掃整個 `command/`，不論字串放在哪裡，
+//  呼叫的方法都必須在注入的 JS 裡存在——JS 改名時 `?.` 會讓呼叫靜默變成 no-op。
 //
 //  `WebPage.callJavaScript` 與 `WKWebView.callAsyncJavaScript` 都是**函式體語意**
 //  ——漏寫 `return` 不會報錯，只會恆回 nil。forceReconnect 少了 `return`，
@@ -13,7 +17,7 @@
 
 import Foundation
 
-/// Naki 注入的 WebSocket 模組（`command/Resources/JavaScript/naki-websocket.js`）對應的 JS 片段。
+/// Naki 注入的頁面模組（`command/Resources/JavaScript/naki-*.js`）對應的 JS 片段。
 ///
 /// 這些字串一律以 **function body** 的形式撰寫（必須自帶 `return`），
 /// 因為所有呼叫端（WebPage / WKWebView / MCP `execute_js` / DebugServer `/js`）都是函式體語意。
@@ -31,6 +35,25 @@ enum NakiWebSocketScript {
   static func sendRaw(base64: String) -> String {
     "return JSON.stringify(window.__nakiWebSocket.sendRaw('\(base64)'))"
   }
+
+  /// 更新唯讀推薦通道並通知插件（插件 hook 見 `naki-plugins.js` 的 `recommendationsChanged`）。
+  static func publishRecommendations(json: String, contextJSON: String) -> String {
+    """
+    window.__nakiRecommendations = \(json);
+    window.__nakiRecommendationContext = \(contextJSON);
+    if (window.__nakiPlugins && window.__nakiPlugins.recommendationsChanged) {
+      window.__nakiPlugins.recommendationsChanged(window.__nakiRecommendations, window.__nakiRecommendationContext);
+    }
+    """
+  }
+
+  /// 背景保活開關（`naki-core.js` 的 `__nakiKeepAlive`）。
+  static func setKeepAlive(_ enabled: Bool) -> String {
+    "window.__nakiKeepAlive?.set(\(enabled)); return null;"
+  }
+
+  /// 喚醒被系統暫停的 WebContent，回傳頁面是否隱藏。
+  static let keepAliveTick = "return window.__nakiKeepAlive ? window.__nakiKeepAlive.tick() : false"
 
   /// 把 `sendRaw` 的 JS 回傳值解析成送出結果。
   ///
