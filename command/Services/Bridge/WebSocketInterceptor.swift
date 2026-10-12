@@ -513,22 +513,25 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         guard let base64Data = data["data"] as? String,
               let direction = data["direction"] as? String else { return }
 
+        // 沒有 socketId 也照常處理；-1 只用於 log
+        let socketId = data["socketId"] as? Int ?? -1
+
         // 解碼 Base64 數據
         guard let binaryData = Data(base64Encoded: base64Data) else {
-            wsLog("[WS] Failed to decode base64 data")
+            wsLog("[WS] socket \(socketId) Failed to decode base64 data")
             return
         }
 
         // 打印數據大小用於調試
         let dirSymbol = direction == "receive" ? "←" : "→"
-        wsLog("[WS] \(dirSymbol) \(binaryData.count) bytes")
+        wsLog("[WS] socket \(socketId) \(dirSymbol) \(binaryData.count) bytes")
 
         // 處理發送的消息（用於跟蹤請求）
         if direction == "send" {
             // 發送的消息是請求，需要解析以跟蹤 msgId
             if let parsed = majsoulBridge.parseRaw(binaryData),
                let method = parsed["method"] as? String {
-                wsLog("[WS] Sent request: \(method)")
+                wsLog("[WS] socket \(socketId) Sent request: \(method)")
             }
             return
         }
@@ -540,7 +543,7 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         if let mjaiEvents = majsoulBridge.parse(binaryData) {
             for event in mjaiEvents {
                 if let eventType = event["type"] as? String {
-                    wsLog("[MJAI] \(eventType): \(formatEvent(event))")
+                    wsLog("[MJAI] socket \(socketId) \(eventType): \(formatEvent(event))")
                 }
                 onMJAIEvent?(event)
             }
@@ -552,13 +555,13 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         // 所有 RESPONSE 必然回 nil，等於為了寫一行 log 而產生一份錯的解析結果。
         guard let parsed = majsoulBridge.lastParsed else {
             if let failure = majsoulBridge.lastEnvelopeFailure {
-                wsLog("[Liqi] envelope 解不開：\(failure)")
+                wsLog("[Liqi] socket \(socketId) envelope 解不開：\(failure)")
             }
             return
         }
         guard let method = parsed["method"] as? String else { return }
 
-        wsLog("[Liqi] \(method)")
+        wsLog("[Liqi] socket \(socketId) \(method)")
 
         // 調試 ActionPrototype
         if method == ".lq.ActionPrototype",

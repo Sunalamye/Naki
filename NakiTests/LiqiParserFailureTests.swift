@@ -769,6 +769,41 @@ final class LiqiParserFailureTests: XCTestCase {
                              "不同的未知 action 要各記一次")
     }
 
+    /// 配不到 request 的 RESPONSE 以前只留 trace：authGame 回應被丟掉時整局靜默不工作。
+    /// 現在記 degraded（不得 blocking：重連後在途的舊回應是常態），且同一條連線只記首次。
+    func testUnmatchedResponseRecordsDegradedFaultNotBlocking() {
+        let (bridge, state) = makeBridge()
+        let field = LiqiField.varint(field: 1, value: 1)
+
+        _ = bridge.parse(response(msgId: 7, fields: [field]))
+        XCTAssertEqual(state.totalCount, 1)
+        XCTAssertEqual(state.recent.first?.site, "LiqiParser.unmatchedResponse")
+        XCTAssertEqual(state.recent.first?.severity, .degraded)
+        XCTAssertNil(state.blocking)
+
+        _ = bridge.parse(response(msgId: 8, fields: [field]))
+        XCTAssertEqual(state.totalCount, 1, "同一條連線只記首次")
+
+        // 配得到的回應不記
+        logIn(bridge)
+        XCTAssertEqual(state.totalCount, 1, "配得到的回應不記")
+
+        // 重連（reset）算新連線，再記一次
+        bridge.reset()
+        _ = bridge.parse(response(msgId: 10, fields: [field]))
+        XCTAssertEqual(state.totalCount, 2)
+        XCTAssertNil(state.blocking)
+    }
+
+    func testUnmatchedResponseCountResetsWithParser() {
+        let parser = LiqiParser()
+        let frame = response(msgId: 5, fields: [])
+        for _ in 0..<3 { _ = parser.parse(frame) }
+        XCTAssertEqual(parser.unmatchedResponseCount, 3)
+        parser.reset()
+        XCTAssertEqual(parser.unmatchedResponseCount, 0)
+    }
+
     // MARK: - F. 產出層：MJAI 事件的欄位正確性
 
     /// 鳴牌的 `target` 必須指向**放銃者**，不是自己。

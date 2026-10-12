@@ -519,6 +519,9 @@ class MajsoulBridge {
                   SelfActionEchoTracker.isEcho(type: type,
                                                actor: event["actor"] as? Int,
                                                seat: seat) else { continue }
+            if syncing {
+                bridgeLog("[MajsoulBridge] syncGame 重放期間記到回音：\(type)（\(name)）")
+            }
             SelfActionEchoTracker.shared.record()
         }
 
