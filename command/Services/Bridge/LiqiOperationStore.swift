@@ -208,11 +208,11 @@ nonisolated struct LiqiOperationSnapshot: Equatable {
     /// 找不到對應組合時回 nil，呼叫端可自行退回保守索引。
     func chiCombinationIndex(variant: Int) -> Int? {
         guard let chi = operation(of: .chi), !chi.combination.isEmpty else { return nil }
-        guard let called = LiqiOperationSnapshot.tileNumber(contextTile) else { return nil }
+        guard let called = LiqiTile.number(of: contextTile) else { return nil }
 
         for (index, combo) in chi.combination.enumerated() {
             let numbers = combo.split(separator: "|").compactMap {
-                LiqiOperationSnapshot.tileNumber(String($0))
+                LiqiTile.number(of: String($0))
             }
             guard numbers.count == 2 else { continue }
 
@@ -249,16 +249,6 @@ nonisolated struct LiqiOperationSnapshot: Equatable {
                 ]
             }
         ]
-    }
-
-    /// 雀魂牌字串 → 數字（紅五 `0m` 視為 5；字牌回 nil，吃不到字牌）
-    private static func tileNumber(_ tile: String?) -> Int? {
-        guard let tile, tile.count >= 2 else { return nil }
-        let chars = Array(tile)
-        guard let digit = chars.first.flatMap({ Int(String($0)) }) else { return nil }
-        let suit = chars[1]
-        guard suit == "m" || suit == "p" || suit == "s" else { return nil }
-        return digit == 0 ? 5 : digit
     }
 }
 

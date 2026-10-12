@@ -99,7 +99,7 @@ final class AkagiSanmaBot: MahjongBot {
         case 88: return "5sr"
         default:
             let t = Int(tid / 4)
-            if t >= 27 { return ["E", "S", "W", "N", "P", "F", "C"][t - 27] }
+            if t >= 27 { return LiqiTile.honors[t - 27] }
             return "\(t % 9 + 1)\(["m", "p", "s"][t / 9])"
         }
     }

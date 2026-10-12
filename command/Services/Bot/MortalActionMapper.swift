@@ -144,10 +144,9 @@ struct MortalActionMapper {
             }
             // 字牌 (27-33 -> E/S/W/N/P/F/C)
             else {
-                let honorTiles = ["E", "S", "W", "N", "P", "F", "C"]
                 let honorIndex = index - 27
-                if honorIndex < honorTiles.count {
-                    return Recommendation(tile: honorTiles[honorIndex], probability: probability, actionType: .discard)
+                if honorIndex < LiqiTile.honors.count {
+                    return Recommendation(tile: LiqiTile.honors[honorIndex], probability: probability, actionType: .discard)
                 }
             }
         }

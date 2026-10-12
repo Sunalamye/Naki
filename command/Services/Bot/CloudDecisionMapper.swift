@@ -151,9 +151,9 @@ enum CloudDecisionMapper {
     /// chi 變體：0＝被吃的牌最小（consumed 都比它大）、1＝中間、2＝最大。
     /// 與 `LiqiOperationSnapshot.chiCombinationIndex` 的推導同一套。
     static func chiVariant(called: String, consumed: [String]) -> Int? {
-        guard let calledNumber = tileNumber(called),
+        guard let calledNumber = LiqiTile.number(of: called),
               consumed.count == 2 else { return nil }
-        let numbers = consumed.compactMap(tileNumber)
+        let numbers = consumed.compactMap(LiqiTile.number(of:))
         guard numbers.count == 2 else { return nil }
 
         let below = numbers.filter { $0 < calledNumber }.count
@@ -162,12 +162,5 @@ enum CloudDecisionMapper {
         if below == 2 { return 2 }
         if below == 1 && above == 1 { return 1 }
         return nil
-    }
-
-    /// mjai 數牌字串的數字（"3m" → 3、"5mr" → 5）；字牌回 nil（chi 用不到）。
-    private nonisolated static func tileNumber(_ tile: String) -> Int? {
-        guard let first = tile.first, let number = first.wholeNumberValue,
-              (1...9).contains(number) else { return nil }
-        return number
     }
 }
