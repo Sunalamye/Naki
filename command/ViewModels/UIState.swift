@@ -33,4 +33,7 @@ final class UIState {
     }
 
     nonisolated init() { }
+
+    /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
+    nonisolated deinit {}
 }

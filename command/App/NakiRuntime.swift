@@ -102,7 +102,9 @@ final class NakiRuntime {
 
         configureLiqiSender()
         adoptStoredAutoPlayMode()
-        startAutoPlayEngine()
+        // test host 就是 App 本體：不跳過的話每次跑測試都會綁 8765 並啟動引擎
+        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if !isTestHost { startAutoPlayEngine() }
 
         actions = makeActions()
 
@@ -110,7 +112,7 @@ final class NakiRuntime {
         //
         // 頁面本身**不在這裡載入**：首次載入掛在 `WebSession.makeView()` 的 `.task` 上，
         // 等頁面真的要顯示了才開始（見 `WebSession.loadMajsoulIfNeeded`）。
-        startDebugServer()
+        if !isTestHost { startDebugServer() }
     }
 
     /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
@@ -286,9 +288,9 @@ final class NakiRuntime {
                 + AutoPlayAvailability.autoUnavailableReason)
         } else {
             bridgeLog("[Naki] 自動打牌模式設定為: \(effective.rawValue)")
+            store.statusMessage = L10n.text("模式已變更: \(effective.localizedName), 推薦數: \(store.recommendations.count)")
         }
         bridgeLog("模式已變更: \(effective.rawValue), 推薦數: \(store.recommendations.count)")
-        store.statusMessage = L10n.text("模式已變更: \(effective.localizedName), 推薦數: \(store.recommendations.count)")
 
         // 模式一改就要立刻反映在畫面上，不能等下一次 Bot 回應：
         // 切到 `.off` 時把遊戲內標記清掉，切回 `.recommend` / `.auto` 時重新染上。
@@ -366,11 +368,13 @@ final class NakiRuntime {
     }
 
     func startDebugServer() {
-        guard debugServer == nil else {
+        guard !store.isDebugServerRunning else {
             store.statusMessage = L10n.text("MCP Server 已在運行")
             return
         }
 
+        // 上一個 server 可能綁 port 全失敗而停在半死狀態：停掉再換新的才能重啟
+        debugServer?.stop()
         let server = DebugServer(port: store.debugServerPort,
                                  dependencies: makeMCPDependencies())
         debugServer = server
