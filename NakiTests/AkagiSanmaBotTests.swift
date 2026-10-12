@@ -357,6 +357,14 @@ final class AkagiSanmaBotTests: XCTestCase {
         XCTAssertFalse(status(source: DecisionSource.local).isSanmaCapableDecision)
     }
 
+    /// 預設來源若被當成雲端或三麻引擎，本地四麻推薦會在三麻對局被放行自動打牌。
+    func testDefaultStatusIsLocalAndNotSanmaCapable() {
+        let s = BotStatus(isActive: true, modelName: "akagi-sanma-bc", playerId: 0, is3P: true)
+        XCTAssertEqual(s.decisionSource, "local")
+        XCTAssertFalse(s.isCloudDecision)
+        XCTAssertFalse(s.isSanmaCapableDecision)
+    }
+
     func testSanmaCapableDecisionBySource() {
         XCTAssertTrue(status(source: AkagiSanmaBot.source).isSanmaCapableDecision)
         XCTAssertTrue(status(source: "cloud:akagi-3p").isSanmaCapableDecision)
