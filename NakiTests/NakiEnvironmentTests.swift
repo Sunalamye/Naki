@@ -93,6 +93,24 @@ final class NakiEnvironmentSourceTests: XCTestCase {
                 + hits.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
     }
 
+    /// View 不得直讀單例：狀態一律經 `@Environment(\.naki)` 取得（2026-08-02 決策），
+    /// 否則 Preview 與單測換不掉它。白名單只放系統 API；先去掉白名單字樣再比對，
+    /// 同一行另有單例照樣抓。
+    func testViewsDoNotReadSingletons() throws {
+        let root = try repoRoot()
+        let allowed = ["UIApplication.shared"]
+        let hits = codeLines(under: root.appendingPathComponent("command/Views"))
+            .filter { line in
+                let rest = allowed.reduce(line.text) { $0.replacingOccurrences(of: $1, with: "") }
+                return rest.range(of: #"\.shared\b"#, options: .regularExpression) != nil
+            }
+
+        XCTAssertTrue(
+            hits.isEmpty,
+            "command/Views 不得出現 `.shared`（改經 `NakiEnvironment`）；實際: "
+                + hits.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
+    }
+
     /// **App 層必須顯式注入**（p3-4 的核心約束）。
     ///
     /// `@Entry` 的預設值只給 Preview：忘了注入不會有編譯錯誤，只會讓 View 拿到
