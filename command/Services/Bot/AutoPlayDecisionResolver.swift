@@ -60,9 +60,10 @@ nonisolated enum AutoPlayDecisionResolver {
 
         // 三麻 fail-closed：自動模式降級成「只顯示、不送出」。
         //
-        // bundled 模型只有四麻一份，三麻的 observation 佈局與動作空間都不同
-        // （MortalSwift 上游：無三麻權重、無 775×34 encoder、無拔北槽位）。
-        // 推薦本身已經是無效輸出，讓它自動送出等於用亂數打牌。
+        // bundled Mortal 只有四麻模型，三麻的 observation 佈局與動作空間都不同
+        // （MortalSwift 上游：無三麻權重、無 775×34 encoder、無拔北槽位），
+        // 其推薦在三麻是無效輸出，讓它自動送出等於用亂數打牌。
+        // 三麻有自己的引擎（雲端 3p、本地 `AkagiSanmaBot`），其決策走下面的例外。
         // 這裡刻意不整條 return `.none`：伺服器授權仍然要看得見，
         // 使用者可以自己決定要不要照做。
         //
