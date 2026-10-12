@@ -31,10 +31,10 @@ final class LiqiParserFailureTests: XCTestCase {
 
     private let accountId = 123456
 
-    /// 乾淨的失敗狀態（不碰 `LiqiParseFaultState.shared`，避免測試互相汙染）
-    private func makeBridge() -> (MajsoulBridge, LiqiParseFaultState) {
+    /// 乾淨的失敗狀態與 oplist（不碰 `.shared`，避免測試互相汙染）
+    private func makeBridge(operations: LiqiOperationStore = LiqiOperationStore()) -> (MajsoulBridge, LiqiParseFaultState) {
         let state = LiqiParseFaultState()
-        return (MajsoulBridge(faultState: state), state)
+        return (MajsoulBridge(faultState: state, operations: operations), state)
     }
 
     /// notify envelope：`[1][field1=method][field2=payload]`（notify 沒有 msgId）
@@ -78,7 +78,7 @@ final class LiqiParserFailureTests: XCTestCase {
         return LiqiEncoder.encodeFields(fields)
     }
 
-    /// authGame request（帶 account_id）＋ response 一組；msgId 必須一致才配得起來
+    /// request 與 response 的 msgId 必須一致才配得起來
     private func authGameRequest(msgId: UInt16) -> Data {
         Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.authGame",
                                        fields: [
@@ -89,7 +89,7 @@ final class LiqiParserFailureTests: XCTestCase {
                                        msgId: msgId))
     }
 
-    private func authGameResponse(msgId: UInt16, fields: [LiqiField]) -> Data {
+    private func response(msgId: UInt16, fields: [LiqiField]) -> Data {
         Data(LiqiEncoder.encodeEnvelope(type: .response,
                                         msgId: msgId,
                                         method: "",
@@ -108,11 +108,20 @@ final class LiqiParserFailureTests: XCTestCase {
 
     private static let hand13 = ["1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m", "1p", "2p", "3p", "4p"]
 
-    /// 讓 bridge 進入「已知自家座位 0」的狀態（後續 action 測試的前置）
+    /// accountId 只來自登入回應（`ResLogin`：2=account_id，3=account{1=account_id}）
+    private func logIn(_ bridge: MajsoulBridge, account: LiqiField? = nil) {
+        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Login", fields: [], msgId: 1)))
+        _ = bridge.parse(response(msgId: 1, fields: [account ?? .varint(field: 2, value: UInt64(accountId))]))
+    }
+
+    /// 照正式路徑登入並進場：送出面只走 `parseRaw`（`WebSocketInterceptor`），收到面走 `parse`。
+    /// 預設讓 bridge 進入「已知自家座位 0」的狀態（後續 action 測試的前置）
     @discardableResult
-    private func authenticate(_ bridge: MajsoulBridge, msgId: UInt16 = 41) -> [[String: Any]]? {
-        _ = bridge.parse(authGameRequest(msgId: msgId))
-        return bridge.parse(authGameResponse(msgId: msgId, fields: [
+    private func authenticate(_ bridge: MajsoulBridge, msgId: UInt16 = 41,
+                              account: LiqiField? = nil, fields: [LiqiField]? = nil) -> [[String: Any]]? {
+        logIn(bridge, account: account)
+        _ = bridge.parseRaw(authGameRequest(msgId: msgId))
+        return bridge.parse(response(msgId: msgId, fields: fields ?? [
             .bytes(field: 3, value: packed([accountId, 2, 3, 4]))
         ]))
     }
@@ -253,7 +262,8 @@ final class LiqiParserFailureTests: XCTestCase {
     func testAuthGameResponseWithoutEmptyMethodFieldStillStartsGame() {
         let (bridge, state) = makeBridge()
 
-        _ = bridge.parse(authGameRequest(msgId: 53))
+        logIn(bridge)
+        _ = bridge.parseRaw(authGameRequest(msgId: 53))
 
         // 手工組 envelope：[3][msgId LE][field2=payload]——刻意不寫 field 1
         let payload = LiqiEncoder.encodeFields([
@@ -268,6 +278,27 @@ final class LiqiParserFailureTests: XCTestCase {
         XCTAssertEqual(events?.first?["id"] as? Int, 1, "accountId 在 seatList 的第 1 位")
         XCTAssertNil(state.blocking)
         XCTAssertEqual(state.totalCount, 0, "合法的 canonical 形狀不得產生 fault")
+    }
+
+    /// accountId 只來自登入回應（D16 單一來源）；ResLogin 的兩種形狀都要認得。
+    /// 座位刻意不放 0：seat 預設就是 0，分不出「認到座位」與「沒認到」。
+    func testLoginResponseProvidesAccountIdOnProductionPath() {
+        let seated: [LiqiField] = [.bytes(field: 3, value: packed([2, 3, accountId, 4]))]
+        for account: LiqiField in [.varint(field: 2, value: UInt64(accountId)),
+                                   .message(field: 3, fields: [.varint(field: 1, value: UInt64(accountId))])] {
+            let (bridge, state) = makeBridge()
+            let events = authenticate(bridge, account: account, fields: seated)
+            XCTAssertEqual(events?.first?["type"] as? String, "start_game", "\(account)")
+            XCTAssertEqual(events?.first?["id"] as? Int, 2, "\(account)")
+            XCTAssertNil(state.blocking)
+        }
+
+        // ReqAuthGame 帶的 account_id 不是來源：沒有登入回應就不得建立 Bot
+        let (bridge, state) = makeBridge()
+        _ = bridge.parseRaw(authGameRequest(msgId: 41))
+        let events = bridge.parse(response(msgId: 41, fields: seated))
+        XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" })
+        XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list")
     }
 
     func testNormalNewRoundStillEmitsStartKyoku() {
@@ -314,8 +345,8 @@ final class LiqiParserFailureTests: XCTestCase {
         ])
 
         let msgId: UInt16 = 77
-        _ = bridge.parse(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
-                                                        fields: [], msgId: msgId)))
+        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+                                                           fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response,
                                                                   msgId: msgId,
                                                                   method: "",
@@ -346,8 +377,8 @@ final class LiqiParserFailureTests: XCTestCase {
             .message(field: 4, fields: [.bytes(field: 1, value: snapshot)])
         ])
         let msgId: UInt16 = 78
-        _ = bridge.parse(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
-                                                        fields: [], msgId: msgId)))
+        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+                                                           fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: msgId,
                                                                   method: "", payload: payload)))
 
@@ -363,10 +394,9 @@ final class LiqiParserFailureTests: XCTestCase {
     func testAuthGameWithoutSeatListEntersBlockingState() {
         let (bridge, state) = makeBridge()
 
-        _ = bridge.parse(authGameRequest(msgId: 51))
-        let events = bridge.parse(authGameResponse(msgId: 51, fields: [
+        let events = authenticate(bridge, msgId: 51, fields: [
             .bool(field: 4, value: true)   // 只有 is_game_start
-        ]))
+        ])
 
         XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" },
                      "拿不到座位就不得建立 Bot")
@@ -380,10 +410,9 @@ final class LiqiParserFailureTests: XCTestCase {
     func testAccountIdMissingFromSeatListEntersBlockingState() {
         let (bridge, state) = makeBridge()
 
-        _ = bridge.parse(authGameRequest(msgId: 52))
-        let events = bridge.parse(authGameResponse(msgId: 52, fields: [
+        let events = authenticate(bridge, msgId: 52, fields: [
             .bytes(field: 3, value: packed([1, 2, 3, 4]))
-        ]))
+        ])
 
         XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" })
         XCTAssertEqual(state.blocking?.severity, .blocking)
@@ -440,8 +469,8 @@ final class LiqiParserFailureTests: XCTestCase {
         })
         let payload = LiqiEncoder.encodeFields([.message(field: 4, fields: [.bytes(field: 1, value: snapshot)])])
         let msgId: UInt16 = 79
-        _ = bridge.parse(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
-                                                        fields: [], msgId: msgId)))
+        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+                                                           fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: msgId,
                                                                   method: "", payload: payload)))
 
@@ -472,8 +501,7 @@ final class LiqiParserFailureTests: XCTestCase {
         let (bridge, state) = makeBridge()
 
         // authGame 拿不到座位 → blocking（Bot 沒建）
-        _ = bridge.parse(authGameRequest(msgId: 71))
-        _ = bridge.parse(authGameResponse(msgId: 71, fields: [.bool(field: 4, value: true)]))
+        authenticate(bridge, msgId: 71, fields: [.bool(field: 4, value: true)])
         XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list")
 
         // 之後來一個分數完全正常的 ActionNewRound
@@ -534,9 +562,8 @@ final class LiqiParserFailureTests: XCTestCase {
     func testSeatListFromPlayersIsMarkedHeuristic() {
         let (bridge, state) = makeBridge()
 
-        _ = bridge.parse(authGameRequest(msgId: 61))
-        let raw = bridge.parseRaw(authGameResponse(msgId: 61,
-                                                   fields: playerFields([accountId, 2, 3, 4])))
+        _ = bridge.parseRaw(authGameRequest(msgId: 61))
+        let raw = bridge.parseRaw(response(msgId: 61, fields: playerFields([accountId, 2, 3, 4])))
         let data = raw?["data"] as? [String: Any]
 
         XCTAssertEqual(data?["seatList"] as? [Int], [accountId, 2, 3, 4])
@@ -552,8 +579,8 @@ final class LiqiParserFailureTests: XCTestCase {
     func testSeatListFromSchemaIsMarkedExact() {
         let (bridge, _) = makeBridge()
 
-        _ = bridge.parse(authGameRequest(msgId: 62))
-        let raw = bridge.parseRaw(authGameResponse(msgId: 62, fields: [
+        _ = bridge.parseRaw(authGameRequest(msgId: 62))
+        let raw = bridge.parseRaw(response(msgId: 62, fields: [
             .bytes(field: 3, value: packed([accountId, 2, 3, 4]))
         ] + playerFields([accountId, 2, 3, 4])))
         let data = raw?["data"] as? [String: Any]
@@ -805,8 +832,7 @@ final class LiqiParserFailureTests: XCTestCase {
     func testUnsignedRepeatedFieldStillRejectsTenByteVarint() {
         let (bridge, state) = makeBridge()
         let negative = LiqiEncoder.encodeVarint(UInt64(bitPattern: -1))
-        _ = bridge.parse(authGameRequest(msgId: 41))
-        _ = bridge.parse(authGameResponse(msgId: 41, fields: [.bytes(field: 3, value: negative)]))
+        authenticate(bridge, fields: [.bytes(field: 3, value: negative)])
 
         XCTAssertNotNil(state.blocking)
     }
@@ -825,6 +851,12 @@ final class LiqiParserFailureTests: XCTestCase {
             .string(field: 2, value: tile)
         ] + extra))
     }
+
+    /// `ActionDiscardTile.operation`（4）：自家（seat 0）有一個 type 9 可做
+    private let oplistField: LiqiField = .message(field: 4, fields: [
+        .varint(field: 1, value: 0),
+        .message(field: 2, fields: [.varint(field: 1, value: 9)])
+    ])
 
     func testEventsAreDroppedWhileStartKyokuIsBlockedUntilNextHealthyRound() {
         let (bridge, _) = makeBridge()
@@ -862,20 +894,42 @@ final class LiqiParserFailureTests: XCTestCase {
     }
 
     func testOplistStillRecordedWhileStartKyokuIsBlocked() {
-        let (bridge, _) = makeBridge()
+        let operations = LiqiOperationStore()
+        let (bridge, _) = makeBridge(operations: operations)
         authenticate(bridge)
-        LiqiOperationStore.shared.clear()
         _ = bridge.parse(actionPrototypeFrame(
             name: "ActionNewRound",
             data: newRoundPayload(scores: .bytes(field: 6, value: [0xff, 0xff]))))
 
-        _ = bridge.parse(discardFrame(seat: 1, tile: "5p", extra: [.message(field: 4, fields: [
-            .varint(field: 1, value: 0),
-            .message(field: 2, fields: [.varint(field: 1, value: 9)])
-        ])]))
+        _ = bridge.parse(discardFrame(seat: 1, tile: "5p", extra: [oplistField]))
 
-        XCTAssertNotNil(LiqiOperationStore.shared.latest, "伺服器授權的操作仍要能經 oplist 送出")
-        LiqiOperationStore.shared.clear()
+        XCTAssertNotNil(operations.latest, "伺服器授權的操作仍要能經 oplist 送出")
+    }
+
+    /// 每一種讓 oplist 失效的情況都要清**注入的** store；清到別的 store，自動打牌就會拿舊授權送出
+    func testOplistInvalidationClearsInjectedStore() {
+        let invalidations: [(String, (MajsoulBridge) -> Void)] = [
+            ("reset", { $0.reset() }),
+            ("fullReset", { $0.fullReset() }),
+            ("沒帶 operation", { _ = $0.parse(self.discardFrame(seat: 1, tile: "6p")) }),
+            ("operationList 是空的", { _ = $0.parse(self.discardFrame(seat: 1, tile: "6p", extra: [
+                .message(field: 4, fields: [.varint(field: 1, value: 0)])
+            ])) }),
+            ("每筆都缺 type", { _ = $0.parse(self.discardFrame(seat: 1, tile: "6p", extra: [
+                .message(field: 4, fields: [.message(field: 2, fields: [.string(field: 2, value: "4p|6p")])])
+            ])) })
+        ]
+        for (label, invalidate) in invalidations {
+            let operations = LiqiOperationStore()
+            let (bridge, _) = makeBridge(operations: operations)
+            authenticate(bridge)
+            _ = bridge.parse(discardFrame(seat: 1, tile: "5p", extra: [oplistField]))
+            XCTAssertNotNil(operations.latest, label)
+
+            invalidate(bridge)
+
+            XCTAssertNil(operations.latest, label)
+        }
     }
 
     // MARK: - int32 範圍
@@ -960,10 +1014,7 @@ final class LiqiParserFailureTests: XCTestCase {
 
     func testThreePlayerGameAcceptsThreeScoresAndPadsToFour() {
         let (bridge, state) = makeBridge()
-        _ = bridge.parse(authGameRequest(msgId: 41))
-        _ = bridge.parse(authGameResponse(msgId: 41, fields: [
-            .bytes(field: 3, value: packed([accountId, 2, 3]))
-        ]))
+        authenticate(bridge, fields: [.bytes(field: 3, value: packed([accountId, 2, 3]))])
 
         let events = bridge.parse(actionPrototypeFrame(
             name: "ActionNewRound",
@@ -1004,13 +1055,12 @@ final class LiqiParserFailureTests: XCTestCase {
     /// 以 seatList 認座位後送 syncGame 快照，回傳 start_kyoku
     private func snapshotStartKyoku(seatList: [Int], scores: [Int], msgId: UInt16) -> (event: [String: Any]?, state: LiqiParseFaultState) {
         let (bridge, state) = makeBridge()
-        _ = bridge.parse(authGameRequest(msgId: msgId))
-        _ = bridge.parse(authGameResponse(msgId: msgId, fields: [.bytes(field: 3, value: packed(seatList))]))
+        authenticate(bridge, msgId: msgId, fields: [.bytes(field: 3, value: packed(seatList))])
         let snapshot = LiqiEncoder.encodeFields(
             [.string(field: 6, value: "1m"), .string(field: 6, value: "2m")]
             + scores.map { .message(field: 9, fields: [.int(field: 1, value: $0)]) })
         let syncId = msgId + 1
-        _ = bridge.parse(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: syncId)))
+        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: syncId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(
             type: .response, msgId: syncId, method: "",
             payload: LiqiEncoder.encodeFields([.message(field: 4, fields: [.bytes(field: 1, value: snapshot)])]))))
@@ -1057,7 +1107,7 @@ final class LiqiParserFailureTests: XCTestCase {
                                         .bytes(field: 3, value: LiqiEncoder.encodeFields(data))])
         }
         let msgId: UInt16 = 120
-        _ = bridge.parse(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: msgId)))
+        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: msgId)))
         return bridge.parse(Data(LiqiEncoder.encodeEnvelope(
             type: .response, msgId: msgId, method: "",
             payload: LiqiEncoder.encodeFields([.message(field: 4, fields: restore)])))) ?? []

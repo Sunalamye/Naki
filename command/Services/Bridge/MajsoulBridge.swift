@@ -45,8 +45,12 @@ class MajsoulBridge {
     /// 測試注入獨立實例，避免跨測試互相汙染。
     let faultState: LiqiParseFaultState
 
-    init(faultState: LiqiParseFaultState = .shared) {
+    /// 自動打牌的 oplist 授權來源。測試注入獨立實例，正式路徑一律用 `.shared`。
+    private let operations: LiqiOperationStore
+
+    init(faultState: LiqiParseFaultState = .shared, operations: LiqiOperationStore = .shared) {
         self.faultState = faultState
+        self.operations = operations
     }
 
     /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
@@ -104,7 +108,7 @@ class MajsoulBridge {
         syncing = false
         hasReceivedAuthGame = false
         roundBlocked = false
-        LiqiOperationStore.shared.clear()
+        operations.clear()
         bridgeLog("[MajsoulBridge] 重置 (accountId 已保留: \(accountId), seat 已保留: \(seat))")
     }
 
@@ -120,7 +124,7 @@ class MajsoulBridge {
         syncing = false
         hasReceivedAuthGame = false
         roundBlocked = false
-        LiqiOperationStore.shared.clear()
+        operations.clear()
         LiqiResponseStore.shared.reset()
         // 頁面重新載入＝重新開始：上一次載入留下的解析失敗不該掛在新頁面上
         faultState.reset()
@@ -279,24 +283,6 @@ class MajsoulBridge {
             } else if let accId = msgData["account_id"] as? Int, accId > 0 {
                 accountId = accId
                 bridgeLog("[MajsoulBridge] 從 account_id 獲取 accountId: \(accountId)")
-            }
-        }
-
-        // 處理 authGame 請求 - 重置狀態（新遊戲開始）
-        if method == ".lq.FastTest.authGame" && msgType == "request" {
-            bridgeLog("[MajsoulBridge] 偵測到 authGame 請求 - 重置狀態以開始新遊戲")
-            // 重置遊戲狀態，但保留 accountId
-            seat = 0
-            lastDiscard = nil
-            doras = []
-            is3P = false
-            pendingReachAccepted = nil
-            roundBlocked = false
-
-            // 從請求中獲取 accountId
-            if let accId = msgData["accountId"] as? Int, accId > 0 {
-                accountId = accId
-                bridgeLog("[MajsoulBridge] 從 authGame 請求獲取 accountId: \(accountId)")
             }
         }
 
@@ -550,14 +536,14 @@ class MajsoulBridge {
     @discardableResult
     private func recordOperationSnapshot(name: String, data: [String: Any]) -> UInt64? {
         guard let operation = data["operation"] as? [String: Any] else {
-            LiqiOperationStore.shared.clear()
+            operations.clear()
             return nil
         }
 
         let contextTile = data["tile"] as? String
-        guard let snapshot = LiqiOperationStore.shared.record(fromParsed: operation,
-                                                             contextTile: contextTile,
-                                                             source: name) else {
+        guard let snapshot = operations.record(fromParsed: operation,
+                                               contextTile: contextTile,
+                                               source: name) else {
             // 動作**帶了** operation 卻建不出快照，代表解析結果不合預期
             // （operationList 空、或每筆都缺 type）。這在莊家第一打時實測發生過：
             // ActionNewRound 的 keys 有 operation，但沒有任何 oplist 更新，
@@ -580,7 +566,7 @@ class MajsoulBridge {
                              + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
                              + "keys=\(operation.keys.sorted())")
                 }
-                LiqiOperationStore.shared.clear()
+                operations.clear()
                 return nil
             }
 
@@ -590,7 +576,7 @@ class MajsoulBridge {
                      + "rawBytes=\(operation["_rawBytes"] as? Int ?? -1) "
                      + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
                      + "list3=\(String(describing: list.prefix(3)))")
-            LiqiOperationStore.shared.clear()
+            operations.clear()
             return nil
         }
 
