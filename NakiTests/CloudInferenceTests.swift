@@ -290,11 +290,11 @@ final class CloudDecisionMapperTests: XCTestCase {
 
     func test_chiVariants_matchLiqiCombinationSemantics() {
         // 0＝被吃的牌最小、1＝中間、2＝最大（與 chiCombinationIndex 同一套推導）
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "3m", consumed: ["4m", "5m"]), 0)
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "3m", consumed: ["2m", "4m"]), 1)
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "3m", consumed: ["1m", "2m"]), 2)
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "5s", consumed: ["4s", "6s"]), 1)
-        XCTAssertNil(CloudDecisionMapper.chiVariant(called: "E", consumed: ["1m", "2m"]),
+        XCTAssertEqual(LiqiTile.chiVariant(called: "3m", consumed: ["4m", "5m"]), 0)
+        XCTAssertEqual(LiqiTile.chiVariant(called: "3m", consumed: ["2m", "4m"]), 1)
+        XCTAssertEqual(LiqiTile.chiVariant(called: "3m", consumed: ["1m", "2m"]), 2)
+        XCTAssertEqual(LiqiTile.chiVariant(called: "5s", consumed: ["4s", "6s"]), 1)
+        XCTAssertNil(LiqiTile.chiVariant(called: "E", consumed: ["1m", "2m"]),
                      "字牌不能吃")
 
         let recs = CloudDecisionMapper.recommendations(

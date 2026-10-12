@@ -88,6 +88,24 @@ nonisolated enum LiqiTile {
         return digit == 0 ? 5 : digit
     }
 
+    /// 吃的變體：0＝被吃的牌最小（consumed 都比它大）、1＝中間、2＝最大；其餘回 nil。
+    ///
+    /// Mortal 的 `chi_low` / `chi_mid` / `chi_high` 與雀魂 `combination` 的對照共用這一份分類。
+    /// 與牌號放在一起：分類只吃牌號，Bot 與 Bridge 兩層都已依賴本檔。
+    /// 刻意不驗花色與是否相連，只看 consumed 恰為兩張數牌時各自在被吃牌的哪一側。
+    static func chiVariant(called: String?, consumed: [String]) -> Int? {
+        guard let calledNumber = number(of: called), consumed.count == 2 else { return nil }
+        let numbers = consumed.compactMap(number(of:))
+        guard numbers.count == 2 else { return nil }
+
+        let below = numbers.filter { $0 < calledNumber }.count
+        let above = numbers.filter { $0 > calledNumber }.count
+        if above == 2 { return 0 }
+        if below == 2 { return 2 }
+        if below == 1 && above == 1 { return 1 }
+        return nil
+    }
+
     // MARK: 排序
 
     /// MJAI 牌序（手牌顯示與送進 Bot 前的排序用）。

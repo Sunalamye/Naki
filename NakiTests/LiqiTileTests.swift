@@ -108,4 +108,97 @@ final class LiqiTileTests: XCTestCase {
             XCTAssertEqual(TileImage.assetName(for: honor), "MahjongTiles/Honors/\(honor)", "TileImage")
         }
     }
+
+    // MARK: 吃的變體
+
+    /// 收斂前 `CloudDecisionMapper.chiVariant`（原文，改用上面的舊 `tileNumber`）
+    private func legacyCloudChiVariant(called: String, consumed: [String]) -> Int? {
+        guard let calledNumber = legacyCloudTileNumber(called),
+              consumed.count == 2 else { return nil }
+        let numbers = consumed.compactMap(legacyCloudTileNumber)
+        guard numbers.count == 2 else { return nil }
+
+        let below = numbers.filter { $0 < calledNumber }.count
+        let above = numbers.filter { $0 > calledNumber }.count
+        if above == 2 { return 0 }
+        if below == 2 { return 2 }
+        if below == 1 && above == 1 { return 1 }
+        return nil
+    }
+
+    /// 收斂前 `LiqiOperationSnapshot.chiCombinationIndex` 對單一 combination 字串的分類（原文）
+    private func legacyStoreComboVariant(called: String?, combo: String) -> Int? {
+        guard let called = legacyStoreTileNumber(called) else { return nil }
+        let numbers = combo.split(separator: "|").compactMap { legacyStoreTileNumber(String($0)) }
+        guard numbers.count == 2 else { return nil }
+
+        let below = numbers.filter { $0 < called }.count
+        let above = numbers.filter { $0 > called }.count
+        if above == 2 { return 0 }
+        if below == 2 { return 2 }
+        if below == 1 && above == 1 { return 1 }
+        return nil
+    }
+
+    /// (被吃的牌, consumed, 變體)：含赤五、長度不是 2、不同花色、不相連、字牌
+    private static let chiCases: [(called: String?, consumed: [String], variant: Int?)] = [
+        ("3m", ["4m", "5m"], 0), ("3m", ["2m", "4m"], 1), ("3m", ["1m", "2m"], 2),
+        ("5s", ["4s", "6s"], 1),
+        // 赤五：MJAI `5mr`、雀魂 `0m` 都算 5
+        ("3m", ["4m", "5mr"], 0), ("4m", ["5mr", "6m"], 0),
+        ("5mr", ["3m", "4m"], 2), ("0m", ["6m", "7m"], 0), ("6m", ["0m", "7m"], 1),
+        // consumed 長度不是 2
+        ("3m", [], nil), ("3m", ["4m"], nil), ("3m", ["4m", "5m", "6m"], nil),
+        // 不驗花色、不驗相連（沿用舊行為）
+        ("3m", ["4p", "5s"], 0), ("3m", ["5m", "6m"], 0), ("5m", ["1m", "2m"], 2),
+        // 同號、同側各一不成立
+        ("3m", ["3m", "4m"], nil), ("3m", ["3p", "3s"], nil), ("3m", ["2m", "2m"], 2),
+        // 字牌與無法辨識
+        ("E", ["1m", "2m"], nil), ("3m", ["E", "S"], nil), ("3m", ["4m", "S"], nil),
+        ("?", ["4m", "5m"], nil), (nil, ["4m", "5m"], nil),
+    ]
+
+    func testChiVariantBoundaryCases() {
+        for c in Self.chiCases {
+            XCTAssertEqual(LiqiTile.chiVariant(called: c.called, consumed: c.consumed), c.variant,
+                           "called=\(c.called ?? "nil") consumed=\(c.consumed)")
+        }
+    }
+
+    /// 對全部 MJAI 牌 × 全部 consumed 長度 0–3 的組合，與舊雲端分類逐一相同
+    func testChiVariantMatchesLegacyCloudOnEveryMJAIInput() {
+        let tiles = Self.tiles.map(\.mjai) + ["?"]
+        var consumedLists: [[String]] = [[]] + tiles.map { [$0] }
+        for a in tiles { for b in tiles { consumedLists.append([a, b]) } }
+        consumedLists += [["4m", "5m", "6m"], ["3m", "E", "4m"]]
+        for called in tiles {
+            for consumed in consumedLists {
+                XCTAssertEqual(LiqiTile.chiVariant(called: called, consumed: consumed),
+                               legacyCloudChiVariant(called: called, consumed: consumed),
+                               "called=\(called) consumed=\(consumed)")
+            }
+        }
+    }
+
+    /// 對全部雀魂牌 × 全部兩張 combination，與舊 Bridge 分類逐一相同
+    func testChiVariantMatchesLegacyStoreOnEveryMajsoulCombination() {
+        let tiles = Self.tiles.map(\.majsoul)
+        for called in tiles + [nil] {
+            for a in tiles {
+                for b in tiles {
+                    XCTAssertEqual(
+                        LiqiTile.chiVariant(called: called, consumed: [a, b]),
+                        legacyStoreComboVariant(called: called, combo: "\(a)|\(b)"),
+                        "called=\(called ?? "nil") combo=\(a)|\(b)")
+                }
+            }
+        }
+    }
+
+    /// 兩份舊分類只在「combination 含非牌號的第三段」分歧：Bridge 舊版略過非牌號後仍分類，
+    /// 雲端舊版先看長度。收斂後採雲端版（長度先擋）；雀魂 combination 恆為兩張，走不到。
+    func testChiVariantRejectsThreePartCombinationUnlikeLegacyStore() {
+        XCTAssertEqual(legacyStoreComboVariant(called: "3m", combo: "4m|E|5m"), 0)
+        XCTAssertNil(LiqiTile.chiVariant(called: "3m", consumed: ["4m", "E", "5m"]))
+    }
 }

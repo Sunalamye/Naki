@@ -208,24 +208,10 @@ nonisolated struct LiqiOperationSnapshot: Equatable {
     /// 找不到對應組合時回 nil，呼叫端可自行退回保守索引。
     func chiCombinationIndex(variant: Int) -> Int? {
         guard let chi = operation(of: .chi), !chi.combination.isEmpty else { return nil }
-        guard let called = LiqiTile.number(of: contextTile) else { return nil }
 
         for (index, combo) in chi.combination.enumerated() {
-            let numbers = combo.split(separator: "|").compactMap {
-                LiqiTile.number(of: String($0))
-            }
-            guard numbers.count == 2 else { continue }
-
-            let below = numbers.filter { $0 < called }.count
-            let above = numbers.filter { $0 > called }.count
-
-            let comboVariant: Int
-            if above == 2 { comboVariant = 0 }
-            else if below == 2 { comboVariant = 2 }
-            else if below == 1 && above == 1 { comboVariant = 1 }
-            else { continue }
-
-            if comboVariant == variant { return index }
+            let consumed = combo.split(separator: "|").map(String.init)
+            if LiqiTile.chiVariant(called: contextTile, consumed: consumed) == variant { return index }
         }
         return nil
     }

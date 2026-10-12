@@ -74,7 +74,7 @@ enum CloudDecisionMapper {
         case "chi":
             guard let pai = reaction["pai"] as? String,
                   let consumed = reaction["consumed"] as? [String],
-                  let variant = chiVariant(called: pai, consumed: consumed) else {
+                  let variant = LiqiTile.chiVariant(called: pai, consumed: consumed) else {
                 return nil
             }
             // 雲端 reaction 帶實際牌組——顯示「用哪兩張吃哪張」，
@@ -147,21 +147,5 @@ enum CloudDecisionMapper {
         default:
             return nil
         }
-    }
-
-    /// chi 變體：0＝被吃的牌最小（consumed 都比它大）、1＝中間、2＝最大。
-    /// 與 `LiqiOperationSnapshot.chiCombinationIndex` 的推導同一套。
-    static func chiVariant(called: String, consumed: [String]) -> Int? {
-        guard let calledNumber = LiqiTile.number(of: called),
-              consumed.count == 2 else { return nil }
-        let numbers = consumed.compactMap(LiqiTile.number(of:))
-        guard numbers.count == 2 else { return nil }
-
-        let below = numbers.filter { $0 < calledNumber }.count
-        let above = numbers.filter { $0 > calledNumber }.count
-        if above == 2 { return 0 }
-        if below == 2 { return 2 }
-        if below == 1 && above == 1 { return 1 }
-        return nil
     }
 }
