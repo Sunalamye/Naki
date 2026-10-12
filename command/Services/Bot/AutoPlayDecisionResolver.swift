@@ -38,7 +38,7 @@ nonisolated enum AutoPlayDecision: Equatable {
 
 // MARK: - Resolver
 
-nonisolated struct AutoPlayDecisionResolver {
+nonisolated enum AutoPlayDecisionResolver {
 
     /// 依 oplist、AI 推薦與目前模式決定要送什麼。
     ///

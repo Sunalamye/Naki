@@ -201,7 +201,7 @@ class LiqiParser {
         if method == ".lq.Lobby.fetchCurrentMatchInfo" {
             let modes = parseRepeatedVarint(payload, field: 1)
             if !modes.isEmpty {
-                Task { @MainActor in ObservedMatchModes.shared.record(modes: modes) }
+                ObservedMatchModes.shared.record(modes: modes)
             }
         }
 
@@ -219,15 +219,13 @@ class LiqiParser {
             let sid = parseStringField(payload, field: 1) ?? ""
             let version = parseStringField(payload, field: 2) ?? ""
             if !sid.isEmpty {
-                Task { @MainActor in
-                    ObservedMatchSids.shared.record(sid: sid, clientVersionString: version)
-                }
+                ObservedMatchSids.shared.record(sid: sid, clientVersionString: version)
             }
         }
 
         // 取消匹配（不論誰送的）：不會再有對局開出來，別讓下一局友人房被回填成這個 sid 的人數
         if method == LiqiRequestBuilder.cancelUnifiedMatchMethod || method == LiqiRequestBuilder.cancelMatchMethod {
-            Task { @MainActor in ObservedMatchSids.shared.cancelAwaitingGameKind() }
+            ObservedMatchSids.shared.cancelAwaitingGameKind()
         }
 
         var result: [String: Any] = [

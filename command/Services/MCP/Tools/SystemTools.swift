@@ -26,7 +26,7 @@ struct GetStatusTool: MCPTool {
     func execute(arguments: [String: Any]) async throws -> Any {
         // JS 注入失敗是「所有其他欄位都不可信」的前置條件，所以放在 status 裡，
         // 而不是等使用者自己去翻 log。沒有 fallback 攔截器可以掩蓋這件事。
-        let injection = await JSInjectionState.shared.report
+        let injection = JSInjectionState.shared.report
 
         // 同一個道理：封包解析失敗到「這局不會運作」時，`game_*` / `bot_*` 的內容
         // 是不完整的。與其讓查詢端自己去比對 log，不如在 status 就講清楚。
@@ -50,13 +50,13 @@ struct GetStatusTool: MCPTool {
             ],
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             // 每次啟動一個獨立目錄；要回報問題就整包送出，不必挑檔案
-            "logDir": await LogManager.shared.logDirectory.path,
-            "logFile": await LogManager.shared.logFilePath,
+            "logDir": LogManager.shared.logDirectory.path,
+            "logFile": LogManager.shared.logFilePath,
             "logFileNote": "合併日誌（不含解析細節）。每次啟動一個 <timestamp> 目錄，"
                 + "同一層的其他目錄是前幾次執行（保留 8 次）",
             // 查「剛剛發生什麼」看這個——只有對局事件，一行一件
-            "eventLog": await LogManager.shared.eventLogPath,
-            "categoryLogs": await LogManager.shared.categoryLogPaths
+            "eventLog": LogManager.shared.eventLogPath,
+            "categoryLogs": LogManager.shared.categoryLogPaths
         ]
         payload.merge(injection.statusPayload) { _, new in new }
         payload.merge(parseFaults) { _, new in new }

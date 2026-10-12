@@ -20,9 +20,8 @@ struct LogEntry: Identifiable {
     ///
     /// formatter 快取成 static：以前每讀一次就 `DateFormatter()` 建一個，
     /// 而 `DateFormatter` 的建構要吃 locale／calendar，是這種每則訊息都會碰到的
-    /// 路徑上最貴的一項。`nonisolated(unsafe)`：Foundation 的 formatter 對
-    /// **只做格式化**是 thread-safe 的，這裡也從不改它的設定。
-    private nonisolated(unsafe) static let timeFormatter: DateFormatter = {
+    /// 路徑上最貴的一項。
+    private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -39,7 +38,7 @@ struct LogEntry: Identifiable {
 /// 先前所有東西都寫進同一個檔，而 LiqiParser 每解一個 protobuf 欄位就寫一行——
 /// 單一摸打會產生數十行 `field 1, wireType 0, size 1`，把真正的事件淹掉。
 /// 實測要靠 grep 才找得到「有沒有出現過和牌機會」。
-enum LogLevel: Int, Comparable, CaseIterable {
+nonisolated enum LogLevel: Int, Comparable, CaseIterable {
     /// 解析內部細節。量極大，只寫進該類別自己的檔案
     case trace = 0
     /// 一般訊息
@@ -100,14 +99,14 @@ class LogManager {
 
     /// 合併日誌（不含 trace，避免被解析細節淹沒）
     private let logFile: URL
-    private var fileHandle: FileHandle?
+    private let fileHandle: FileHandle?
 
     /// 對局事件時間軸——只有 `.event`，這是要用眼睛讀的那份
     private let eventFile: URL
-    private var eventHandle: FileHandle?
+    private let eventHandle: FileHandle?
 
     /// 每個類別各自一份完整紀錄（含 trace），深入除錯時才看
-    private var categoryHandles: [LogCategory: FileHandle] = [:]
+    private let categoryHandles: [LogCategory: FileHandle]
 
     /// 是否把 trace 寫進各類別檔案（量很大，可關）
     var traceToCategoryFiles = true
@@ -176,11 +175,13 @@ class LogManager {
         fm.createFile(atPath: eventFile.path, contents: nil)
         eventHandle = try? FileHandle(forWritingTo: eventFile)
 
+        var handles: [LogCategory: FileHandle] = [:]
         for c in LogCategory.allCases {
             let url = dir.appendingPathComponent("\(c.rawValue.lowercased()).log")
             fm.createFile(atPath: url.path, contents: nil)
-            categoryHandles[c] = try? FileHandle(forWritingTo: url)
+            handles[c] = try? FileHandle(forWritingTo: url)
         }
+        categoryHandles = handles
 
         // XCTest host 不輪替：它每次啟動都會跑一次，會刪掉同時在跑的正式 App 的目錄
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
@@ -260,6 +261,7 @@ class LogManager {
 
         // UI 只顯示 info 以上——trace 是給檔案看的
         if level >= .info {
+            // 保留 hop：是否可改同步未驗證（審查 arch S13 標為推測）
             DispatchQueue.main.async {
                 Self.append(entry, to: &self.entries, limit: self.maxEntries)
             }

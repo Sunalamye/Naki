@@ -19,18 +19,18 @@ import Foundation
 /// 雙版本並存的理由：Naki 的消費者（Claude Code 的 MCP client、skill 腳本、curl）
 /// 不會同時升級。規格明文允許 dual-era server，選擇條件也由規格定義：
 /// **請求帶 modern `_meta` → stateless 語意；請求是 `initialize` → legacy 語意**。
-enum NakiMCPProtocol {
+nonisolated enum NakiMCPProtocol {
 
     // MARK: - 版本
 
     /// 現行版：stateless、無 handshake、result 帶 `resultType`
-    nonisolated static let current = "2026-07-28"
+    static let current = "2026-07-28"
 
     /// 支援的協定版本（新 → 舊）。
     ///
     /// `server/discover` 的 `supportedVersions` 與 `-32022` 的 `data.supported`
     /// 都讀這一份，不存在第二張會漂移的表。
-    nonisolated static let supportedVersions = [
+    static let supportedVersions = [
         "2026-07-28",
         "2025-11-25",
         "2025-06-18",
@@ -38,7 +38,7 @@ enum NakiMCPProtocol {
     ]
 
     /// 走 `initialize` handshake 的舊版（`initialize` 在 2026-07-28 被移除）
-    nonisolated static var legacyVersions: [String] {
+    static var legacyVersions: [String] {
         supportedVersions.filter { $0 != current }
     }
 
@@ -46,47 +46,47 @@ enum NakiMCPProtocol {
     ///
     /// 客戶端有帶且我們支援時一律**原樣回報**——回一個對方沒要求的版本
     /// 等於要對方猜語意。
-    nonisolated static let preferredLegacy = "2025-11-25"
+    static let preferredLegacy = "2025-11-25"
 
     // MARK: - `_meta` key（規格保留字，不可自己改寫）
 
-    nonisolated static let metaProtocolVersion = "io.modelcontextprotocol/protocolVersion"
-    nonisolated static let metaServerInfo = "io.modelcontextprotocol/serverInfo"
+    static let metaProtocolVersion = "io.modelcontextprotocol/protocolVersion"
+    static let metaServerInfo = "io.modelcontextprotocol/serverInfo"
 
     // MARK: - HTTP header（Streamable HTTP；比對一律小寫）
 
-    nonisolated static let protocolVersionHeader = "mcp-protocol-version"
-    nonisolated static let methodHeader = "mcp-method"
-    nonisolated static let nameHeader = "mcp-name"
+    static let protocolVersionHeader = "mcp-protocol-version"
+    static let methodHeader = "mcp-method"
+    static let nameHeader = "mcp-name"
 
     // MARK: - 錯誤碼
 
     /// `-32020`：header 與 body 不一致
-    nonisolated static let headerMismatchCode = -32020
+    static let headerMismatchCode = -32020
     /// `-32022`：不支援請求的協定版本
-    nonisolated static let unsupportedProtocolVersionCode = -32022
+    static let unsupportedProtocolVersionCode = -32022
 
     /// `-32020…-32099` 是規格保留區。
     ///
     /// 用途不是「我們要用它」，而是**證明我們沒有把自訂碼放進去**——
     /// 規格明文禁止在此區發出未定義的碼，單測會對這條做回歸。
-    nonisolated static let specReservedErrorCodes = (-32099)...(-32020)
+    static let specReservedErrorCodes = (-32099)...(-32020)
 
     // MARK: - 快取提示（CacheableResult）
 
     /// `tools/list` 的 TTL。registry 在啟動時註冊一次就不再變動，
     /// 但仍給一個有限值——升版換 binary 後客戶端不該還吃舊清單。
-    nonisolated static let toolsListTTLMs = 300_000
+    static let toolsListTTLMs = 300_000
     /// `server/discover` 的 TTL
-    nonisolated static let discoverTTLMs = 3_600_000
+    static let discoverTTLMs = 3_600_000
     /// 工具清單不含使用者資料（帳號資訊只出現在工具**結果**裡）
-    nonisolated static let cacheScope = "public"
+    static let cacheScope = "public"
 
     // MARK: - 身分與能力
 
     /// `_meta['io.modelcontextprotocol/serverInfo']` 與 legacy `serverInfo` 共用這一份。
     /// 版本讀 App bundle（`NakiAppVersion`），不寫死。
-    nonisolated static var serverInfo: [String: Any] {
+    static var serverInfo: [String: Any] {
         [
             "name": "naki",
             "title": "Naki 麻將 AI 助手",
@@ -97,11 +97,11 @@ enum NakiMCPProtocol {
     /// Naki 只有 tools：沒有 resources / prompts / logging / sampling / roots。
     /// `listChanged: false` 是事實——registry 在 `MCPHandler.init` 註冊一次後不再變動，
     /// 也沒有推播通道（無 `subscriptions/listen`）。
-    nonisolated static var capabilities: [String: Any] {
+    static var capabilities: [String: Any] {
         ["tools": ["listChanged": false]]
     }
 
-    nonisolated static let instructions = """
+    static let instructions = """
         Naki 是本機 loopback 的雀魂 AI 助手。狀態類工具讀 Swift 協定層快照（不是向伺服器查詢），\
         動作類工具會真的送出 Liqi request 並影響帳號與對局，只在測試帳號使用。\
         每次都先 tools/list 取得現行工具與 schema，不要依舊 catalog 猜名稱。
@@ -129,7 +129,7 @@ enum NakiMCPProtocol {
     /// - `server/discover` → modern（它本來就是 modern-only 的方法，
     ///   而且客戶端正是用它來問「你是哪個世代」，要求它先自報版本沒有意義）
     /// - 其餘（含 `initialize` 與所有 legacy 版本值） → legacy
-    nonisolated static func era(method: String,
+    static func era(method: String,
                                 params: [String: Any],
                                 headerVersion: String? = nil) -> Era {
         if let declared = requestedVersion(params: params) ?? headerVersion,
@@ -141,25 +141,25 @@ enum NakiMCPProtocol {
     }
 
     /// 取出請求 `_meta` 裡的協定版本
-    nonisolated static func requestedVersion(params: [String: Any]) -> String? {
+    static func requestedVersion(params: [String: Any]) -> String? {
         guard let meta = params["_meta"] as? [String: Any] else { return nil }
         return meta[metaProtocolVersion] as? String
     }
 
-    nonisolated static func isSupported(version: String) -> Bool {
+    static func isSupported(version: String) -> Bool {
         supportedVersions.contains(version)
     }
 
     // MARK: - 方法名稱
 
     enum Method {
-        nonisolated static let discover = "server/discover"
-        nonisolated static let initialize = "initialize"
-        nonisolated static let initialized = "initialized"
-        nonisolated static let notificationsInitialized = "notifications/initialized"
-        nonisolated static let ping = "ping"
-        nonisolated static let toolsList = "tools/list"
-        nonisolated static let toolsCall = "tools/call"
+        static let discover = "server/discover"
+        static let initialize = "initialize"
+        static let initialized = "initialized"
+        static let notificationsInitialized = "notifications/initialized"
+        static let ping = "ping"
+        static let toolsList = "tools/list"
+        static let toolsCall = "tools/call"
     }
 
     // MARK: - Result envelope
@@ -168,7 +168,7 @@ enum NakiMCPProtocol {
     ///
     /// legacy era 原樣返回：舊版沒有 `resultType`，而規格要求舊 client 把缺席
     /// 視為 `"complete"`——多塞欄位對它們沒有好處，只會多一份要解釋的差異。
-    nonisolated static func decorate(_ result: [String: Any], era: Era) -> [String: Any] {
+    static func decorate(_ result: [String: Any], era: Era) -> [String: Any] {
         guard era == .modern else { return result }
         var decorated = result
         decorated["resultType"] = "complete"
@@ -179,7 +179,7 @@ enum NakiMCPProtocol {
     }
 
     /// `server/discover` 的結果（規格列為 MUST 實作）
-    nonisolated static func discoverResult() -> [String: Any] {
+    static func discoverResult() -> [String: Any] {
         decorate([
             "supportedVersions": supportedVersions,
             "capabilities": capabilities,
@@ -192,7 +192,7 @@ enum NakiMCPProtocol {
     /// legacy `initialize` 的結果。
     ///
     /// - Parameter requestedVersion: client 在 params 裡宣告的版本；支援就原樣回報。
-    nonisolated static func initializeResult(requestedVersion: String? = nil) -> [String: Any] {
+    static func initializeResult(requestedVersion: String? = nil) -> [String: Any] {
         let negotiated: String
         if let requestedVersion, legacyVersions.contains(requestedVersion) {
             negotiated = requestedVersion
@@ -210,7 +210,7 @@ enum NakiMCPProtocol {
     ///
     /// 順序由 `MCPToolRegistry.toolOrder` 決定（註冊順序），符合規格的
     /// deterministic ordering 要求。
-    nonisolated static func toolsListResult(tools: [[String: Any]], era: Era) -> [String: Any] {
+    static func toolsListResult(tools: [[String: Any]], era: Era) -> [String: Any] {
         var result: [String: Any] = ["tools": tools]
         if era == .modern {
             result["ttlMs"] = toolsListTTLMs
@@ -225,7 +225,7 @@ enum NakiMCPProtocol {
     /// 不必再解一層跳脫字串（CLAUDE.md 記載的 `tr -d '\\'` 痛點就是這麼來的）。
     /// `content[0].text` 保留同一份 JSON 的字串化——規格建議這麼做以相容舊 client，
     /// 而且既有腳本不會因為升級而一次全斷。
-    nonisolated static func toolSuccessPayload(content: Any, era: Era) -> [String: Any] {
+    static func toolSuccessPayload(content: Any, era: Era) -> [String: Any] {
         let structured = structuredContent(from: content)
         return decorate([
             "content": [["type": "text", "text": jsonText(structured)]],
@@ -238,7 +238,7 @@ enum NakiMCPProtocol {
     ///
     /// 參數驗證失敗走這條而不是 JSON-RPC protocol error：規格 2025-11-25 起
     /// 要求可自我修正的錯誤回 `isError`，模型才有機會自己改參數重試。
-    nonisolated static func toolErrorPayload(message: String, era: Era) -> [String: Any] {
+    static func toolErrorPayload(message: String, era: Era) -> [String: Any] {
         decorate([
             "content": [["type": "text", "text": message]],
             "structuredContent": ["success": false, "error": message],
@@ -251,7 +251,7 @@ enum NakiMCPProtocol {
     /// 工具目前一律回 dictionary；非 dictionary 包一層 `result`，
     /// 這樣 `outputSchema` 宣告的 `type: object` 永遠成立
     /// （規格：宣告了 outputSchema 就 MUST 提供符合它的結構化結果）。
-    nonisolated static func structuredContent(from content: Any) -> [String: Any] {
+    static func structuredContent(from content: Any) -> [String: Any] {
         if let dict = content as? [String: Any] {
             return JSONSanitizer.sanitize(dict)
         }
@@ -259,7 +259,7 @@ enum NakiMCPProtocol {
     }
 
     /// 把 structuredContent 字串化成人類可讀的 fallback text
-    nonisolated static func jsonText(_ value: [String: Any]) -> String {
+    static func jsonText(_ value: [String: Any]) -> String {
         guard JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
               let text = String(data: data, encoding: .utf8) else {
@@ -272,7 +272,7 @@ enum NakiMCPProtocol {
 
     /// 版本不合：規格要求回 -32022，並列出我們支援哪些版本，
     /// 讓 client 自己挑一個重送（沒有 handshake 可以協商了）。
-    nonisolated static func unsupportedVersionFailure(requested: String) -> NakiMCPFailure {
+    static func unsupportedVersionFailure(requested: String) -> NakiMCPFailure {
         NakiMCPFailure(
             code: unsupportedProtocolVersionCode,
             message: "Unsupported protocol version: \(requested)",
@@ -283,7 +283,7 @@ enum NakiMCPProtocol {
 
     /// header 與 body 不一致：中介層依 header 路由、server 依 body 執行，
     /// 兩者不同就是安全問題，不是可以「以 body 為準」帶過的小事。
-    nonisolated static func headerMismatchFailure(header: String,
+    static func headerMismatchFailure(header: String,
                                                   headerValue: String,
                                                   bodyValue: String) -> NakiMCPFailure {
         NakiMCPFailure(
@@ -299,7 +299,7 @@ enum NakiMCPProtocol {
 // MARK: - Failure
 
 /// 一次請求要回的 JSON-RPC 錯誤（含 HTTP status）
-struct NakiMCPFailure {
+nonisolated struct NakiMCPFailure {
     let code: Int
     let message: String
     let data: [String: Any]?
@@ -331,12 +331,12 @@ struct NakiMCPFailure {
 ///
 /// 沒有 Origin header 的請求放行：curl、Claude Code 的 MCP client 與 skill 腳本
 /// 都不送 Origin，擋掉它們等於把整條驗證面關掉。
-enum NakiMCPOriginPolicy {
+nonisolated enum NakiMCPOriginPolicy {
 
     /// 允許的 host（瀏覽器只會把 loopback 頁面標成這幾種）
-    nonisolated static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
+    static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
 
-    nonisolated static func isAllowed(_ origin: String?) -> Bool {
+    static func isAllowed(_ origin: String?) -> Bool {
         guard let raw = origin?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
             // 非瀏覽器 client（curl / MCP client）不送 Origin
             return true
@@ -353,12 +353,12 @@ enum NakiMCPOriginPolicy {
     }
 
     /// 被擋下時的回應 body（規格允許放一個沒有 id 的 JSON-RPC error）
-    nonisolated static func forbiddenBody(origin: String?) -> String {
+    static func forbiddenBody(origin: String?) -> String {
         forbiddenJSON("Forbidden origin: \(origin ?? "unknown")")
     }
 
     /// Origin／Host 兩道檢查共用的 403 body
-    nonisolated fileprivate static func forbiddenJSON(_ message: String) -> String {
+    fileprivate static func forbiddenJSON(_ message: String) -> String {
         let failure = NakiMCPFailure(code: -32600, message: message, data: nil, httpStatus: 403)
         let payload: [String: Any] = ["jsonrpc": "2.0", "error": failure.errorObject]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
@@ -374,9 +374,9 @@ enum NakiMCPOriginPolicy {
 /// rebinding 之後攻擊者頁面與 server 同源，`GET /logs` 不帶 Origin，Origin 檢查看不到；
 /// 但 Host 仍是攻擊者的網域。port 任意（8765 被佔用時會往上找）。
 /// 沒有 Host 的請求放行：瀏覽器一定會送，所以放行只會讓 HTTP/1.0 的 curl 過，不會開洞。
-enum NakiMCPHostPolicy {
+nonisolated enum NakiMCPHostPolicy {
 
-    nonisolated static func isAllowed(_ hostHeader: String?) -> Bool {
+    static func isAllowed(_ hostHeader: String?) -> Bool {
         guard let raw = hostHeader?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return true }
         let host: Substring
         if raw.hasPrefix("[") {
@@ -389,7 +389,7 @@ enum NakiMCPHostPolicy {
         return NakiMCPOriginPolicy.loopbackHosts.contains(host.lowercased())
     }
 
-    nonisolated static func forbiddenBody(host: String?) -> String {
+    static func forbiddenBody(host: String?) -> String {
         NakiMCPOriginPolicy.forbiddenJSON("Forbidden host: \(host ?? "unknown")")
     }
 }
@@ -397,10 +397,10 @@ enum NakiMCPHostPolicy {
 /// Origin＋Host 兩道檢查的單一入口（`DebugServer.handleRequest` 對所有 endpoint 套用）。
 ///
 /// 抽成純函式是為了能單測；`MCPToolHardeningTests` 另外鎖住 DebugServer 真的有呼叫它。
-enum NakiMCPRequestGuard {
+nonisolated enum NakiMCPRequestGuard {
 
     /// 被擋下時回 (log 原因, 403 body)；放行回 nil。
-    nonisolated static func rejection(lines: [String]) -> (reason: String, body: String)? {
+    static func rejection(lines: [String]) -> (reason: String, body: String)? {
         let origin = NakiHTTPHeaderReader.value("origin", in: lines)
         guard NakiMCPOriginPolicy.isAllowed(origin) else {
             return ("Rejected non-loopback origin: \(origin ?? "?")",
@@ -421,8 +421,8 @@ enum NakiMCPRequestGuard {
 ///
 /// 傳進來的 `lines` 是整條 request（header ＋ body），所以**掃到第一個空行就停**：
 /// body 是呼叫端可以控制的內容，讓它有機會被讀成 header 是不必要的風險。
-enum NakiHTTPHeaderReader {
-    nonisolated static func value(_ name: String, in lines: [String]) -> String? {
+nonisolated enum NakiHTTPHeaderReader {
+    static func value(_ name: String, in lines: [String]) -> String? {
         let target = name.lowercased()
         for line in lines {
             if line.isEmpty { return nil }  // header 區塊結束
@@ -442,7 +442,7 @@ enum NakiHTTPHeaderReader {
 ///
 /// 不碰連線、不執行工具，所以整條協定決策（era、版本檢查、方法路由、錯誤碼與
 /// HTTP status）都能在單測裡對拍。`MCPHandler` 只負責執行這份決策。
-enum NakiMCPRouter {
+nonisolated enum NakiMCPRouter {
 
     /// 這次請求要做的事
     enum Outcome {
@@ -463,7 +463,7 @@ enum NakiMCPRouter {
     }
 
     /// 解析請求並決定回應
-    nonisolated static func plan(body: String,
+    static func plan(body: String,
                                  headers: [String],
                                  toolDefinitions: @autoclosure () -> [[String: Any]]) -> Plan {
         guard let data = body.data(using: .utf8),
@@ -577,7 +577,7 @@ enum NakiMCPRouter {
 
     /// 未知方法。modern era 的 HTTP status 由規格指定為 404
     /// （body 仍是 JSON-RPC `-32601`，用來與「沒有這個 endpoint」的 404 區分）。
-    nonisolated static func methodNotFound(_ method: String, era: NakiMCPProtocol.Era) -> NakiMCPFailure {
+    static func methodNotFound(_ method: String, era: NakiMCPProtocol.Era) -> NakiMCPFailure {
         NakiMCPFailure(code: -32601,
                        message: "Method not found: \(method)",
                        data: nil,

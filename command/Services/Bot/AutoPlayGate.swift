@@ -16,7 +16,7 @@ import Foundation
 ///
 /// 這裡**只決定要不要動、動什麼**；怎麼送、重試幾次、去抖多久在 `AutoPlayEngine`。
 /// 那些跟送出通道與 log 通道綁死，搬過來只會把耦合換個位置。
-enum AutoPlayGate {
+nonisolated enum AutoPlayGate {
 
     /// 閘門的結論
     enum Decision: Equatable {

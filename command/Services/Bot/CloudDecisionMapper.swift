@@ -165,7 +165,7 @@ enum CloudDecisionMapper {
     }
 
     /// mjai 數牌字串的數字（"3m" → 3、"5mr" → 5）；字牌回 nil（chi 用不到）。
-    private static func tileNumber(_ tile: String) -> Int? {
+    private nonisolated static func tileNumber(_ tile: String) -> Int? {
         guard let first = tile.first, let number = first.wholeNumberValue,
               (1...9).contains(number) else { return nil }
         return number

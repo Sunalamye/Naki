@@ -39,12 +39,12 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum L10n {
+nonisolated enum L10n {
 
     /// 目前生效的 locale：使用者選的語言，`system` 時用系統的。iOS 一律系統的。
     ///
     /// 走 nonisolated 的 `loadAppLanguage`：Services 在任意 actor 呼叫，不該為了拿語言碰 MainActor。
-    nonisolated static var locale: Locale {
+    static var locale: Locale {
         #if os(macOS)
         SettingsStore.loadAppLanguage().locale ?? .current
         #else
@@ -56,7 +56,7 @@ enum L10n {
     ///
     /// 必須經 `LocalizedStringResource`：`String(localized:locale:)` 的 locale 只管格式，
     /// 不會挑語言（實測 ja／zh-Hant 都回 en 的字串）。
-    nonisolated static func text(_ key: String.LocalizationValue, locale: Locale = L10n.locale) -> String {
+    static func text(_ key: String.LocalizationValue, locale: Locale = L10n.locale) -> String {
         String(localized: LocalizedStringResource(key, locale: locale))
     }
 }

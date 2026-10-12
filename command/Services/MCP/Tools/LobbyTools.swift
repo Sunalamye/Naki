@@ -83,7 +83,7 @@ struct MatchModeListTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        var result = await ObservedMatchModes.shared.dictionary
+        var result = ObservedMatchModes.shared.dictionary
         result["source"] = "遊戲自己送的 .lq.Lobby.fetchCurrentMatchInfo（mode_list）"
         result["knownErrorForBadMode"] = "1306 = match_mode 不存在"
         return result
@@ -205,7 +205,7 @@ struct MatchSidListTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        await ObservedMatchSids.shared.dictionary
+        ObservedMatchSids.shared.dictionary
     }
 }
 
@@ -241,7 +241,7 @@ struct StartUnifiedMatchTool: MCPTool {
 
         // 沒帶參數時退回「最近觀察到的那一組」——這是唯一有真憑據的預設值。
         // 猜一個 sid 送出去比失敗更糟：可能排進非預期的場次。
-        let observed = await ObservedMatchSids.shared.latest
+        let observed = ObservedMatchSids.shared.latest
         let matchSid = (arguments["match_sid"] as? String) ?? observed?.sid ?? ""
         guard !matchSid.isEmpty else {
             throw MCPToolError.invalidParameter(
@@ -291,7 +291,7 @@ struct CancelUnifiedMatchTool: MCPTool {
             throw MCPToolError.notAvailable("Naki context")
         }
         // `??` 右側是 autoclosure，不能直接放 await——先取出來再合併。
-        let observed = await ObservedMatchSids.shared.latest
+        let observed = ObservedMatchSids.shared.latest
         let matchSid = (arguments["match_sid"] as? String) ?? observed?.sid ?? ""
         guard !matchSid.isEmpty else {
             throw MCPToolError.invalidParameter(

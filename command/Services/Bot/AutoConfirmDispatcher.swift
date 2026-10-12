@@ -48,7 +48,7 @@ enum AutoConfirmDispatcher {
     /// 與和牌 / 「過」同型：次數有限、間隔短。用完次數**不**清 pending——保留才能讓
     /// 下一輪輪詢重試（伺服器結算窗口有數十秒到數分鐘，多等幾輪沒有代價，
     /// 靜默放棄整局卡死才有）。
-    struct RetryPolicy {
+    nonisolated struct RetryPolicy {
         var maxAttempts: Int = 6
         var delay: TimeInterval = 0.4
         /// 每次送出後等 RESPONSE 的毫秒數（`<= 0` 表示不等，只看 sendRaw）

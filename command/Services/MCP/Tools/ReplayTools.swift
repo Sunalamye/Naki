@@ -26,7 +26,7 @@ struct ListRecordingsTool: MCPTool {
     init(context: MCPContext) { self.context = context }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let dir = try await ReplaySupport.gamesDirectory(session: arguments["session"] as? String)
+        let dir = try ReplaySupport.gamesDirectory(session: arguments["session"] as? String)
         let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
             .filter { $0.hasSuffix(".mjai.jsonl") }
             .sorted()
@@ -84,7 +84,7 @@ struct ReplayGameTool: MCPTool {
         if file.hasPrefix("/") {
             url = URL(fileURLWithPath: file)
         } else {
-            let dir = try await ReplaySupport.gamesDirectory(session: arguments["session"] as? String)
+            let dir = try ReplaySupport.gamesDirectory(session: arguments["session"] as? String)
             url = dir.appendingPathComponent(file)
         }
         guard ReplaySupport.isInsideLogsRoot(url) else {

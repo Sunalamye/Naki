@@ -213,73 +213,76 @@ class DebugServer: MCPHTTPResponder {
     /// 或連線結束 / 達到大小上限。解決大的 `/js`、`/mcp` body 跨 TCP 段被截斷的問題。
     private func receiveRequest(connection: NWConnection, buffer: Data, deadline: DispatchWorkItem) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
-            guard let self = self else { return }
+            // 回呼 queue 是 `.main`（`handleConnection` 的 `start(queue: .main)`），所以可以斷言隔離
+            MainActor.assumeIsolated {
+                guard let self = self else { return }
 
-            var accumulated = buffer
-            if let data = data, !data.isEmpty {
-                accumulated.append(data)
-            }
-
-            // 上限保護：避免無限等待 / 記憶體爆掉
-            if accumulated.count > self.maxRequestSize {
-                self.trace("Request exceeds max size (\(accumulated.count) > \(self.maxRequestSize)), rejecting")
-                self.sendResponse(connection: connection, status: 400, body: "Request Entity Too Large")
-                return
-            }
-
-            // 對端已關閉（half-close）或發生錯誤，視為不會再有更多資料
-            let ended = isComplete || (error != nil)
-
-            // 完全沒收到資料的錯誤 → 直接關閉
-            if let error = error, accumulated.isEmpty {
-                self.trace("Connection error: \(error)")
-                connection.cancel()
-                return
-            }
-
-            // 尚未收到任何資料
-            if accumulated.isEmpty {
-                if ended {
-                    connection.cancel()
-                } else {
-                    self.receiveRequest(connection: connection, buffer: accumulated, deadline: deadline)
+                var accumulated = buffer
+                if let data = data, !data.isEmpty {
+                    accumulated.append(data)
                 }
-                return
-            }
 
-            // 檢查 HTTP header 是否收齊（\r\n\r\n）
-            guard let headerEnd = accumulated.range(of: Data([0x0d, 0x0a, 0x0d, 0x0a])) else {
-                if ended {
-                    // 連線結束但 header 仍不完整 → 用現有資料盡力處理
+                // 上限保護：避免無限等待 / 記憶體爆掉
+                if accumulated.count > self.maxRequestSize {
+                    self.trace("Request exceeds max size (\(accumulated.count) > \(self.maxRequestSize)), rejecting")
+                    self.sendResponse(connection: connection, status: 400, body: "Request Entity Too Large")
+                    return
+                }
+
+                // 對端已關閉（half-close）或發生錯誤，視為不會再有更多資料
+                let ended = isComplete || (error != nil)
+
+                // 完全沒收到資料的錯誤 → 直接關閉
+                if let error = error, accumulated.isEmpty {
+                    self.trace("Connection error: \(error)")
+                    connection.cancel()
+                    return
+                }
+
+                // 尚未收到任何資料
+                if accumulated.isEmpty {
+                    if ended {
+                        connection.cancel()
+                    } else {
+                        self.receiveRequest(connection: connection, buffer: accumulated, deadline: deadline)
+                    }
+                    return
+                }
+
+                // 檢查 HTTP header 是否收齊（\r\n\r\n）
+                guard let headerEnd = accumulated.range(of: Data([0x0d, 0x0a, 0x0d, 0x0a])) else {
+                    if ended {
+                        // 連線結束但 header 仍不完整 → 用現有資料盡力處理
+                        self.processRequestData(accumulated, connection: connection, deadline: deadline)
+                    } else {
+                        self.receiveRequest(connection: connection, buffer: accumulated, deadline: deadline)
+                    }
+                    return
+                }
+
+                // 解析 Content-Length，判斷 body 是否收滿
+                let headerData = accumulated.subdata(in: accumulated.startIndex..<headerEnd.lowerBound)
+                let headerLines = String(decoding: headerData, as: UTF8.self).components(separatedBy: "\r\n")
+                let contentLength = NakiHTTPHeaderReader.value("content-length", in: headerLines).flatMap { Int($0) }
+                let expectedBodyLength = contentLength ?? 0
+                let currentBodyLength = accumulated.distance(from: headerEnd.upperBound, to: accumulated.endIndex)
+
+                // chunked（或沒有 Content-Length 卻帶了 body）沒有可靠的 body 邊界：
+                // 硬收會截斷，或把 chunk framing 當 JS 執行。沒有 body 的 POST（`/bot/trigger`）照常放行。
+                if NakiHTTPHeaderReader.value("transfer-encoding", in: headerLines) != nil
+                    || (contentLength == nil && currentBodyLength > 0) {
+                    deadline.cancel()
+                    self.sendResponse(connection: connection, status: 411, body: "Length Required")
+                    return
+                }
+
+                if currentBodyLength >= expectedBodyLength || ended {
+                    // body 已收滿（或連線結束）→ 處理
                     self.processRequestData(accumulated, connection: connection, deadline: deadline)
                 } else {
+                    // body 跨 TCP 段尚未收滿，繼續累積
                     self.receiveRequest(connection: connection, buffer: accumulated, deadline: deadline)
                 }
-                return
-            }
-
-            // 解析 Content-Length，判斷 body 是否收滿
-            let headerData = accumulated.subdata(in: accumulated.startIndex..<headerEnd.lowerBound)
-            let headerLines = String(decoding: headerData, as: UTF8.self).components(separatedBy: "\r\n")
-            let contentLength = NakiHTTPHeaderReader.value("content-length", in: headerLines).flatMap { Int($0) }
-            let expectedBodyLength = contentLength ?? 0
-            let currentBodyLength = accumulated.distance(from: headerEnd.upperBound, to: accumulated.endIndex)
-
-            // chunked（或沒有 Content-Length 卻帶了 body）沒有可靠的 body 邊界：
-            // 硬收會截斷，或把 chunk framing 當 JS 執行。沒有 body 的 POST（`/bot/trigger`）照常放行。
-            if NakiHTTPHeaderReader.value("transfer-encoding", in: headerLines) != nil
-                || (contentLength == nil && currentBodyLength > 0) {
-                deadline.cancel()
-                self.sendResponse(connection: connection, status: 411, body: "Length Required")
-                return
-            }
-
-            if currentBodyLength >= expectedBodyLength || ended {
-                // body 已收滿（或連線結束）→ 處理
-                self.processRequestData(accumulated, connection: connection, deadline: deadline)
-            } else {
-                // body 跨 TCP 段尚未收滿，繼續累積
-                self.receiveRequest(connection: connection, buffer: accumulated, deadline: deadline)
             }
         }
     }

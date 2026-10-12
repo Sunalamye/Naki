@@ -49,7 +49,7 @@ import Foundation
 /// ——它會扣掉網路與推論已經花掉的部分。Naki 是拿到推薦之後才開始睡，所以伺服器看到的
 /// 是「推論時間 + 這個值」。本地推論在 50–100ms 量級影響不大，但雲端往返（逾時設 2 秒）
 /// 會讓總時間系統性偏長。要修需要把決策起點的時間戳一路傳到這裡。
-struct ActionDelayModel {
+nonisolated enum ActionDelayModel {
 
     // MARK: - 校準參數
 

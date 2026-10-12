@@ -18,15 +18,15 @@ import Security
 
 /// 雲端推論 API key 的唯一持久化入口。
 ///
-/// 成員全標 `nonisolated`：`SettingsStore.cloudAPIKey` 的 stored property 預設值
+/// 型別層級 `nonisolated`：`SettingsStore.cloudAPIKey` 的 stored property 預設值
 /// 在 `nonisolated init()` 的脈絡求值（見該檔 `@Entry` 註解），而 app target 開了
 /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`。Security API 本身執行緒安全。
-enum CloudKeyStore {
+nonisolated enum CloudKeyStore {
 
-    nonisolated static let service = "org.naki.cloud-inference"
-    nonisolated static let account = "api-key"
+    static let service = "org.naki.cloud-inference"
+    static let account = "api-key"
 
-    private nonisolated static var baseQuery: [String: Any] {
+    private static var baseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -35,7 +35,7 @@ enum CloudKeyStore {
     }
 
     /// 讀出 key；沒有存過或讀取失敗回空字串。
-    nonisolated static func load() -> String {
+    static func load() -> String {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -51,7 +51,7 @@ enum CloudKeyStore {
     }
 
     /// 寫入 key；空字串＝刪除。
-    nonisolated static func save(_ key: String) {
+    static func save(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             SecItemDelete(baseQuery as CFDictionary)
