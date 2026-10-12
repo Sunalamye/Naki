@@ -46,14 +46,11 @@ final class AppLanguageTests: XCTestCase {
         XCTAssertEqual(SettingsStore.loadAppLanguage(from: defaults), .system)
     }
 
-    func testStoreWritesThroughToStandardDefaults() {
-        let original = UserDefaults.standard.object(forKey: SettingsStore.appLanguageKey)
-        defer { UserDefaults.standard.set(original, forKey: SettingsStore.appLanguageKey) }
-
-        let store = SettingsStore()
+    func testStoreWritesThroughToInjectedDefaults() {
+        let store = SettingsStore(defaults: defaults)
         store.appLanguage = .ja
         XCTAssertEqual(store.locale?.identifier, "ja")
-        XCTAssertEqual(SettingsStore.loadAppLanguage(), .ja)
+        XCTAssertEqual(SettingsStore.loadAppLanguage(from: defaults), .ja)
     }
 
     func testTextFollowsLocale() {
