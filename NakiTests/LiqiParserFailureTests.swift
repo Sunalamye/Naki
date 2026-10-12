@@ -1372,6 +1372,24 @@ final class LiqiParserFailureTests: XCTestCase {
         XCTAssertNil(state.blocking)
     }
 
+    /// 赤寶牌連號的正向情境：type 缺席、`4m 0m 6m`（赤五視為 5）仍是順子 → 補 chi，赤五保留為 `5mr`
+    func testChiPengGangTypeAbsentWithRedFiveRunFillsChi() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        let chi = actionEvents(bridge, "ActionChiPengGang", [
+            .varint(field: 1, value: 1)
+        ] + tiles("4m", "0m", "6m") + [.bytes(field: 4, value: packed([0, 1, 1]))]).first
+
+        XCTAssertEqual(chi?["type"] as? String, "chi")
+        XCTAssertEqual(chi?["actor"] as? Int, 1)
+        XCTAssertEqual(chi?["target"] as? Int, 0)
+        XCTAssertEqual(chi?["pai"] as? String, "4m")
+        XCTAssertEqual(chi?["consumed"] as? [String], ["5mr", "6m"])
+        XCTAssertEqual(faults(state, "ActionChiPengGang.type.absent").count, 1)
+        XCTAssertTrue(faults(state, "ActionChiPengGang.meld").isEmpty, "赤五連號不是壞封包")
+    }
+
     /// type 缺席但 pai／consumed 解不完整 → malformed，不得產出空 pai／consumed 的 chi
     func testChiPengGangTypeAbsentWithIncompleteMeldIsDropped() {
         let meldCases: [(String, [LiqiField])] = [
@@ -1482,5 +1500,54 @@ final class LiqiParserFailureTests: XCTestCase {
         authenticate(bridge)
         _ = bridge.parse(discardFrame(seat: 1, tile: "5p", extra: [.message(field: 4, fields: [.varint(field: 4, value: 5)])]))
         XCTAssertTrue(faults(state, "OptionalOperationList.seat.absent").isEmpty)
+    }
+
+    // MARK: - bridge 黃金測試：Liqi bytes 進、MJAI 事件出
+
+    /// 事件逐欄比對用：鍵排序後的 JSON 字串（`[String: Any]` 不能直接 `==`）
+    private func canonical(_ events: [[String: Any]]?) -> [String] {
+        (events ?? []).map {
+            String(decoding: try! JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]), as: UTF8.self)
+        }
+    }
+
+    /// 格式正確的 ActionDealTile／DiscardTile／ChiPengGang 封包（XOR 過的 notify bytes）經 parser＋bridge，
+    /// 產出的 MJAI 事件逐欄等於依封包語意手算的期望值，而且一個 fault 都不記。
+    ///
+    /// `ReplayFingerprintTests` 重放的是 MJAI 事件流，不經 LiqiParser／MajsoulBridge；這條補上那一段。
+    /// seat 0 與 type 0（chi）都顯式上線，對應 live 直連的形狀。
+    func testWellFormedActionBytesProduceExactMJAIEvents() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+        XCTAssertEqual(startsRound(bridge)?.first?["type"] as? String, "start_kyoku")
+
+        let cases: [(name: String, fields: [LiqiField], expected: [[String: Any]])] = [
+            ("ActionDealTile",
+             [.varint(field: 1, value: UInt64(Self.ownSeat)), .string(field: 2, value: "1z")],
+             [["type": "tsumo", "actor": Self.ownSeat, "pai": "E"]]),
+            ("ActionDiscardTile",
+             [.varint(field: 1, value: UInt64(Self.ownSeat)), .string(field: 2, value: "1z"), .varint(field: 5, value: 1)],
+             [["type": "dahai", "actor": Self.ownSeat, "pai": "E", "tsumogiri": true]]),
+            ("ActionDealTile",
+             [.varint(field: 1, value: 3)],
+             [["type": "tsumo", "actor": 3, "pai": "?"]]),
+            ("ActionDiscardTile",
+             [.varint(field: 1, value: 3), .string(field: 2, value: "0p")],
+             [["type": "dahai", "actor": 3, "pai": "5pr", "tsumogiri": false]]),
+            ("ActionChiPengGang",
+             [.varint(field: 1, value: 0), .varint(field: 2, value: 0),
+              .string(field: 3, value: "0p"), .string(field: 3, value: "4p"), .string(field: 3, value: "6p"),
+              .bytes(field: 4, value: packed([3, 0, 0]))],
+             [["type": "chi", "actor": 0, "target": 3, "pai": "5pr", "consumed": ["4p", "6p"]]]),
+            ("ActionDiscardTile",
+             [.varint(field: 1, value: 0), .string(field: 2, value: "9s"), .varint(field: 3, value: 1)],
+             [["type": "reach", "actor": 0], ["type": "dahai", "actor": 0, "pai": "9s", "tsumogiri": false]]),
+        ]
+        for (name, fields, expected) in cases {
+            XCTAssertEqual(canonical(bridge.parse(actionPrototypeFrame(name: name, data: LiqiEncoder.encodeFields(fields)))),
+                           canonical(expected), name)
+        }
+        XCTAssertTrue(state.recent.isEmpty, "格式正確的封包不得記任何 fault：\(state.recent.map(\.site))")
+        XCTAssertNil(state.blocking)
     }
 }

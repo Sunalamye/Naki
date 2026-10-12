@@ -52,7 +52,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.discard, .riichi, .tsumo]),
       recommendations: [rec(.discard, "9s"), rec(.riichi, "9s")],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     XCTAssertEqual(decision, .send(action: .hora, tile: "9s"),
                    "伺服器提供自摸時必須覆蓋 AI 的打牌推薦")
@@ -64,7 +65,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.discard, .riichi, .tsumo]),
       recommendations: [rec(.discard, "9s")],
       mode: .recommend,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     guard case .surfaceOnly(let action, _) = decision else {
       return XCTFail("推薦模式應為 surfaceOnly，實際: \(decision)")
@@ -79,7 +81,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
         snapshot: snapshot(types: types),
         recommendations: [rec(.discard, "9s")],
         mode: .off,
-        seat: 0)
+        seat: 0,
+        isSanma: false)
 
       if case .send = decision {
         XCTFail("關閉模式不得送出任何動作，ops=\(types)")
@@ -93,7 +96,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.chi, .pon, .ron]),
       recommendations: [rec(.none, "")],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     XCTAssertEqual(decision, .send(action: .hora, tile: "9s"))
   }
@@ -113,7 +117,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.discard, .riichi, .tsumo]),
       recommendations: [],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
     XCTAssertEqual(decision, .send(action: .hora, tile: "9s"),
                    "模型沒意見不代表可以放掉伺服器給的自摸")
   }
@@ -125,7 +130,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.chi, .pon, .ron]),
       recommendations: [],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
     XCTAssertEqual(decision, .send(action: .hora, tile: "9s"),
                    "有榮和機會時絕不能送出「過」")
   }
@@ -135,7 +141,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: nil,
       recommendations: [rec(.hora, "9s")],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     XCTAssertEqual(decision, .none(reason: "no_oplist"))
   }
@@ -146,7 +153,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.discard, .tsumo], seat: 2),
       recommendations: [rec(.discard, "9s")],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     if case .none = decision {} else {
       XCTFail("座位不符時不得送出，實際: \(decision)")
@@ -159,7 +167,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.chi, .pon]),   // 沒有 discard
       recommendations: [rec(.discard, "9s")],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     if case .none = decision {} else {
       XCTFail("動作不在 oplist 內不得送出，實際: \(decision)")
@@ -206,7 +215,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.chi]),
       recommendations: [],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     XCTAssertEqual(decision, .send(action: .none, tile: ""))
   }
@@ -218,7 +228,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
         snapshot: snapshot(types: [.chi]),
         recommendations: [],
         mode: mode,
-        seat: 0)
+        seat: 0,
+        isSanma: false)
 
       if case .send = decision {
         XCTFail("\(mode.rawValue) 模式不得自動送出過")
@@ -405,6 +416,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       recommendations: [kan(.kakan), rec(.discard, "5p", 0.3)],
       mode: .auto,
       seat: 0,
+      isSanma: false,
       recommendationsOplistSequence: 1)
 
     XCTAssertEqual(decision, .send(action: .kan, tile: "kan"))
@@ -417,6 +429,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       recommendations: [kan(.kakan), rec(.discard, "5p", 0.3)],
       mode: .auto,
       seat: 0,
+      isSanma: false,
       recommendationsOplistSequence: 1)
 
     XCTAssertEqual(decision, .send(action: .discard, tile: "5p"))
@@ -429,6 +442,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       recommendations: [kan(nil), rec(.discard, "5p", 0.3)],
       mode: .auto,
       seat: 0,
+      isSanma: false,
       recommendationsOplistSequence: 1)
 
     XCTAssertEqual(decision, .send(action: .kan, tile: "kan"))
@@ -443,6 +457,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       recommendations: [rec(.riichi, "", 0.6), rec(.discard, "5p", 0.3)],
       mode: .auto,
       seat: 0,
+      isSanma: false,
       recommendationsOplistSequence: 1)
 
     XCTAssertEqual(decision, .send(action: .discard, tile: "5p"))
@@ -457,6 +472,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
                           rec(.riichi, "", 0.1), rec(.kan, "", 0.1)],
         mode: .auto,
         seat: 0,
+        isSanma: false,
         recommendationsOplistSequence: 1)
       guard case .none = decision else {
         return XCTFail("退選不得落在 \(target)，實際: \(decision)")
@@ -468,7 +484,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.discard, .ankan]),
       recommendations: [rec(.none, "", 0.6), rec(.pon, "", 0.3), rec(.kan, "", 0.1)],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
     guard case .none = decision else {
       return XCTFail("舊視窗的推薦不得變成暗槓，實際: \(decision)")
     }
@@ -482,6 +499,7 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
         recommendations: [rec(.riichi, "", 0.6), rec(.discard, "5p", 0.3)],
         mode: .auto,
         seat: 0,
+        isSanma: false,
         recommendationsOplistSequence: sequence)
       guard case .none = decision else {
         return XCTFail("序號 \(String(describing: sequence)) 與當前 oplist 不符，不得退選，實際: \(decision)")
@@ -494,7 +512,8 @@ final class AutoPlayDecisionResolverTests: XCTestCase {
       snapshot: snapshot(types: [.pon]),
       recommendations: [rec(.riichi, "", 0.6), rec(.kan, "", 0.3)],
       mode: .auto,
-      seat: 0)
+      seat: 0,
+      isSanma: false)
 
     guard case .none(let reason) = decision else {
       return XCTFail("都沒有授權時不得送出，實際: \(decision)")

@@ -16,7 +16,7 @@ import AkagiSanma
 final class AkagiSanmaBot: MahjongBot {
 
     /// `BotReaction.source`；`BotStatus.isSanmaCapableDecision` 以它放行三麻自動打牌
-    nonisolated static let source = "local-akagi3p"
+    nonisolated static let source = DecisionSource.akagiSanma
 
     /// 模型隨 app 打包，本地三麻引擎永遠可建（建構失敗另有退路，見 `NativeBotController.createBot`）
     nonisolated static let isBundled = true

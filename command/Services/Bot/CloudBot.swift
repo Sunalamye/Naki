@@ -267,7 +267,7 @@ final class CloudBot: MahjongBot {
             return nil
         }
 
-        let source = "cloud:\(response.model ?? (model.isEmpty ? "default" : model))"
+        let source = DecisionSource.cloud(model: response.model ?? (model.isEmpty ? "default" : model))
         eventLog("[Bot] ☁️ 雲端決策生效（\(source)）: "
                + "\(recommendations.count) items [\(recommendations.logSummary)]")
 

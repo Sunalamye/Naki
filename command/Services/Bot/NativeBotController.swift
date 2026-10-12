@@ -43,9 +43,9 @@ final class NativeBotController {
     /// `CloudBot` 在每個決策點經它重讀設定；nil ⇒ 不包裝、雲端永遠關。
     var cloudConfigProvider: (() -> CloudInferenceConfig?)?
 
-    /// 這批推薦由誰算出："local" 或 "cloud:<model>"（來自 `BotReaction.source`）。
+    /// 這批推薦由誰算出（`DecisionSource`，來自 `BotReaction.source`）。
     /// fallback 原則——可以更弱，但必須讓人看得出來（UI 與 /bot/status 都讀它）。
-    private(set) var lastDecisionSource = "local"
+    private(set) var lastDecisionSource = DecisionSource.local
 
     /// 玩家 ID (0-3)
     private(set) var playerId: UInt8 = 0
@@ -290,7 +290,7 @@ final class NativeBotController {
             // 例外：三麻在新授權上回 nil ＝ 這一手沒有三麻引擎的決策（本地建構失敗退回雲端-only
             // 後雲端又失敗／退避），決策來源不能黏著上一手的三麻來源，否則 `AutoPlayGate` 會放行
             if is3P, let eventOplistSeq, eventOplistSeq != lastRecommendationsOplistSequence {
-                lastDecisionSource = "local"
+                lastDecisionSource = DecisionSource.local
             }
             return nil
         }
@@ -553,7 +553,7 @@ final class NativeBotController {
         // 可用動作是 oplist 的投影，不在本 class 持有，因此沒有東西要重置。
         // ☁️ 雲端狀態（視窗／client／斷路器）住在 CloudBot，隨 deleteBot 一起釋放；
         // 這裡只歸零決策來源標記。
-        lastDecisionSource = "local"
+        lastDecisionSource = DecisionSource.local
     }
 
     // MARK: - State Export

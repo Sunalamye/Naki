@@ -347,6 +347,24 @@ final class AkagiSanmaBotTests: XCTestCase {
         XCTAssertFalse(key(name: "cloud-only", source: "cloud:m").contains("未生效"))
     }
 
+    /// `decisionSource` 是 `/bot/status` 的對外欄位，常數化不得改字面值；寫入端的雲端前綴要被讀取端認得
+    func testDecisionSourceConstantsKeepWireValues() {
+        XCTAssertEqual(DecisionSource.local, "local")
+        XCTAssertEqual(DecisionSource.akagiSanma, "local-akagi3p")
+        XCTAssertEqual(AkagiSanmaBot.source, DecisionSource.akagiSanma)
+        XCTAssertEqual(DecisionSource.cloud(model: "3p-x"), "cloud:3p-x")
+        XCTAssertTrue(status(source: DecisionSource.cloud(model: "3p-x")).isSanmaCapableDecision)
+        XCTAssertFalse(status(source: DecisionSource.local).isSanmaCapableDecision)
+    }
+
+    /// 預設來源若被當成雲端或三麻引擎，本地四麻推薦會在三麻對局被放行自動打牌。
+    func testDefaultStatusIsLocalAndNotSanmaCapable() {
+        let s = BotStatus(isActive: true, modelName: "akagi-sanma-bc", playerId: 0, is3P: true)
+        XCTAssertEqual(s.decisionSource, "local")
+        XCTAssertFalse(s.isCloudDecision)
+        XCTAssertFalse(s.isSanmaCapableDecision)
+    }
+
     func testSanmaCapableDecisionBySource() {
         XCTAssertTrue(status(source: AkagiSanmaBot.source).isSanmaCapableDecision)
         XCTAssertTrue(status(source: "cloud:akagi-3p").isSanmaCapableDecision)
@@ -360,7 +378,7 @@ final class AkagiSanmaBotTests: XCTestCase {
             sanmaCapableDecision: status(source: source).isSanmaCapableDecision,
             hasActionInFlight: false, snapshot: snapshot([.discard]),
             recommendations: [Recommendation(tile: "9s", probability: 0.9, actionType: .discard)],
-            now: Date(), callPassGrace: 2))
+            now: Date(), callPassGrace: 2, recommendationsOplistSequence: nil))
     }
 
     func testGateLetsLocalSanmaSourceThroughAndBlocksLocalFourPlayer() {

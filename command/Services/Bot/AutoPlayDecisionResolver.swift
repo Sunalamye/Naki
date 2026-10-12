@@ -48,13 +48,12 @@ nonisolated enum AutoPlayDecisionResolver {
     ///   - mode: 使用者選的模式
     ///   - seat: 自家座位，用來確認這批 oplist 確實是給我們的
     ///   - isSanma: 這局是不是三麻。true 時**一律不自動送出**（見下方 fail-closed 說明）。
-    ///     預設 false 只是為了不動舊測試，正式路徑必須明確傳 `gameState.is3P`。
     ///   - recommendationsOplistSequence: 推薦是針對哪一批 oplist 算的；退次選的前提（見下方）
     static func resolve(snapshot: LiqiOperationSnapshot?,
                         recommendations: [Recommendation],
                         mode: AutoPlayMode,
                         seat: Int,
-                        isSanma: Bool = false,
+                        isSanma: Bool,
                         sanmaCapableDecision: Bool = false,
                         recommendationsOplistSequence: UInt64? = nil) -> AutoPlayDecision {
 
@@ -69,7 +68,7 @@ nonisolated enum AutoPlayDecisionResolver {
         // 例外：`sanmaCapableDecision`（三麻引擎算出的那一手）不降級，
         // 規則見 `AutoPlayGate.Input.sanmaCapableDecision`。
         let effectiveMode: AutoPlayMode =
-            (isSanma && !sanmaCapableDecision && mode.isFullAuto) ? .recommend : mode
+            (isSanma && !sanmaCapableDecision && mode.sendsActions) ? .recommend : mode
 
         // 缺少權威資料一律 fail closed。
         // 舊行為是「沒有 snapshot 時預設當自摸送出」，那等於在沒有伺服器授權的
@@ -104,7 +103,7 @@ nonisolated enum AutoPlayDecisionResolver {
         guard let first = recommendations.first else {
             // 有副露機會但模型沒有意見 → 送「過」，否則對局會停在那裡等我們回應
             if snapshot.isCallOpportunity {
-                return effectiveMode.isFullAuto
+                return effectiveMode.sendsActions
                     ? .send(action: .none, tile: "")
                     : .none(reason: "no_recommendation_mode_\(mode.rawValue)\(isSanma ? "_sanma" : "")")
             }

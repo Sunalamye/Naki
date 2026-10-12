@@ -43,9 +43,6 @@ import MortalSwift   // Tile.mjaiString（推薦序列化用）
 @MainActor
 protocol WebSessionBackend: AnyObject {
 
-    /// 頁面物件已經建好、可以執行 JS 了嗎
-    var isReady: Bool { get }
-
     /// 這條 path 是否提供自動送出。
     ///
     /// WebPage path 是 true；Legacy path 是 false——那條路沒有實機對局驗證
@@ -113,9 +110,6 @@ final class WebSession {
 
     /// 這條 path 是否提供自動送出（`SettingsStore.supportsAutoPlay` 由此而來）
     var supportsAutoPlay: Bool { backend.supportsAutoPlay }
-
-    /// 頁面就緒（`AutoPlayEngine.Context.isReady`）
-    var isReady: Bool { backend.isReady }
 
     // MARK: - 建立
 
@@ -264,12 +258,6 @@ final class WebSession {
     /// 不各自跑一次 JS、也不各自解讀 outcome。
     @discardableResult
     func forceReconnect() async -> ForceReconnectOutcome {
-        guard backend.isReady else {
-            bridgeLog("[WebSession] 無法強制重連: 頁面尚未就緒")
-            store.statusMessage = L10n.text("無法重連：WebView 不可用")
-            return .failed("web_view_not_ready")
-        }
-
         bridgeLog("[WebSession] 強制重連 WebSocket...")
         store.statusMessage = L10n.text("正在強制重連...")
 
@@ -291,8 +279,6 @@ final class WebSession {
     /// `GameHighlightScript.make` 保留為 highlight payload 的參考實作與測試對象，
     /// 不再自動注入。關閉顯示（`.off`）時清一次並清空推薦——使用者關掉的東西不該還在畫面上。
     func syncHighlight() async {
-        guard backend.isReady else { return }
-
         let show = store.autoPlayMode.showRecommendation
         let recos = show ? store.recommendations : []
         let json = Self.recommendationsJSON(recos)

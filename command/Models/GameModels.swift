@@ -154,7 +154,7 @@ struct BotStatus: Equatable {
     /// 這批推薦由誰算出："local" 或 "cloud:<model>"（雲端 overlay 寫入）。
     /// fallback 原則——可以更弱，但必須讓人看得出來：雲端失敗退回本地時
     /// 這裡會如實變回 "local"，UI 與 `/bot/status` 都讀同一份。
-    var decisionSource: String = "local"
+    var decisionSource: String = DecisionSource.local
 
     /// 雲端推論啟用中時的目的主機；nil＝純本地。
     /// 非 nil 代表**對局事件（含自家手牌）正在送往這個主機**——
@@ -192,12 +192,12 @@ struct BotStatus: Equatable {
     // MARK: - Computed Properties
 
     /// 這批推薦是否由雲端模型算出。
-    var isCloudDecision: Bool { decisionSource.hasPrefix("cloud:") }
+    var isCloudDecision: Bool { decisionSource.hasPrefix(DecisionSource.cloudPrefix) }
 
     /// 這批推薦是否由支援三麻的引擎算出（雲端 3p 或本地 Akagi 三麻）。
     /// 三麻放行與 UI 警告的共同判準，規則見 `AutoPlayGate.Input.sanmaCapableDecision`。
     var isSanmaCapableDecision: Bool {
-        isCloudDecision || decisionSource == AkagiSanmaBot.source
+        isCloudDecision || decisionSource == DecisionSource.akagiSanma
     }
 
     /// 模型顯示名稱

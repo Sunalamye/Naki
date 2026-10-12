@@ -188,6 +188,15 @@ nonisolated struct LiqiOperationSnapshot: Equatable {
         return nil
     }
 
+    /// 槓種未指定時的退路：oplist 授權的第一個槓，沒有就暗槓（executor 與 MCP `game_action` 共用）
+    var defaultKanType: LiqiOperationType { kanOperation ?? .ankan }
+
+    /// 「過」走哪個通道：回應他家打牌走 `inputChiPengGang`，自家回合走 `inputOperation`。
+    ///
+    /// ⚠️ 與 `LiqiOperationType.channel` 對榮和的分類不同（ron-only 這裡是 `.chiPengGang`）；
+    /// `AutoPlayEngine.sendPass` 用後者。兩者並存是既有行為，未 live 驗證哪個對。
+    var passChannel: LiqiActionChannel { isCallOpportunity ? .chiPengGang : .selfOperation }
+
     /// 依 Mortal 的吃法變體挑出雀魂 `combination` 的索引。
     ///
     /// Mortal 的 `chi_low` / `chi_mid` / `chi_high` 指的是**被吃的那張牌**在順子中的位置：
@@ -250,6 +259,17 @@ nonisolated struct LiqiOperationSnapshot: Equatable {
         let suit = chars[1]
         guard suit == "m" || suit == "p" || suit == "s" else { return nil }
         return digit == 0 ? 5 : digit
+    }
+}
+
+extension LiqiOperationSnapshot {
+    /// 和牌 request：由 oplist 決定榮和還是自摸；沒有和牌授權回 nil——不猜，寧可不送。
+    ///
+    /// 帶 `timeuse` 所以是函式而非計算屬性（MCP 要傳）。`@MainActor`：`LiqiRequestBuilder` 隨 app target 預設隔離。
+    @MainActor
+    func horaRequest(timeuse: UInt32 = 0) -> LiqiRequestSpec? {
+        guard let hora = horaOperation else { return nil }
+        return hora == .ron ? LiqiRequestBuilder.ron(timeuse: timeuse) : LiqiRequestBuilder.tsumo(timeuse: timeuse)
     }
 }
 

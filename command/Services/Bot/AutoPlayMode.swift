@@ -35,16 +35,16 @@ nonisolated enum AutoPlayMode: String, CaseIterable {
 
     /// 是否啟用自動送出（`.auto` 與 `.fullAuto` 都送）
     ///
-    /// ⚠️ 名字沿用歷史，語意是「**這一手**由 Naki 自己送」，不是「整場全自動」。
+    /// 語意是「**這一手**由 Naki 自己送」，不是「整場全自動」（那是 `autoRematch`）。
     /// 新增模式時務必讓這裡涵蓋到：Legacy 路徑的能力收斂（`AutoPlayAvailability`）
     /// 就是用它過濾的，漏掉會讓不支援自動送出的裝置選得到、然後靜靜地送出去。
-    var isFullAuto: Bool {
+    var sendsActions: Bool {
         return self == .auto || self == .fullAuto
     }
 
     /// 對局結束後是否自動排下一場（只有 `.fullAuto`）
     ///
-    /// 與 `isFullAuto` 分開的理由：自動打「這一手」和自動開「下一場」是兩種不同的授權。
+    /// 與 `sendsActions` 分開的理由：自動打「這一手」和自動開「下一場」是兩種不同的授權。
     /// 前者只影響進行中的對局，後者會**主動把帳號排進伺服器隊列**——使用者可能只想要前者。
     var autoRematch: Bool {
         return self == .fullAuto
@@ -104,7 +104,7 @@ nonisolated enum AutoPlayAvailability {
     static func modes(autoPlaySupported: Bool) -> [AutoPlayMode] {
         autoPlaySupported
             ? AutoPlayMode.allCases
-            : AutoPlayMode.allCases.filter { !$0.isFullAuto }
+            : AutoPlayMode.allCases.filter { !$0.sendsActions }
     }
 
     /// 把「使用者選的／存檔讀到的」模式收斂成這條路徑真的能執行的模式。
@@ -112,7 +112,7 @@ nonisolated enum AutoPlayAvailability {
     /// 不支援自動送出時 `.auto` 一律降級成 `.recommend`——降級而不是 `.off`，
     /// 因為使用者要的是「幫我看牌」，把顯示一起關掉會是另一個他沒選的行為。
     static func clamp(_ mode: AutoPlayMode, autoPlaySupported: Bool) -> AutoPlayMode {
-        (!autoPlaySupported && mode.isFullAuto) ? .recommend : mode
+        (!autoPlaySupported && mode.sendsActions) ? .recommend : mode
     }
 
     /// 「決定採用某個模式」時該發生的全部事情：收斂 → 寫進存檔 → 回傳生效值。
@@ -151,7 +151,7 @@ nonisolated enum AutoPlayModeStore {
 
     /// 一次性遷移：舊 key 有值而新 key 沒有時，把值搬過去；不論搬不搬都刪掉舊 key。
     ///
-    /// 冪等，重複呼叫安全——App 進入點與 `load()` 都會呼叫。
+    /// 冪等，重複呼叫安全。正式路徑只有 `load()` 呼叫它。
     /// - Returns: 是否真的把舊值搬進新 key。
     @discardableResult
     static func migrateLegacyKeyIfNeeded(_ defaults: UserDefaults = .standard) -> Bool {

@@ -45,10 +45,8 @@ nonisolated enum AutoPlayGate {
     /// 全部是值，不含任何 UI 或網路物件——這是能單測的前提。
     struct Input {
         let isAutoMode: Bool
-        /// 這局是不是三麻（`GameState.is3P`）
-        ///
-        /// 預設 false：舊的呼叫點與測試不必逐一改，但**正式路徑必須明確傳入**。
-        var isSanma: Bool = false
+        /// 這局是不是三麻（`GameState.is3P`）。不給預設值：漏傳會讓三麻 fail-closed 失效。
+        let isSanma: Bool
         /// 這批推薦是否由支援三麻的引擎算出：雲端 3p 或本地 Akagi 三麻（`BotStatus.isSanmaCapableDecision`）。
         ///
         /// 三麻放行的唯一條件：三麻引擎的推薦是有效決策，本地四麻模型推三麻
@@ -65,7 +63,8 @@ nonisolated enum AutoPlayGate {
         let callPassGrace: TimeInterval
         /// `recommendations` 是針對哪一批 oplist 算的（`Context.recommendationsOplistSequence`）。
         /// 比當前 snapshot 舊＝明確過期；nil＝未知，不當成過期。
-        var recommendationsOplistSequence: UInt64?
+        /// 用 `let`：optional `var` 會被 memberwise init 補上 nil 預設值，漏傳就等於「不算過期」。
+        let recommendationsOplistSequence: UInt64?
     }
 
     static func evaluate(_ input: Input) -> Decision {
@@ -82,7 +81,7 @@ nonisolated enum AutoPlayGate {
         //
         // 和牌例外：能不能和的權威是伺服器 oplist，不需要模型，擋掉就是漏和（不可逆）。
         // resolver 對和牌同樣不吃三麻降級，其餘三麻動作維持原限制。
-        if input.isSanma && !input.sanmaCapableDecision {
+        if !sanmaAllows(isSanma: input.isSanma, sanmaCapableDecision: input.sanmaCapableDecision) {
             if !input.hasActionInFlight, input.snapshot?.horaOperation != nil { return .forceHora }
             return .skip(.sanmaUnsupported)
         }
@@ -96,8 +95,8 @@ nonisolated enum AutoPlayGate {
         // 引擎對新視窗沒有產出（推論失敗、逾時）時，舊推薦會一直擋在 stale guard，
         // 「過」永遠送不出去。有和牌的批次不在此列，維持走 resolver。
         // 三麻非雲端決策不會走到這裡（上面已擋），其副露視窗交給伺服器逾時自動判過。
-        let staleCallOnly = snapshot.horaOperation == nil && snapshot.isCallOpportunity
-            && (input.recommendationsOplistSequence.map { $0 < snapshot.sequence } ?? false)
+        let staleCallOnly = snapshot.isCallOpportunity
+            && isStale(recommendationsOplistSequence: input.recommendationsOplistSequence, for: snapshot)
 
         if input.recommendations.isEmpty || staleCallOnly {
             // 伺服器提供和牌時，絕不因為「模型沒意見」而放過。
@@ -138,6 +137,27 @@ nonisolated enum AutoPlayGate {
         }
 
         return .proceed
+    }
+
+    /// 三麻 fail-closed 的放行條件：四麻局，或這批推薦由三麻引擎算出（見 `Input.sanmaCapableDecision`）。
+    ///
+    /// 伺服器授權的和牌另行放行，形狀各路不同，留在呼叫端：輪詢走 `.forceHora`，
+    /// 手動觸發交給 resolver（`AutoPlayEngine.runManualCycle`）。
+    static func sanmaAllows(isSanma: Bool, sanmaCapableDecision: Bool) -> Bool {
+        !isSanma || sanmaCapableDecision
+    }
+
+    /// 推薦明確是為更早的機會算的，而這批機會沒有伺服器授權的和牌——不得拿它回應這批機會。
+    ///
+    /// - provenance 未知（nil）不算過期：strict 等號會讓整局 0 觸發（實測）。
+    /// - 有和牌不算：resolver 會把和牌排在推薦之上，擋下來只會漏和（不可逆）。
+    ///
+    /// `evaluate` 只在推薦為空或此式成立的純副露機會走「無推薦」分支；推薦非空的擋法在
+    /// `AutoPlayEngine` 的輪詢與手動兩條路，同用此式。
+    static func isStale(recommendationsOplistSequence: UInt64?,
+                        for snapshot: LiqiOperationSnapshot) -> Bool {
+        guard let recSeq = recommendationsOplistSequence else { return false }
+        return recSeq < snapshot.sequence && snapshot.horaOperation == nil
     }
 
     /// 局間確認（`confirmNewRound`）的閘門：只看 mode 與三麻 fail-closed。

@@ -116,7 +116,7 @@ final class BundledCoreMLBot: MahjongBot {
                 let recommendations = await recommendationsFromCurrentMask()
                 // forced 不在這條路量：這不是 `react` 決策當下的合法集快照
                 return BotReaction(action: nil, recommendations: recommendations,
-                                   source: "local")
+                                   source: DecisionSource.local)
             }
             // 非決策點：不刷新、不清空，畫面保持現狀
             return nil
@@ -130,7 +130,7 @@ final class BundledCoreMLBot: MahjongBot {
             botLog("[BundledCoreMLBot] ERROR: Failed to parse response JSON")
             // 防禦路徑（MortalBot 輸出必為合法 JSON）：以空推薦清空畫面，
             // 對應抽出前「清 lastRecommendations、回 nil」的語意
-            return BotReaction(action: nil, recommendations: [], source: "local")
+            return BotReaction(action: nil, recommendations: [], source: DecisionSource.local)
         }
 
         // 更新推薦列表（Bot 已選擇動作，顯示所有可用選項及其機率）
@@ -140,7 +140,7 @@ final class BundledCoreMLBot: MahjongBot {
                                                       into: recommendations)
         }
         return BotReaction(action: response, recommendations: recommendations,
-                           source: "local", forced: legalCount == 1)
+                           source: DecisionSource.local, forced: legalCount == 1)
     }
 
     // MARK: - 推薦生成（自 NativeBotController 原樣搬移）

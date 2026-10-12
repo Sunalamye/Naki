@@ -58,7 +58,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
-            tsumoTile: "5m", sender: sender, store: store)
+            tsumoTile: "5m", sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(result?.success, true)
         XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputOperation")
@@ -80,7 +80,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
             let result = await AutoPlayActionExecutor.execute(
                 action: .kita, tile: "kita", snapshot: snapshot, recommendations: [],
-                tsumoTile: tsumo, sender: sender, store: store)
+                tsumoTile: tsumo, sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
             XCTAssertEqual(result?.success, true)
             XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputOperation")
@@ -99,7 +99,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .ryukyoku, tile: "", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(result?.success, true)
         XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputOperation")
@@ -120,7 +120,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         await AutoPlayActionExecutor.execute(
             action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
-            tsumoTile: "1p", sender: sender, store: store)
+            tsumoTile: "1p", sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertTrue(hex(captured.first).hasSuffix("08011a02356d"),
                       "手切不可以宣稱摸切，實際 bytes=\(hex(captured.first))")
@@ -131,7 +131,6 @@ final class AutoPlayActionExecutorTests: XCTestCase {
     func testRiichiUsesTopDiscardRecommendationAsDeclarationTile() async {
         let store = LiqiOperationStore()
         var captured: [String] = []
-        var events: [String] = []
         let sender = recordingSender { captured.append($0) }
         let snapshot = store.record(seat: 0,
                                     operations: [LiqiOperation(type: .discard),
@@ -141,7 +140,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         let result = await AutoPlayActionExecutor.execute(
             action: .riichi, tile: "riichi", snapshot: snapshot,
             recommendations: [Recommendation(tile: "3s", probability: 0.9, actionType: .discard)],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(result?.success, true)
         XCTAssertTrue(hex(captured.first).hasSuffix("08071a023373"),
@@ -164,7 +163,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         await AutoPlayActionExecutor.execute(
             action: .chi, tile: "chi_1", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputChiPengGang")
         XCTAssertTrue(hex(captured.first).hasSuffix("08021001"),
@@ -186,7 +185,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         await AutoPlayActionExecutor.execute(
             action: .chi, tile: "chi_1", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store, log: { logs.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, log: { logs.append($0) })
 
         XCTAssertTrue(hex(captured.first).hasSuffix("0802"),
                       "退回索引 0（proto3 省略），實際 bytes=\(hex(captured.first))")
@@ -210,7 +209,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store, event: { events.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
 
         XCTAssertNil(result)
         XCTAssertEqual(sendCount, 0)
@@ -227,10 +226,31 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .chi, tile: "chi_0", snapshot: nil, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertNil(result)
         XCTAssertEqual(sendCount, 0)
+    }
+
+    /// 可達路徑：oplist 有 chi 但 combination 為空（例如解析缺陷）→ 沒有可猜的對象，不送、不消化 oplist
+    @MainActor
+    func testChiOperationWithEmptyCombinationDoesNotSend() async {
+        let store = LiqiOperationStore()
+        var sendCount = 0
+        var events: [String] = []
+        let sender = recordingSender { _ in sendCount += 1 }
+        let snapshot = store.record(seat: 0,
+                                    operations: [LiqiOperation(type: .chi, combination: [])],
+                                    contextTile: "3m", source: "test")
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [],
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
+
+        XCTAssertNil(result)
+        XCTAssertEqual(sendCount, 0)
+        XCTAssertEqual(store.pending?.sequence, snapshot.sequence, "沒送出就不能消化這批 oplist")
+        XCTAssertTrue(events.contains { $0.contains("[-]") }, "event 要標出沒有任何組合，實際: \(events)")
     }
 
     /// `chi_` 前綴解析失敗：照舊以 chi_0 對照，但必須留下一行 log
@@ -247,7 +267,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         await AutoPlayActionExecutor.execute(
             action: .chi, tile: "chi_x", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store, log: { logs.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, log: { logs.append($0) })
 
         XCTAssertTrue(logs.contains { $0.contains("無法解析變體") })
     }
@@ -264,7 +284,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         await AutoPlayActionExecutor.execute(
             action: .kan, tile: "", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputOperation")
         XCTAssertTrue(hex(captured.first).hasSuffix("12020806"),
@@ -285,7 +305,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
             let result = await AutoPlayActionExecutor.execute(
                 action: .kan, tile: "kan", snapshot: snapshot,
                 recommendations: [Recommendation(tile: "kan", probability: 0.9, actionType: .kan, kanKind: kind)],
-                sender: sender, store: store)
+                sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
             XCTAssertEqual(result?.success, true)
             XCTAssertTrue(hex(captured.first).hasSuffix(suffix),
@@ -308,7 +328,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         let result = await AutoPlayActionExecutor.execute(
             action: .kan, tile: "kan", snapshot: snapshot,
             recommendations: [Recommendation(tile: "kan", probability: 0.9, actionType: .kan, kanKind: .kakan)],
-            sender: sender, store: store, event: { events.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
 
         XCTAssertNil(result)
         XCTAssertEqual(sendCount, 0)
@@ -329,7 +349,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         await AutoPlayActionExecutor.execute(
             action: .kan, tile: "kan", snapshot: snapshot,
             recommendations: [Recommendation(tile: "kan", probability: 0.9, actionType: .kan)],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertTrue(hex(captured.first).hasSuffix("12020804"),
                       "無槓種走 kanOperation（暗槓優先），實際 bytes=\(hex(captured.first))")
@@ -347,10 +367,30 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         await AutoPlayActionExecutor.execute(
             action: .hora, tile: "5p", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertTrue(hex(captured.first).hasSuffix("12020809"),
                       "榮和是 type=9，實際 bytes=\(hex(captured.first))")
+    }
+
+    /// 沒有和牌授權就不送（與 MCP `game_action hora` 同一條規則）：不猜自摸
+    @MainActor
+    func testHoraWithoutAuthorizationSendsNothingAndKeepsOplist() async {
+        let store = LiqiOperationStore()
+        var captured: [String] = []
+        let sender = recordingSender { captured.append($0) }
+        var events: [String] = []
+        store.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test")
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .hora, tile: "", snapshot: store.pending, recommendations: [],
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0,
+            event: { events.append($0) })
+
+        XCTAssertNil(result)
+        XCTAssertTrue(captured.isEmpty, "沒有和牌授權不得送出，實際 bytes=\(hex(captured.first))")
+        XCTAssertNotNil(store.pending, "沒送出就不能消化 oplist")
+        XCTAssertTrue(events.contains { $0.contains("沒有和牌授權") })
     }
 
     /// 「過」的通道由這批機會的類型決定：副露機會走 inputChiPengGang
@@ -365,7 +405,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         await AutoPlayActionExecutor.execute(
             action: .none, tile: "", snapshot: call, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
         XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputChiPengGang")
         XCTAssertTrue(hex(captured.first).hasSuffix("12021801"),
                       "ReqChiPengGang.cancel_operation 是 field 3，實際 bytes=\(hex(captured.first))")
@@ -376,7 +416,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
                                     source: "test")
         await AutoPlayActionExecutor.execute(
             action: .none, tile: "", snapshot: selfTurn, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
         XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputOperation")
         XCTAssertTrue(hex(captured.last).hasSuffix("12022001"),
                       "ReqSelfOperation.cancel_operation 是 field 4，實際 bytes=\(hex(captured.last))")
@@ -396,7 +436,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(result?.success, false)
         XCTAssertEqual(captured.count, 1, "失敗也要真的送過一次")
@@ -417,7 +457,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .discard, tile: "not-a-tile", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store, event: { events.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
 
         XCTAssertNil(result, "組不出 request 與送出失敗要分得開")
         XCTAssertEqual(sendCount, 0)
@@ -439,7 +479,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         let result = await AutoPlayActionExecutor.execute(
             action: .riichi, tile: "riichi", snapshot: snapshot,
             recommendations: [Recommendation(actionType: .pon, probability: 0.5)],
-            sender: sender, store: store, event: { events.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
 
         XCTAssertNil(result)
         XCTAssertEqual(sendCount, 0)
@@ -460,7 +500,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .unknown, tile: "", snapshot: snapshot, recommendations: [],
-            sender: sender, store: store, event: { events.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
 
         XCTAssertNil(result)
         XCTAssertEqual(sendCount, 0)
@@ -479,7 +519,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .discard, tile: "5m", snapshot: nil, recommendations: [],
-            sender: sender, store: store)
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(result?.success, true)
         XCTAssertEqual(store.pending?.sequence, snapshot.sequence,
@@ -517,7 +557,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
-            tsumoTile: "5m", sender: sender, store: store, awaitResponseMs: 500)
+            tsumoTile: "5m", sender: sender, store: store, awaitResponseMs: 500, echoTimeoutMs: 0)
 
         XCTAssertEqual(result?.success, false, "sendRaw 成功但伺服器拒絕，不能算打成")
         XCTAssertNotNil(store.pending, "被拒絕就保留 oplist，交給重試框架再送")
@@ -534,7 +574,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         let result = await AutoPlayActionExecutor.execute(
             action: .discard, tile: "5m", snapshot: snapshot, recommendations: [],
-            tsumoTile: "5m", sender: sender, store: store, awaitResponseMs: 500)
+            tsumoTile: "5m", sender: sender, store: store, awaitResponseMs: 500, echoTimeoutMs: 0)
 
         XCTAssertEqual(result?.success, true, "RESPONSE 無 error＝伺服器受理")
         XCTAssertNil(store.pending, "受理才消化這批 oplist")
@@ -687,7 +727,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
             action: .riichi, tile: "riichi", snapshot: snapshot,
             recommendations: [Recommendation(tile: "9m", probability: 0.9, actionType: .discard),
                               Recommendation(tile: "3s", probability: 0.5, actionType: .discard)],
-            sender: sender, store: store, event: { events.append($0) })
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
         return (hex(captured.first), events)
     }
 
