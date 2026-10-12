@@ -731,3 +731,11 @@
   - R4 另一半（本地丟錯清推薦 vs 雲端失敗保留舊推薦不一致）→ 延後表，等 live 證據決定統一方向。
   - `testChiWithoutAnyCombinationDoesNotSend` 測的是正式路徑到不了的 nil snapshot，可達的「有 chi 但 combination 為空」未直接測 → WP7c 補。
   - 同類多組槓一律送 index 0 仍是已知未實作（WP5 等 live 抓包）。
+
+### WP5 進行中裁決（2026-10-12）
+- 復驗（HEAD `57a27ee`）裁決「要修正」，阻擋項：`ActionChiPengGang.type` 缺席補 0（chi）的路徑未檢查順子形狀與三麻。proto3 缺席即 chi，chi 只能是同花色三張連續數牌，「type 缺席但不是順子」自相矛盾，依 U2 第 1 點屬 malformed 應丟棄；WP5 前這類封包被丟棄，不補就會變成 chi 事件送進 bot（復驗推定自家字牌 chi 可能觸發 MortalSwift `AgariCalculator.swift:330-338` `kinds[kind]` 越界，可達性未驗證）。
+- 統帥裁決：**補形狀檢查＋`!is3P`，只加在 type 缺席路徑**，type 顯式 0 的既有曝險不動（不擴大 WP5 範圍）。順帶修 malformed seat 的 bridge fault 文字（-1 被寫成「越界」）。
+- 復驗推翻的證據：§4 WP5 驗證閘「四麻指紋測試證明事件輸出不變」**無效**——`ReplayFingerprintTests` 重放的是 MJAI 事件流，不經 LiqiParser／MajsoulBridge。現在「格式正確封包輸出不變」只靠逐 hunk 論證＋錄影 fixture 證據（cf38b77 時代 bridge 要求 seat／type key 存在才發事件，錄影裡 actor 0 的事件 56 條、chi 4 條，代表 live 直連顯式送 0）。**後續：補一條「Liqi bytes 進、MJAI 事件出」的 bridge 黃金測試 → WP7c**。
+- 其他復驗結論：巢狀 `account.accountId` 顯式 0 覆寫是既有行為（d861648 相同），非本包引入；Deviation 7 改測試輸入合理（保留「自家打牌」語意）；Deviation 2（malformed oplist seat 以 -1 建快照，不 clear）接受——resolver 以 `seat_mismatch` fail-closed，且 `pending != nil` 會亮停滯橫幅，是可見訊號；改 `clear()` → WP7b 評估。
+- 給 live 驗證的訊號：依錄影證據，live 直連下 `.absent` fault 照理不會出現；出現就代表中間有代理或重新序列化（寫進 §6）。
+- 延後表新增：MortalSwift `kinds[kind]` 無 `< 3` 守衛（上游，type 顯式 0 的字牌 chi 也會走到）；`LiqiActionSender.swift:23`、`LiqiEnvelope.swift:23`、`docs/plugin-system-design.md` 的 `parseRaw` 文件漂移 → WP12。
