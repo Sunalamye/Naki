@@ -131,7 +131,7 @@ Expand the summary row to inspect server-authorized actions, player scores, dora
 </tr>
 </table>
 
-<sub>The iPhone gameplay images were captured from the app running in an iOS 26 simulator. Player names are concealed using Naki's built-in name-hiding feature. The images retain the interface language used when they were captured.</sub>
+<sub>The iPhone gameplay images were captured from the app running in an iOS 26 simulator. Player names are concealed by the built-in name-hiding feature as it existed when the images were captured (now provided by plugins). The images retain the interface language used when they were captured.</sub>
 
 ### Choose your Mahjong Soul server
 
@@ -165,9 +165,21 @@ Auto and Full Auto are available only on platforms that support automatic action
 
 The toolbar also offers a **delay baseline** control, from 0.5 to 3.0 seconds. This scales a randomized action-delay distribution; it does not set a fixed delay for every action. A value of 1.0 seconds uses the baseline behavior, with higher values slowing it down and lower values speeding it up.
 
+### Plugin system
+
+The puzzle-piece icon in the toolbar opens the **Plugins page**. Toggling a plugin takes effect immediately, with no page reload. Place plugins in `~/Library/Application Support/Naki/Plugins/<id>/` (macOS), or paste a gist or HTTPS `plugin.json` URL for a one-time import. Naki ships no marketplace or built-in source. Display features such as tile recoloring and name hiding are no longer built in; they are provided by plugins.
+
+- Plugins have three capability levels: **L1 read-only** (observe packets), **L2 local display** (rewrite what the game client sees, without affecting the server or other players), and **L3 outbound** (send game actions with your account). L3 is completely unavailable until you turn on a separate master switch and confirm it.
+- ⚠️ **L3 risk:** a plugin runs in the same JavaScript environment as the game, and its permissions only guard against mistakes, not against a malicious plugin. A malicious plugin can send or rewrite outgoing packets with your account and read anything on the page, including your login token. **Installing a plugin means trusting its author.** Install only plugins you trust, and use them only on a secondary account.
+- The contract and its limits are in [`docs/plugin-api-v1.md`](docs/plugin-api-v1.md).
+
+### In-app language (macOS)
+
+Advanced Settings → **Language**: follow the system, or choose one of **Traditional Chinese, Simplified Chinese, English, Japanese, or Korean**. The interface and status messages switch to that language immediately. iOS always follows the system language.
+
 ### Other tools
 
-- **Hide player names:** an Advanced Settings switch that works on two layers. Protocol-level rewriting replaces names with `Player 1`–`Player 4` before the game parses packets, and applies only to matches started after enabling the option. Render-level hiding (added in 2.8.0) takes effect the moment you switch it on. The Unity client has no hookable UI layer, so Naki calibrates itself: it tries masking candidates one at a time, compares the screen, and picks the one whose masking changes all four seat positions with very few changed pixels. If it cannot identify one, it hides nothing rather than hiding unrelated UI. This is a display feature, not a guarantee of anonymity.
+- **Hide player names:** the built-in switch has been removed and the feature is now provided by plugins; the underlying APIs remain, on two layers. Protocol-level rewriting replaces names with equal-length ASCII before the game parses packets, and applies only to matches started afterwards. Render-level hiding (added in 2.8.0, `setNameMask`) takes effect immediately. The Unity client has no hookable UI layer, so Naki calibrates itself: it tries masking candidates one at a time, compares the screen, and picks the one whose masking changes all four seat positions with very few changed pixels. If it cannot identify one, it hides nothing rather than hiding unrelated UI. This is a display feature, not a guarantee of anonymity.
 - **Protocol-level emotes:** MCP tools can send emotes and inspect received broadcasts. The older automatic-reply path is not available with the Unity client.
 - **MCP integration:** connect an AI assistant such as Claude Code to inspect state and use the app's exposed tools.
 - **Local Debug API:** the HTTP server binds to loopback, not to other devices on your network.
@@ -231,7 +243,7 @@ Mahjong Soul · Unity WebGL
           │
           │ WebSocket traffic / WebGL highlighting
           ▼
-JavaScript bridge · naki-core / naki-websocket
+JavaScript bridge · naki-core / naki-websocket / naki-plugins
           │
           ▼
 Swift services
@@ -294,14 +306,14 @@ The built-in [Model Context Protocol](https://modelcontextprotocol.io/) server s
 claude mcp add --transport http naki http://localhost:8765/mcp
 ```
 
-Discover the current tool inventory with `tools/list` or inspect `get_status.toolsCount`; a static count can become outdated as tools change (2.7.0 registered 40 tools statically, and six obsolete highlight stubs have since been removed).
+Discover the current tool inventory with `tools/list` or inspect `get_status.toolsCount`; a static count can become outdated as tools change (2026-10-13: 43 tools registered statically; six obsolete highlight stubs have since been removed).
 
 | Area | Count | Example tools |
 |---|:---:|---|
 | System | 6 | `get_status`, `get_logs`, `replay_game` |
 | Bot control | 7 | `bot_status`, `bot_ops`, `bot_trigger` |
 | Game state and actions | 8 | `game_state`, `game_action`, `game_confirm_new_round` |
-| Lobby | 8 | `lobby_start_match`, `lobby_account_info` |
+| Lobby | 11 | `lobby_start_unified_match`, `lobby_account_info` |
 | Friendly rooms | 7 | `room_create`, `room_add_robot`, `room_quick_test` |
 | Emotes | 2 | `game_emoji`, `game_emoji_listen` |
 | Utilities | 2 | `execute_js`, `lobby_anti_idle` |
@@ -349,10 +361,10 @@ Feature availability is not the same as complete end-to-end verification. [`AUDI
 | Four-player AI recommendations | Available with the local model. |
 | Automatic play and between-round confirmation | Available on macOS / iOS 26+; live validation gaps remain. |
 | Full Auto rematching | Implemented as a separate opt-in mode from Auto. |
-| In-game tile highlighting | Implemented; complete visual-regression coverage is still missing. |
+| In-game tile highlighting | Built-in automatic coloring has been removed; plugins read the recommendation channel and color tiles themselves. The underlying hook is implemented; complete visual-regression coverage is still missing. |
 | Optional cloud inference | Available, with explicit upload disclosure and local fallback. Live-verified for four-player matches; no live three-player match with a cloud model. |
 | Three-player AI recommendations | Available locally at default strength; see below. |
-| Hide player names | Protocol-level rewriting and render-level hiding. |
+| Hide player names | The built-in switch has been removed; provided by plugins (the underlying APIs remain). |
 | MCP server and Debug API | Available through the local loopback server. |
 | iOS 17–25 | Recommendations only; automatic action submission is disabled. |
 | Game-record review and analysis | Not yet implemented as a user-facing analysis workflow. |

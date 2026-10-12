@@ -103,7 +103,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 </tr>
 </table>
 
-<sub>iPhone 截圖為 iOS 26 模擬器實機畫面，玩家名稱是 App 內建的「隱藏玩家名稱」效果。</sub>
+<sub>iPhone 截圖為 iOS 26 模擬器實機畫面，玩家名稱是截圖當時內建的「隱藏玩家名稱」效果（現在改由插件提供）。</sub>
 
 ### 三個雀魂區服，啟動時選
 
@@ -195,15 +195,32 @@ iPhone 是同一份設定表單的單欄版（窄畫面放不下兩欄）：
 雲端相關的驗證進度記在 [`AUDIT.md`](AUDIT.md) §20 與
 [`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md)。
 
+### 插件系統
+
+工具列的拼圖圖示打開**插件頁面**：開關插件即時生效，不必重載頁面。插件放在
+`~/Library/Application Support/Naki/Plugins/<id>/`（macOS），或在頁面貼 gist／HTTPS 的
+`plugin.json` URL 一次性匯入；Naki 不內建市集或任何來源。牌面變色、暱稱隱藏這類顯示功能
+已不再內建，改由插件提供。
+
+- 插件分三級能力：**L1 唯讀**（看封包）、**L2 改本機顯示**（改遊戲客戶端看到的封包，不影響伺服器與其他玩家）、
+  **L3 送出側**（能替你的帳號送出遊戲動作）。L3 預設完全不可用，要另外開總開關並確認
+- ⚠️ **L3 風險**：插件與遊戲跑在同一個 JS 環境，授權只是防誤用、不防惡意插件。
+  一個惡意插件可以用你的帳號送出或改寫送出的封包、讀取頁面上的任何資料（含登入 token）。
+  **安裝插件 ＝ 信任作者**；只裝信任的插件，只在測試帳號上用
+- 契約與限制見 [`docs/plugin-api-v1.md`](docs/plugin-api-v1.md)
+
+### App 內語言（macOS）
+
+進階設定 →「語言」：跟隨系統，或指定**繁體中文、简体中文、English、日本語、한국어**
+五種之一，切換後介面與狀態訊息立即改用該語言。iOS 一律跟隨系統語言。
+
 ### 其他
 
 - **協定層表情工具** — MCP 可發送表情並讀取收到的廣播；舊自動回覆路徑在 Unity 下不可用
-- **隱藏玩家名稱** — 進階設定裡的開關，兩層一起生效：
-  - **協定層** 在遊戲解析封包之前把暱稱改寫成 `Player 1`–`Player 4`。只對開啟之後才開始的
-    對局生效
-  - **渲染層**（2.8.0 新增）直接讓遊戲畫面上的名字不顯示，**開關當下就生效**，不必等下一局。
-    Unity 客戶端沒有可 hook 的 UI 層，所以靠自我校準認出名字那一層：開啟時逐一試遮並比對
-    畫面，選出「遮掉會讓四家位置同時變化、但變動像素很少」的那一個。認不出來就什麼都不遮，
+- **隱藏玩家名稱** — 內建開關已移除，改由插件提供（底層 API 仍在）：
+  - **協定層**在遊戲解析封包之前把暱稱改寫成等長 ASCII，只對之後才開始的對局生效
+  - **渲染層**（2.8.0 新增，`setNameMask`）直接讓遊戲畫面上的名字不顯示，即時生效。
+    Unity 客戶端沒有可 hook 的 UI 層，所以靠自我校準認出名字那一層；認不出來就什麼都不遮,
     不會誤遮其他 UI
 - **MCP Server** — 讓 Claude Code 之類的 AI 助手直接操作遊戲
 - **本機 Debug API** — 只綁 loopback，同網段的其他裝置連不到
@@ -251,8 +268,8 @@ iPhone 是同一份設定表單的單欄版（窄畫面放不下兩欄）：
 ┌──────────────────────────────────────────────────────────┐
 │              WebPage（雀魂 · Unity WebGL）                │
 │                          │                               │
-│    JavaScript 只做兩件事：收送 WebSocket、替牌上色         │
-│              naki-core / naki-websocket                  │
+│  JavaScript 只做三件事：收送 WebSocket、替牌上色、跑插件   │
+│        naki-core / naki-websocket / naki-plugins          │
 └──────────────────────────┼───────────────────────────────┘
                            ▼
 ┌──────────────────────────────────────────────────────────┐
@@ -325,7 +342,7 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 與 Debug API 共用同一個 port。協定升級到 **2026-07-28（stateless）**，同時相容舊的
 `initialize` handshake：工具結果走 `structuredContent`（不再是「JSON 包在 JSON 字串裡」），
 非 loopback Origin 回 403。工具數請以 `tools/list` 或 `get_status.toolsCount` 現查
-（2.7.0 靜態註冊 40 個；6 個舊高亮失敗樁已移除）。
+（2026-10-13 靜態註冊 43 個；6 個舊高亮失敗樁已移除）。
 
 ```bash
 claude mcp add --transport http naki http://localhost:8765/mcp
@@ -336,7 +353,7 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 | 系統 | 6 | `get_status` · `get_logs` · `replay_game` |
 | Bot 控制 | 7 | `bot_status` · `bot_ops` · `bot_trigger` |
 | 遊戲狀態與動作 | 8 | `game_state` · `game_action` · `game_confirm_new_round` |
-| 大廳 | 8 | `lobby_start_match` · `lobby_account_info` |
+| 大廳 | 11 | `lobby_start_unified_match` · `lobby_account_info` |
 | 友人房 | 7 | `room_create` · `room_add_robot` · `room_quick_test` |
 | 表情 | 2 | `game_emoji` · `game_emoji_listen` |
 | 其他 | 2 | `execute_js` · `lobby_anti_idle` |
@@ -375,9 +392,9 @@ Xcode 裡可到 `Product → Scheme → Edit Scheme → Run → Build Configurat
 | AI 推薦（三麻） | 本地可用（default strength），見下 |
 | 全自動打牌 · 局間自動確認 | 可用（macOS / iOS 26+） |
 | 全自動（對局結束後自動排下一場） | 已實作，為獨立選用模式（macOS / iOS 26+） |
-| 遊戲內牌面高亮 | 可用 |
+| 遊戲內牌面高亮 | 內建自動染色已移除，改由插件讀推薦通道自行染色 |
 | 雲端推論（可選） | 可用；四麻已 live 驗證，三麻雲端模型無 live 對局 |
-| 隱藏玩家名稱 | 可用（協定層 + 渲染層） |
+| 隱藏玩家名稱 | 內建開關已移除，改由插件提供（底層 API 仍在） |
 | MCP Server · Debug API | 可用 |
 | iOS 17–25 | 只顯示推薦，不自動送出 |
 | 牌譜回放分析 | 尚未開始 |
