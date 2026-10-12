@@ -823,3 +823,9 @@
 - 實作者 c2 一次 flaky（停滯訊息變日文）：復驗歸因 wp9 首輪變異寫 `naki.appLanguage=ja` 到真實設定檔的時間窗，字母序重跑 6 次皆過，非本包；精確寫入時刻無 log，歸因未驗證。
 - 可合併後補：JSContractTests 補 `atob` polyfill 讓 Commit 4 在 Swift 側也鎖住、補涵蓋全域變數賦值（`NakiRuntime.swift:453`、`PluginRegistry.swift:291/292/347`、`NakiWebSocketScript.swift:44-45`——JS 改名會靜默失效，送出總開關落到關閉屬安全方向）、每模組載入後清 `JSContext.exception`、修 `naki-websocket.js:29` fail-open 註解 → 併入 WP9b 改名 **WP9b「測試隔離與契約加固」**；選做加固「插件號段 id 不進登記表」→ 延後表（重啟條件：live 看到插件注入量大）；v1 文件既有漂移（onSocketClose／drop／dropReceive／dropSend／rewriteSend 基底即 0 出現）→ WP12。
 - 未驗證：live 一局（§6 第 12 項）；量測方法改讀剔除 ws 物件後的 `getMajsoulConnections()` 加 `isNakiSent(msgId)`。
+
+### WP11 進行中裁決（2026-10-13）
+- 復驗（`.swfd/logs/wp11-verify/`）對 `e42ce17` 裁「要修正」，兩阻擋：(A) `CloudDecisionMapper` 的 chi case 對非 MJAI 輸入（`0m` 類赤五寫法）基底回 nil 退回本地、HEAD 產出吃的列，方向 fail-open，上游 `AkagiApiClient` 不驗證 JSON 所以程式上可達；(B) 與 wp8 文字合併乾淨但語意衝突——wp8 測試用 `Recommendation(tile:"chi_N", actionType:.chi)` 期待「吃①②③」，WP11 把變體改藏在欄位後這三格退化成「吃」，實作者還為此改寫了兩條既有測試。
+- **統帥代決**：(A) 在 mapper 分類前加 `majsoul(fromMJAI:) != nil` guard，不動 `LiqiTile.chiVariant`，接受集合變成基底子集（fail-closed）；(B) 選復驗方案 (a)：`Recommendation` 兩個 init 遇 `.chi` 且未傳變體時在建構邊界解一次 label，函式層行為回到基底，兩條被改寫的既有測試還原原文。理由：(a) 最接近零行為改動，且不需要 WP8 配合改測試；若選 (b) 改 wp8 測試，等於承認 Recommendation 的建構契約變了，之後所有用 label 建構 chi 的呼叫端都要跟改。
+- 另補：executor `first(where: .chi)`→`first` 變異存活（正式路徑等價但無測試）→ 補測試；`LiqiTile.swift:37` 註解不準。復驗更正了主線 brief 的一個前提：基底與 HEAD 對「無變體」都是以 0 對照，規格 :318「多組且對照失敗才不送」才是正確描述，非 WP11 造成。
+- 復驗附帶：`ReplayFingerprintTests` 只雜湊 bot 的 MJAI action，對 chi 路徑無覆蓋力（弱證據）；live log 無任何「執行: 吃」，chi combination 恆為兩張未驗證；test host 每跑一次會在 `~/Library/Logs/Naki` 建 session 目錄（既有行為，plist 以外的環境副作用，WP9b 一併看）；實作者與復驗員都用過系統 `python3`（違反 proto 規則，已提醒）。
