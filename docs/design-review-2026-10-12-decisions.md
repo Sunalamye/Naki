@@ -774,3 +774,8 @@
   - `AutoPlayMode.swift:150` doc 仍寫「App 進入點與 load() 都會呼叫」→ WP7c。
   - 基底就有：`build-for-testing -scheme Naki-M` 在 Naki-MUITests target 報 `akagi.entitlements` 重複複製（`Unexpected duplicate tasks`），純 build 不受影響 → 延後表。
   - `fireJavaScript` 測試只驗失敗寫 log，未驗成功不寫 → 次要，WP7c 順手。
+
+### U1 拆出 WP7b（2026-10-12，統帥代決）
+- §11 把 U1（移除 `matchGame` 鏈）排進 WP7b，前置條件是「先以 MCP 呼叫一次 `lobby_start_match` 確認仍回 error 1306」。這需要執行中的 Naki 與登入的測試帳號在大廳，只有用戶能提供；實作者不得啟動 app、不得連網。
+- 裁決：U1 從 WP7b 拆出成獨立小包 **WP7d**，排在 WP7c 之後、WP8 之前，**等用戶提供 1306 證據後才派**（證據存 `.swfd/logs/wp7d/`）。不先拆掉程式碼再補證據，因為 U1 是用戶裁決的行為移除，證據鏈順序不能反。
+- WP7d 範圔：`lobby_start_match`／`cancel_match`／`match_modes` 三個 MCP 工具、`StartMatchAction`／`CancelMatchAction`、`ObservedMatchModes` 與對應測試；`tools/list` 數量會減 3（契約變更，WP12 文件同步）。arch S6 的 4 個匹配 Action 收斂在 WP7d 一併定案。
