@@ -189,13 +189,12 @@ final class ToolAndModelGapTests: XCTestCase {
 
     // MARK: - 設定持久化
 
-    func testSettingsWritesChangesThroughToUserDefaults() {
-        let defaults = UserDefaults.standard
-        let keys = [SettingsStore.keepAliveInBackgroundKey, SettingsStore.autoCheckUpdateKey]
-        let saved = keys.map { defaults.object(forKey: $0) }
-        defer { zip(keys, saved).forEach { defaults.set($1, forKey: $0) } }
+    func testSettingsWritesChangesThroughToUserDefaults() throws {
+        let suite = "naki.tests.gap.settings.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
 
-        let store = SettingsStore()
+        let store = SettingsStore(defaults: defaults)
         for flip in [false, true] {
             store.keepAliveInBackground = flip
             store.autoCheckUpdate = flip

@@ -69,7 +69,7 @@ final class ObservedMatchSids {
     /// 短暫狀態，跨啟動保留只會把下一局的人數標到上次那個 sid 上。
     nonisolated static let storageKey = "naki.observedMatchSids"
 
-    private let defaults: UserDefaults
+    private var defaults: UserDefaults
 
     private init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -80,6 +80,13 @@ final class ObservedMatchSids {
         /// 測試用：不碰 `.standard`
         static func makeForTesting(defaults: UserDefaults) -> ObservedMatchSids {
             ObservedMatchSids(defaults: defaults)
+        }
+
+        /// 測試用：parser 只寫 `.shared`，所以把它的落點換成獨立 suite 並重讀；傳 `.standard` 還原。
+        func redirect(to defaults: UserDefaults) {
+            self.defaults = defaults
+            observations = Self.load(from: defaults)
+            awaitingGameKind = nil
         }
     #endif
 

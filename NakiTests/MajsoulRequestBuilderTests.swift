@@ -96,22 +96,18 @@ final class MajsoulConnectionSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsStore.loadExtraHeaders(from: defaults), headers)
     }
 
-    func testSettingsStorePersistsUserAgentAndHeaders() {
-        let standard = UserDefaults.standard
-        let savedUA = standard.object(forKey: SettingsStore.majsoulUserAgentKey)
-        let savedHeaders = standard.object(forKey: SettingsStore.majsoulExtraHeadersKey)
-        defer {
-            standard.set(savedUA, forKey: SettingsStore.majsoulUserAgentKey)
-            standard.set(savedHeaders, forKey: SettingsStore.majsoulExtraHeadersKey)
-        }
+    func testSettingsStorePersistsUserAgentAndHeaders() throws {
+        let suite = "naki.tests.h1.persist.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
 
-        let settings = SettingsStore()
+        let settings = SettingsStore(defaults: defaults)
         settings.majsoulUserAgent = "Naki-UA/1"
         settings.majsoulExtraHeaders = ["X-A": "1"]
 
-        XCTAssertEqual(standard.string(forKey: SettingsStore.majsoulUserAgentKey), "Naki-UA/1")
-        XCTAssertEqual(SettingsStore.loadExtraHeaders(), ["X-A": "1"])
-        let reloaded = SettingsStore()
+        XCTAssertEqual(defaults.string(forKey: SettingsStore.majsoulUserAgentKey), "Naki-UA/1")
+        XCTAssertEqual(SettingsStore.loadExtraHeaders(from: defaults), ["X-A": "1"])
+        let reloaded = SettingsStore(defaults: defaults)
         XCTAssertEqual(reloaded.majsoulUserAgent, "Naki-UA/1")
         XCTAssertEqual(reloaded.majsoulExtraHeaders, ["X-A": "1"])
     }
