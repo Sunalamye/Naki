@@ -360,7 +360,7 @@ final class AkagiSanmaBotTests: XCTestCase {
             sanmaCapableDecision: status(source: source).isSanmaCapableDecision,
             hasActionInFlight: false, snapshot: snapshot([.discard]),
             recommendations: [Recommendation(tile: "9s", probability: 0.9, actionType: .discard)],
-            now: Date(), callPassGrace: 2))
+            now: Date(), callPassGrace: 2, recommendationsOplistSequence: nil))
     }
 
     func testGateLetsLocalSanmaSourceThroughAndBlocksLocalFourPlayer() {

@@ -84,7 +84,8 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
                 snapshot: snapshot,
                 recommendations: recs,
                 now: Date(),
-                callPassGrace: 2.0))
+                callPassGrace: 2.0,
+                recommendationsOplistSequence: nil))
             let expectedSend: AutoPlayGate.Decision = row.autoSend ? .proceed : .skip(.notAutoMode)
             XCTAssertEqual(sendDecision, expectedSend,
                            "[\(row.mode.rawValue)] 自動送出格")

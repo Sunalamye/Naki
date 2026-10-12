@@ -45,10 +45,8 @@ nonisolated enum AutoPlayGate {
     /// 全部是值，不含任何 UI 或網路物件——這是能單測的前提。
     struct Input {
         let isAutoMode: Bool
-        /// 這局是不是三麻（`GameState.is3P`）
-        ///
-        /// 預設 false：舊的呼叫點與測試不必逐一改，但**正式路徑必須明確傳入**。
-        var isSanma: Bool = false
+        /// 這局是不是三麻（`GameState.is3P`）。不給預設值：漏傳會讓三麻 fail-closed 失效。
+        let isSanma: Bool
         /// 這批推薦是否由支援三麻的引擎算出：雲端 3p 或本地 Akagi 三麻（`BotStatus.isSanmaCapableDecision`）。
         ///
         /// 三麻放行的唯一條件：三麻引擎的推薦是有效決策，本地四麻模型推三麻
@@ -65,7 +63,8 @@ nonisolated enum AutoPlayGate {
         let callPassGrace: TimeInterval
         /// `recommendations` 是針對哪一批 oplist 算的（`Context.recommendationsOplistSequence`）。
         /// 比當前 snapshot 舊＝明確過期；nil＝未知，不當成過期。
-        var recommendationsOplistSequence: UInt64?
+        /// 用 `let`：optional `var` 會被 memberwise init 補上 nil 預設值，漏傳就等於「不算過期」。
+        let recommendationsOplistSequence: UInt64?
     }
 
     static func evaluate(_ input: Input) -> Decision {

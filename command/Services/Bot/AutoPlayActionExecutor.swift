@@ -44,8 +44,8 @@ enum AutoPlayActionExecutor {
     /// - Returns: 送出結果；**`nil` 代表一個 request 都沒組出來**（牌字串轉不了、
     ///   找不到宣言牌、推薦的槓種未獲授權、未知動作）。這與「送出失敗」不同，但兩者都不會消化 oplist。
     /// - Parameter awaitResponseMs: > 0 時等同 msgId 的 RESPONSE 並驗第 2 層（伺服器有沒有
-    ///   受理）。0＝只驗第 1 層（`sendRaw` 送進 WebSocket）——測試預設值，
-    ///   保留舊語意。正式路徑傳 > 0，讓「送成功但伺服器拒絕」不再被靜默當成功。
+    ///   受理）。0＝只驗第 1 層（`sendRaw` 送進 WebSocket）。正式路徑傳 > 0，讓「送成功但伺服器拒絕」
+    ///   不再被靜默當成功；不給預設值，漏傳就會退回只驗第 1 層。
     @discardableResult
     static func execute(
         action: Recommendation.ActionType,
@@ -55,8 +55,8 @@ enum AutoPlayActionExecutor {
         tsumoTile: String? = nil,
         sender: LiqiActionSender,
         store: LiqiOperationStore,
-        awaitResponseMs: Int = 0,
-        echoTimeoutMs: Int = 0,
+        awaitResponseMs: Int,
+        echoTimeoutMs: Int,
         echo: (any SelfActionEchoObserving)? = nil,
         log: (String) -> Void = { _ in },
         event: (String) -> Void = { _ in }
@@ -192,7 +192,7 @@ enum AutoPlayActionExecutor {
         spec: LiqiRequestSpec,
         sender: LiqiActionSender,
         awaitResponseMs: Int,
-        echoTimeoutMs: Int = 0,
+        echoTimeoutMs: Int,
         echo: (any SelfActionEchoObserving)? = nil,
         event: (String) -> Void
     ) async -> LiqiSendResult {

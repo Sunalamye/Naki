@@ -217,6 +217,17 @@ final class AutoPlayGateTests: XCTestCase {
                        .skip(.notAutoMode))
     }
 
+    /// 嚴格方向的預設值（省略＝擋下）是刻意保留的；鎖住省略時真的落在擋下那一邊
+    func testOmittedStrictDefaultsFailClosed() {
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true),
+                       .skip(.sanmaUnsupported))
+        let d = AutoPlayGate.evaluate(.init(
+            isAutoMode: true, isSanma: true, hasActionInFlight: false,
+            snapshot: snapshot(types: [1]), recommendations: [rec(.discard)],
+            now: Date(), callPassGrace: 2, recommendationsOplistSequence: nil))
+        XCTAssertEqual(d, .skip(.sanmaUnsupported))
+    }
+
     /// 和牌是伺服器權威、不需要模型：三麻（非雲端決策）也照樣走 forceHora，否則就是漏和
     func testSanmaStillForceHora() {
         let now = Date()

@@ -48,13 +48,12 @@ nonisolated enum AutoPlayDecisionResolver {
     ///   - mode: 使用者選的模式
     ///   - seat: 自家座位，用來確認這批 oplist 確實是給我們的
     ///   - isSanma: 這局是不是三麻。true 時**一律不自動送出**（見下方 fail-closed 說明）。
-    ///     預設 false 只是為了不動舊測試，正式路徑必須明確傳 `gameState.is3P`。
     ///   - recommendationsOplistSequence: 推薦是針對哪一批 oplist 算的；退次選的前提（見下方）
     static func resolve(snapshot: LiqiOperationSnapshot?,
                         recommendations: [Recommendation],
                         mode: AutoPlayMode,
                         seat: Int,
-                        isSanma: Bool = false,
+                        isSanma: Bool,
                         sanmaCapableDecision: Bool = false,
                         recommendationsOplistSequence: UInt64? = nil) -> AutoPlayDecision {
 
