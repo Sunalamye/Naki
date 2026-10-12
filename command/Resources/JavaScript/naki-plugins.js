@@ -25,8 +25,10 @@
     var sendToSwift = (window.__nakiCore && window.__nakiCore.sendToSwift)
         || window.__nakiSendToSwift
         || function () {};
+    // envelope 解析與 naki-websocket 共用 naki-core 那一份；缺了就不派發（fail-open）
+    var parseEnvelope = (window.__nakiCore && window.__nakiCore.parseEnvelope)
+        || function () { return null; };
 
-    var TYPE_NOTIFY = 1;
     var TYPE_REQUEST = 2;
     var TYPE_RESPONSE = 3;
 
@@ -120,76 +122,6 @@
     function noteSuccess(id, hook) {
         var f = failures.get(id);
         if (f) f[hook] = 0;
-    }
-
-    // ---- 輕量 envelope 解析（自包含，不依賴 naki-websocket 的私有符號）----
-
-    function readVarint(b, i, end) {
-        var shift = 0, result = 0;
-        while (i < end) {
-            var byte = b[i];
-            result |= (byte & 0x7f) << shift;
-            i++;
-            if ((byte & 0x80) === 0) return [result >>> 0, i];
-            shift += 7;
-            if (shift > 35) return null;
-        }
-        return null;
-    }
-
-    function decodeAscii(b, from, to) {
-        var s = '';
-        for (var i = from; i < to; i++) s += String.fromCharCode(b[i]);
-        return s;
-    }
-
-    // 掃 envelope body 的 field 1(method) 與 field 2(payload byte range)
-    function parseBody(b, start) {
-        var i = start, method = null, payload = null;
-        while (i < b.length) {
-            var tag = readVarint(b, i, b.length);
-            if (!tag) break;
-            var field = Math.floor(tag[0] / 8);
-            var wire = tag[0] & 7;
-            i = tag[1];
-            if (wire === 2) {
-                var len = readVarint(b, i, b.length);
-                if (!len) break;
-                var from = len[1];
-                var to = from + len[0];
-                if (to > b.length) break;
-                if (field === 1) method = decodeAscii(b, from, to);
-                else if (field === 2) payload = { from: from, to: to };
-                i = to;
-            } else if (wire === 0) {
-                var v = readVarint(b, i, b.length);
-                if (!v) break;
-                i = v[1];
-            } else if (wire === 5) { i += 4; }
-            else if (wire === 1) { i += 8; }
-            else break;
-        }
-        return { method: method, payload: payload };
-    }
-
-    // bytes(Uint8Array) -> { type, msgId, method, payload }
-    // NOTIFY 無 msgId，body 從 index 1；REQUEST/RESPONSE 跳過 2 bytes msgId，body 從 index 3。
-    function parseEnvelope(bytes) {
-        if (!bytes || bytes.length < 1) return null;
-        var type = bytes[0];
-        var msgId = null;
-        var bodyStart;
-        if (type === TYPE_NOTIFY) {
-            bodyStart = 1;
-        } else if (type === TYPE_REQUEST || type === TYPE_RESPONSE) {
-            if (bytes.length < 3) return null;
-            msgId = bytes[1] | (bytes[2] << 8);
-            bodyStart = 3;
-        } else {
-            return null; // 非 liqi envelope，不派發
-        }
-        var body = parseBody(bytes, bodyStart);
-        return { type: type, msgId: msgId, method: body.method, payload: body.payload };
     }
 
     function rememberIfRequest(env, direction) {

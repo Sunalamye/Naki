@@ -15,11 +15,14 @@ function setup() {
   const events = [], renders = [];
   const c = { console: { log(){}, error(){} }, Uint8Array, ArrayBuffer, DataView, Blob,
     btoa: s => Buffer.from(s, 'binary').toString('base64'), atob: s => Buffer.from(s, 'base64').toString('binary'),
-    __nakiCore: { sendToSwift: (type, data) => events.push({type,data}) },
-    __nakiRecommendations: [], __nakiRecommendationContext: {}, __nakiPluginGrants: {},
-    __nakiHighlight: { set: (marks,popup) => renders.push(plain({marks,popup})), clear: () => renders.push(null), state: () => ({}) }
+    document: { getElementById: () => null },
+    __nakiRecommendations: [], __nakiRecommendationContext: {}, __nakiPluginGrants: {}
   };
-  c.window = c; vm.createContext(c); vm.runInContext(source('naki-plugins.js'),c);
+  // 照正式注入順序先載 naki-core（envelope 解析在那裡），再換掉 bridge 與 WebGL 高亮
+  c.window = c; vm.createContext(c); vm.runInContext(source('naki-core.js'),c);
+  c.__nakiCore.sendToSwift = (type, data) => events.push({type,data});
+  c.__nakiHighlight = { set: (marks,popup) => renders.push(plain({marks,popup})), clear: () => renders.push(null), state: () => ({}) };
+  vm.runInContext(source('naki-plugins.js'),c);
   function register(settings={}) {
     c.__nakiPlugins.setGrant(id,{capabilities:['observe'],methods:['.lq.ActionPrototype'],settings});
     vm.runInContext(plugin(id),c);
@@ -172,4 +175,49 @@ test('failures are counted per hook: a healthy hook does not reset a failing one
     c.__nakiPlugins.recommendationsChanged([rec()]);
   }
   assert.equal(c.__nakiPlugins.list().length, 0);
+});
+// ---- envelope 解析（naki-core 共用一份，websocket 遮名與插件派發都走它）----
+function page() {
+  const s = setup();
+  class Socket { constructor(url) { this.url = url; this.readyState = 1; this.listeners = {}; this.sent = []; }
+    addEventListener(k, f) { this.listeners[k] = f; } send(d) { this.sent.push(new Uint8Array(d)); } }
+  Socket.OPEN = 1; s.c.WebSocket = Socket;
+  vm.runInContext(source('naki-websocket.js'), s.c);
+  return { ...s, socket: url => new s.c.WebSocket(url) };
+}
+function request(msgId, method, payload = []) {
+  const m = Buffer.from(method);
+  return new Uint8Array([2, msgId & 0xff, msgId >> 8, 10, m.length, ...m, 18, payload.length, ...payload]);
+}
+function response(msgId, payload = []) { return new Uint8Array([3, msgId & 0xff, msgId >> 8, 10, 0, 18, payload.length, ...payload]); }
+test('core parseEnvelope: corpus locks shared semantics', () => {
+  const { c } = setup(); const P = b => plain(c.__nakiCore.parseEnvelope(new Uint8Array(b)));
+  const m = [...Buffer.from('.lq.Foo')], A = [10, 1, 0x41];
+  const env = (type, msgId, method, payload, complete) => ({ type, msgId, method, payload, complete });
+  assert.deepEqual(P([1, 10, 7, ...m, 18, 1, 9]), env(1, null, '.lq.Foo', { from: 12, to: 13 }, true));
+  assert.deepEqual(P([2, 0x61, 0xEA, 10, 7, ...m, 18, 0]), env(2, 60001, '.lq.Foo', { from: 14, to: 14 }, true));
+  assert.deepEqual(P([2, 1, 0, 10, 9, ...m]), env(2, 1, null, null, false), 'length past end');
+  assert.deepEqual(P([1, ...A, 18, 5, 1]), env(1, null, 'A', null, false), 'partial fields survive');
+  assert.deepEqual(P([1, 10, 2, 0xC3, 0xA9]), env(1, null, 'Ã©', null, true), 'non-ASCII method is latin1');
+  assert.deepEqual(P([1, 8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1, ...A]), env(1, null, 'A', null, true), '7-byte varint');
+  assert.deepEqual(P([1, 8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 1]), env(1, null, null, null, false), 'varint too long');
+  assert.deepEqual(P([1, 11, ...A]), env(1, null, null, null, false), 'wire 3');
+  assert.deepEqual(P([1, 0xC2, 0x3E, 1, 0, ...A]), env(1, null, 'A', null, true), 'field 1000');
+  assert.deepEqual(P([1, 13, 1]), env(1, null, null, null, true), 'fixed32 past end');
+  for (const b of [[], [4, 10, 0], [2, 1]]) assert.equal(c.__nakiCore.parseEnvelope(new Uint8Array(b)), null);
+  assert.deepEqual(plain(c.__nakiCore.readVarint(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x10]), 0, 5)), [2 ** 32, 5]);
+});
+test('authGame nickname is masked in place; malformed response is left alone', () => {
+  const { c, socket } = page(); const ws = socket('wss://game.example/game-gateway');
+  c.__nakiHideNames.setEnabled(true);
+  const name = [...Buffer.from('Alice12')], view = [0x22, name.length, ...name];
+  ws.send(request(7, '.lq.FastTest.authGame'));
+  const bytes = response(7, [18, view.length, ...view]);
+  ws.listeners.message({ data: bytes.buffer });
+  assert.equal(Buffer.from(bytes.slice(-7)).toString(), 'P1     ');
+  ws.send(request(8, '.lq.FastTest.authGame'));
+  const bad = new Uint8Array([...response(8, [18, view.length, ...view]), 11]);
+  ws.listeners.message({ data: bad.buffer });
+  assert.equal(Buffer.from(bad.slice(-8, -1)).toString(), 'Alice12');
+  assert.equal(c.__nakiHideNames.getStatus().maskedFields, 1);
 });

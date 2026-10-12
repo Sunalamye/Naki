@@ -191,6 +191,70 @@
     }
 
     // ========================================
+    // Liqi envelope 解析（naki-websocket 與 naki-plugins 共用）
+    // ========================================
+    //
+    // 格式的 canonical 在 Swift（LiqiEnvelope.swift）。這份必須同步：呼叫端在遊戲解析
+    // 封包之前就要改 bytes、選連線，繞去 Swift 再回來就來不及了。
+
+    // 回傳 [value, nextOffset]，讀不完整回 null。
+    // 用乘法而非 <<：JS 位移是 32-bit，長 varint 會靜默算錯。
+    function readVarint(b, i, end) {
+        let result = 0;
+        let shift = 1;
+        while (i < end) {
+            const byte = b[i++];
+            result += (byte & 0x7f) * shift;
+            if ((byte & 0x80) === 0) return [result, i];
+            shift *= 128;
+            if (shift > 1e15) return null;
+        }
+        return null;
+    }
+
+    // [type][msgId LE，NOTIFY 沒有][protobuf {1: method, 2: payload}]
+    // 不是 envelope 回 null。body 中途讀壞時 complete=false，已讀到的欄位照樣回：
+    // 插件端要部分結果，改 bytes 的遮名只吃 complete。
+    function parseEnvelope(b) {
+        if (!b || b.length < 1) return null;
+        const type = b[0];
+        if (type !== 1 && type !== 2 && type !== 3) return null;
+        if (type !== 1 && b.length < 3) return null;
+        const msgId = type === 1 ? null : (b[1] | (b[2] << 8));
+        let i = type === 1 ? 1 : 3;
+        let method = null;
+        let payload = null;
+        let complete = false;
+        for (;;) {
+            if (i >= b.length) { complete = true; break; }
+            const tag = readVarint(b, i, b.length);
+            if (!tag) break;
+            const field = Math.floor(tag[0] / 8);
+            const wire = tag[0] & 7;
+            i = tag[1];
+            if (wire === 2) {
+                const len = readVarint(b, i, b.length);
+                if (!len) break;
+                const from = len[1];
+                const to = from + len[0];
+                if (to > b.length) break;
+                if (field === 1) {
+                    method = '';
+                    for (let k = from; k < to; k++) method += String.fromCharCode(b[k]);
+                } else if (field === 2) payload = { from: from, to: to };
+                i = to;
+            } else if (wire === 0) {
+                const v = readVarint(b, i, b.length);
+                if (!v) break;
+                i = v[1];
+            } else if (wire === 5) i += 4;
+            else if (wire === 1) i += 8;
+            else break;
+        }
+        return { type: type, msgId: msgId, method: method, payload: payload, complete: complete };
+    }
+
+    // ========================================
     // 導出到全域
     // ========================================
 
@@ -198,7 +262,9 @@
         arrayBufferToBase64: arrayBufferToBase64,
         base64ToArrayBuffer: base64ToArrayBuffer,
         blobToBase64: blobToBase64,
-        sendToSwift: sendToSwift
+        sendToSwift: sendToSwift,
+        readVarint: readVarint,
+        parseEnvelope: parseEnvelope
     };
 
     // 向後兼容：直接導出到 window

@@ -7,10 +7,10 @@
  *     → command/Services/Bridge/LiqiEnvelope.swift
  *   - msgId → method 對照表 → LiqiParser.pendingRequests
  *
- * 本檔的 `parseEnvelopeBody` / `attributeSend` / `sendRaw` / `nakiNicknameMask.pendingMethods`
- * 各自留著一份**刻意的**重複：它們必須在遊戲解析封包之前、在頁面裡同步跑完
- * （改暱稱 bytes、選連線），繞去 Swift 再回來就來不及了。跨語言邊界的同步成本
- * 高於重複成本，所以保留——但格式一改，改的是 Swift 那份，這裡跟著對齊。
+ * 本檔的 envelope 解析（naki-core 的 `parseEnvelope`／`readVarint`）、`attributeSend`、
+ * `sendRaw`、`nakiNicknameMask.pendingMethods` 是**刻意的**重複：它們必須在遊戲解析封包之前、
+ * 在頁面裡同步跑完（改暱稱 bytes、選連線），繞去 Swift 再回來就來不及了。跨語言邊界的
+ * 同步成本高於重複成本，所以保留——但格式一改，改的是 Swift 那份，這裡跟著對齊。
  */
 (function() {
     'use strict';
@@ -26,6 +26,9 @@
     const sendToSwift = window.__nakiCore?.sendToSwift || window.__nakiSendToSwift || function() {};
     const arrayBufferToBase64 = window.__nakiCore?.arrayBufferToBase64 || window.__nakiArrayBufferToBase64 || function(b) { return ''; };
     const blobToBase64 = window.__nakiCore?.blobToBase64 || window.__nakiBlobToBase64 || function(b, cb) { cb(''); };
+    // 缺了就 fail-open：遮名停擺，封包照常轉給 Swift
+    const readVarint = window.__nakiCore?.readVarint || function() { return null; };
+    const parseEnvelope = window.__nakiCore?.parseEnvelope || function() { return null; };
 
     /**
      * Base64 → Uint8Array（不依賴 naki-core，避免載入順序造成的空實作 fallback）
@@ -213,61 +216,6 @@
         const TYPE_RESPONSE = 3;
         const AUTH_GAME = '.lq.FastTest.authGame';
 
-        // 回傳 [value, nextOffset]，讀不完整回 null。
-        // 用乘法而非 <<：JS 位移是 32-bit，長 varint 會靜默算錯。
-        function readVarint(b, i, end) {
-            let result = 0;
-            let shift = 1;
-            while (i < end) {
-                const byte = b[i++];
-                result += (byte & 0x7f) * shift;
-                if ((byte & 0x80) === 0) return [result, i];
-                shift *= 128;
-                if (shift > 1e15) return null;
-            }
-            return null;
-        }
-
-        // 找出 wrapper `{1: method, 2: payload}` 的兩個欄位。
-        function parseEnvelopeBody(b, start) {
-            let i = start;
-            let method = null;
-            let payload = null;
-            while (i < b.length) {
-                const tag = readVarint(b, i, b.length);
-                if (!tag) return null;
-                const field = Math.floor(tag[0] / 8);
-                const wire = tag[0] & 7;
-                i = tag[1];
-                if (wire === 2) {
-                    const len = readVarint(b, i, b.length);
-                    if (!len) return null;
-                    const from = len[1];
-                    const to = from + len[0];
-                    if (to > b.length) return null;
-                    if (field === 1) method = decodeAscii(b, from, to);
-                    else if (field === 2) payload = [from, to];
-                    i = to;
-                } else if (wire === 0) {
-                    const v = readVarint(b, i, b.length);
-                    if (!v) return null;
-                    i = v[1];
-                } else if (wire === 5) i += 4;
-                else if (wire === 1) i += 8;
-                else return null;
-            }
-            return { method: method, payload: payload };
-        }
-
-        function decodeAscii(b, from, to) {
-            let out = '';
-            for (let k = from; k < to; k++) {
-                if (b[k] > 127) return null;   // method name 一定是 ASCII
-                out += String.fromCharCode(b[k]);
-            }
-            return out;
-        }
-
         // 把 [from,to) 當成 PlayerGameView，改寫 field 4 (nickname)。
         function maskPlayerGameView(b, from, to, seat) {
             let i = from;
@@ -347,8 +295,8 @@
             const msgId = bytes[1] | (bytes[2] << 8);
 
             if (direction === 'send' && type === TYPE_REQUEST) {
-                const env = parseEnvelopeBody(bytes, 3);
-                if (env && env.method) {
+                const env = parseEnvelope(bytes);
+                if (env && env.complete && env.method) {
                     pendingMethods.set(msgId, env.method);
                     if (pendingMethods.size > 256) {
                         pendingMethods.delete(pendingMethods.keys().next().value);
@@ -362,9 +310,9 @@
             if (method) pendingMethods.delete(msgId);
             if (!enabled || method !== AUTH_GAME) return;
 
-            const env = parseEnvelopeBody(bytes, 3);
-            if (!env || !env.payload) return;
-            maskAuthGame(bytes, env.payload[0], env.payload[1]);
+            const env = parseEnvelope(bytes);
+            if (!env || !env.complete || !env.payload) return;
+            maskAuthGame(bytes, env.payload.from, env.payload.to);
         }
 
         return {
