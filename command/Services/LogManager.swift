@@ -189,7 +189,7 @@ class LogManager {
         }
     }
 
-    private static let sessionStampFormatter: DateFormatter = {
+    static let sessionStampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -328,9 +328,7 @@ class LogManager {
     /// 純函式，方便單測；同一毫秒的條目用原本的插入順序穩定化（Swift 的 `sort` 不保證穩定）。
     /// 時間戳帶毫秒是刻意的：`/logs` 的消費端要能自己再排序，秒級解析度不夠。
     nonisolated static func formatLines(_ entries: [LogEntry]) -> [String] {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
+        let formatter = fractionalTimestampFormatter
         return entries.enumerated()
             .sorted { lhs, rhs in
                 if lhs.element.timestamp != rhs.element.timestamp {
@@ -342,6 +340,12 @@ class LogManager {
                 "[\(formatter.string(from: entry.timestamp))] [\(entry.category.rawValue)] \(entry.message)"
             }
     }
+
+    private nonisolated(unsafe) static let fractionalTimestampFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     /// 檔案行的時間戳格式器（`ISO8601DateFormatter()` 的預設選項，維持既有行格式）。
     ///

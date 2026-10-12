@@ -27,11 +27,7 @@ struct ListRecordingsTool: MCPTool {
 
     func execute(arguments: [String: Any]) async throws -> Any {
         let dir = try ReplaySupport.gamesDirectory(session: arguments["session"] as? String)
-        let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
-            .filter { $0.hasSuffix(".mjai.jsonl") }
-            .sorted()
-
-        let games: [[String: Any]] = files.map { name in
+        let games: [[String: Any]] = GameRecorder.recordedGames(in: dir).map { name in
             let url = dir.appendingPathComponent(name)
             let count = (try? GameRecorder.load(url).count) ?? -1
             let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int ?? 0

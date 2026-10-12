@@ -330,7 +330,7 @@ final class NakiRuntime {
     private func makeMCPDependencies() -> NakiMCPDependencies {
         let javaScript = ExecuteJavaScriptAction(session: session)
         // 短碼而不是自由文字：它會出現在 MCP 工具輸出與 log 裡，要能被 grep
-        let disabled = "legacy_path_action_send_disabled"
+        let disabled = LiqiToolResult.legacySendDisabled
         let send: SendActionAction = settings.supportsAutoPlay
             ? SendActionAction(sender: liqiSender)
             : .unavailable(disabled)

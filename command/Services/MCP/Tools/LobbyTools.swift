@@ -48,13 +48,11 @@ struct LobbyStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.fetchGamingInfo()
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
-        return LiqiToolResult.dictionary(outcome, spec: spec)
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
 
@@ -125,9 +123,7 @@ struct StartMatchTool: MCPTool {
         guard matchMode > 0, matchMode < 100 else {
             throw MCPToolError.invalidParameter("match_mode", expected: "1–99（正確值請攔 fetchCurrentMatchInfo）")
         }
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         // spec 的組裝在 `StartMatchAction`：工具只負責參數驗證與輸出格式，
         // 不再自己拼 protobuf 欄位——那是「同一個請求兩個地方組」的漂移來源。
@@ -136,8 +132,8 @@ struct StartMatchTool: MCPTool {
             clientVersionString: arguments["client_version_string"] as? String ?? "",
             awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("🎮 lobby_start_match match_mode=\(matchMode)")
-        return LiqiToolResult.dictionary(result.outcome, spec: result.spec,
-                                         extra: ["match_mode": matchMode])
+        return LiqiToolResult.dictionaryLoggingRejection(result.outcome, spec: result.spec,
+                                                         extra: ["match_mode": matchMode])
     }
 }
 
@@ -168,16 +164,14 @@ struct CancelMatchTool: MCPTool {
         guard let matchMode = arguments["match_mode"] as? Int else {
             throw MCPToolError.missingParameter("match_mode")
         }
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let result = await nakiContext.cancelMatch(
             matchMode: try MCPArguments.uint32(matchMode, "match_mode"),
             awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("⏹️ lobby_cancel_match match_mode=\(matchMode)")
-        return LiqiToolResult.dictionary(result.outcome, spec: result.spec,
-                                         extra: ["match_mode": matchMode])
+        return LiqiToolResult.dictionaryLoggingRejection(result.outcome, spec: result.spec,
+                                                         extra: ["match_mode": matchMode])
     }
 }
 
@@ -235,9 +229,7 @@ struct StartUnifiedMatchTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         // 沒帶參數時退回「最近觀察到的那一組」——這是唯一有真憑據的預設值。
         // 猜一個 sid 送出去比失敗更糟：可能排進非預期的場次。
@@ -257,7 +249,7 @@ struct StartUnifiedMatchTool: MCPTool {
             clientVersionString: clientVersion,
             awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("🎮 lobby_start_unified_match match_sid=\(matchSid)")
-        return LiqiToolResult.dictionary(
+        return LiqiToolResult.dictionaryLoggingRejection(
             result.outcome, spec: result.spec,
             extra: ["match_sid": matchSid,
                     "client_version_string": clientVersion,
@@ -287,9 +279,7 @@ struct CancelUnifiedMatchTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         // `??` 右側是 autoclosure，不能直接放 await——先取出來再合併。
         let observed = ObservedMatchSids.shared.latest
         let matchSid = (arguments["match_sid"] as? String) ?? observed?.sid ?? ""
@@ -302,8 +292,8 @@ struct CancelUnifiedMatchTool: MCPTool {
             matchSid: matchSid,
             awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("⏹️ lobby_cancel_unified_match match_sid=\(matchSid)")
-        return LiqiToolResult.dictionary(result.outcome, spec: result.spec,
-                                         extra: ["match_sid": matchSid])
+        return LiqiToolResult.dictionaryLoggingRejection(result.outcome, spec: result.spec,
+                                                         extra: ["match_sid": matchSid])
     }
 }
 
@@ -333,9 +323,7 @@ struct AccountInfoTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let known = (nakiContext.getGameSnapshot()?["accountId"] as? Int) ?? 0
         let accountId = arguments["account_id"] as? Int ?? known
@@ -353,9 +341,9 @@ struct AccountInfoTool: MCPTool {
         let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: try MCPArguments.uint32(accountId, "account_id"))
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
-        return LiqiToolResult.dictionary(outcome, spec: spec,
-                                         extra: ["account_id": accountId,
-                                                 "accountIdSource": arguments["account_id"] == nil ? "naki-login-capture" : "argument"])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
+                                                         extra: ["account_id": accountId,
+                                                                 "accountIdSource": arguments["account_id"] == nil ? "naki-login-capture" : "argument"])
     }
 }
 
@@ -383,13 +371,11 @@ struct ServerTimeTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.fetchServerTime()
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
-        return LiqiToolResult.dictionary(outcome, spec: spec)
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
 
@@ -418,16 +404,14 @@ struct HeartbeatTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let counter = try MCPArguments.uint32(arguments, "no_operation_counter")
         let spec = LiqiRequestBuilder.heatbeat(noOperationCounter: counter)
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("💓 lobby_heartbeat sent")
-        return LiqiToolResult.dictionary(outcome, spec: spec,
-                                         extra: ["no_operation_counter": Int(counter)])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
+                                                         extra: ["no_operation_counter": Int(counter)])
     }
 }
 
@@ -455,15 +439,13 @@ struct LoginBeatTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let contract = arguments["contract"] as? String ?? ""
         let spec = LiqiRequestBuilder.loginBeat(contract: contract)
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
-        return LiqiToolResult.dictionary(outcome, spec: spec,
-                                         extra: ["contractProvided": !contract.isEmpty])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
+                                                         extra: ["contractProvided": !contract.isEmpty])
     }
 }
 
@@ -492,9 +474,7 @@ struct AntiIdleToggleTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let enabled = arguments["enabled"] as? Bool
         let interval = (arguments["intervalSeconds"] as? Int).map { TimeInterval($0) }

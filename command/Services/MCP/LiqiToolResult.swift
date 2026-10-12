@@ -43,20 +43,23 @@ struct LiqiToolSendOutcome {
 /// 把送出結果轉成 MCP 工具的回傳字典
 enum LiqiToolResult {
 
+    /// Legacy path 不提供送出通道時的短碼。出現在 MCP 工具輸出與 log 裡，要能被 grep；
+    /// `BotTriggerTool` 與 `NakiRuntime` 共用這一份。
+    nonisolated static let legacySendDisabled = "legacy_path_action_send_disabled"
+
     nonisolated static func serverAccepted(_ response: LiqiResponseRecord) -> Bool {
         !response.hasError
     }
 
-    /// ⚠️ 有副作用：伺服器拒絕時寫一行 `eventLog`（見檔頭）。名稱沒有表達這點是因為二十多處呼叫端
-    /// 在 `Tools/`，改名留給擁有那些檔案的後續工作包。
+    /// 有副作用：伺服器拒絕時寫一行 `eventLog`（見檔頭），名稱因此帶 `LoggingRejection`。
     ///
     /// - Parameters:
     ///   - outcome: 送出結果
     ///   - spec: 送出的請求（用來附上 method 與 payload hex，方便對拍）
     ///   - extra: 額外欄位（例如工具自己的參數回顯）
-    static func dictionary(_ outcome: LiqiToolSendOutcome,
-                           spec: LiqiRequestSpec,
-                           extra: [String: Any] = [:]) -> [String: Any] {
+    static func dictionaryLoggingRejection(_ outcome: LiqiToolSendOutcome,
+                                           spec: LiqiRequestSpec,
+                                           extra: [String: Any] = [:]) -> [String: Any] {
         var result: [String: Any] = [
             "method": spec.method,
             "payloadHex": LiqiEncoder.hexString(spec.payload)

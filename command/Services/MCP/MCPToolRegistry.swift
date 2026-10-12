@@ -47,18 +47,6 @@ final class MCPToolRegistry {
         toolTypes[name] = toolType
     }
 
-    /// 批量註冊工具
-    /// - Parameter toolTypes: 工具類型列表
-    func registerAll(_ types: [any MCPTool.Type]) {
-        for toolType in types {
-            let name = toolType.name
-            if toolTypes[name] == nil {
-                toolOrder.append(name)
-            }
-            toolTypes[name] = toolType
-        }
-    }
-
     // MARK: - Tool Access
 
     /// 獲取工具實例
@@ -69,13 +57,6 @@ final class MCPToolRegistry {
     func tool(named name: String, context: MCPContext) -> (any MCPTool)? {
         guard let toolType = toolTypes[name] else { return nil }
         return toolType.init(context: context)
-    }
-
-    /// 檢查工具是否存在
-    /// - Parameter name: 工具名稱
-    /// - Returns: 是否存在
-    func hasToolNamed(_ name: String) -> Bool {
-        return toolTypes[name] != nil
     }
 
     /// 獲取所有已註冊的工具名稱
@@ -105,19 +86,6 @@ final class MCPToolRegistry {
         }
     }
 
-    /// 生成工具定義 JSON（可保存到文件）
-    /// - Returns: JSON 字串
-    func generateToolsJSON() -> String? {
-        let definitions = allToolDefinitions()
-        let json: [String: Any] = ["tools": definitions]
-
-        guard let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
-              let string = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-        return string
-    }
-
     // MARK: - Tool Execution
 
     /// 執行工具
@@ -142,14 +110,6 @@ final class MCPToolRegistry {
             return .error(error.localizedDescription)
         }
     }
-
-    // MARK: - Reset (for testing)
-
-    /// 清空所有註冊（僅用於測試）
-    func reset() {
-        toolTypes.removeAll()
-        toolOrder.removeAll()
-    }
 }
 
 // MARK: - Convenience Registration
@@ -157,7 +117,7 @@ final class MCPToolRegistry {
 extension MCPToolRegistry {
     /// 註冊所有內建工具
     ///
-    /// 下方 registration 是工具數的**唯一真實來源**（本次靜態計數 40 個）；
+    /// 下方 registration 是工具數的**唯一真實來源**；
     /// `get_status` 的 `tools_count` 直接數 `registeredToolNames`，不會跟註解漂移，
     /// 要確認 live 數字請看 `tools/list` 或 `get_status`。
     /// 2026-08-02 移除 6 個 highlight 失敗樁（見下）。
