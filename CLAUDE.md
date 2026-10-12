@@ -177,7 +177,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 ## MortalSwift／模型
 
 - 目前解到 0.6.0／`da7238c`（`Package.resolved`）；bundled Core ML 仍是固定 Mortal v4 四麻模型。
-- 0.5.x 系列中移除了 `PlayerState` 的 `isAllLast`／`isWRiichi`／`kansOnBoard`／`dorasOwned`／`dorasSeen`／`atIppatsu`，Naki 全都沒用到。
+- 0.5.2 移除了 `PlayerState` 的 `isAllLast`／`isWRiichi`／`kansOnBoard`／`dorasOwned`／`dorasSeen`／`atIppatsu`，Naki 全都沒用到。
 - 0.5.3：`handleReach` 在自家宣言後打開 `canDiscard`，`BundledCoreMLBot` 因此在 `react` 回 `reach` 時餵合成 `reach` 再 `inferCurrentState()`，推薦列的打牌項是立直後的第二次推論（失敗退回立直前的打牌項）。
 - observation `1012 × 34`，action mask 46。
 - libriichi parity 是兩套固定 fixtures 的逐格測試；Debug／Release 各 47 tests 通過，不是全狀態證明。
@@ -200,7 +200,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## 2026-09-30 審查修正後的行為
 
-以下都有單測（NakiTests 1002 個、0 failures，2026-10-13 整合閘，`.swfd/logs/merge-main/test-d1e9775.log`），**除非註明否則沒有 live 驗證**。
+以下都有單測（NakiTests 1003 個、0 failures，2026-10-13 主線整合閘數字，`.swfd/logs/merge-main/test-5f78080.log`），**除非註明否則沒有 live 驗證**。
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。

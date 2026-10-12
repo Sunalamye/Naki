@@ -131,7 +131,7 @@ Expand the summary row to inspect server-authorized actions, player scores, dora
 </tr>
 </table>
 
-<sub>The iPhone gameplay images were captured from the app running in an iOS 26 simulator. Player names are concealed by the built-in name-hiding feature as it existed when the images were captured (now provided by plugins). The images retain the interface language used when they were captured.</sub>
+<sub>The iPhone gameplay images were captured from the app running in an iOS 26 simulator. Player names are concealed by the built-in name-hiding feature as it existed when the images were captured (the built-in feature has since been removed; plugins can implement it). The images retain the interface language used when they were captured.</sub>
 
 ### Choose your Mahjong Soul server
 
@@ -167,7 +167,7 @@ The toolbar also offers a **delay baseline** control, from 0.5 to 3.0 seconds. T
 
 ### Plugin system
 
-The puzzle-piece icon in the toolbar opens the **Plugins page**. Toggling a plugin takes effect immediately, with no page reload. Place plugins in `~/Library/Application Support/Naki/Plugins/<id>/` (macOS), or paste a gist or HTTPS `plugin.json` URL for a one-time import. Naki ships no marketplace or built-in source. Display features such as tile recoloring and name hiding are no longer built in; they are provided by plugins.
+The puzzle-piece icon in the toolbar opens the **Plugins page**. Toggling a plugin takes effect immediately, with no page reload. Place plugins in `~/Library/Application Support/Naki/Plugins/<id>/` (macOS), or paste a gist or HTTPS `plugin.json` URL for a one-time import. Naki ships no marketplace or built-in source. Display features such as tile recoloring and name hiding are no longer built in; plugins can implement them.
 
 - Plugins have three capability levels: **L1 read-only** (observe packets), **L2 local display** (rewrite what the game client sees, without affecting the server or other players), and **L3 outbound** (send game actions with your account). L3 is completely unavailable until you turn on a separate master switch and confirm it.
 - ⚠️ **L3 risk:** a plugin runs in the same JavaScript environment as the game, and its permissions only guard against mistakes, not against a malicious plugin. A malicious plugin can send or rewrite outgoing packets with your account and read anything on the page, including your login token. **Installing a plugin means trusting its author.** Install only plugins you trust, and use them only on a secondary account.
@@ -175,11 +175,11 @@ The puzzle-piece icon in the toolbar opens the **Plugins page**. Toggling a plug
 
 ### In-app language (macOS)
 
-Advanced Settings → **Language**: follow the system, or choose one of **Traditional Chinese, Simplified Chinese, English, Japanese, or Korean**. The interface and status messages switch to that language immediately. iOS always follows the system language.
+Advanced Settings → **Language**: follow the system, or choose one of **Traditional Chinese, Simplified Chinese, English, Japanese, or Korean**. The interface and status messages switch to that language immediately. iOS has no in-app menu; it uses the app language set in system Settings (the same five).
 
 ### Other tools
 
-- **Hide player names:** the built-in switch has been removed and the feature is now provided by plugins; the underlying APIs remain, on two layers. Protocol-level rewriting replaces names with equal-length ASCII before the game parses packets, and applies only to matches started afterwards. Render-level hiding (added in 2.8.0, `setNameMask`) takes effect immediately. The Unity client has no hookable UI layer, so Naki calibrates itself: it tries masking candidates one at a time, compares the screen, and picks the one whose masking changes all four seat positions with very few changed pixels. If it cannot identify one, it hides nothing rather than hiding unrelated UI. This is a display feature, not a guarantee of anonymity.
+- **Hide player names:** the built-in switch has been removed and plugins can implement the feature; the underlying APIs remain, on two layers. Protocol-level rewriting replaces names with equal-length ASCII before the game parses packets, and applies only to matches started afterwards. Render-level hiding (added in 2.8.0, `setNameMask`) takes effect immediately. The Unity client has no hookable UI layer, so Naki calibrates itself: it tries masking candidates one at a time, compares the screen, and picks the one whose masking changes all four seat positions with very few changed pixels. If it cannot identify one, it hides nothing rather than hiding unrelated UI. This is a display feature, not a guarantee of anonymity.
 - **Protocol-level emotes:** MCP tools can send emotes and inspect received broadcasts. The older automatic-reply path is not available with the Unity client.
 - **MCP integration:** connect an AI assistant such as Claude Code to inspect state and use the app's exposed tools.
 - **Local Debug API:** the HTTP server binds to loopback, not to other devices on your network.
@@ -364,7 +364,7 @@ Feature availability is not the same as complete end-to-end verification. [`AUDI
 | In-game tile highlighting | Built-in automatic coloring has been removed; plugins read the recommendation channel and color tiles themselves. The underlying hook is implemented; complete visual-regression coverage is still missing. |
 | Optional cloud inference | Available, with explicit upload disclosure and local fallback. Live-verified for four-player matches; no live three-player match with a cloud model. |
 | Three-player AI recommendations | Available locally at default strength; see below. |
-| Hide player names | The built-in switch has been removed; provided by plugins (the underlying APIs remain). |
+| Hide player names | The built-in switch has been removed; plugins can implement it (the underlying APIs remain). |
 | MCP server and Debug API | Available through the local loopback server. |
 | iOS 17–25 | Recommendations only; automatic action submission is disabled. |
 | Game-record review and analysis | Not yet implemented as a user-facing analysis workflow. |

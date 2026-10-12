@@ -22,8 +22,8 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 | Liqi schema | live manifest fresh download + byte compare | 2026-08-01 當時 repo `liqi.json` 與 CDN 完全相同；**2026-10-09 起已不同**：repo 補了 `ReqSelfOperation.auto_operation`（field 11），而那個 CDN 基準本身落後 client 好幾版（見 `CLAUDE.md`「Unity 與 Liqi 必知事實」），所以此列只證明當時 byte 相同、不證明 schema 正確 |
 | config | live manifest fresh download + repo parser | 41 tables／263 sheets／119,289 rows |
 | Mortal parity | fresh Debug／Release tests | 各 47 tests 通過；固定 fixtures obs／mask 零落差 |
-| Naki unit tests | fresh NakiTests（2026-10-13 整合閘；本列的測試覆蓋清單是 2026-10-01 審查修正當時所寫） | 1002 tests、0 failures（2026-10-13 整合閘，`.swfd/logs/merge-main/test-d1e9775.log`；218 為 2026-08-02 的舊數字）；含 resolver、fail-safe fixture、協定負分／NOTIFY 按欄位號、Debug server 加固、插件載入與更新預覽 |
-| JS 回歸（node 合成） | `scripts/plugin-regression.cjs`、`keepalive-regression.cjs`、name-hider | 23/23、11/11、7/7；**只驗 JS 邏輯，不是 live 頁面** |
+| Naki unit tests | fresh NakiTests（2026-10-13 整合閘；本列的測試覆蓋清單是 2026-10-01 審查修正當時所寫） | 1003 tests、0 failures（2026-10-13 主線整合閘數字，`.swfd/logs/merge-main/test-5f78080.log`；218 為 2026-08-02 的舊數字）；含 resolver、fail-safe fixture、協定負分／NOTIFY 按欄位號、Debug server 加固、插件載入與更新預覽 |
+| JS 回歸（node 合成） | `scripts/plugin-regression.cjs`、`keepalive-regression.cjs` | plugin 29/29、keepalive 11/11（2026-10-13 實跑；舊數字 23/23、11/11、7/7 的第三項 name-hider 已無獨立腳本，`__nakiHideNames` 由 plugin-regression 涵蓋）；**只驗 JS 邏輯，不是 live 頁面** |
 | 建置 | macOS Release、iOS Simulator | 皆 BUILD SUCCEEDED（2026-10-01）；iOS 實機未驗 |
 | runtime ron | request／response／ActionHule trace | type 9 走 `inputOperation` 成功 |
 | runtime pon | request／response／ActionChiPengGang trace | type 3 走 `inputChiPengGang` 成功 |

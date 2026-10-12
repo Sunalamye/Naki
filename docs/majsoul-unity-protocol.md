@@ -20,14 +20,14 @@
 | 雀魂客戶端 | Unity WebGL `chs_t-WebGL-release-4.0.45(45)`，不是 Laya |
 | Naki 狀態來源 | WebSocket → Liqi protobuf → Swift 狀態；不是 JS 遊戲物件 |
 | Naki 動作來源 | Swift 組 Liqi request，再由 `window.__nakiWebSocket.sendRaw` 送出 |
-| AI package | MortalSwift `0.5.2`／revision `6223548…`，由已提交的 `Package.resolved` 釘住 |
+| AI package | MortalSwift `0.6.0`／revision `da7238c…`，由已提交的 `Package.resolved` 釘住 |
 | AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.x 並不是新訓練模型 |
 | 「最新最強」 | **不能這樣宣稱**。0.5.x 只改 encoder／parity，權重未更新，也沒有牌力 benchmark |
 | 四麻 | 唯一有正確模型形狀與 parity 證據的模式 |
 | 三麻 | 本地引擎是 Akagi 三麻（`AkagiSanmaBot`，default strength：模仿天鳳人類，非 Mortal 等級；2026-10-09 D23），雲端啟用時雲端優先；不會退回四麻模型。自動打牌在三麻 fail-closed（推薦須來自雲端 3p 或本地 Akagi 三麻），伺服器授權的和牌照送（2026-09-30）；三麻 live 已驗（2026-10-09 三局，`.swfd/logs/s3-live-{4,5,6}`） |
 | 自摸保護 | resolver 純邏輯與整合的兩個漏洞（漏觸發、錯誤完成）在 source 層已收斂，有單測與注入式 fixture；**live 對局未驗證** |
 | 遊戲內高亮 | 現行 WebGL hook 會執行；尚未證明每次都染到正確牌／按鈕 |
-| MCP | 2026-08-01 live `tools/list` 為 42 個；2026-08-02 移除 6 個高亮失敗樁，靜態計數 38（未 live 複查） |
+| MCP | 靜態計數 43 個（`MCPToolRegistry` 的 `register(` 呼叫，2026-10-13；未 live 複查）。歷史：2026-08-01 live `tools/list` 為 42 個，2026-08-02 移除 6 個高亮失敗樁後為 38 |
 
 ## 現場唯讀查詢
 
@@ -108,7 +108,7 @@ Naki 載入雀魂頁面時可設 User-Agent 與額外 header（`MajsoulRequestBu
 
 `naki-autoplay.js`、`naki-game-api.js`、`naki-coordinator.js` 已於 2026-08-02 整檔刪除（合計約 2,900 行）。它們的每一條路徑都經過 `Laya` / `GameMgr` / `app.NetAgent` / `view.DesktopMgr` / `uiscript`，在 Unity 客戶端一律不存在，所以只會靜默失敗；注入腳本是 `forMainFrameOnly: false`，每個 iframe 都要 parse 一次，留著只有成本。同批移除的還有 `naki-core.js` 的 `__nakiAntiIdle`（改由 Swift 定期送 `.lq.Lobby.heatbeat`）、`__nakiEmojiAutoReply`，以及 `naki-websocket.js` 的 `interceptConsole`（零呼叫者）。
 
-現存的 JS 全域面是：`__nakiCore`（base64／`sendToSwift`）、`__nakiWebSocket`（連線清單／`sendRaw`／`forceReconnect`／`isNakiSent`）、`__nakiHideNames`（authGame 暱稱等長覆寫；未記載於插件 API 的內部函式）、`__nakiHighlight`（WebGL draw hook）、`__nakiPlugins`（插件 runtime）、`__nakiRecommendations`（唯讀推薦通道）、`__nakiKeepAlive`（背景保活）、`__nakiHeap`（wasm heap 唯讀存取）。任何 `window.naki`、`NakiCoordinator`、`__nakiGameAPI`、`__nakiAutoPlay`、`__nakiRecommendHighlight`、`__nakiPlayerNames`、`__nakiDoraHook`、`__nakiAntiIdle`、`__nakiEmojiAutoReply` 都已不存在，probe 到的一定是 `undefined`。
+現存的主要 JS 全域面是：`__nakiCore`（base64／`sendToSwift`）、`__nakiWebSocket`（連線清單／`sendRaw`／`forceReconnect`／`isNakiSent`）、`__nakiHideNames`（authGame 暱稱等長覆寫；未記載於插件 API 的內部函式）、`__nakiHighlight`（WebGL draw hook）、`__nakiPlugins`（插件 runtime）、`__nakiPluginGrants`（Swift 注入的插件授權表）、`__nakiPluginsMayModifyOutbound`（L3 外送改寫總開關）、`__nakiRecommendations`（唯讀推薦通道）、`__nakiRecommendationContext`（推薦的對局脈絡）、`__nakiKeepAlive`（背景保活）、`__nakiHeap`（wasm heap 唯讀存取）。任何 `window.naki`、`NakiCoordinator`、`__nakiGameAPI`、`__nakiAutoPlay`、`__nakiRecommendHighlight`、`__nakiPlayerNames`、`__nakiDoraHook`、`__nakiAntiIdle`、`__nakiEmojiAutoReply` 都已不存在，probe 到的一定是 `undefined`。
 
 ### Envelope
 
@@ -175,7 +175,7 @@ OS 26+ 主路徑的 `AutoPlayDecisionResolver`：
 - 送出前再比 sequence、seat、source、context tile，拒絕 stale decision。
 - recommend mode 只呈現，off mode 不送。
 
-resolver 有專項單測，NakiTests 全套 1002 個測試 0 failures（2026-10-13 整合閘）。這證明純函式、encoding、builder 與注入式 fixture，不等於 live 對局或 live server 已驗證。
+resolver 有專項單測，NakiTests 全套 1003 個測試 0 failures（2026-10-13 主線整合閘數字，`.swfd/logs/merge-main/test-5f78080.log`）。這證明純函式、encoding、builder 與注入式 fixture，不等於 live 對局或 live server 已驗證。
 
 ### 為什麼曾經「能自摸卻不自摸」（歷史診斷，兩個 P0 已於 source 收斂，仍缺 live 驗證）
 
@@ -212,18 +212,18 @@ Mode 語意（2026-08-02 收斂）：`.off` 同時關掉自動送出與顯示—
 
 ### 真正的版本狀態
 
-Xcode package requirement 是 `upToNextMinorVersion`、minimum `0.5.2`，即允許 `[0.5.2, 0.6.0)`，不是 exact pin。下界不能低於 0.5.1（現為 0.5.2）：`NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API，解到 0.5.0 會編不過。
+Xcode package requirement 是 `upToNextMinorVersion`、minimum `0.6.0`，即允許 `[0.6.0, 0.7.0)`，不是 exact pin。下界不能低於 0.5.1（現為 0.6.0）：`NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API，解到 0.5.0 會編不過。
 
 真正決定 revision 的是已提交的 `Package.resolved`（2026-08-02 起不再被 `.gitignore` 排除）：
 
 ```text
-MortalSwift 0.5.2
-revision 6223548abb930fbd7ff70ae39436eedd6fee5615
+MortalSwift 0.6.0
+revision da7238c28d18a42c3d065435ac66c68b404c0b02
 ```
 
-`Package.resolved` 現在解到 `0.5.2`／`6223548…`（2026-08-02 時 remote 最高 tag 還是 `v0.5.1`／`78b048e…`；`Package.resolved` 已解到 0.5.2 代表該 tag 現在可解析，remote 最高 tag **未重查**）。這不代表模型權重最新或最強。
+`Package.resolved` 現在解到 `0.6.0`／`da7238c…`（2026-08-02 時 remote 最高 tag 還是 `v0.5.1`／`78b048e…`；`Package.resolved` 已解到 0.6.0 代表該 tag 現在可解析，remote 最高 tag **未重查**）。這不代表模型權重最新或最強。
 
-lockfile 進版控後，clean clone 會固定在同一 revision（2026-08-02 以 `78b048e` 機械驗過 clone → `-resolvePackageDependencies` → `build`；0.5.2 未重做這個 clean-clone 驗證）。代價是**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**。
+lockfile 進版控後，clean clone 會固定在同一 revision（2026-08-02 以 `78b048e` 機械驗過 clone → `-resolvePackageDependencies` → `build`；0.5.2、0.6.0 未重做這個 clean-clone 驗證）。代價是**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**。
 
 0.5.2 移除 `PlayerState` 的 `isAllLast`／`isWRiichi`／`kansOnBoard`／`dorasOwned`／`dorasSeen`／`atIppatsu`，Naki 全都沒用到。
 
@@ -245,7 +245,7 @@ MortalSwift test target 用 libriichi v4 當 oracle。兩套固定 MJAI 劇本�
 - Naki 沒有千局級牌力、順位、和率、放銃率或相對基準 benchmark。
 - 現有 obvious-discard sanity test 不能代表實戰強度。
 
-所以能說的是：「Naki 目前使用已完成這批 encoder parity 修正的 MortalSwift 0.5.2」；不能說「模型已升成最新最強」。
+所以能說的是：「Naki 目前使用已完成這批 encoder parity 修正的 MortalSwift（現為 0.6.0）」；不能說「模型已升成最新最強」。
 
 ### 三麻
 
@@ -332,8 +332,8 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-10-13 靜態
 | 已處理 | off mode 的顯示閘門（`DecisionSidebar` + `WebSession.syncHighlight`） | source 與單測已確認；畫面未 live 驗證 |
 | P1 | pass／無效 discard／riichi failure path 會過早 mark handled | source code 已確認；尚缺 failure-path integration tests |
 | 已處理 | 三麻使用四麻模型 | 已改本地 Akagi 三麻＋雲端 3p（原為雲端-only，D23 取代）；三麻 live 已驗（2026-10-09 三局，`.swfd/logs/s3-live-{4,5,6}`） |
-| 已處理 | Package.resolved 已納入版本控制、requirement 下界升到 0.5.2 | 0.5.1 時 clean clone → resolve → build 已機械驗過（`78b048e`）；0.5.2 未重做 |
-| 已處理 | 3 組無效設定已從 UI 移除；隱藏玩家名稱改以協定層重做（AUDIT §15.3） | source 已確認；協定層改寫只有合成 frame 測試，未 live 驗證 |
+| 已處理 | Package.resolved 已納入版本控制、requirement 下界隨升級調整（現為 0.6.0） | 0.5.1 時 clean clone → resolve → build 已機械驗過（`78b048e`）；0.5.2、0.6.0 未重做 |
+| 已處理 | 3 組無效設定已從 UI 移除；隱藏玩家名稱曾改以協定層重做（AUDIT §15.3），2026-08-10（`c0b7564`）內建功能已移除，`__nakiHideNames` 只剩 JS 函式（未記載於插件 API 的內部函式，有 node 回歸測試）| 歷史紀錄；當時協定層改寫只有合成 frame 測試，未 live 驗證 |
 | P1 | WebGL highlighter 可能誤染／重複染 | hook 執行已確認；視覺正確性未驗證 |
 | 已處理 | Liqi generic protobuf tag 只讀一 byte，field > 31 會錯 | `parseProtobufBlocks` 的 tag 是 varint（`LiqiEnvelope.swift:165-176`）；此列為過期紀錄 |
 | P2 | AI 實戰強度未知 | 沒有 benchmark，未驗證 |

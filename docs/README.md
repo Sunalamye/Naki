@@ -57,6 +57,7 @@ Repo 根目錄另有：
 | [plugin-live-test-notes.md](plugin-live-test-notes.md) | 2026-08-11 插件系統人機場 live 實測筆記 |
 | [cleanup-2026-08-06.md](cleanup-2026-08-06.md) | 2026-08-06 清理輪：credential 遮蔽、死碼、考古註釋 |
 | [ui-reference/implementation-decisions.md](ui-reference/implementation-decisions.md) | 2026-08-09 UI 重設計的實作決策與實測發現（原型與各動作狀態截圖在 `ui-reference/`） |
+| [ui-reference/action-states/README.md](ui-reference/action-states/README.md) | 動作狀態視覺參考的範圍與交付清單（英文；內含 `prototype.html`、`rendered/` 各狀態 PNG、牌面 sprite） |
 
 ## 歷史工作紀錄（非 current truth）
 

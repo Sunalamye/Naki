@@ -185,7 +185,7 @@ MCP registry 的靜態註冊是 43 個工具（2026-10-13 計數；2026-08-01 li
 | live Debug／log | 實際 WS、request／response、權威 action | 未出現過的 failure path |
 | screenshot／人工對局 | 視覺命中與完整體驗 | 大樣本牌力 |
 
-最近一次 fresh 結果：MortalSwift Debug／Release 各 47 tests 通過（2026-08 的記錄）；NakiTests 1002 tests、0 failures（2026-10-13 整合閘，`.swfd/logs/merge-main/test-d1e9775.log`）。仍需 live 補測自摸 override、send failure、Legacy、chi variants、槓與高亮視覺正確性。
+最近一次 fresh 結果：MortalSwift Debug／Release 各 47 tests 通過（2026-08 的記錄）；NakiTests 1003 tests、0 failures（2026-10-13 主線整合閘數字，`.swfd/logs/merge-main/test-5f78080.log`）。仍需 live 補測自摸 override、send failure、Legacy、chi variants、槓與高亮視覺正確性。
 
 ## 主要程式位置
 
