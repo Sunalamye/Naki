@@ -584,7 +584,7 @@ final class NakiRuntime {
             toggleDebugServer: ToggleDebugServerAction(runtime: self),
             reloadPage: ReloadPageAction(session: session),
             switchServer: SwitchServerAction(session: session),
-            connectionSettings: ConnectionSettingsAction(session: session),
+            connectionSettings: ConnectionSettingsAction(settings: settings, session: session),
             chooseServer: ChooseServerAction(
                 settings: settings, switchServer: SwitchServerAction(session: session)),
             setKeepAliveInBackground: SetKeepAliveInBackgroundAction(session: session),

@@ -237,3 +237,33 @@ final class RecommendationActionNameTests: XCTestCase {
         XCTAssertEqual(cases[0].0.actionNameKey, LocalizedStringKey("打"))
     }
 }
+
+// MARK: - ConnectionSettingsAction
+
+/// 字典規則抄自改動前 `MajsoulConnectionSettingsBox.apply()`：空名稱略過、空值保留、重複名稱後者勝出。
+@MainActor
+final class ConnectionSettingsHeadersTests: XCTestCase {
+
+    private let rows: [(name: String, value: String)] = [
+        ("X-A", "1"), ("", "dropped"), ("X-Empty", ""), ("X-B", "b"), ("X-A", "2"),
+    ]
+    private let expected = ["X-A": "2", "X-Empty": "", "X-B": "b"]
+
+    func testHeadersDictionaryMatchesFormerViewAssembly() {
+        XCTAssertEqual(ConnectionSettingsAction.headers(from: rows), expected)
+        XCTAssertEqual(ConnectionSettingsAction.headers(from: []), [:])
+    }
+
+    func testApplyWritesHeadersBeforeReloading() {
+        var events: [String] = []
+        var saved: [String: String]?
+        let action = ConnectionSettingsAction(
+            stub: { events.append("reload") },
+            saveHeaders: { saved = $0; events.append("save") })
+
+        action.apply(headers: rows)
+
+        XCTAssertEqual(events, ["save", "reload"])
+        XCTAssertEqual(saved, expected)
+    }
+}

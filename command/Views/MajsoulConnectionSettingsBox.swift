@@ -50,7 +50,9 @@ struct MajsoulConnectionSettingsBox: View {
                         rows.append(HeaderRow(name: "", value: ""))
                     }
                     Spacer()
-                    Button("套用並重新載入") { apply() }
+                    Button("套用並重新載入") {
+                        naki.actions.connectionSettings.apply(headers: rows.map { ($0.name, $0.value) })
+                    }
                         .accessibilityIdentifier("apply-majsoul-connection-button")
                 }
 
@@ -111,12 +113,5 @@ struct MajsoulConnectionSettingsBox: View {
         case .reservedName: Text("此名稱由系統保留，不會送出。")
         case .invalidValue: Text("值不可為空或含換行。")
         }
-    }
-
-    private func apply() {
-        naki.settings.majsoulExtraHeaders = Dictionary(
-            rows.filter { !$0.name.isEmpty }.map { ($0.name, $0.value) },
-            uniquingKeysWith: { _, last in last })
-        naki.actions.connectionSettings.apply()
     }
 }

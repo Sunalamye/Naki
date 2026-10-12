@@ -836,37 +836,61 @@ struct SwitchServerAction {
 
 // MARK: - 雀魂連線設定
 
-/// 套用 User-Agent 與額外 header（整頁重新載入），並提供 WebKit 的預設 UA 供設定頁當 placeholder。
+/// 寫入額外 header 並整頁重新載入，並提供 WebKit 的預設 UA 供設定頁當 placeholder。
 ///
-/// 設定值本身由 View 直接寫 `SettingsStore`；這裡只負責「寫完之後讓它生效」的副作用。
+/// header 字典由這裡組好再寫：View 只收集編輯中的列。User-Agent 仍由 View 直接 binding，
+/// 它與 header 一樣要等重新載入才生效。
 @MainActor
 struct ConnectionSettingsAction {
 
+  private nonisolated(unsafe) let saveHeaders: ([String: String]) -> Void
   private nonisolated(unsafe) let applyNow: () -> Void
   private nonisolated(unsafe) let readDefaultUserAgent: () async -> String?
 
-  private init(apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String?) {
+  private init(
+    saveHeaders: @escaping ([String: String]) -> Void, apply: @escaping () -> Void,
+    defaultUserAgent: @escaping () async -> String?
+  ) {
+    self.saveHeaders = saveHeaders
     self.applyNow = apply
     self.readDefaultUserAgent = defaultUserAgent
   }
 
   /// 真實實作
-  init(session: WebSession) {
+  init(settings: SettingsStore, session: WebSession) {
     self.init(
+      saveHeaders: { [weak settings] in settings?.majsoulExtraHeaders = $0 },
       apply: { [weak session] in session?.loadMajsoul() },
       defaultUserAgent: { [weak session] in await session?.defaultUserAgent() })
   }
 
   nonisolated init() {
+    self.saveHeaders = { _ in }
     self.applyNow = {}
     self.readDefaultUserAgent = { nil }
   }
 
   #if DEBUG
-    init(stub apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String? = { nil }) {
-      self.init(apply: apply, defaultUserAgent: defaultUserAgent)
+    init(
+      stub apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String? = { nil },
+      saveHeaders: @escaping ([String: String]) -> Void = { _ in }
+    ) {
+      self.init(saveHeaders: saveHeaders, apply: apply, defaultUserAgent: defaultUserAgent)
     }
   #endif
+
+  /// 空名稱的列略過；名稱重複時後面那列勝出。
+  static func headers(from rows: [(name: String, value: String)]) -> [String: String] {
+    Dictionary(
+      rows.filter { !$0.name.isEmpty }.map { ($0.name, $0.value) },
+      uniquingKeysWith: { _, last in last })
+  }
+
+  /// 先寫設定再重新載入：載入時讀的是設定裡的 header。
+  func apply(headers rows: [(name: String, value: String)]) {
+    saveHeaders(Self.headers(from: rows))
+    apply()
+  }
 
   func apply() { applyNow() }
 
@@ -1008,7 +1032,7 @@ struct NakiActions {
   var reloadPage: ReloadPageAction
   /// 換到另一個區服（換 URL，不是重載）
   var switchServer: SwitchServerAction
-  /// 套用雀魂連線設定（User-Agent／額外 header）並重新載入
+  /// 寫入額外 header 並重新載入（User-Agent 由 View 直接寫設定）
   var connectionSettings: ConnectionSettingsAction
   /// 啟動時的區服選擇：寫入「不再詢問」，區服不同才換服
   var chooseServer: ChooseServerAction
