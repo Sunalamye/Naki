@@ -74,6 +74,8 @@ enum CloudDecisionMapper {
         case "chi":
             guard let pai = reaction["pai"] as? String,
                   let consumed = reaction["consumed"] as? [String],
+                  // 雲端只會回 MJAI 寫法；`0m` 這類雀魂寫法代表資料有誤，退回本地而不是猜
+                  ([pai] + consumed).allSatisfy({ LiqiTile.majsoul(fromMJAI: $0) != nil }),
                   let variant = LiqiTile.chiVariant(called: pai, consumed: consumed) else {
                 return nil
             }

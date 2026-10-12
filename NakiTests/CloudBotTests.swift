@@ -218,6 +218,22 @@ final class CloudBotTests: XCTestCase {
                        "退避視窗內不得再付一次逾時")
     }
 
+    /// 層級：CloudBot 整條 overlay（mock HTTP）。雲端回 `0m` 這類非 MJAI 牌的吃 → 沿用本地決策
+    func test_chiReactionWithNonMJAITile_fallsBackToLocal() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (200, #"{"reaction":{"type":"chi","actor":0,"pai":"0m","consumed":["6m","7m"],"target":3},"#
+                + #""candidates":[{"action":"chi_low","prob":0.9}],"model":"4p-x"}"#, [:]),
+        ])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+
+        let result = try await decide(bot, local: local, reaction: localDahai("1m"))
+        XCTAssertEqual(result?.source, "local", "無法映射的雲端 chi 必須沿用本地決策")
+        XCTAssertEqual(result?.recommendations.first?.displayTile, "1m")
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 1)
+    }
+
     func test_nullReaction_fallsBackToLocal_withoutTrippingBreaker() async throws {
         CloudMockURLProtocol.reset(script: [
             (200, "{}", [:]),

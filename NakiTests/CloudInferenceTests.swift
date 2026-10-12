@@ -306,6 +306,27 @@ final class CloudDecisionMapperTests: XCTestCase {
         XCTAssertEqual(recs?[0].displayTile, "chi_0")
     }
 
+    /// 層級：mapper。雀魂寫法（`0m`）或非牌字串不是合法 MJAI，整列回 nil 讓呼叫端退回本地
+    func test_chiReaction_withNonMJAITiles_returnsNil() {
+        let cases: [(pai: String, consumed: [String])] = [
+            ("0m", ["6m", "7m"]), ("3m", ["4m", "0m"]), ("6m", ["0m", "7m"]),
+            ("1z", ["2m", "3m"]), ("3m", ["4m", "5x"]),
+        ]
+        for c in cases {
+            XCTAssertNil(
+                CloudDecisionMapper.recommendations(
+                    reaction: ["type": "chi", "actor": 1, "pai": c.pai,
+                               "consumed": c.consumed, "target": 0],
+                    candidates: [], reachDiscard: nil),
+                "pai=\(c.pai) consumed=\(c.consumed)")
+        }
+        let valid = CloudDecisionMapper.recommendations(
+            reaction: ["type": "chi", "actor": 1, "pai": "3m",
+                       "consumed": ["4m", "5mr"], "target": 0],
+            candidates: [], reachDiscard: nil)
+        XCTAssertEqual(valid?.first?.chiVariant, 0, "合法 MJAI 赤五照常通過")
+    }
+
     func test_kanReactions_mapToKan() {
         for type in ["daiminkan", "ankan", "kakan"] {
             let recs = CloudDecisionMapper.recommendations(
