@@ -105,25 +105,6 @@ final class SettingsStore {
         #endif
     }
 
-    /// 隱藏玩家名稱的持久化 key —— **唯一定義點**。
-    ///
-    /// UI 的 Toggle 與 `WebSession` 都讀這個 static，不要在別處再寫一次字面值。
-    nonisolated static let hidePlayerNamesKey = "HidePlayerNames"
-
-    /// 在遊戲解析封包前把暱稱改寫成 Player 1–4（實作見 `naki-websocket.js` 的 `__nakiHideNames`）。
-    ///
-    /// 寫入即持久化：UI 的 Toggle 與 `WebSession.setHidePlayerNames` 讀寫同一份。
-    /// 初值直接從 `UserDefaults` 取（stored property 的預設值運算式），這樣 `init` 就不必
-    /// 走 setter——`@Entry` 的預設值要在 nonisolated 的 `defaultValue` 裡建起來。
-    var hidePlayerNames: Bool = UserDefaults.standard
-        .bool(forKey: SettingsStore.hidePlayerNamesKey)
-    {
-        didSet {
-            guard hidePlayerNames != oldValue else { return }
-            UserDefaults.standard.set(hidePlayerNames, forKey: Self.hidePlayerNamesKey)
-        }
-    }
-
     /// 背景保活的持久化 key。
     nonisolated static let keepAliveInBackgroundKey = "naki.keepAliveInBackground"
 

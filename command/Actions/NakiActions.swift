@@ -893,42 +893,6 @@ struct ConnectionSettingsAction {
   func defaultUserAgent() async -> String? { await readDefaultUserAgent() }
 }
 
-// MARK: - SetHidePlayerNamesAction
-
-/// 隱藏玩家名稱開關（設定 Toggle）。
-///
-/// 持久化寫進 `SettingsStore`，推送走 `naki-websocket.js` 的 `__nakiHideNames`；
-/// 兩件事都在 `WebSession.setHidePlayerNames` 一處。
-@MainActor
-struct SetHidePlayerNamesAction {
-
-  private nonisolated(unsafe) let perform: (Bool) -> Void
-
-  private init(perform: @escaping (Bool) -> Void) {
-    self.perform = perform
-  }
-
-  /// 真實實作
-  init(session: WebSession) {
-    self.init(perform: { [weak session] hide in session?.setHidePlayerNames(hide) })
-  }
-
-  /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
-  nonisolated init() {
-    self.perform = { _ in }
-  }
-
-  #if DEBUG
-    init(stub: @escaping (Bool) -> Void) {
-      self.init(perform: stub)
-    }
-  #endif
-
-  func callAsFunction(_ hide: Bool) {
-    perform(hide)
-  }
-}
-
 // MARK: - SetAppLanguageAction
 
 /// 切換 App 內語言（設定 Picker）。`.appLocale()` 的 `.environment(\.locale)` 讀 `settings.locale`，寫入即重繪。

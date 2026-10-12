@@ -177,20 +177,6 @@ final class NakiEnvironmentDefaultsTests: XCTestCase {
 @MainActor
 final class SettingsStoreTests: XCTestCase {
 
-    /// key 只有一份（先前三個檔案各寫一次，其中兩份是字面值）
-    func testHidePlayerNamesKeyIsTheOnlyDefinition() {
-        XCTAssertEqual(SettingsStore.hidePlayerNamesKey, "HidePlayerNames")
-    }
-
-    /// 初值來自持久化，不是硬寫 false
-    func testHidePlayerNamesReadsPersistedValue() {
-        let store = SettingsStore()
-
-        XCTAssertEqual(
-            store.hidePlayerNames,
-            UserDefaults.standard.bool(forKey: SettingsStore.hidePlayerNamesKey))
-    }
-
     /// 背景保活預設開；未設定過的 key 不能落到 `UserDefaults.bool` 的 false。用獨立 suite，不碰 `.standard`。
     func testKeepAliveInBackgroundDefaultsToOnAndHonorsPersistedValue() throws {
         let name = "naki.tests.keepAlive.\(UUID().uuidString)"

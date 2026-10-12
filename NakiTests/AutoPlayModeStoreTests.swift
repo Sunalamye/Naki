@@ -98,7 +98,7 @@ final class AutoPlayModeStoreTests: XCTestCase {
             AutoPlayModeStore.save(mode, to: defaults)
             XCTAssertEqual(AutoPlayModeStore.load(defaults), mode)
             XCTAssertEqual(defaults.string(forKey: AutoPlayModeStore.key), mode.rawValue,
-                           "@AppStorage 直接讀這個 key 的字串，格式必須是 rawValue")
+                           "持久化格式必須是 rawValue 字串，load 靠它還原")
         }
     }
 }
