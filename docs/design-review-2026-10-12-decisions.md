@@ -829,3 +829,12 @@
 - **統帥代決**：(A) 在 mapper 分類前加 `majsoul(fromMJAI:) != nil` guard，不動 `LiqiTile.chiVariant`，接受集合變成基底子集（fail-closed）；(B) 選復驗方案 (a)：`Recommendation` 兩個 init 遇 `.chi` 且未傳變體時在建構邊界解一次 label，函式層行為回到基底，兩條被改寫的既有測試還原原文。理由：(a) 最接近零行為改動，且不需要 WP8 配合改測試；若選 (b) 改 wp8 測試，等於承認 Recommendation 的建構契約變了，之後所有用 label 建構 chi 的呼叫端都要跟改。
 - 另補：executor `first(where: .chi)`→`first` 變異存活（正式路徑等價但無測試）→ 補測試；`LiqiTile.swift:37` 註解不準。復驗更正了主線 brief 的一個前提：基底與 HEAD 對「無變體」都是以 0 對照，規格 :318「多組且對照失敗才不送」才是正確描述，非 WP11 造成。
 - 復驗附帶：`ReplayFingerprintTests` 只雜湊 bot 的 MJAI action，對 chi 路徑無覆蓋力（弱證據）；live log 無任何「執行: 吃」，chi combination 恆為兩張未驗證；test host 每跑一次會在 `~/Library/Logs/Naki` 建 session 目錄（既有行為，plist 以外的環境副作用，WP9b 一併看）；實作者與復驗員都用過系統 `python3`（違反 proto 規則，已提醒）。
+
+### WP8 結果（2026-10-13）
+- 合併到 main：merge commit `edf0841`（七個 commit `2f8369e`…`3ef11de`，基準 `1b38673`，12 檔 +653/−284）。復驗「可合併」（`.swfd/logs/wp8-verify/`）：959 → 970；macOS Debug／Release 與 iOS generic build 皆成功、警告不增；合併態 main 全套見 `.swfd/logs/merge-main/test-edf0841.log`。
+- Deviation（核可）：Preview 的 `logManager`／`jsInjection`／`parseFault` 不用新實例，改為 private optional 備份欄位＋計算屬性 `injected ?? .shared`。復驗重現：nonisolated Preview init 直接取 `.shared` 或呼叫 MainActor init 會多三條警告（Swift 6 模式變 error），消除需在範圍外 `LiqiParseFault.swift` 補 `nonisolated init`。副作用判定：兩個 state 的 init 是純值；`LogManager.shared` 首次存取會建 `~/Library/Logs/Naki` session 目錄並 prune，但基底 View 早已觸發同一件事，非回歸。Observation 追蹤依賴建立在解析出的實例上，橫幅仍會重繪（推理，未 runtime 驗證）。若日後要新實例：兩個 class 各補 `nonisolated init() {}`（`PluginStore` 有先例）。
+- 唯一正式路徙語意差異（核可記錄）：`DismissUpdate(skip:)` 改在點擊當下讀 `availableUpdate?.version`，原為 body 求值時捕捉。只在「選單手動檢查更新在橫幅顯示期間完成、GitHub 恰好發新版、點擊落在重繪前的窗口」才不同；舊碼記使用者看到的版本較貼近語意。可達但極窄，兩條測試鎖值與順序。
+- revert 依賴：`fc97077` → `f3a34b5` → `3ef11de` 線性堆疊（LogPanel 的 `@Environment` 在 `fc97077` 引入），偏離「每項可獨立 revert」，成組 revert 即可，已揭露。
+- 與 WP11：文字合併乾淨；對舊 `e42ce17` 有語意衝突（復驗實測三格「吃」≠「吃①②③」），WP11 補強 `d8abb30` 後消解（復驗實測綠）。**WP11 必須以 `a15950f` 或之後版本合併，若 `d8abb30` 被撤則 wp8 測試三個 chi case 要補 `chiVariant:`。**
+- 可合併後補 → WP9b：lint 補規格 grep 的四個名稱（`fetchAny` 等）並斷言掃到行數 > 0（V10 不帶點 `shared`、V11 直呼 `fetchAny` 存活；目錄不存在時會空轉通過）；`NakiRuntime` 三條 Action 接線無鎖（V16 把 `clearLogs` 換 no-op 12 條全綠）；`NakiEnvironment.swift:96-101` 註解仍寫「全新的空 store」→ WP12。
+- 程序備註：復驗員自報一次短暫寫 /tmp scratchpad（10 秒內刪除）；兩位都新增 `naki.tests.wp8.*` suite plist 共 7 個（`removePersistentDomain` 不刪檔，既有模式）。
