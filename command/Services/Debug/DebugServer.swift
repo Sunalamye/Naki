@@ -146,8 +146,9 @@ class DebugServer: MCPHTTPResponder {
                 return
             }
 
-            listener = try NWListener(using: parameters, on: nwPort)
-            listener?.stateUpdateHandler = { [weak self] state in
+            let created = try NWListener(using: parameters, on: nwPort)
+            listener = created
+            created.stateUpdateHandler = { [weak self] state in
                 guard let self = self else { return }
                 switch state {
                 case .ready:
@@ -171,19 +172,19 @@ class DebugServer: MCPHTTPResponder {
                 case .cancelled:
                     self.log("Server cancelled")
                     // `.failed` 之後的 `cancel()` 也走這裡；旗標不歸零的話 `startDebugServer` 的 guard
-                    // 會一直回「已在運行」。換 port 重試成功時，新 listener 的 `.ready`（同在 main queue、
-                    // 排在這之後）會再設回 true
-                    self.markStopped()
+                    // 會一直回「已在運行」。換 port 重試後，舊 listener 遲到的 `.cancelled` 不能蓋掉
+                    // 新 listener 的 `.ready`，事件次序 Network.framework 不保證，所以比對身分
+                    if self.listener == nil || self.listener === created { self.markStopped() }
                 default:
                     break
                 }
             }
 
-            listener?.newConnectionHandler = { [weak self] connection in
+            created.newConnectionHandler = { [weak self] connection in
                 self?.handleConnection(connection)
             }
 
-            listener?.start(queue: .main)
+            created.start(queue: .main)
 
         } catch {
             log("Failed to start server on port \(port): \(error)")

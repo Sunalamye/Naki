@@ -140,7 +140,7 @@ final class DebugServerLifecycleTests: XCTestCase {
             let base = UInt16.random(in: 50000...60000)
             if let fds = occupyPorts(from: base, count: 10) { occupied = (base, fds) }
         }
-        let held = try XCTUnwrap(occupied, "找不到連續 10 個可佔用的 port")
+        guard let held = occupied else { throw XCTSkip("無法佔用連續 10 個 loopback port（機器可能沒有 IPv6 loopback）") }
         defer { held.fds.forEach { close($0) } }
 
         // 模擬「曾經 ready 後失敗」留下的旗標：fix 前它永遠不會被改回 false
@@ -161,7 +161,7 @@ final class DebugServerLifecycleTests: XCTestCase {
             let base = UInt16.random(in: 50000...60000)
             if let fds = occupyPorts(from: base, count: 2) { occupied = (base, fds) }
         }
-        let held = try XCTUnwrap(occupied, "找不到連續 2 個可佔用的 port")
+        guard let held = occupied else { throw XCTSkip("無法佔用連續 2 個 loopback port（機器可能沒有 IPv6 loopback）") }
         defer { held.fds.forEach { close($0) } }
 
         let store = GameStore()
@@ -173,7 +173,8 @@ final class DebugServerLifecycleTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(300))
 
         XCTAssertTrue(store.isDebugServerRunning)
-        XCTAssertEqual(store.debugServerPort, held.base + 2)
+        // 只斷言前兩個 port 綁定失敗；base+2 之後可能被其他程序佔用，確切落點不可預期
+        XCTAssertGreaterThanOrEqual(store.debugServerPort, held.base + 2)
     }
 
     func testStopResetsRunningFlagViaCancelledState() async throws {
