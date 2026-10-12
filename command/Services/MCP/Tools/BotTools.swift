@@ -57,6 +57,10 @@ struct BotTriggerTool: MCPTool {
         guard let nakiContext = context as? NakiMCPContext else {
             throw MCPToolError.notAvailable("Naki context")
         }
+        // Legacy path 的 `TriggerAutoPlayAction` 是空閉包，不擋的話會回假的 `queued: true`
+        if !nakiContext.supportsAutoPlay {
+            return ["success": false, "error": "legacy_path_action_send_disabled", "queued": false]
+        }
         // 引擎那一輪的 outcome 拿不到（`TriggerAutoPlayAction` 是射後不理），
         // 所以只先擋下明知不會送的情況；success 只代表「已排進引擎下一輪」
         // 伺服器授權的和牌不需要推薦，引擎會交給 resolver

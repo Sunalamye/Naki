@@ -460,6 +460,9 @@ struct ContentView: View {
                         LiqiParseFailureBanner()
                     }
                     .safeAreaInset(edge: .top) {
+                        PageLoadFailureBanner()
+                    }
+                    .safeAreaInset(edge: .top) {
                         UpdateAvailableBanner()
                     }
                     .safeAreaInset(edge: .top) {

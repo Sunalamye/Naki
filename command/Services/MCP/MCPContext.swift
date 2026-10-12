@@ -25,6 +25,9 @@ protocol NakiMCPContext: MCPContext {
     /// 獲取 Bot 狀態
     func getBotStatus() -> [String: Any]?
 
+    /// 這條 WebView path 是否提供自動送出（Legacy path 為 false）
+    var supportsAutoPlay: Bool { get }
+
     /// 觸發自動打牌
     func triggerAutoPlay()
 
@@ -144,6 +147,8 @@ final class DefaultNakiMCPContext: NakiMCPContext {
     func getBotStatus() -> [String: Any]? {
         NakiStatePayload.botStatus(store: dependencies.store)
     }
+
+    var supportsAutoPlay: Bool { dependencies.settings.supportsAutoPlay }
 
     func triggerAutoPlay() {
         dependencies.triggerAutoPlay()

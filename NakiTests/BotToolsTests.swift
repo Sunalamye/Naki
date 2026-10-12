@@ -1,0 +1,57 @@
+//
+//  BotToolsTests.swift
+//  NakiTests
+//
+//  Legacy path 的 `bot_trigger` 短碼，以及 test host 不自起 MCP server 的鎖。
+//
+
+import XCTest
+
+@testable import Naki
+
+@MainActor
+final class BotToolsTests: XCTestCase {
+
+    /// Legacy path 的 `TriggerAutoPlayAction` 是空閉包；沒有這個短碼，工具會回假的 `queued: true`。
+    /// 用「在 .normal path 一定會成功」的 oplist，才能證明擋下的是 path 而不是別的閘門。
+    func testBotTriggerReportsLegacyShortCode() async throws {
+        let shared = LiqiOperationStore.shared
+        shared.reset()
+        defer { shared.reset() }
+        shared.record(seat: 0, operations: [LiqiOperation(type: .tsumo)], contextTile: "5p")
+
+        let settings = SettingsStore()
+        settings.adoptAutoPlaySupport(false)
+        let store = GameStore()
+        let send: SendActionAction = .unavailable("test_not_wired")
+        var triggered = 0
+        let context = DefaultNakiMCPContext(dependencies: NakiMCPDependencies(
+            store: store, ui: UIState(), settings: settings,
+            executeJavaScript: .unavailable, captureScreenshot: .unavailable,
+            sendAction: send, startMatch: StartMatchAction(send: send),
+            cancelMatch: CancelMatchAction(send: send),
+            startUnifiedMatch: StartUnifiedMatchAction(send: send),
+            cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),
+            triggerAutoPlay: TriggerAutoPlayAction(stub: { triggered += 1 }),
+            setAntiIdle: .unavailable,
+            gameSnapshot: GameSnapshotAction(store: store, accountSource: nil),
+            forceReconnect: .unavailable))
+
+        let result = try await BotTriggerTool(context: context).execute(arguments: [:]) as? [String: Any]
+
+        XCTAssertEqual(result?["success"] as? Bool, false)
+        XCTAssertEqual(result?["error"] as? String, "legacy_path_action_send_disabled")
+        XCTAssertEqual(result?["queued"] as? Bool, false)
+        XCTAssertEqual(triggered, 0)
+    }
+
+    /// test host 本身就是 App：`NakiRuntime.init` 不跳過的話，每次跑測試都會綁 loopback 8765。
+    /// 監聽就緒是非同步的，等一小段讓「沒跳過」的情況有時間現形。
+    func testRuntimeInTestHostDoesNotStartDebugServer() async throws {
+        let runtime = NakiRuntime()
+
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertFalse(runtime.store.isDebugServerRunning)
+    }
+}
