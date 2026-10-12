@@ -46,21 +46,20 @@ private final class LoopbackServer: @unchecked Sendable {
 final class NativeBotControllerTests: XCTestCase {
 
     private var server: LoopbackServer!
+    private let operations = LiqiOperationStore()
     private let cloudDahai = #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"candidates":[],"model":"4p-x"}"#
     private let cloudKita = #"{"reaction":{"type":"kita","actor":0,"pai":"N"},"candidates":[],"model":"3p-x"}"#
 
     override func setUp() async throws {
         server = await LoopbackServer()
-        LiqiOperationStore.shared.reset()
     }
 
     override func tearDown() async throws {
-        LiqiOperationStore.shared.reset()
         server = nil
     }
 
     private func makeController(is3P: Bool) throws -> NativeBotController {
-        let controller = NativeBotController()
+        let controller = NativeBotController(operations: operations)
         let url = "http://127.0.0.1:\(server.port)"
         controller.cloudConfigProvider = {
             CloudInferenceConfig(enabled: true, baseURL: url, apiKey: "K", model4P: "4p-x", model3P: "3p-x")
@@ -83,7 +82,7 @@ final class NativeBotControllerTests: XCTestCase {
     }
 
     private func pendingSequence() -> UInt64 {
-        LiqiOperationStore.shared.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test").sequence
+        operations.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test").sequence
     }
 
     private func tsumo(seq: UInt64, pai: String = "1p") -> [String: Any] {
@@ -120,6 +119,13 @@ final class NativeBotControllerTests: XCTestCase {
         _ = try await controller.react(event: tsumo(seq: pending))
         XCTAssertEqual(server.requests, 1)
         XCTAssertEqual(controller.lastDecisionSource, "cloud:4p-x")
+    }
+
+    func testAvailableActionsFollowInjectedStore() throws {
+        let controller = try makeController(is3P: true)
+        operations.record(seat: 0, operations: [LiqiOperation(type: .pon)], source: "test")
+
+        XCTAssertTrue(controller.canPon)
     }
 
     // MARK: 決策來源不黏著

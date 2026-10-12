@@ -57,9 +57,12 @@ class NativeBotController {
     /// 目前（或，沒有 bot 時，將會建的）引擎是否支援三麻：局間確認與續局的判準
     var supports3P: Bool { bot?.identity.supports3P ?? AkagiSanmaBot.isBundled }
 
+    /// 授權來源。Replay 傳全新空 store：錄影沒有 oplist，不能讀到 live 牌局的授權。
+    private let operations: LiqiOperationStore
+
     /// 三麻本地引擎的工廠（測試縫：注入失敗以驗證退路）
-    var makeSanmaLocal: (UInt8) throws -> AkagiSanmaBot = { playerId in
-        try AkagiSanmaBot(playerId: playerId, snapshot: { LiqiOperationStore.shared.pending })
+    lazy var makeSanmaLocal: (UInt8) throws -> AkagiSanmaBot = { [operations] playerId in
+        try AkagiSanmaBot(playerId: playerId, snapshot: { operations.pending })
     }
 
     /// 是否為 3P 模式
@@ -129,7 +132,7 @@ class NativeBotController {
     /// 用 `pending` 而不是 `latest`：動作送出並 `markHandled` 之後這批機會就消化掉了，
     /// 徽章應該跟著熄滅。
     var availableActions: BotAvailableActions {
-        BotAvailableActions(snapshot: LiqiOperationStore.shared.pending)
+        BotAvailableActions(snapshot: operations.pending)
     }
 
     var canDiscard: Bool { availableActions.canDiscard }
@@ -141,7 +144,9 @@ class NativeBotController {
 
     // MARK: - Initialization
 
-    init() {}
+    init(operations: LiqiOperationStore = .shared) {
+        self.operations = operations
+    }
 
     /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit { }
@@ -159,7 +164,7 @@ class NativeBotController {
         if is3P {
             // 三麻：本地 4p 模型推三麻結構上無效，本地引擎改用 Akagi 三麻（decisions D23）。
             // 動作類別由 oplist 授權；雲端優先、本地接手，與四麻同形。
-            let serverAuthorization: (UInt64) -> Bool = { LiqiOperationStore.shared.pending?.sequence == $0 }
+            let serverAuthorization: (UInt64) -> Bool = { [operations] in operations.pending?.sequence == $0 }
             if let local = try? makeSanmaLocal(playerId) {
                 if let provider = cloudConfigProvider {
                     bot = CloudBot(local: local, playerId: playerId, is3P: true,
@@ -186,7 +191,7 @@ class NativeBotController {
             if let provider = cloudConfigProvider {
                 bot = CloudBot(local: local, playerId: playerId, is3P: false,
                                configProvider: provider,
-                               serverAuthorization: { LiqiOperationStore.shared.pending?.sequence == $0 })
+                               serverAuthorization: { [operations] in operations.pending?.sequence == $0 })
             } else {
                 bot = local
             }
@@ -317,7 +322,7 @@ class NativeBotController {
         let recSummary = lastRecommendations.prefix(6)
             .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
             .joined(separator: " ")
-        let opsSummary = LiqiOperationStore.shared.latest.map { "\($0.rawTypes)" } ?? "-"
+        let opsSummary = operations.latest.map { "\($0.rawTypes)" } ?? "-"
         eventLog("[Bot] Bot returned action, updated recommendations: "
                + "\(lastRecommendations.count) items [\(recSummary)] oplist=\(opsSummary)")
 

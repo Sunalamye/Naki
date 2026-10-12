@@ -149,7 +149,8 @@ enum ReplaySupport {
         }
         let is3P = (startGame["is3P"] as? Bool) ?? false
 
-        let controller = NativeBotController()
+        // 錄影沒有 oplist：全新空 store，不讀 live 牌局的授權
+        let controller = NativeBotController(operations: LiqiOperationStore())
         guard let seat = UInt8(exactly: playerId) else {
             throw MCPToolError.invalidParameter("file", expected: "start_game.id 在 0–255 的錄影")
         }
@@ -179,7 +180,7 @@ enum ReplaySupport {
             }
         }
 
-        return [
+        var result: [String: Any] = [
             "source": source,
             "events": events.count,
             "playerId": playerId,
@@ -191,5 +192,7 @@ enum ReplaySupport {
             "note": "純離線重跑，沒有送出任何 Liqi 請求。"
                 + "決策是模型對錄影中該局面的回應，可與當時的實際送出比對。"
         ]
+        if is3P { result["sanmaAuthorization"] = "unavailable_no_oplist_in_recording" }
+        return result
     }
 }
