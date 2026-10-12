@@ -583,10 +583,8 @@ final class NakiRuntime {
 
     private func makeActions() -> NakiActions {
         NakiActions(
-            executeJavaScript: ExecuteJavaScriptAction(session: session),
             setPluginEnabled: SetPluginEnabledAction(runtime: self),
             setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction(runtime: self),
-            rescanPlugins: RescanPluginsAction(runtime: self),
             removePlugin: RemovePluginAction(runtime: self),
             installPlugins: InstallPluginsAction(runtime: self),
             checkPluginUpdates: CheckPluginUpdatesAction(runtime: self),
@@ -594,11 +592,9 @@ final class NakiRuntime {
             setPluginSetting: SetPluginSettingAction(runtime: self),
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
-            startFullAutoNow: StartFullAutoNowAction(runtime: self),
             startFullAuto: StartFullAutoAction(
                 settings: settings, setMode: SetAutoPlayModeAction(runtime: self),
                 startNow: StartFullAutoNowAction(runtime: self)),
-            triggerAutoPlay: TriggerAutoPlayAction(runtime: self),
             deleteBot: DeleteBotAction(coordinator: coordinator),
             toggleDebugServer: ToggleDebugServerAction(runtime: self),
             reloadPage: ReloadPageAction(session: session),
@@ -606,7 +602,6 @@ final class NakiRuntime {
             connectionSettings: ConnectionSettingsAction(session: session),
             chooseServer: ChooseServerAction(
                 settings: settings, switchServer: SwitchServerAction(session: session)),
-            setHidePlayerNames: SetHidePlayerNamesAction(session: session),
             setKeepAliveInBackground: SetKeepAliveInBackgroundAction(session: session),
             setAppLanguage: SetAppLanguageAction(settings: settings),
             probeCloud: .live(),

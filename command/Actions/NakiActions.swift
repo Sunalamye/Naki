@@ -659,9 +659,6 @@ struct SetAutoPlayModeAction {
     self.init(perform: { [weak runtime] mode in runtime?.setAutoPlayMode(mode) })
   }
 
-  /// Preview／未接線：什麼都不做
-  static let noop = SetAutoPlayModeAction()
-
   /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = { _ in }
@@ -703,9 +700,6 @@ struct StartFullAutoNowAction {
     self.init(perform: { [weak runtime] in runtime?.startFullAutoNow() })
   }
 
-  /// Preview／未接線：什麼都不做
-  static let noop = StartFullAutoNowAction()
-
   nonisolated init() {
     self.perform = {}
   }
@@ -741,9 +735,6 @@ struct DeleteBotAction {
     self.init(perform: { [weak coordinator] in coordinator?.deleteBot() })
   }
 
-  /// Preview／未接線
-  static let noop = DeleteBotAction()
-
   /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = {}
@@ -776,9 +767,6 @@ struct ToggleDebugServerAction {
   init(runtime: NakiRuntime) {
     self.init(perform: { [weak runtime] in runtime?.toggleDebugServer() })
   }
-
-  /// Preview／未接線
-  static let noop = ToggleDebugServerAction()
 
   /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
@@ -816,9 +804,6 @@ struct ReloadPageAction {
     self.init(perform: { [weak session] in session?.reload() })
   }
 
-  /// Preview／未接線
-  static let noop = ReloadPageAction()
-
   /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
     self.perform = {}
@@ -853,9 +838,6 @@ struct SwitchServerAction {
   init(session: WebSession) {
     self.init(perform: { [weak session] server in session?.switchServer(to: server) })
   }
-
-  /// Preview／未接線
-  static let noop = SwitchServerAction()
 
   nonisolated init() {
     self.perform = { _ in }
@@ -895,9 +877,6 @@ struct ConnectionSettingsAction {
       defaultUserAgent: { [weak session] in await session?.defaultUserAgent() })
   }
 
-  /// Preview／未接線
-  static let noop = ConnectionSettingsAction()
-
   nonisolated init() {
     self.applyNow = {}
     self.readDefaultUserAgent = { nil }
@@ -933,9 +912,6 @@ struct SetHidePlayerNamesAction {
   init(session: WebSession) {
     self.init(perform: { [weak session] hide in session?.setHidePlayerNames(hide) })
   }
-
-  /// Preview／未接線
-  static let noop = SetHidePlayerNamesAction()
 
   /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
@@ -1060,14 +1036,10 @@ struct WebViewAction {
 @MainActor
 struct NakiActions {
 
-  /// 在遊戲頁面執行 JS（函式體語意）
-  var executeJavaScript: ExecuteJavaScriptAction
   /// 熱插拔：開關插件（免 reload；持久化 + 對當前頁面注入 enable/disable）
   var setPluginEnabled: SetPluginEnabledAction
   /// L3 總開關：允許插件改寫／送出封包（持久化 + 重建 user script + 即時注入）
   var setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction
-  /// 重掃插件目錄（URL 匯入落地後刷新清單）
-  var rescanPlugins: RescanPluginsAction
   /// 移除插件（刪目錄 + 熱停用 + 重掃）
   var removePlugin: RemovePluginAction
   /// 安裝（匯入／更新）插件
@@ -1082,12 +1054,8 @@ struct NakiActions {
   var forceReconnect: ForceReconnectAction
   /// 切換自動打牌模式
   var setAutoPlayMode: SetAutoPlayModeAction
-  /// 全自動：立刻排一場（大廳按「開始」時用，不等 end_game）
-  var startFullAutoNow: StartFullAutoNowAction
   /// 全自動：寫入四麻／三麻與房間偏好、切到全自動、立刻排一場
   var startFullAuto: StartFullAutoAction
-  /// 手動要求自動打牌跑一輪
-  var triggerAutoPlay: TriggerAutoPlayAction
   /// 刪除原生 Bot
   var deleteBot: DeleteBotAction
   /// 啟動／停止 MCP Server
@@ -1100,8 +1068,6 @@ struct NakiActions {
   var connectionSettings: ConnectionSettingsAction
   /// 啟動時的區服選擇：寫入「不再詢問」，區服不同才換服
   var chooseServer: ChooseServerAction
-  /// 隱藏玩家名稱開關
-  var setHidePlayerNames: SetHidePlayerNamesAction
   /// 背景保活開關
   var setKeepAliveInBackground: SetKeepAliveInBackgroundAction
   /// 切換 App 內語言
@@ -1114,17 +1080,18 @@ struct NakiActions {
   var pluginDiagnostics: PluginDiagnosticsAction
   /// 交出這條 path 的 WebView
   var webView: WebViewAction
+}
 
+// 放在 extension：寫在型別本體內會抑制編譯器合成的 memberwise init（`NakiRuntime` 正式路徑用）。
+extension NakiActions {
   /// Preview／未接線：全部無副作用。
   ///
   /// 沒有預設引數（而是一個獨立的 `nonisolated init()`）的理由：Swift 5 語言模式下
   /// **預設引數運算式在 nonisolated 上下文求值**，碰不到 `@MainActor` 的 static，
   /// 而 `@Entry` 的 `defaultValue` 正是那種上下文。
   nonisolated init() {
-    self.executeJavaScript = ExecuteJavaScriptAction()
     self.setPluginEnabled = SetPluginEnabledAction()
     self.setPluginsMayModifyOutbound = SetPluginsMayModifyOutboundAction()
-    self.rescanPlugins = RescanPluginsAction()
     self.removePlugin = RemovePluginAction()
     self.installPlugins = InstallPluginsAction()
     self.checkPluginUpdates = CheckPluginUpdatesAction()
@@ -1132,79 +1099,19 @@ struct NakiActions {
     self.setPluginSetting = SetPluginSettingAction()
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
-    self.startFullAutoNow = StartFullAutoNowAction()
     self.startFullAuto = StartFullAutoAction()
-    self.triggerAutoPlay = TriggerAutoPlayAction()
     self.deleteBot = DeleteBotAction()
     self.toggleDebugServer = ToggleDebugServerAction()
     self.reloadPage = ReloadPageAction()
     self.switchServer = SwitchServerAction()
     self.connectionSettings = ConnectionSettingsAction()
     self.chooseServer = ChooseServerAction()
-    self.setHidePlayerNames = SetHidePlayerNamesAction()
     self.setKeepAliveInBackground = SetKeepAliveInBackgroundAction()
     self.setAppLanguage = SetAppLanguageAction()
     self.probeCloud = ProbeCloudAction()
     self.testCloudConnection = TestCloudConnectionAction()
     self.pluginDiagnostics = PluginDiagnosticsAction()
     self.webView = WebViewAction()
-  }
-
-  /// 正式路徑：由 `NakiRuntime` 一次組好（全部明講，漏一個編譯期就不過）
-  init(executeJavaScript: ExecuteJavaScriptAction,
-       setPluginEnabled: SetPluginEnabledAction,
-       setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction,
-       rescanPlugins: RescanPluginsAction,
-       removePlugin: RemovePluginAction,
-       installPlugins: InstallPluginsAction,
-       checkPluginUpdates: CheckPluginUpdatesAction,
-       checkForUpdate: CheckForUpdateAction,
-       setPluginSetting: SetPluginSettingAction,
-       forceReconnect: ForceReconnectAction,
-       setAutoPlayMode: SetAutoPlayModeAction,
-       startFullAutoNow: StartFullAutoNowAction,
-       startFullAuto: StartFullAutoAction,
-       triggerAutoPlay: TriggerAutoPlayAction,
-       deleteBot: DeleteBotAction,
-       toggleDebugServer: ToggleDebugServerAction,
-       reloadPage: ReloadPageAction,
-       switchServer: SwitchServerAction,
-       connectionSettings: ConnectionSettingsAction,
-       chooseServer: ChooseServerAction,
-       setHidePlayerNames: SetHidePlayerNamesAction,
-       setKeepAliveInBackground: SetKeepAliveInBackgroundAction,
-       setAppLanguage: SetAppLanguageAction,
-       probeCloud: ProbeCloudAction,
-       testCloudConnection: TestCloudConnectionAction,
-       pluginDiagnostics: PluginDiagnosticsAction,
-       webView: WebViewAction) {
-    self.executeJavaScript = executeJavaScript
-    self.setPluginEnabled = setPluginEnabled
-    self.setPluginsMayModifyOutbound = setPluginsMayModifyOutbound
-    self.rescanPlugins = rescanPlugins
-    self.removePlugin = removePlugin
-    self.installPlugins = installPlugins
-    self.checkPluginUpdates = checkPluginUpdates
-    self.checkForUpdate = checkForUpdate
-    self.setPluginSetting = setPluginSetting
-    self.forceReconnect = forceReconnect
-    self.setAutoPlayMode = setAutoPlayMode
-    self.startFullAutoNow = startFullAutoNow
-    self.startFullAuto = startFullAuto
-    self.triggerAutoPlay = triggerAutoPlay
-    self.deleteBot = deleteBot
-    self.toggleDebugServer = toggleDebugServer
-    self.reloadPage = reloadPage
-    self.switchServer = switchServer
-    self.connectionSettings = connectionSettings
-    self.chooseServer = chooseServer
-    self.setHidePlayerNames = setHidePlayerNames
-    self.setKeepAliveInBackground = setKeepAliveInBackground
-    self.setAppLanguage = setAppLanguage
-    self.probeCloud = probeCloud
-    self.testCloudConnection = testCloudConnection
-    self.pluginDiagnostics = pluginDiagnostics
-    self.webView = webView
   }
 }
 
@@ -1226,9 +1133,6 @@ struct SetPluginEnabledAction {
       runtime?.setPluginEnabled(id: id, enabled: enabled)
     })
   }
-
-  /// Preview／未接線
-  static let noop = SetPluginEnabledAction()
 
   /// Preview／未接線的預設值；`nonisolated` 的理由見 `ExecuteJavaScriptAction.init()`。
   nonisolated init() {
@@ -1270,31 +1174,6 @@ struct SetPluginsMayModifyOutboundAction {
   #endif
 
   func callAsFunction(_ on: Bool) { perform(on) }
-}
-
-// MARK: - 重掃插件
-
-/// 重掃插件目錄（URL 匯入落地後刷新 `pluginDescriptors`）。
-struct RescanPluginsAction {
-
-  private nonisolated(unsafe) let perform: () -> Void
-
-  private init(perform: @escaping () -> Void) {
-    self.perform = perform
-  }
-
-  init(runtime: NakiRuntime) {
-    self.init(perform: { [weak runtime] in runtime?.rescanPlugins() })
-  }
-
-  static let noop = RescanPluginsAction()
-  nonisolated init() { self.perform = { } }
-
-  #if DEBUG
-    init(stub: @escaping () -> Void) { self.init(perform: stub) }
-  #endif
-
-  func callAsFunction() { perform() }
 }
 
 // MARK: - 安裝／檢查更新／改設定
@@ -1404,7 +1283,6 @@ struct RemovePluginAction {
     self.init(perform: { [weak runtime] id in runtime?.removePlugin(id: id) })
   }
 
-  static let noop = RemovePluginAction()
   nonisolated init() { self.perform = { _ in } }
 
   #if DEBUG
@@ -1462,11 +1340,7 @@ struct ChooseServerAction {
     self.init(perform: { [weak settings] server, pin in
       guard let settings else { return }
       settings.pinMajsoulServer = pin
-      if server == settings.majsoulServer {
-        settings.majsoulServer = server
-      } else {
-        switchServer(server)
-      }
+      if server != settings.majsoulServer { switchServer(server) }
     })
   }
 
