@@ -786,3 +786,14 @@
 - 規則補強：**實作者不得自行把存活變異判為「等價變異」後移除被測的 guard**；判等價必須附證明（API 契約或窮舉），否則保留原碼、記為未鎖。
 - 其他復驗結論：13 項一致；`eventLog` 改名只改 Swift 名稱不改輸出 key，非契約變更；`resetConfirm` 五處逐處等價；`resolveReachDiscard` 取消在 sleep 期間與飛行中都不記故障，變異兩邊都紅。
 - 可合併後補：`DebugServer.swift:675` 的 Task 在 await 期間強持有 self，重啟時舊實例遲到的 `.cancelled` 理論上可清掉新 server 旗標（窗口極窄，推測未實測）→ 延後表；`docs/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12` 提到已刪符號 → WP12。
+
+### WP7b 結果（2026-10-12）
+- 合併到 main：merge commit `03ac6b8`（`468cd0b` MCP／`ae77c56` Debug／`e6e6eb2` Bot／`36404b3`／`6580ab0` 補強／`2a1e662` 修正，基準 `a8536e7`，30 檔 +435/−425）。復驗兩輪（`.swfd/logs/wp7b-verify/`）：第一輪「要修正」（lifecycle 測試 port 等式 flaky），第二輪「可合併」。927 → 937 條（+10）；合併態 main 全套見 `.swfd/logs/merge-main/test-03ac6b8.log`。
+- 完成：arch S5 `MCPContext.naki()` 31 處機械等價；`MCPToolRegistry` 四個死方法、`DebugServer` 13 個轉發、`NativeBotController` 批次 react／轉發／`canX`、`GameModels` unicode 系列刪除（main 全專案 grep 無人用）；`resetConfirm`／mask 迴圈／摘要字串／`sessionStampFormatter` 收斂逐處等價；工具數 43 不變並加斷言鎖住。
+- 後續項處置：`sanmaAuthorization` 進 outputSchema（string，與輸出一致）；legacy 短碼共用常數；`eventLog` 改名 `dictionaryLoggingRejection`（只改 Swift 名）；DebugServer `.cancelled` 歸零旗標＋listener 身分 guard；`resolveReachDiscard` 取消不記故障（sleep 期間與飛行中皆驗）；`echo` → `echoOverride` 且 stored 改非 optional；`MajsoulBridge:778` else 補 `ActionChiPengGang.type.invalid` fault；Deviation 2 評估後不改（`autoPlaySeat` 恆 ≥ 0，-1 無授權路徑）；短碼放置不一致只盤點（notes），改欄位留 WP12 文件化後再議。
+- 未做（寫明）：engine 側「只鎖 server 未鎖 engine」測試與啟動降級 log 測試（`autoPlayEngine` 為 private 無縫）；`MajsoulBridge` 新 fault 無測（走不到）。
+- 可合併後補（歸屬）：
+  - listener 身分 guard 反向變異全綠，**guard 未被測試鎖住** → WP7c 補一條能殺變異的測試。
+  - 跨實例窗口：`DebugServer.swift:675` Task 在 await 期間強持有舊實例，重啟時舊實例 `stop()` 後遲到的 `.cancelled` 走 nil 分支會清掉共用 store 旗標（窄窗口，推測未實測）→ 延後表。
+  - 立直第二段取消時 `cloudOverride` 仍多寫一行「呼叫失敗」log（WP4 範圍）→ 延後表（只是 log）。
+  - `docs/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12`、`CLAUDE.md` 內 `LogManager`／`AutoPlayEngine`／`BotTools` 行號 → WP12。
