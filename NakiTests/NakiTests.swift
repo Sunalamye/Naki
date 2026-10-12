@@ -44,11 +44,17 @@ final class NakiTests: XCTestCase {
 }
 
 extension XCTestCase {
-    /// 釘住 App 內語言：`L10n.text` 讀 `UserDefaults.standard`，繁中斷言不該被測試主機的系統語言左右。
+    /// 釘住 App 內語言：`L10n.text` 讀 `L10n.defaults`，繁中斷言不該被測試主機的系統語言左右。
+    /// 換成獨立 suite 而不是寫 `.standard`：後者就是用戶真實設定檔。
     func pinAppLanguage(_ language: AppLanguage = .zhHant) {
-        let defaults = UserDefaults.standard
-        let original = defaults.string(forKey: SettingsStore.appLanguageKey)
+        let suite = "naki.tests.lang.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let original = L10n.defaults
         SettingsStore.saveAppLanguage(language, to: defaults)
-        addTeardownBlock { defaults.set(original, forKey: SettingsStore.appLanguageKey) }
+        L10n.defaults = defaults
+        addTeardownBlock {
+            L10n.defaults = original
+            defaults.removePersistentDomain(forName: suite)
+        }
     }
 }
