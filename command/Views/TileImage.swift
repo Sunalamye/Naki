@@ -119,7 +119,6 @@ struct TileImage: View {
     // MARK: - Asset Mapping
 
     private static let honors: Set<String> = ["E", "S", "W", "N", "P", "F", "C"]
-    private static let utilities: Set<String> = ["back", "blank", "front"]
     /// 自己就是一整張牌、不需要疊 `Front` 的資產。
     static let selfContained: Set<String> = ["back", "blank", "front"]
     private static let suitGroups: [Character: String] = [
@@ -133,7 +132,7 @@ struct TileImage: View {
     /// 這個函式回傳合法字串不代表圖存在（imageset 沒被 build 進去時 `Image` 會靜靜
     /// 畫一塊空白，畫面上看起來就只是「牌不見了」）。
     static func assetName(for mjai: String) -> String? {
-        if utilities.contains(mjai) { return "MahjongTiles/Utility/\(mjai)" }
+        if selfContained.contains(mjai) { return "MahjongTiles/Utility/\(mjai)" }
         if honors.contains(mjai) { return "MahjongTiles/Honors/\(mjai)" }
 
         // 數牌：`1m`–`9m`／`1p`–`9p`／`1s`–`9s`，外加赤五 `5mr`／`5pr`／`5sr`。

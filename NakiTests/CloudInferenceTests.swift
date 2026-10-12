@@ -31,10 +31,13 @@ final class CloudMockURLProtocol: URLProtocol {
     static var script: [(Int, String, [String: String])] = []
     /// 捕獲的 request（含讀出的 body）
     static var captured: [(request: URLRequest, body: Data)] = []
+    /// 每收到一個 request 呼叫一次（參數＝累計筆數，含這一筆）；測試用來在指定請求上取消 Task
+    static var onRequest: ((Int) -> Void)?
 
     static func reset(script: [(Int, String, [String: String])]) {
         self.script = script
         self.captured = []
+        self.onRequest = nil
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -58,6 +61,7 @@ final class CloudMockURLProtocol: URLProtocol {
             body = data
         }
         Self.captured.append((request, body))
+        Self.onRequest?(Self.captured.count)
 
         let (status, text, headers) = Self.script.isEmpty
             ? (500, #"{"error":"script exhausted"}"#, [:])

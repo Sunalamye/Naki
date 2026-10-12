@@ -4,7 +4,6 @@
 //
 //  Created by Suoie on 2025/11/30.
 //  原生 Mortal Bot 控制器 - 使用 MortalSwift 進行本地 AI 推理
-//  Updated: 2025/12/01 - 使用 MortalSwift 強類型 API
 //
 
 import Foundation
@@ -14,12 +13,12 @@ import MortalSwift
 
 /// 原生 Bot 控制器，使用 MortalSwift 進行 Core ML 推理
 /// ⭐ 現在 MortalBot 是 actor，所有方法都需要 async
-/// ⭐ 支援強類型 MJAIEvent/MJAIAction API
+/// ⭐ 事件與回應都是 MJAI 字典
 /// ⭐ 標為 @MainActor —— 可變狀態（tehai/tsumo/lastRecommendations…）在 MainActor 隔離，
 ///        消除呼叫端（`NakiWebCoordinator`，@MainActor）的資料競態。
 ///        heavy 的 Core ML 推理仍在 MortalBot actor 內 off-main，不受此隔離影響。
 @MainActor
-class NativeBotController {
+final class NativeBotController {
 
     // MARK: - Properties
 
@@ -108,13 +107,6 @@ class NativeBotController {
     private(set) var scores: [Int] = [25000, 25000, 25000, 25000]
     private(set) var doraMarkers: [Tile] = []
 
-    /// 場風 (MJAI 字串格式，保持兼容性)
-    var bakaze: String { bakazeWind.rawValue }
-    /// 自風 (MJAI 字串格式，保持兼容性)
-    var jikaze: String { jikazeWind.rawValue }
-    /// 寶牌指示牌 (MJAI 字串格式，保持兼容性)
-    var doraIndicators: [String] { doraMarkers.map { $0.mjaiString } }
-
     // MARK: - 可用動作（來源：協定層 oplist）
 
     /// 現在能做什麼，一律由伺服器推來的 `OptionalOperationList` 導出。
@@ -134,13 +126,6 @@ class NativeBotController {
     var availableActions: BotAvailableActions {
         BotAvailableActions(snapshot: operations.pending)
     }
-
-    var canDiscard: Bool { availableActions.canDiscard }
-    var canRiichi: Bool { availableActions.canRiichi }
-    var canChi: Bool { availableActions.canChi }
-    var canPon: Bool { availableActions.canPon }
-    var canKan: Bool { availableActions.canKan }
-    var canAgari: Bool { availableActions.canAgari }
 
     // MARK: - Initialization
 
@@ -182,7 +167,7 @@ class NativeBotController {
         } else {
             // 內建引擎經 handProvider 讀 controller 的手牌——手牌是**遊戲**狀態，
             // 權威在 `updateInternalState`（UI/MCP 匯出也讀同一份），引擎只讀不寫。
-            let local = try BundledCoreMLBot(playerId: playerId, is3P: false,
+            let local = try BundledCoreMLBot(playerId: playerId,
                                              hand: { [weak self] in
                                                  (self?.tehai ?? [], self?.tsumo)
                                              })
@@ -209,15 +194,15 @@ class NativeBotController {
         botLog("[NativeBotController] Bot 已刪除, gen=\(generation)")
     }
 
-    // MARK: - Event Processing (Dictionary API - Legacy)
+    // MARK: - Event Processing
 
-    /// 處理 MJAI 事件並獲取回應 (字典異步版本，保持兼容性)
-    /// ⭐ MortalBot 是 actor，使用 async react() 自動在背景執行推理
-    /// - Parameter event: MJAI 事件字典
-    /// - Returns: Bot 回應字典，無動作時返回 nil
     /// 生命週期事件：這些在 Bot 已被刪除後才抵達是正常的，不算錯誤
     private static let lifecycleEvents: Set<String> = ["end_game", "end_kyoku"]
 
+    /// 處理 MJAI 事件並獲取回應
+    /// ⭐ MortalBot 是 actor，使用 async react() 自動在背景執行推理
+    /// - Parameter event: MJAI 事件字典
+    /// - Returns: Bot 回應字典，無動作時返回 nil
     func react(event: [String: Any]) async throws -> [String: Any]? {
         guard let bot = bot else {
             // end_game 抵達時 Bot 幾乎一定已經不在了：協調器是先 emit 事件、
@@ -322,29 +307,11 @@ class NativeBotController {
 
         // 只記筆數不足以事後判斷「Mortal 為什麼沒選和牌」——必須看得到它到底有哪些選項，
         // 以及協定層同時給了哪些可用操作。兩者不一致就是 Mortal 的狀態與實際牌局脫節。
-        let recSummary = lastRecommendations.prefix(6)
-            .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
-            .joined(separator: " ")
         let opsSummary = operations.latest.map { "\($0.rawTypes)" } ?? "-"
         eventLog("[Bot] Bot returned action, updated recommendations: "
-               + "\(lastRecommendations.count) items [\(recSummary)] oplist=\(opsSummary)")
+               + "\(lastRecommendations.count) items [\(lastRecommendations.logSummary)] oplist=\(opsSummary)")
 
         return response
-    }
-
-    /// 批量處理多個 MJAI 事件 (異步版本)
-    /// - Parameter events: MJAI 事件陣列
-    /// - Returns: 最後一個需要回應的動作
-    func react(events: [[String: Any]]) async throws -> [String: Any]? {
-        var lastResponse: [String: Any]?
-
-        for event in events {
-            if let response = try await react(event: event) {
-                lastResponse = response
-            }
-        }
-
-        return lastResponse
     }
 
     private func handleEndKyoku() {
@@ -361,7 +328,7 @@ class NativeBotController {
         resetState()
     }
 
-    // MARK: - State Management (Dictionary API - Legacy)
+    // MARK: - State Management
 
     private func updateInternalState(from event: [String: Any]) {
         guard let type = event["type"] as? String else { return }
@@ -455,7 +422,7 @@ class NativeBotController {
             bakazeWind = Wind(rawValue: b) ?? .east
         }
 
-        botLog("[NativeBotController] start_kyoku: bakaze=\(bakaze), kyoku=\(kyoku), honba=\(honba), kyotaku=\(kyotaku)")
+        botLog("[NativeBotController] start_kyoku: bakaze=\(bakazeWind.rawValue), kyoku=\(kyoku), honba=\(honba), kyotaku=\(kyotaku)")
 
         // 計算自風
         // #8: kyoku 為 1-based（oya = kyoku-1），故以 (kyoku - 1) 取模；原式用 kyoku 取模差一。
@@ -655,7 +622,6 @@ class NativeBotController {
 enum NativeBotError: Error, LocalizedError {
     case botNotInitialized
     case invalidEvent
-    case reactionFailed(String)
     /// bundled Core ML 模型沒載進來
     case bundledModelMissing
 
@@ -665,8 +631,6 @@ enum NativeBotError: Error, LocalizedError {
             return "沒有 bot（座位未取得或尚未建立，不是模型推論錯誤）"
         case .invalidEvent:
             return "無效的事件格式"
-        case .reactionFailed(let message):
-            return "Bot 處理失敗: \(message)"
         case .bundledModelMissing:
             return "內建模型未載入（app bundle 裡找不到 mortal.mlmodelc）"
         }

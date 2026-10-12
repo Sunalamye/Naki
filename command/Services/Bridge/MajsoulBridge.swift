@@ -775,7 +775,12 @@ class MajsoulBridge {
         guard let actor = actorSeat(data, site: "ActionChiPengGang.seat") else { return nil }
         // type 缺席依 proto3 視為 0（chi，U2 用戶裁決），但只在牌組完整時採用（見 switch 前）
         let typeAbsent = data["type"] == nil
-        guard let opType = typeAbsent ? 0 : data["type"] as? Int else { return nil }
+        guard let opType = typeAbsent ? 0 : data["type"] as? Int else {
+            // parser 一律寫 Int，目前走不到；補的是可見性，避免之後這裡靜默丟棄事件
+            recordDegradedOnce(site: "ActionChiPengGang.type.invalid", fieldId: 2,
+                               reason: "type 不是整數 → 丟棄這一個事件")
+            return nil
+        }
 
         let tiles = data["tiles"] as? [String] ?? []
 
