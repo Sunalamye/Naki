@@ -4,8 +4,9 @@
 //
 //  View 層看得到的整個 Naki（狀態＋設定＋副作用），一個 Environment 值。
 //
-//  View 只讀五樣東西：狀態（`GameStore`）、設定（`SettingsStore`）、
-//  副作用（`NakiActions`）、插件清單（`PluginStore`）、畫面開關（`UIState`）。
+//  View 只讀這些：狀態（`GameStore`）、設定（`SettingsStore`）、
+//  副作用（`NakiActions`）、插件清單（`PluginStore`）、畫面開關（`UIState`），
+//  以及三個 service 狀態的唯讀 ref（log、JS 注入、封包解析失敗）。
 //  全是具體型別，**沒有 optional，也沒有向下轉型**
 //  ——一顆按鈕的行為因此不必把整個 App 的型別拖進 View 的簽章，也不會有
 //  「轉型失敗於是什麼都沒發生」這種沒有編譯錯誤、沒有例外的失敗。
@@ -55,14 +56,40 @@ struct NakiEnvironment {
     /// 讀的是 `pluginStore.descriptors`（class ref）⇒ reactive。
     var pluginDescriptors: [PluginDescriptor] { pluginStore.descriptors }
 
-    /// 正式路徑：由 `NakiRuntime` 五樣全部顯式提供。
+    /// 記憶體 log（唯讀；清除走 `actions.clearLogs`）。
+    var logManager: LogManager { injectedLogManager ?? .shared }
+    /// JS 注入結果（寫入端是 `WebSocketInterceptor.createUserScript()`）。
+    var jsInjection: JSInjectionState { injectedJSInjection ?? .shared }
+    /// 封包解析失敗（寫入端是 `MajsoulBridge`）。
+    var parseFault: LiqiParseFaultState { injectedParseFault ?? .shared }
+
+    /// Preview 為 nil，讀取時才解析成 `.shared`：三者的 init 與 `.shared` 都是 MainActor 隔離，
+    /// 下面 nonisolated 的 Preview init 碰不到；View 只讀它們，寫入端不經 environment。
+    private let injectedLogManager: LogManager?
+    private let injectedJSInjection: JSInjectionState?
+    private let injectedParseFault: LiqiParseFaultState?
+
+    /// 常駐橫幅讀的四個故障來源任一成立。`statusMessage` 不帶類型，不能靠文字猜
+    /// （翻成別的語言就失效），狀態列以此決定圖示與顏色。
+    var hasFault: Bool {
+        store.botFailure != nil
+            || store.pageLoadFailure != nil
+            || jsInjection.report.failureSummary != nil
+            || parseFault.bannerSummary != nil
+    }
+
+    /// 正式路徑：由 `NakiRuntime` 全部顯式提供。
     init(store: GameStore, settings: SettingsStore, actions: NakiActions,
-         pluginStore: PluginStore, ui: UIState) {
+         pluginStore: PluginStore, ui: UIState,
+         logManager: LogManager, jsInjection: JSInjectionState, parseFault: LiqiParseFaultState) {
         self.store = store
         self.settings = settings
         self.actions = actions
         self.pluginStore = pluginStore
         self.ui = ui
+        self.injectedLogManager = logManager
+        self.injectedJSInjection = jsInjection
+        self.injectedParseFault = parseFault
     }
 
     /// **預設值只給 Preview。**
@@ -82,6 +109,9 @@ struct NakiEnvironment {
         self.actions = NakiActions()
         self.pluginStore = PluginStore()
         self.ui = UIState()
+        self.injectedLogManager = nil
+        self.injectedJSInjection = nil
+        self.injectedParseFault = nil
     }
 
     /// `@Entry` 的預設值每讀一次都會重新求值；用同一份共用實例，讀取之間才相等，

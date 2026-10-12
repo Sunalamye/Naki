@@ -63,12 +63,9 @@ struct UpdateAvailableBanner: View {
 
                 Button("前往下載") { openURL(update.url) }
                     .buttonStyle(.borderedProminent)
-                Button("略過此版本") {
-                    naki.settings.skippedUpdateVersion = update.version
-                    naki.store.availableUpdate = nil
-                }
-                .buttonStyle(.bordered)
-                Button("關閉提示", systemImage: "xmark") { naki.store.availableUpdate = nil }
+                Button("略過此版本") { naki.actions.dismissUpdate(skip: true) }
+                    .buttonStyle(.bordered)
+                Button("關閉提示", systemImage: "xmark") { naki.actions.dismissUpdate(skip: false) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
             }
@@ -112,12 +109,14 @@ struct BotFailureBanner: View {
 /// ——在這個狀態下 Naki 收不到任何封包、送不出任何動作，
 /// 側欄的推薦、`/game/*`、`/bot/*` 全部不可信，所以必須一直掛著。
 ///
-/// 資料來源是 `JSInjectionState.shared`（`@Observable`），
+/// 資料來源是 `naki.jsInjection`（`@Observable`），
 /// 由 `WebSocketInterceptor.createUserScript()` 在建立 WebView 時寫入。
 struct JSInjectionFailureBanner: View {
 
+    @Environment(\.naki) private var naki
+
     var body: some View {
-        if let summary = JSInjectionState.shared.report.failureSummary {
+        if let summary = naki.jsInjection.report.failureSummary {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.octagon.fill")
                     .imageScale(.large)
@@ -162,8 +161,10 @@ struct JSInjectionFailureBanner: View {
 /// 「重裝 App」那種指示。
 struct LiqiParseFailureBanner: View {
 
+    @Environment(\.naki) private var naki
+
     var body: some View {
-        if let summary = LiqiParseFaultState.shared.bannerSummary {
+        if let summary = naki.parseFault.bannerSummary {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .imageScale(.large)
@@ -228,18 +229,9 @@ struct StatusBar: View {
         }
     }
 
-    /// `statusMessage` 不帶類型，不能靠文字猜（翻成別的語言就失效）；
-    /// 以常駐橫幅所讀的四個故障來源判斷。
-    private var hasFault: Bool {
-        naki.store.botFailure != nil
-            || naki.store.pageLoadFailure != nil
-            || JSInjectionState.shared.report.failureSummary != nil
-            || LiqiParseFaultState.shared.bannerSummary != nil
-    }
-
     private var statusIcon: String {
-        hasFault ? "exclamationmark.triangle.fill" : "info.circle.fill"
+        naki.hasFault ? "exclamationmark.triangle.fill" : "info.circle.fill"
     }
 
-    private var statusColor: Color { hasFault ? .red : .blue }
+    private var statusColor: Color { naki.hasFault ? .red : .blue }
 }

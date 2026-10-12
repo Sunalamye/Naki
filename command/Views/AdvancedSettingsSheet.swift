@@ -372,283 +372,311 @@ struct AdvancedSettingsSheet: View {
     /// 左欄：這台機器怎麼跑（畫面／自動操作／Bot／MCP）
     @ViewBuilder
     private var operationalSettings: some View {
-        @Bindable var settings = naki.settings
-
         // 自動打牌可用性（只有在這條路徑不支援時才出現）
         autoPlayAvailabilityBox
 
         autoPlaySettingsBox
 
-            // 雀魂伺服器
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("伺服器", selection: majsoulServer) {
-                        ForEach(MajsoulServer.allCases) { server in
-                            Text("\(Text(server.displayNameKey))・\(Text(server.regionNameKey))").tag(server)
-                        }
-                    }
-                    .accessibilityIdentifier("majsoul-server-picker")
+        majsoulServerBox
 
-                    Text("目前：\(naki.settings.majsoulServer.host)")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+        MajsoulConnectionSettingsBox()
 
-                    Text("換伺服器會**整頁重新載入**，等於登出重來——各服的帳號不互通。對局中不要換。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        #if os(macOS)
+        languageBox
+        #endif
 
-                    Divider()
+        displayBox
 
-                    Toggle("啟動時不再詢問", isOn: $settings.pinMajsoulServer)
-                        .accessibilityIdentifier("pin-majsoul-server-toggle")
+        updateBox
 
-                    // 這行是「取消固定」的說明：關掉開關就會恢復每次啟動詢問。
-                    // 沒有這句的話，勾過「以後都用這個」的人不會知道怎麼把它要回來。
-                    pinnedServerNote
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            } label: {
-                Label("雀魂伺服器", systemImage: "globe.asia.australia")
-            }
+        botManagementBox
 
-            MajsoulConnectionSettingsBox()
+        mcpServerBox
+    }
 
-            #if os(macOS)
-            // 語言
-            GroupBox {
-                Picker("語言", selection: appLanguage) {
-                    ForEach(AppLanguage.allCases) { language in
-                        if let name = language.nativeName {
-                            Text(verbatim: name).tag(language)
-                        } else {
-                            Text("跟隨系統").tag(language)
-                        }
+    @ViewBuilder
+    private var majsoulServerBox: some View {
+        @Bindable var settings = naki.settings
+
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("伺服器", selection: majsoulServer) {
+                    ForEach(MajsoulServer.allCases) { server in
+                        Text("\(Text(server.displayNameKey))・\(Text(server.regionNameKey))").tag(server)
                     }
                 }
-                .accessibilityIdentifier("app-language-picker")
-            } label: {
-                Label("語言", systemImage: "character.bubble")
+                .accessibilityIdentifier("majsoul-server-picker")
+
+                Text("目前：\(naki.settings.majsoulServer.host)")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+
+                Text("換伺服器會**整頁重新載入**，等於登出重來——各服的帳號不互通。對局中不要換。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+
+                Toggle("啟動時不再詢問", isOn: $settings.pinMajsoulServer)
+                    .accessibilityIdentifier("pin-majsoul-server-toggle")
+
+                // 這行是「取消固定」的說明：關掉開關就會恢復每次啟動詢問。
+                // 沒有這句的話，勾過「以後都用這個」的人不會知道怎麼把它要回來。
+                pinnedServerNote
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            #endif
+        } label: {
+            Label("雀魂伺服器", systemImage: "globe.asia.australia")
+        }
+    }
 
-            // 畫面
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("視窗在背景時保持遊戲運作", isOn: keepAliveInBackground)
-                        .accessibilityIdentifier("keep-alive-in-background-toggle")
+#if os(macOS)
+    private var languageBox: some View {
+        GroupBox {
+            Picker("語言", selection: appLanguage) {
+                ForEach(AppLanguage.allCases) { language in
+                    if let name = language.nativeName {
+                        Text(verbatim: name).tag(language)
+                    } else {
+                        Text("跟隨系統").tag(language)
+                    }
+                }
+            }
+            .accessibilityIdentifier("app-language-picker")
+        } label: {
+            Label("語言", systemImage: "character.bubble")
+        }
+    }
+#endif
 
-                    Text("視窗被蓋住或 App 隱藏時，遊戲仍以低頻率運作，避免停止心跳而斷線；會持續耗用少量 CPU。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder
+    private var displayBox: some View {
+        @Bindable var settings = naki.settings
 
-                    Divider()
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("視窗在背景時保持遊戲運作", isOn: keepAliveInBackground)
+                    .accessibilityIdentifier("keep-alive-in-background-toggle")
 
-                    Text("暱稱隱藏與牌面高亮已改由**插件**提供（工具列拼圖圖示 → 插件頁面）。裝「暱稱隱藏」「牌面變色」插件即可；底層 API 仍在，只是不再內建自動開。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                Text("視窗被蓋住或 App 隱藏時，遊戲仍以低頻率運作，避免停止心跳而斷線；會持續耗用少量 CPU。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    // 只有 iOS：那條狀態列疊在牌桌上。macOS 的是排版出來的一列，
-                    // 不擋任何東西，沒有這個開關要解決的問題。
-                    #if os(iOS)
-                    Divider()
+                Divider()
 
-                    Toggle("顯示狀態訊息列", isOn: $settings.showStatusBar)
-                        .accessibilityIdentifier("show-status-bar-toggle")
+                Text("暱稱隱藏與牌面高亮已改由**插件**提供（工具列拼圖圖示 → 插件頁面）。裝「暱稱隱藏」「牌面變色」插件即可；底層 API 仍在，只是不再內建自動開。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    Text("牌桌底部那條浮動訊息（連線狀態、未自動送出的原因等）。預設關閉——它疊在牌桌上，而內容多半是一次性回饋或診斷輸出。真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                // 只有 iOS：那條狀態列疊在牌桌上。macOS 的是排版出來的一列，
+                // 不擋任何東西，沒有這個開關要解決的問題。
+                #if os(iOS)
+                Divider()
+
+                Toggle("顯示狀態訊息列", isOn: $settings.showStatusBar)
+                    .accessibilityIdentifier("show-status-bar-toggle")
+
+                Text("牌桌底部那條浮動訊息（連線狀態、未自動送出的原因等）。預設關閉——它疊在牌桌上，而內容多半是一次性回饋或診斷輸出。真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                #endif
+            }
+        } label: {
+            Label("畫面", systemImage: "eye.slash")
+        }
+    }
+
+    @ViewBuilder
+    private var updateBox: some View {
+        @Bindable var settings = naki.settings
+
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("自動檢查更新", isOn: $settings.autoCheckUpdate)
+                    .accessibilityIdentifier("auto-check-update-toggle")
+
+                HStack {
+                    Text("目前版本 \(NakiAppVersion.short)")
+                    Button(updateCheckRunning ? "檢查中…" : "立即檢查") {
+                        Task {
+                            updateCheckRunning = true
+                            await naki.actions.checkForUpdate(manual: true)
+                            updateCheckRunning = false
+                        }
+                    }
+                    .disabled(updateCheckRunning)
+                    .accessibilityIdentifier("check-update-button")
+                    updateCheckResultText
+                }
+            }
+        } label: {
+            Label("更新", systemImage: "arrow.down.circle")
+        }
+    }
+
+    private var botManagementBox: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Bot 會在遊戲開始時自動創建，通常不需要手動管理。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("重建 Bot") {
+                        Task {
+                            // 強制斷線重連以重建 Bot（手段由各 path 決定，見 Action）
+                            await naki.actions.forceReconnect()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .help("強制斷線重連，伺服器會重新發送遊戲狀態重建 Bot")
+                    .accessibilityIdentifier("rebuild-bot-button")
+
+                    Button("刪除 Bot") {
+                        naki.actions.deleteBot()
+                    }
+                    .buttonStyle(.bordered)
+                    #if os(macOS)
+                    .tint(.red)
                     #endif
+                    .accessibilityIdentifier("delete-bot-button")
                 }
-            } label: {
-                Label("畫面", systemImage: "eye.slash")
             }
+        } label: {
+            Label("Bot 管理", systemImage: "cpu")
+        }
+    }
 
-            // 更新
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("自動檢查更新", isOn: $settings.autoCheckUpdate)
-                        .accessibilityIdentifier("auto-check-update-toggle")
-
+    /// MCP Server（兩個平台都有，`DebugServer` 不是 macOS 專屬）。
+    /// **不要包回 `#if os(macOS)`**：iOS 也會綁 loopback 8765，
+    /// 控制項藏起來就變成「跑著卻看不到、關不掉」。
+    private var mcpServerBox: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
                     HStack {
-                        Text("目前版本 \(NakiAppVersion.short)")
-                        Button(updateCheckRunning ? "檢查中…" : "立即檢查") {
-                            Task {
-                                updateCheckRunning = true
-                                await naki.actions.checkForUpdate(manual: true)
-                                updateCheckRunning = false
-                            }
-                        }
-                        .disabled(updateCheckRunning)
-                        .accessibilityIdentifier("check-update-button")
-                        updateCheckResultText
+                        Circle()
+                            .fill(naki.store.isDebugServerRunning ? Color.green : Color.gray)
+                            .frame(width: 8, height: 8)
+                        Text(naki.store.isDebugServerRunning ? "運行中" : "已停止")
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("mcp-server-status")
+                    .accessibilityLabel("MCP Server 狀態")
+                    .accessibilityValue(naki.store.isDebugServerRunning ? "運行中" : "已停止")
+
+                    Spacer()
+
+                    Button(naki.store.isDebugServerRunning ? "停止" : "啟動") {
+                        naki.actions.toggleDebugServer()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(naki.store.isDebugServerRunning ? .red : .green)
+                    .accessibilityIdentifier("mcp-server-toggle-button")
+                }
+
+                if naki.store.isDebugServerRunning {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(verbatim: "http://localhost:\(naki.store.debugServerPort)")
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+
+                        Text(verbatim: "curl http://localhost:\(naki.store.debugServerPort)/logs")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
                 }
-            } label: {
-                Label("更新", systemImage: "arrow.down.circle")
             }
-
-            // Bot 管理
-            GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Bot 會在遊戲開始時自動創建，通常不需要手動管理。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    HStack {
-                        Button("重建 Bot") {
-                            Task {
-                                // 強制斷線重連以重建 Bot（手段由各 path 決定，見 Action）
-                                await naki.actions.forceReconnect()
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .help("強制斷線重連，伺服器會重新發送遊戲狀態重建 Bot")
-                        .accessibilityIdentifier("rebuild-bot-button")
-
-                        Button("刪除 Bot") {
-                            naki.actions.deleteBot()
-                        }
-                        .buttonStyle(.bordered)
-                        #if os(macOS)
-                        .tint(.red)
-                        #endif
-                        .accessibilityIdentifier("delete-bot-button")
-                    }
-                }
-            } label: {
-                Label("Bot 管理", systemImage: "cpu")
-            }
-
-            // MCP Server（兩個平台都有，`DebugServer` 不是 macOS 專屬）。
-            // **不要包回 `#if os(macOS)`**：iOS 也會綁 loopback 8765，
-            // 控制項藏起來就變成「跑著卻看不到、關不掉」。
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        HStack {
-                            Circle()
-                                .fill(naki.store.isDebugServerRunning ? Color.green : Color.gray)
-                                .frame(width: 8, height: 8)
-                            Text(naki.store.isDebugServerRunning ? "運行中" : "已停止")
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("mcp-server-status")
-                        .accessibilityLabel("MCP Server 狀態")
-                        .accessibilityValue(naki.store.isDebugServerRunning ? "運行中" : "已停止")
-
-                        Spacer()
-
-                        Button(naki.store.isDebugServerRunning ? "停止" : "啟動") {
-                            naki.actions.toggleDebugServer()
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(naki.store.isDebugServerRunning ? .red : .green)
-                        .accessibilityIdentifier("mcp-server-toggle-button")
-                    }
-
-                    if naki.store.isDebugServerRunning {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(verbatim: "http://localhost:\(naki.store.debugServerPort)")
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-
-                            Text(verbatim: "curl http://localhost:\(naki.store.debugServerPort)/logs")
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            } label: {
-                Label("MCP Server", systemImage: "server.rack")
-            }
+        } label: {
+            Label("MCP Server", systemImage: "server.rack")
+        }
     }
 
     /// 右欄：雲端推論（唯一一組需要對外連線的設定）
     @ViewBuilder
     private var cloudSettings: some View {
-            @Bindable var settings = naki.settings
+        @Bindable var settings = naki.settings
 
-            // ☁️ 雲端推論（docs/cloud-inference-plan.md；key 在 Keychain）
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle("啟用雲端推論", isOn: $settings.cloudInferenceEnabled)
-                        .accessibilityIdentifier("cloud-inference-toggle")
+        // ☁️ 雲端推論（docs/cloud-inference-plan.md；key 在 Keychain）
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("啟用雲端推論", isOn: $settings.cloudInferenceEnabled)
+                    .accessibilityIdentifier("cloud-inference-toggle")
 
-                    Text("啟用後，每個決策點會把**本局至今的對局事件**（含自家手牌）上傳到下方伺服器換取決策；伺服器失敗時自動退回內建本地模型，對局不會停擺。API key 存在 Keychain，不會出現在 log 或設定檔。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Text("啟用後，每個決策點會把**本局至今的對局事件**（含自家手牌）上傳到下方伺服器換取決策；伺服器失敗時自動退回內建本地模型，對局不會停擺。API key 存在 Keychain，不會出現在 log 或設定檔。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                    HStack {
-                        TextField("伺服器 URL", text: $settings.cloudServerURL)
-                            .textFieldStyle(.roundedBorder)
-                            .autocorrectionDisabled()
-                            .accessibilityIdentifier("cloud-server-url-field")
-
-                        // 一鍵填回官方預設。手打這串 URL 很容易少個字母，而打錯的結果
-                        // 是「測試連線失敗」——那跟 key 無效、伺服器掛掉長得一樣。
-                        Button("預設") {
-                            naki.settings.cloudServerURL = SettingsStore.defaultCloudBaseURL
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(naki.settings.cloudServerURL == SettingsStore.defaultCloudBaseURL)
-                        .help("填入 \(SettingsStore.defaultCloudBaseURL)")
-                        .accessibilityIdentifier("cloud-url-default-button")
-                    }
-                    Text("預設：\(SettingsStore.defaultCloudBaseURL)（Akagi 官方；也可填自架位址）")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    SecureField("API Key（自行取得後貼上）", text: $settings.cloudAPIKey)
+                HStack {
+                    TextField("伺服器 URL", text: $settings.cloudServerURL)
                         .textFieldStyle(.roundedBorder)
-                        .accessibilityIdentifier("cloud-api-key-field")
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("cloud-server-url-field")
 
-                    cloudModelRow(placeholder: "四麻模型（空＝伺服器預設）",
-                                  pickerLabel: "選擇四麻模型",
-                                  text: $settings.cloudModel4P, game: "4p",
-                                  accessibilityId: "cloud-model-4p-field")
-                    cloudModelRow(placeholder: "三麻模型（空＝伺服器預設）",
-                                  pickerLabel: "選擇三麻模型",
-                                  text: $settings.cloudModel3P, game: "3p",
-                                  accessibilityId: "cloud-model-3p-field")
-
-                    HStack {
-                        Button(cloudTestRunning ? "測試中…" : "測試連線") {
-                            runCloudConnectionTest()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(cloudTestRunning)
-                        .accessibilityIdentifier("cloud-test-button")
-
-                        if let result = cloudTest {
-                            cloudTestText(result)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .accessibilityIdentifier("cloud-test-result")
-                        }
+                    // 一鍵填回官方預設。手打這串 URL 很容易少個字母，而打錯的結果
+                    // 是「測試連線失敗」——那跟 key 無效、伺服器掛掉長得一樣。
+                    Button("預設") {
+                        naki.settings.cloudServerURL = SettingsStore.defaultCloudBaseURL
                     }
-
-                    // 生效條件是 `enabled && url && key` 三者，而它們是三個分開的控制、
-                    // 開關還排在 key 欄位**上方**。沒有這一行，「貼完 key 就走」會得到
-                    // 一個看起來已配置、行為卻完全是本地模型的設定——而畫面上任何地方
-                    // 都不會說。這是 Akagi #221 的形狀，Naki 當初照抄了它的判定條件。
-                    cloudEffectiveStateRow
-
-                    cloudKeyStatusCard
-
-                    Text("三麻提醒：本地有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的決策來源會如實顯示。")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                    .buttonStyle(.bordered)
+                    .disabled(naki.settings.cloudServerURL == SettingsStore.defaultCloudBaseURL)
+                    .help("填入 \(SettingsStore.defaultCloudBaseURL)")
+                    .accessibilityIdentifier("cloud-url-default-button")
                 }
-            } label: {
-                Label("雲端推論", systemImage: "icloud.and.arrow.up")
+                Text("預設：\(SettingsStore.defaultCloudBaseURL)（Akagi 官方；也可填自架位址）")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                SecureField("API Key（自行取得後貼上）", text: $settings.cloudAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("cloud-api-key-field")
+
+                cloudModelRow(placeholder: "四麻模型（空＝伺服器預設）",
+                              pickerLabel: "選擇四麻模型",
+                              text: $settings.cloudModel4P, game: "4p",
+                              accessibilityId: "cloud-model-4p-field")
+                cloudModelRow(placeholder: "三麻模型（空＝伺服器預設）",
+                              pickerLabel: "選擇三麻模型",
+                              text: $settings.cloudModel3P, game: "3p",
+                              accessibilityId: "cloud-model-3p-field")
+
+                HStack {
+                    Button(cloudTestRunning ? "測試中…" : "測試連線") {
+                        runCloudConnectionTest()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(cloudTestRunning)
+                    .accessibilityIdentifier("cloud-test-button")
+
+                    if let result = cloudTest {
+                        cloudTestText(result)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("cloud-test-result")
+                    }
+                }
+
+                // 生效條件是 `enabled && url && key` 三者，而它們是三個分開的控制、
+                // 開關還排在 key 欄位**上方**。沒有這一行，「貼完 key 就走」會得到
+                // 一個看起來已配置、行為卻完全是本地模型的設定——而畫面上任何地方
+                // 都不會說。這是 Akagi #221 的形狀，Naki 當初照抄了它的判定條件。
+                cloudEffectiveStateRow
+
+                cloudKeyStatusCard
+
+                Text("三麻提醒：本地有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的決策來源會如實顯示。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
+        } label: {
+            Label("雲端推論", systemImage: "icloud.and.arrow.up")
+        }
     }
 
     /// 自動操作：送出可用性與基準延遲。

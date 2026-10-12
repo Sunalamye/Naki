@@ -421,6 +421,14 @@ struct Recommendation: Identifiable, Equatable {
     /// `displayLabel` 的畫面版；捨牌／未知的 label 是牌面字串，查不到 key 就原樣顯示
     var displayLabelKey: LocalizedStringKey { LocalizedStringKey(displayLabel) }
 
+    /// 決策卡與次選列的動作名。
+    ///
+    /// 打牌**不能用 `displayLabel`**：它是牌名（`8p`），牌面已經畫在旁邊，badge 再說一次
+    /// 同一張牌，「要拿它做什麼」反而沒人講。其餘動作的 `displayLabel` 是對的（吃①／立直）。
+    var actionName: String { actionType == .discard ? actionType.displayName : displayLabel }
+
+    var actionNameKey: LocalizedStringKey { LocalizedStringKey(actionName) }
+
     /// 是否為紅寶牌
     var isRed: Bool {
         tile?.isRed ?? label.hasSuffix("r")

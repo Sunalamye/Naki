@@ -12,6 +12,7 @@
 //  「雙重真實來源」，只是換了個入口回來。
 //
 
+import SwiftUI
 import XCTest
 
 @testable import Naki
@@ -89,6 +90,24 @@ final class NakiEnvironmentSourceTests: XCTestCase {
         XCTAssertTrue(
             hits.isEmpty,
             "`\\.webViewModel` 已被 `\\.naki` 取代；實際: "
+                + hits.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
+    }
+
+    /// View 不得直讀單例：狀態一律經 `@Environment(\.naki)` 取得（2026-08-02 決策），
+    /// 否則 Preview 與單測換不掉它。白名單只放系統 API；先去掉白名單字樣再比對，
+    /// 同一行另有單例照樣抓。
+    func testViewsDoNotReadSingletons() throws {
+        let root = try repoRoot()
+        let allowed = ["UIApplication.shared"]
+        let hits = codeLines(under: root.appendingPathComponent("command/Views"))
+            .filter { line in
+                let rest = allowed.reduce(line.text) { $0.replacingOccurrences(of: $1, with: "") }
+                return rest.range(of: #"\.shared\b"#, options: .regularExpression) != nil
+            }
+
+        XCTAssertTrue(
+            hits.isEmpty,
+            "command/Views 不得出現 `.shared`（改經 `NakiEnvironment`）；實際: "
                 + hits.map { "\($0.file):\($0.line)" }.joined(separator: ", "))
     }
 
@@ -204,5 +223,207 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(AutoPlayAvailability.modes(autoPlaySupported: store.supportsAutoPlay),
                        [.off, .recommend],
                        "不支援自動送出時 picker 上不該有「自動」")
+    }
+}
+
+// MARK: - Recommendation.actionName
+
+/// 期望值抄自改動前 `DecisionSidebar` 兩處的三元式（打牌 → `actionType.displayName`，其餘 → `displayLabel`）。
+@MainActor
+final class RecommendationActionNameTests: XCTestCase {
+
+    func testActionNameMatchesFormerSidebarLogic() {
+        let cases: [(Recommendation, String)] = [
+            (Recommendation(tile: "8p", probability: 0.4, actionType: .discard), "打"),
+            (Recommendation(tile: "?", probability: 0.4, actionType: .discard), "打"),
+            (Recommendation(actionType: .riichi, probability: 0.1), "立直"),
+            (Recommendation(tile: "chi_0", probability: 0.1, actionType: .chi), "吃①"),
+            (Recommendation(tile: "chi_1", probability: 0.1, actionType: .chi), "吃②"),
+            (Recommendation(tile: "chi_2", probability: 0.1, actionType: .chi), "吃③"),
+            (Recommendation(actionType: .chi, probability: 0.1), "吃"),
+            (Recommendation(actionType: .pon, probability: 0.1), "碰"),
+            (Recommendation(actionType: .kan, probability: 0.1), "槓"),
+            (Recommendation(actionType: .hora, probability: 0.1), "和"),
+            (Recommendation(actionType: .kita, probability: 0.1), "拔北"),
+            (Recommendation(actionType: .ryukyoku, probability: 0.1), "九種九牌"),
+            (Recommendation(actionType: .none, probability: 0.1), "過"),
+            (Recommendation(tile: "foo", probability: 0.1, actionType: .unknown), "foo"),
+        ]
+        for (recommendation, expected) in cases {
+            XCTAssertEqual(recommendation.actionName, expected, "\(recommendation.actionType) \(recommendation.label)")
+        }
+        XCTAssertEqual(cases[0].0.actionNameKey, LocalizedStringKey("打"))
+    }
+}
+
+// MARK: - ConnectionSettingsAction
+
+/// 字典規則抄自改動前 `MajsoulConnectionSettingsBox.apply()`：空名稱略過、空值保留、重複名稱後者勝出。
+@MainActor
+final class ConnectionSettingsHeadersTests: XCTestCase {
+
+    private let rows: [(name: String, value: String)] = [
+        ("X-A", "1"), ("", "dropped"), ("X-Empty", ""), ("X-B", "b"), ("X-A", "2"),
+    ]
+    private let expected = ["X-A": "2", "X-Empty": "", "X-B": "b"]
+
+    func testHeadersDictionaryMatchesFormerViewAssembly() {
+        XCTAssertEqual(ConnectionSettingsAction.headers(from: rows), expected)
+        XCTAssertEqual(ConnectionSettingsAction.headers(from: []), [:])
+    }
+
+    func testApplyWritesHeadersBeforeReloading() {
+        var events: [String] = []
+        var saved: [String: String]?
+        let action = ConnectionSettingsAction(
+            stub: { events.append("reload") },
+            saveHeaders: { saved = $0; events.append("save") })
+
+        action.apply(headers: rows)
+
+        XCTAssertEqual(events, ["save", "reload"])
+        XCTAssertEqual(saved, expected)
+    }
+}
+
+// MARK: - View 改走 Action 的三個副作用
+
+@MainActor
+final class ViewSideEffectActionTests: XCTestCase {
+
+    private var suiteName = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "naki.tests.wp8.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        super.tearDown()
+    }
+
+    private func makeUpdate() throws -> ReleaseInfo {
+        ReleaseInfo(version: "9.9.9", url: try XCTUnwrap(URL(string: "https://example.invalid/r")))
+    }
+
+    /// 改動前「略過此版本」：先寫 skippedUpdateVersion，再清 availableUpdate。
+    func testDismissUpdateWithSkipRemembersVersionAndClears() throws {
+        let store = GameStore()
+        let settings = SettingsStore(defaults: defaults)
+        store.availableUpdate = try makeUpdate()
+
+        DismissUpdateAction(store: store, settings: settings)(skip: true)
+
+        XCTAssertEqual(settings.skippedUpdateVersion, "9.9.9")
+        XCTAssertEqual(defaults.string(forKey: SettingsStore.skippedUpdateVersionKey), "9.9.9")
+        XCTAssertNil(store.availableUpdate)
+    }
+
+    /// 改動前「關閉提示」：只清 availableUpdate，不記略過。
+    func testDismissUpdateWithoutSkipOnlyClears() throws {
+        let store = GameStore()
+        let settings = SettingsStore(defaults: defaults)
+        store.availableUpdate = try makeUpdate()
+
+        DismissUpdateAction(store: store, settings: settings)(skip: false)
+
+        XCTAssertNil(settings.skippedUpdateVersion)
+        XCTAssertNil(defaults.string(forKey: SettingsStore.skippedUpdateVersionKey))
+        XCTAssertNil(store.availableUpdate)
+    }
+
+    func testFetchPluginImportForwardsURLAndResult() async {
+        var asked: [String] = []
+        let action = FetchPluginImportAction(stub: { asked.append($0); return .failure(.notHTTPS) })
+
+        let result = await action(urlString: "http://example.invalid/p")
+
+        XCTAssertEqual(asked, ["http://example.invalid/p"])
+        guard case .failure(.notHTTPS) = result else { return XCTFail("應原樣回傳 stub 結果：\(result)") }
+    }
+
+    /// Preview 預設值不連網：直接回空清單。
+    func testDefaultFetchPluginImportReturnsEmptyWithoutNetwork() async {
+        let result = await FetchPluginImportAction()(urlString: "https://example.invalid/p")
+        guard case .success(let list) = result else { return XCTFail("\(result)") }
+        XCTAssertTrue(list.isEmpty)
+    }
+
+    /// 真實實作清的是 test host 共用的 `LogManager.shared`，這裡只驗轉發。
+    func testClearLogsForwards() {
+        var cleared = 0
+        ClearLogsAction(stub: { cleared += 1 })()
+        ClearLogsAction()()
+        XCTAssertEqual(cleared, 1)
+    }
+}
+
+// MARK: - environment 上的三個 service ref
+
+@MainActor
+final class NakiEnvironmentTests: XCTestCase {
+
+    private var suiteName = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "naki.tests.wp8.env.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        super.tearDown()
+    }
+
+    private func makeEnvironment(store: GameStore, jsInjection: JSInjectionState,
+                                 parseFault: LiqiParseFaultState) -> NakiEnvironment {
+        NakiEnvironment(store: store, settings: SettingsStore(defaults: defaults), actions: NakiActions(),
+                        pluginStore: PluginStore(), ui: UIState(), logManager: .shared,
+                        jsInjection: jsInjection, parseFault: parseFault)
+    }
+
+    /// 四個來源各自單獨成立都要算故障；全不成立才不算。全用注入的新實例，不碰 `.shared`。
+    func testHasFaultReadsFourSourcesFromEnvironment() {
+        let faults: [(String, (GameStore, JSInjectionState, LiqiParseFaultState) -> Void)] = [
+            ("botFailure", { store, _, _ in store.botFailure = "bot" }),
+            ("pageLoadFailure", { store, _, _ in store.pageLoadFailure = "page" }),
+            ("jsInjection", { _, js, _ in
+                js.record(.failed(loaded: [], failures: [JSModuleFailure(module: "naki-core", reason: .notFound)]))
+            }),
+            ("parseFault", { _, _, fault in
+                fault.record(LiqiParseFault(site: "ResAuthGame.seat_list", byteCount: 0,
+                                            reason: "missing", severity: .blocking))
+            }),
+        ]
+
+        let clean = makeEnvironment(store: GameStore(), jsInjection: JSInjectionState(),
+                                    parseFault: LiqiParseFaultState())
+        XCTAssertFalse(clean.hasFault)
+
+        for (name, inject) in faults {
+            let store = GameStore()
+            let js = JSInjectionState()
+            let fault = LiqiParseFaultState()
+            inject(store, js, fault)
+            let environment = makeEnvironment(store: store, jsInjection: js, parseFault: fault)
+            XCTAssertTrue(environment.hasFault, "\(name) 單獨成立時應算故障")
+            XCTAssertTrue(environment.jsInjection === js && environment.parseFault === fault,
+                          "environment 必須回傳注入的那一份")
+        }
+    }
+
+    /// Preview 預設值讀取時解析成 `.shared`（判斷理由見 `NakiEnvironment`），兩次讀取是同一份。
+    func testPreviewRefsResolveToShared() {
+        let preview = NakiEnvironment()
+        XCTAssertTrue(preview.logManager === LogManager.shared)
+        XCTAssertTrue(preview.jsInjection === JSInjectionState.shared)
+        XCTAssertTrue(preview.parseFault === LiqiParseFaultState.shared)
     }
 }

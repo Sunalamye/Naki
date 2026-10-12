@@ -9,14 +9,14 @@
 import SwiftUI
 
 struct LogPanel: View {
-    private let logManager = LogManager.shared
+    @Environment(\.naki) private var naki
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var autoScroll = true
     @State private var filterCategory: LogCategory? = nil
     @State private var searchText = ""
 
     var body: some View {
-        let shown = logManager.recentEntries(category: filterCategory, search: searchText, limit: .max)
+        let shown = naki.logManager.recentEntries(category: filterCategory, search: searchText, limit: .max)
         VStack(spacing: 0) {
             // 工具欄
             HStack(spacing: 8) {
@@ -51,7 +51,7 @@ struct LogPanel: View {
                 #endif
 
                 // 清除按鈕
-                Button("清除日誌", systemImage: "trash") { logManager.clear() }
+                Button("清除日誌", systemImage: "trash") { naki.actions.clearLogs() }
                     .labelStyle(.iconOnly)
                 .accessibilityIdentifier("log-clear-button")
                 #if os(macOS)

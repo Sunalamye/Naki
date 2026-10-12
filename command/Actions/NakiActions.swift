@@ -836,37 +836,61 @@ struct SwitchServerAction {
 
 // MARK: - 雀魂連線設定
 
-/// 套用 User-Agent 與額外 header（整頁重新載入），並提供 WebKit 的預設 UA 供設定頁當 placeholder。
+/// 寫入額外 header 並整頁重新載入，並提供 WebKit 的預設 UA 供設定頁當 placeholder。
 ///
-/// 設定值本身由 View 直接寫 `SettingsStore`；這裡只負責「寫完之後讓它生效」的副作用。
+/// header 字典由這裡組好再寫：View 只收集編輯中的列。User-Agent 仍由 View 直接 binding，
+/// 它與 header 一樣要等重新載入才生效。
 @MainActor
 struct ConnectionSettingsAction {
 
+  private nonisolated(unsafe) let saveHeaders: ([String: String]) -> Void
   private nonisolated(unsafe) let applyNow: () -> Void
   private nonisolated(unsafe) let readDefaultUserAgent: () async -> String?
 
-  private init(apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String?) {
+  private init(
+    saveHeaders: @escaping ([String: String]) -> Void, apply: @escaping () -> Void,
+    defaultUserAgent: @escaping () async -> String?
+  ) {
+    self.saveHeaders = saveHeaders
     self.applyNow = apply
     self.readDefaultUserAgent = defaultUserAgent
   }
 
   /// 真實實作
-  init(session: WebSession) {
+  init(settings: SettingsStore, session: WebSession) {
     self.init(
+      saveHeaders: { [weak settings] in settings?.majsoulExtraHeaders = $0 },
       apply: { [weak session] in session?.loadMajsoul() },
       defaultUserAgent: { [weak session] in await session?.defaultUserAgent() })
   }
 
   nonisolated init() {
+    self.saveHeaders = { _ in }
     self.applyNow = {}
     self.readDefaultUserAgent = { nil }
   }
 
   #if DEBUG
-    init(stub apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String? = { nil }) {
-      self.init(apply: apply, defaultUserAgent: defaultUserAgent)
+    init(
+      stub apply: @escaping () -> Void, defaultUserAgent: @escaping () async -> String? = { nil },
+      saveHeaders: @escaping ([String: String]) -> Void = { _ in }
+    ) {
+      self.init(saveHeaders: saveHeaders, apply: apply, defaultUserAgent: defaultUserAgent)
     }
   #endif
+
+  /// 空名稱的列略過；名稱重複時後面那列勝出。
+  static func headers(from rows: [(name: String, value: String)]) -> [String: String] {
+    Dictionary(
+      rows.filter { !$0.name.isEmpty }.map { ($0.name, $0.value) },
+      uniquingKeysWith: { _, last in last })
+  }
+
+  /// 先寫設定再重新載入：載入時讀的是設定裡的 header。
+  func apply(headers rows: [(name: String, value: String)]) {
+    saveHeaders(Self.headers(from: rows))
+    apply()
+  }
 
   func apply() { applyNow() }
 
@@ -986,12 +1010,16 @@ struct NakiActions {
   var setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction
   /// 移除插件（刪目錄 + 熱停用 + 重掃）
   var removePlugin: RemovePluginAction
+  /// 從 URL 抓插件供預覽（不安裝）
+  var fetchPluginImport: FetchPluginImportAction
   /// 安裝（匯入／更新）插件
   var installPlugins: InstallPluginsAction
   /// 檢查插件更新
   var checkPluginUpdates: CheckPluginUpdatesAction
   /// 檢查 App 有沒有新版（`manual` 略過節流與略過清單）
   var checkForUpdate: CheckForUpdateAction
+  /// 收起新版提示（`skip` 時記住略過的版本）
+  var dismissUpdate: DismissUpdateAction
   /// 改插件設定值
   var setPluginSetting: SetPluginSettingAction
   /// 強制斷線重連以重建 Bot
@@ -1008,7 +1036,7 @@ struct NakiActions {
   var reloadPage: ReloadPageAction
   /// 換到另一個區服（換 URL，不是重載）
   var switchServer: SwitchServerAction
-  /// 套用雀魂連線設定（User-Agent／額外 header）並重新載入
+  /// 寫入額外 header 並重新載入（User-Agent 由 View 直接寫設定）
   var connectionSettings: ConnectionSettingsAction
   /// 啟動時的區服選擇：寫入「不再詢問」，區服不同才換服
   var chooseServer: ChooseServerAction
@@ -1022,6 +1050,8 @@ struct NakiActions {
   var testCloudConnection: TestCloudConnectionAction
   /// 插件頁的目前頁面診斷（可先重新注入已啟用插件）
   var pluginDiagnostics: PluginDiagnosticsAction
+  /// 清空日誌面板的記憶體 log
+  var clearLogs: ClearLogsAction
   /// 交出這條 path 的 WebView
   var webView: WebViewAction
 }
@@ -1037,9 +1067,11 @@ extension NakiActions {
     self.setPluginEnabled = SetPluginEnabledAction()
     self.setPluginsMayModifyOutbound = SetPluginsMayModifyOutboundAction()
     self.removePlugin = RemovePluginAction()
+    self.fetchPluginImport = FetchPluginImportAction()
     self.installPlugins = InstallPluginsAction()
     self.checkPluginUpdates = CheckPluginUpdatesAction()
     self.checkForUpdate = CheckForUpdateAction()
+    self.dismissUpdate = DismissUpdateAction()
     self.setPluginSetting = SetPluginSettingAction()
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
@@ -1055,6 +1087,7 @@ extension NakiActions {
     self.probeCloud = ProbeCloudAction()
     self.testCloudConnection = TestCloudConnectionAction()
     self.pluginDiagnostics = PluginDiagnosticsAction()
+    self.clearLogs = ClearLogsAction()
     self.webView = WebViewAction()
   }
 }
@@ -1120,7 +1153,32 @@ struct SetPluginsMayModifyOutboundAction {
   func callAsFunction(_ on: Bool) { perform(on) }
 }
 
-// MARK: - 安裝／檢查更新／改設定
+// MARK: - 抓取／安裝／檢查更新／改設定
+
+/// 從 URL 抓插件供預覽（repo → 多個；gist／plugin.json → 一個），只抓不安裝。
+struct FetchPluginImportAction {
+
+  private nonisolated(unsafe) let perform: (String) async -> Result<[ImportedPlugin], PluginImportError>
+
+  private init(perform: @escaping (String) async -> Result<[ImportedPlugin], PluginImportError>) {
+    self.perform = perform
+  }
+
+  static let live = FetchPluginImportAction(perform: { await PluginImportSource.fetchAny(urlString: $0) })
+
+  /// Preview 不連網：回空清單。
+  nonisolated init() { self.perform = { _ in .success([]) } }
+
+  #if DEBUG
+    init(stub: @escaping (String) async -> Result<[ImportedPlugin], PluginImportError>) {
+      self.init(perform: stub)
+    }
+  #endif
+
+  func callAsFunction(urlString: String) async -> Result<[ImportedPlugin], PluginImportError> {
+    await perform(urlString)
+  }
+}
 
 /// 逐一落地插件（匯入與確認更新共用），成功的有重掃；回傳失敗原因。
 struct InstallPluginsAction {
@@ -1186,6 +1244,32 @@ struct CheckForUpdateAction {
   #endif
 
   func callAsFunction(manual: Bool) async { await perform(manual) }
+}
+
+/// 收起新版提示。`skip` 時先記住這個版本（之後自動檢查不再提示），再收起。
+struct DismissUpdateAction {
+
+  private nonisolated(unsafe) let perform: (Bool) -> Void
+
+  private init(perform: @escaping (Bool) -> Void) {
+    self.perform = perform
+  }
+
+  init(store: GameStore, settings: SettingsStore) {
+    self.init(perform: { [weak store, weak settings] skip in
+      guard let store else { return }
+      if skip, let version = store.availableUpdate?.version { settings?.skippedUpdateVersion = version }
+      store.availableUpdate = nil
+    })
+  }
+
+  nonisolated init() { self.perform = { _ in } }
+
+  #if DEBUG
+    init(stub: @escaping (Bool) -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(skip: Bool) { perform(skip) }
 }
 
 /// 存插件設定值；插件已啟用才熱重載（改設定不該順便把插件啟用並執行）。
@@ -1417,4 +1501,28 @@ struct PluginDiagnosticsAction {
   #endif
 
   func callAsFunction(reinject: Bool) async -> PluginDiagnostics { await perform(reinject) }
+}
+
+// MARK: - 清空日誌
+
+/// 清空記憶體 log（日誌面板的清除鈕）；檔案 log 不動。
+struct ClearLogsAction {
+
+  private nonisolated(unsafe) let perform: () -> Void
+
+  private init(perform: @escaping () -> Void) {
+    self.perform = perform
+  }
+
+  init(logManager: LogManager) {
+    self.init(perform: { [weak logManager] in logManager?.clear() })
+  }
+
+  nonisolated init() { self.perform = {} }
+
+  #if DEBUG
+    init(stub: @escaping () -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction() { perform() }
 }

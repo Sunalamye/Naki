@@ -474,18 +474,6 @@ struct DecisionCard: View {
     /// 完全不產。所以這裡不畫「三張副露牌」——那在目前的資料下是假的。
     private var showsTile: Bool { recommendation.actionType == .discard }
 
-    /// 動作名。
-    ///
-    /// **不能直接用 `displayLabel`**：它對打牌回傳的是牌名（`8p`），實測時決策卡
-    /// 因此顯示成「[八筒圖] 8p 40.0%」——牌面已經畫在旁邊，這個 badge 卻又說了
-    /// 一次同一張牌，而「要拿它做什麼」反而沒人講。其餘動作的 `displayLabel`
-    /// 是對的（吃①／立直／九種九牌），那些要保留。
-    private var actionName: LocalizedStringKey {
-        recommendation.actionType == .discard
-            ? recommendation.actionType.displayNameKey
-            : recommendation.displayLabelKey
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 7 : 10) {
             HStack(spacing: compact ? 8 : 14) {
@@ -494,7 +482,7 @@ struct DecisionCard: View {
                               size: compact ? .medium : .large)
                 }
 
-                Text(actionName)
+                Text(recommendation.actionNameKey)
                     .font(compact ? .caption : .headline)
                     .bold()
                     .foregroundStyle(tone)
@@ -606,10 +594,7 @@ struct OptionRow: View {
                 TileImage(mjai: recommendation.displayTile, size: compact ? .tiny : .small)
             }
 
-            // 與 `DecisionCard.actionName` 同一個理由：打牌的 displayLabel 是牌名
-            Text(recommendation.actionType == .discard
-                 ? recommendation.actionType.displayNameKey
-                 : recommendation.displayLabelKey)
+            Text(recommendation.actionNameKey)
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(tone)

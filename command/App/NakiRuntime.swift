@@ -63,7 +63,8 @@ final class NakiRuntime {
     /// 注入 Scene 的值
     var environment: NakiEnvironment {
         NakiEnvironment(store: store, settings: settings, actions: actions,
-                        pluginStore: pluginStore, ui: ui)
+                        pluginStore: pluginStore, ui: ui,
+                        logManager: .shared, jsInjection: .shared, parseFault: .shared)
     }
 
     // MARK: - 組裝
@@ -571,9 +572,11 @@ final class NakiRuntime {
             setPluginEnabled: SetPluginEnabledAction(runtime: self),
             setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction(runtime: self),
             removePlugin: RemovePluginAction(runtime: self),
+            fetchPluginImport: .live,
             installPlugins: InstallPluginsAction(runtime: self),
             checkPluginUpdates: CheckPluginUpdatesAction(runtime: self),
             checkForUpdate: CheckForUpdateAction(runtime: self),
+            dismissUpdate: DismissUpdateAction(store: store, settings: settings),
             setPluginSetting: SetPluginSettingAction(runtime: self),
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
@@ -584,7 +587,7 @@ final class NakiRuntime {
             toggleDebugServer: ToggleDebugServerAction(runtime: self),
             reloadPage: ReloadPageAction(session: session),
             switchServer: SwitchServerAction(session: session),
-            connectionSettings: ConnectionSettingsAction(session: session),
+            connectionSettings: ConnectionSettingsAction(settings: settings, session: session),
             chooseServer: ChooseServerAction(
                 settings: settings, switchServer: SwitchServerAction(session: session)),
             setKeepAliveInBackground: SetKeepAliveInBackgroundAction(session: session),
@@ -592,6 +595,7 @@ final class NakiRuntime {
             probeCloud: .live(),
             testCloudConnection: .live(),
             pluginDiagnostics: PluginDiagnosticsAction(runtime: self),
+            clearLogs: ClearLogsAction(logManager: .shared),
             webView: WebViewAction(session: session))
     }
 }

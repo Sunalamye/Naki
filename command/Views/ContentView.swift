@@ -126,7 +126,7 @@ struct ContentView: View {
             FullAutoSetupSheet(
                 sanma: $draftPrefersSanma,
                 room: $draftRoomPreference,
-                sanmaEngineAvailable: AkagiSanmaBot.isBundled || naki.settings.cloudConfig.isActive,
+                sanmaEngineAvailable: AkagiSanmaBot.isBundled,
                 onStart: {
                     naki.ui.showFullAutoKindChoice = false
                     naki.actions.startFullAuto(sanma: draftPrefersSanma, room: draftRoomPreference)
@@ -285,7 +285,7 @@ struct ContentView: View {
 
             // 決策面板（右側）
             if naki.ui.showGamePanel {
-                GamePanel(showLog: Bindable(naki.ui).showLog)
+                GamePanel()
                     .frame(minWidth: 300, idealWidth: 360, maxWidth: 480)
             }
         }
@@ -684,7 +684,6 @@ private struct IOSStatusOverlay: View {
 #if os(macOS)
 struct GamePanel: View {
     @Environment(\.naki) private var naki
-    @Binding var showLog: Bool
 
     var body: some View {
         VSplitView {
@@ -698,7 +697,7 @@ struct GamePanel: View {
             .frame(minHeight: 200)
 
             // 下半部分：日誌面板
-            if showLog {
+            if naki.ui.showLog {
                 VStack(spacing: 0) {
                     Divider()
                     LogPanel()
