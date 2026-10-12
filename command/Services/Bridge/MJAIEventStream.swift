@@ -63,7 +63,7 @@ class MJAIEventStream {
 
     /// 開始新遊戲
     func startNewGame() {
-        print("[MJAIEventStream] 開始新遊戲, 清空歷史 (\(eventHistory.count) 個事件)")
+        mjaiLog("[MJAIEventStream] 開始新遊戲, 清空歷史 (\(eventHistory.count) 個事件)", level: .info)
 
         // Cancel 舊的 Task
         consumerTask?.cancel()
@@ -81,7 +81,7 @@ class MJAIEventStream {
 
     /// 結束遊戲
     func endGame() {
-        print("[MJAIEventStream] 結束遊戲")
+        mjaiLog("[MJAIEventStream] 結束遊戲", level: .info)
 
         consumerTask?.cancel()
         consumerTask = nil
@@ -104,7 +104,7 @@ class MJAIEventStream {
         continuation?.yield(event)
 
         if let eventType = event["type"] as? String {
-            print("[MJAIEventStream] 發送事件: \(eventType), 歷史數量: \(eventHistory.count)")
+            mjaiLog("[MJAIEventStream] 發送事件: \(eventType), 歷史數量: \(eventHistory.count)", level: .trace)
         }
     }
 
@@ -120,7 +120,7 @@ class MJAIEventStream {
         // 2. 快照當前歷史
         let historySnapshot = eventHistory
 
-        print("[MJAIEventStream] 啟動消費者, 有 \(historySnapshot.count) 個歷史事件")
+        mjaiLog("[MJAIEventStream] 啟動消費者, 有 \(historySnapshot.count) 個歷史事件", level: .info)
 
         // 3. 創建新的 AsyncStream
         //    用 makeStream 同步取得 continuation。若改成在 build 閉包裡把 continuation 指派
@@ -146,7 +146,7 @@ class MJAIEventStream {
         consumerTask = Task { [weak self] in
             for await event in stream {
                 guard !Task.isCancelled else {
-                    print("[MJAIEventStream] 消費者任務已取消")
+                    mjaiLog("[MJAIEventStream] 消費者任務已取消", level: .info)
                     break
                 }
                 await handler(event)
@@ -155,7 +155,7 @@ class MJAIEventStream {
                 guard let self else { return }
                 guard self.consumerGeneration == generation else {
                     // 已經有更新的 consumer 接手了；這裡清掉會製造孤兒
-                    print("[MJAIEventStream] 舊消費者(第 \(generation) 代)結束，當前為第 \(self.consumerGeneration) 代，不清除引用")
+                    mjaiLog("[MJAIEventStream] 舊消費者(第 \(generation) 代)結束，當前為第 \(self.consumerGeneration) 代，不清除引用", level: .info)
                     return
                 }
                 self.consumerTask = nil
@@ -165,7 +165,7 @@ class MJAIEventStream {
 
     /// 停止消費者（保留歷史以便重連時重放）
     func stopConsumer() {
-        print("[MJAIEventStream] 停止消費者 (歷史已保留: \(eventHistory.count) 個事件)")
+        mjaiLog("[MJAIEventStream] 停止消費者 (歷史已保留: \(eventHistory.count) 個事件)", level: .info)
         consumerTask?.cancel()
         consumerTask = nil
         continuation?.finish()
@@ -177,7 +177,7 @@ class MJAIEventStream {
     /// 檢查是否可以重新同步（是否有 start_game 歷史）
     func canResync() -> Bool {
         let hasStartGame = eventHistory.contains { ($0["type"] as? String) == "start_game" }
-        print("[MJAIEventStream] canResync 檢查: hasStartGame=\(hasStartGame), eventCount=\(eventHistory.count)")
+        mjaiLog("[MJAIEventStream] canResync 檢查: hasStartGame=\(hasStartGame), eventCount=\(eventHistory.count)", level: .info)
         return hasStartGame
     }
 

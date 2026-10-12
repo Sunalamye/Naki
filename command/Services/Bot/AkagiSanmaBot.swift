@@ -73,6 +73,12 @@ final class AkagiSanmaBot: MahjongBot {
         let type = last["type"] as? String
         let isMine = last["actor"] as? Int == seat
         if isMine, ["ankan", "kakan", "daiminkan"].contains(type) { return nil }
+        // 本地授權讀 pending，雲端讀事件上的序號；兩者不同代表 consumer 落後於 oplist，授權可能來自下一批
+        let eventSequence = events.compactMap { $0[MJAIEventKey.oplistSequence] as? UInt64 }.last
+        let pendingSequence = snapshot()?.sequence
+        if eventSequence != pendingSequence {
+            botLog("[AkagiSanmaBot] 授權序號與事件不一致：pending=\(pendingSequence.map(String.init) ?? "nil")，事件=\(eventSequence.map(String.init) ?? "nil")（\(type ?? "?")）")
+        }
         guard let decision = engine.decide(authorized: Self.authorizedKinds(snapshot(), seat: seat))
         else { return nil }
 

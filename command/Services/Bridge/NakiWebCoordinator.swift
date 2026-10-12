@@ -101,16 +101,16 @@ final class NakiWebCoordinator {
                     self.websocketHandler.reset()
 
                     if self.eventStream.canResync() {
-                        print("[協調器] WebSocket 已重連, 嘗試重新同步 Bot...")
+                        bridgeLog("[協調器] WebSocket 已重連, 嘗試重新同步 Bot...")
                         await self.resyncBot()
                     } else {
                         // `deleteBot()` 已經清空本局資料（同一個 store）
                         self.deleteBot()
-                        print("[協調器] WebSocket 連線時重置狀態 (無進行中的遊戲)")
+                        bridgeLog("[協調器] WebSocket 連線時重置狀態 (無進行中的遊戲)")
                     }
                 } else {
                     self.eventStream.stopConsumer()
-                    print("[協調器] WebSocket 已斷線, 消費者已停止 (歷史記錄已保留)")
+                    bridgeLog("[協調器] WebSocket 已斷線, 消費者已停止 (歷史記錄已保留)")
                 }
             }
         }
@@ -300,6 +300,6 @@ extension NakiWebCoordinator: WebNavigationLifecycle {
         eventStream.endGame()
         deleteBot()   // 手牌／推薦／botStatus 一併清空
         store.isConnected = false
-        print("[協調器] 導覽開始時完整重置 (包含 EventStream)")
+        bridgeLog("[協調器] 導覽開始時完整重置 (包含 EventStream)")
     }
 }

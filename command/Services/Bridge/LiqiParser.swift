@@ -85,6 +85,9 @@ class LiqiParser {
     /// 當前消息 ID
     private var currentMsgId: Int = 1
 
+    /// 這條連線配不到 request 的 RESPONSE 累計（`reset()` 歸零）。
+    private(set) var unmatchedResponseCount = 0
+
     /// **這一次 `parse(_:)` 期間**累積的解析失敗。
     ///
     /// 刻意不直接寫進 `LiqiParseFaultState.shared`：解析器不知道少了某個欄位
@@ -99,6 +102,7 @@ class LiqiParser {
     func reset() {
         pendingRequests.removeAll()
         currentMsgId = 1
+        unmatchedResponseCount = 0
         faults.removeAll()
         lastEnvelopeFailure = nil
     }
@@ -251,6 +255,17 @@ class LiqiParser {
         guard let methodName = pendingRequests.removeValue(forKey: msgId) else {
             liqiLog("[LiqiParser] parseResponse: no pending request for msgId=\(msgId)"
                     + "，payload \(payload.count) bytes")
+            // 重連後在途的回應可能成串到達：info 只報首次與 2 的冪次，fault 只記首次，避免洗版 /logs 與 recent
+            unmatchedResponseCount += 1
+            let count = unmatchedResponseCount
+            if count & (count - 1) == 0 {
+                liqiLog("[LiqiParser] RESPONSE 配不到 request：msgId=\(msgId)，本連線累計 \(count) 次", level: .info)
+            }
+            if count == 1 {
+                recordFault(site: "LiqiParser.unmatchedResponse",
+                            byteCount: payload.count,
+                            reason: "RESPONSE msgId=\(msgId) 沒有對應的 REQUEST → 這則回應不解析")
+            }
             return nil
         }
 
