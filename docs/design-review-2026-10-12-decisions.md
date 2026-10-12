@@ -838,3 +838,10 @@
 - 與 WP11：文字合併乾淨；對舊 `e42ce17` 有語意衝突（復驗實測三格「吃」≠「吃①②③」），WP11 補強 `d8abb30` 後消解（復驗實測綠）。**WP11 必須以 `a15950f` 或之後版本合併，若 `d8abb30` 被撤則 wp8 測試三個 chi case 要補 `chiVariant:`。**
 - 可合併後補 → WP9b：lint 補規格 grep 的四個名稱（`fetchAny` 等）並斷言掃到行數 > 0（V10 不帶點 `shared`、V11 直呼 `fetchAny` 存活；目錄不存在時會空轉通過）；`NakiRuntime` 三條 Action 接線無鎖（V16 把 `clearLogs` 換 no-op 12 條全綠）；`NakiEnvironment.swift:96-101` 註解仍寫「全新的空 store」→ WP12。
 - 程序備註：復驗員自報一次短暫寫 /tmp scratchpad（10 秒內刪除）；兩位都新增 `naki.tests.wp8.*` suite plist 共 7 個（`removePersistentDomain` 不刪檔，既有模式）。
+
+### WP11 結果（2026-10-13）
+- 合併到 main：merge commit `4f7ab10`（`f4a4b87`／`c9422fd`／`e42ce17` 原三項＋補強 `de9ce16` 雲端 chi MJAI guard／`d8abb30` 建構邊界解 label／`a15950f` executor 選列測試與註解，基準 `a787989`）。兩輪復驗（`.swfd/logs/wp11-verify/`），第二輪「可合併」：962 → 985；合併態 main（含 WP8）全套見 `.swfd/logs/merge-main/test-4f7ab10.log`，WP8 的 chi 斷言在合併態綠。
+- 兩阻擋項關閉：(A) guard 接受集合恰為 37 張合法 MJAI 牌，該集合上新舊分類已由窮舉證明相同，所以修後接受集合是基底子集；`0m` 類輸入回到基底 nil；`4z·5z`／`1z·2z`／`5·6·7`／`5x` 四組基底會產出吃的列、現在退回本地（fail-closed，兩組入測）。端到端測試斷言打過雲端且 `source == "local"`。(B) 三個 init 共用 `parsedChiVariant`，明確傳入值優先；兩條被改寫的既有測試還原原文；對 wp8 `3ef11de` 與 main 三個版本試合皆 exit 0。
+- 六筆第二輪變異全殺（R1–R6）。
+- 殘餘（記錄，非阻擋）：`WebSession.syncHighlight` 的 `top.chiVariant ?? 0` 無測試鎖（WebSession 無注入縫；差異限 DebugServer 注入或 Preview 的 `chi_x` 與插件高亮 context）→ 延後表；「chi combination 恆為兩張」需 live 確認（`LiqiOperationStore.swift:23` 自註待驗，live log 無任何「執行: 吃」）→ 整合驗收；`replay-check.sh` 未驗證；`ReplayFingerprintTests` 對 chi 路徑無覆蓋力。
+- 程序備註：第一輪實作者用系統 python3 寫探針（proto 違規），第二輪已改 shell；notes 一處「test-final.log」應為 test-final2.log（WP12 不管，屬 log 內部）。
