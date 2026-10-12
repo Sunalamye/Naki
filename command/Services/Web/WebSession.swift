@@ -182,6 +182,17 @@ final class WebSession {
         try await backend.callJavaScript(functionBody)
     }
 
+    /// 射後不理：失敗一律寫 `bridgeLog`（`label` 說明這次在做什麼），不靜默吞掉。
+    /// 回傳的 Task 只給測試等待用。
+    @discardableResult
+    func fireJavaScript(_ script: String, label: String) -> Task<Void, Never> {
+        let backend = backend
+        return Task {
+            do { _ = try await backend.callJavaScript(script) }
+            catch { bridgeLog("[WebSession] \(label)錯誤: \(error.localizedDescription)") }
+        }
+    }
+
     // MARK: - 載入
 
     /// 這次 App 生命週期內是否已經要求過首次載入
@@ -367,14 +378,7 @@ final class WebSession {
 
     private func pushKeepAlive() {
         let enabled = settings.keepAliveInBackground
-        Task {
-            do {
-                _ = try await backend.callJavaScript(
-                    "window.__nakiKeepAlive?.set(\(enabled)); return null;")
-            } catch {
-                bridgeLog("[WebSession] 設定背景保活錯誤: \(error.localizedDescription)")
-            }
-        }
+        fireJavaScript("window.__nakiKeepAlive?.set(\(enabled)); return null;", label: "設定背景保活")
         if enabled { startKeepAliveLoop() } else { stopKeepAliveLoop() }
     }
 

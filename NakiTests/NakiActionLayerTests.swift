@@ -16,9 +16,14 @@
 //  Action 的 stub 真的被呼叫到、`.unavailable` 不會假裝成功。
 //
 
+import WebKit
 import XCTest
 
 @testable import Naki
+
+private final class NoopHandler: NSObject, WKScriptMessageHandler {
+    func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {}
+}
 
 @MainActor
 final class NakiActionLayerTests: XCTestCase {
@@ -283,39 +288,62 @@ final class NakiActionLayerTests: XCTestCase {
         XCTAssertEqual(triggered, 1)
     }
 
-    // MARK: - ForceReconnectAction
+    // MARK: - ForceReconnectAction（經真的 WebSession／WebPage，JS 由頁面內假的 `__nakiWebSocket` 回應）
+
+    private func makeSession(forceReconnectBody: String) async throws -> WebSession {
+        let session = WebSession(
+            store: GameStore(), settings: SettingsStore(), messageHandler: NoopHandler())
+        _ = try await session.callJavaScript(
+            "window.__nakiWebSocket = { forceReconnect() { \(forceReconnectBody) } }; return null;")
+        return session
+    }
 
     /// p0-2 的核心：JS 回傳值要被真的讀出來（腳本漏 `return` 時它會是 nil → 0）
-    func testForceReconnectActionReadsClosedCount() async {
-        let action = ForceReconnectAction(javaScript: ExecuteJavaScriptAction(stub: { script in
-            XCTAssertEqual(script, NakiWebSocketScript.forceReconnect)
-            return 3
-        }))
+    func testForceReconnectActionReadsClosedCount() async throws {
+        let session = try await makeSession(forceReconnectBody: "return 3;")
 
-        let outcome = await action()
+        let outcome = await ForceReconnectAction(session: session)()
 
         XCTAssertTrue(outcome.success)
         XCTAssertEqual(outcome.dictionary["closedConnections"] as? Int, 3)
     }
 
     /// 關到 0 條不是錯誤，但也不是成功——訊息與 `success` 都要說實話
-    func testForceReconnectActionZeroClosedIsNotSuccess() async {
-        let action = ForceReconnectAction(javaScript: ExecuteJavaScriptAction(stub: { _ in 0 }))
+    func testForceReconnectActionZeroClosedIsNotSuccess() async throws {
+        let session = try await makeSession(forceReconnectBody: "return 0;")
 
-        let outcome = await action()
+        let outcome = await ForceReconnectAction(session: session)()
 
         XCTAssertFalse(outcome.success)
         XCTAssertEqual(outcome.statusMessage, "沒有活躍的連接")
     }
 
-    func testForceReconnectActionSurfacesJavaScriptError() async {
-        let action = ForceReconnectAction(javaScript: .unavailable)
+    func testForceReconnectActionSurfacesJavaScriptError() async throws {
+        let session = try await makeSession(forceReconnectBody: "throw new Error('boom');")
 
-        let outcome = await action()
+        let outcome = await ForceReconnectAction(session: session)()
 
         XCTAssertFalse(outcome.success)
         XCTAssertEqual(outcome.dictionary["success"] as? Bool, false)
         XCTAssertNotNil(outcome.dictionary["error"])
+    }
+
+    // MARK: - fireJavaScript
+
+    /// 射後不理的 JS 失敗時必須留下 log（先前 `try?` 靜默吞掉，插件注入失敗沒有任何痕跡）
+    func testFireJavaScriptLogsFailureWithLabel() async {
+        let session = WebSession(
+            store: GameStore(), settings: SettingsStore(), messageHandler: NoopHandler())
+        let label = "測試射後不理-\(UUID().uuidString)"
+
+        await session.fireJavaScript("throw new Error('boom');", label: label).value
+
+        for _ in 0..<80 where !LogManager.shared.entries.contains(where: { $0.message.contains(label) }) {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertTrue(
+            LogManager.shared.entries.contains { $0.message.contains(label) && $0.message.contains("錯誤") },
+            "失敗要寫進 bridgeLog，且帶 label")
     }
 
     /// Legacy path 走整頁重載：不可以偽裝成「關了 0 條連線」

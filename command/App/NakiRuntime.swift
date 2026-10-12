@@ -69,13 +69,6 @@ final class NakiRuntime {
     // MARK: - 組裝
 
     init() {
-        // ⓪ 自動打牌模式的兩個舊 key 合併成一個。
-        //
-        // **必須在這裡而不是只在 App 的 `init()` 裡**：`@State private var runtime = NakiRuntime()`
-        // 是 stored property 的預設值，它在 App 的 `init` 本體**之前**求值——也就是說
-        // 這個 runtime 會比 `NakiApp.init()` 裡那一行遷移更早跑。冪等，重複呼叫安全。
-        AutoPlayModeStore.migrateLegacyKeyIfNeeded()
-
         // ① 牌局側：coordinator 擁有 bot / event stream / WS handler，直接寫 store
         coordinator = NakiWebCoordinator(store: store)
 
@@ -226,13 +219,7 @@ final class NakiRuntime {
             // 目標房間沒打過時才用 MatchModeTable 推導候選。
             observations: { ObservedMatchSids.shared.observations },
             accountLevel: { [weak self] sanma in
-                guard let self else { return nil }
-                let accountId = self.coordinator.websocketHandler.majsoulAccountId
-                guard accountId > 0 else { return nil }
-                let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: UInt32(accountId))
-                let outcome = await self.liqiSender.sendAwaitingResponse(
-                    spec, awaitResponseMs: 4000)
-                guard let record = outcome.response, !record.hasError,
+                guard let record = await self?.fetchAccountInfo(awaitResponseMs: 4000),
                       let payload = record.fields["field2"] as? String else { return nil }
                 let levels = AccountLevelParser.levels(fromBase64: payload)
                 return sanma ? levels.sanma : levels.yonma
@@ -245,18 +232,22 @@ final class NakiRuntime {
                 // 「送進 WebSocket」不算成功：只有同 msgId 的 RESPONSE 沒有 error 才算
                 return outcome.response.map { !$0.hasError } == true
             },
-            lobbyProbe: { [weak self] in
-                guard let self else { return false }
-                // 探針沿用 fetchAccountInfo（2026-08-01 實測可用）；
-                // 曾記錄 fetchServerTime 會被拒，但當時 hasError 誤判 field 1，結論未經驗證。
-                let accountId = self.coordinator.websocketHandler.majsoulAccountId
-                guard accountId > 0 else { return false }
-                let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: UInt32(accountId))
-                let outcome = await self.liqiSender.sendAwaitingResponse(spec, awaitResponseMs: 3000)
-                return outcome.response.map { !$0.hasError } == true
-            },
+            lobbyProbe: { [weak self] in await self?.fetchAccountInfo(awaitResponseMs: 3000) != nil },
             log: { [weak self] message in self?.logAutoPlayEvent(message) },
             onFailure: { [weak self] message in self?.store.statusMessage = message })
+    }
+
+    /// 帳號資訊查詢，同時是等級來源與大廳探針：沒帳號 id、逾時或伺服器拒絕都回 nil。
+    ///
+    /// 探針沿用 fetchAccountInfo（2026-08-01 實測可用）；
+    /// 曾記錄 fetchServerTime 會被拒，但當時 hasError 誤判 field 1，結論未經驗證。
+    private func fetchAccountInfo(awaitResponseMs: Int) async -> LiqiResponseRecord? {
+        let accountId = coordinator.websocketHandler.majsoulAccountId
+        guard accountId > 0 else { return nil }
+        let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: UInt32(accountId))
+        let outcome = await liqiSender.sendAwaitingResponse(spec, awaitResponseMs: awaitResponseMs)
+        guard let record = outcome.response, !record.hasError else { return nil }
+        return record
     }
 
     /// 自動打牌的關鍵節點：`eventLog` 一份（LogManager 與 naki-events.log 都收得到），外加狀態列。
@@ -430,9 +421,7 @@ final class NakiRuntime {
             script = PluginRegistry.disableScript(id: id)
         }
         guard let script else { return }
-        Task { [weak self] in
-            _ = try? await self?.session.callJavaScript(script)
-        }
+        session.fireJavaScript(script, label: "插件\(enabled ? "啟用" : "停用") \(id)")
     }
 
     private static let diagnosticsScript = """
@@ -464,9 +453,7 @@ final class NakiRuntime {
         settings.pluginsMayModifyOutbound = on
         session.setPluginInjection(pluginInjection())
         let js = "window.__nakiPluginsMayModifyOutbound = \(on ? "true" : "false");"
-        Task { [weak self] in
-            _ = try? await self?.session.callJavaScript(js)
-        }
+        session.fireJavaScript(js, label: "設定插件 L3 總開關")
     }
 
     /// 重掃插件目錄，更新 `pluginDescriptors`。@Observable ⇒ UI 自動反映。

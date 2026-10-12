@@ -87,16 +87,6 @@ struct ExecuteJavaScriptAction {
     })
   }
 
-  /// 真實實作：直接對某個 backend（backend 自己要跑 JS 時用，例如 forceReconnect）
-  init(backend: any WebSessionBackend) {
-    self.init(run: { [weak backend] script in
-      guard let backend else {
-        throw NakiActionError.notAvailable("JavaScript execution")
-      }
-      return try await backend.callJavaScript(script)
-    })
-  }
-
   /// 沒有頁面可執行時的實作：一律 throw。
   ///
   /// 回 nil 是不行的——MCP 的 `execute_js` 靠這個錯誤把「頁面還沒接上」
@@ -583,9 +573,8 @@ enum ForceReconnectOutcome {
 
 /// 強制斷線重連以重建 Bot 狀態。
 ///
-/// 腳本字串（`NakiWebSocketScript.forceReconnect`）與回傳值解讀（`closedCount(from:)`）
-/// 各只有一份還不夠：呼叫它的每個地方（MCP `bot_sync`、UI 按鈕）都得走這個型別，
-/// 否則 do/catch 與結果解讀又會變成各寫一次、各自漂移。
+/// 腳本字串與回傳值解讀只在 `WebPageBackend.forceReconnect` 一份；呼叫它的每個地方
+///（MCP `bot_sync`、UI 按鈕）都走這個型別，不各自跑 JS、各自解讀 outcome。
 @MainActor
 struct ForceReconnectAction {
 
@@ -595,19 +584,7 @@ struct ForceReconnectAction {
     self.perform = perform
   }
 
-  /// 真實實作 A：JS 通道。關掉所有雀魂 WebSocket，伺服器會以 authGame + syncGame 重建。
-  init(javaScript: ExecuteJavaScriptAction) {
-    self.init(perform: {
-      do {
-        return .closed(NakiWebSocketScript.closedCount(
-          from: try await javaScript(NakiWebSocketScript.forceReconnect)))
-      } catch {
-        return .failed(error.localizedDescription)
-      }
-    })
-  }
-
-  /// 真實實作 B：把「怎麼重連」交回 `WebSession`（UI 按鈕與 MCP `bot_sync` 用）。
+  /// 真實實作：把「怎麼重連」交回 `WebSession`（UI 按鈕與 MCP `bot_sync` 用）。
   ///
   /// 兩條 path 的重連手段不同（WebPage 走 JS 關連線，Legacy 走 `reload()`），
   /// 呼叫端不該知道差別，也不該替某一條 path 選錯手段。
