@@ -1,6 +1,6 @@
 # Naki 設計審查裁決（2026-10-12）
 
-- 裁決基準：HEAD `813aa88`（main），工作樹只有未追蹤的 `build-ios-dev/`（`git status --short`）。
+- 裁決基準（四份審查報告）：HEAD `813aa88`（main）；各 WP 的 diff 基準見 §12，工作樹只有未追蹤的 `build-ios-dev/`（`git status --short`）。
 - 輸入：`.swfd/logs/design-review/{arch,bot,bridge,ui}.md` 第二版（檔案時間 16:50:21／16:46:51／16:37:47／16:42:41）。四份都是靜態審查，沒有 runtime 驗證。
 - 裁決方法：每個「必須改」「建議改」項目都親自打開程式碼核對（清單見第 10 節）。核對不成立的寫在第 8 節。
 - 既有決策出處：`note/dev-notes/2026-08-02-swiftui-target-pattern.md:24-26`（Bridge／Bot 維持 service 形態、Action 是無狀態接縫、`@Entry` 預設值只給 Preview）。2026-08-05 的 422 事故出處：mempal wing `naki`，`docs/cloud-inference-decisions.md` D16 段落，與 `MajsoulBridge.swift:94-103` 的註解一致。
@@ -633,3 +633,48 @@
 | commit 系列 why | **一次授權** | 全部 WP | push 仍每次單獨授權 |
 
 既有決策補充：不引入 InnoDI。理由：DI 面積只有一個 `@Entry` 與 `NakiRuntime.init` 十行有序接線，框架無問題可解；`@DIContainer` 不支援自訂 init；沿用「預設參數 = .shared」注入縫即可。完整筆記在本機 `note/dev-notes/2026-10-12-no-innodi.md`（`note/` 不納入 git，與 2026-08-02 決策檔同慣例）。
+
+## 12. WP0 結果與 codex 審查處理（2026-10-12，統帥代決）
+
+### WP0 結果
+- 合併到 main：`1e840a8`（diff 基準 `71ecee3..1e840a8`，兩檔）。獨立復驗裁決「可合併」，宣稱與實測全部一致（`.swfd/logs/wp0-verify/`）。
+- 兩個架構假設都成立：(a) 「預設參數 = .shared」注入縫在正式路徑零改動下讓測試隔離，6 個人工變異全被殺；(b) 只刪 authGame REQUEST 死分支時 55 條測試有 23 條失敗、全部是 accountId=0，證明這 23 條原本靠死碼取得 accountId。
+- 復驗員核對成立的既有問題（WP0 之前就存在）：`LiqiParser.swift:346-348` 把 `.lq.Lobby.oauth2Auth` 回應交給 `parseLoginResponse`，`ResOauth2Auth` field 2 是 string（access_token），`parseLoginResponse` 不檢查 wireType 直接 parseVarint，token 首 byte 會被當 accountId 並通過 `> 0` 檢查覆寫；是否被後續 ResLogin 蓋回取決於 live 登入順序，無法靜態判定。`MajsoulBridge.swift:275-282` 的 `msgData["account"]` 巢狀分支在標準編碼下是死碼。
+- 基準說明：本文件 §1 與 §5 寫的審查基準 `813aa88` 是**四份審查報告**的基準；各 WP 的 diff 基準是其 worktree 分支點（WP0 為 `71ecee3`）。後續復驗一律以 WP 自己的分支點為 base。
+
+### codex 審查（gpt-5.5 xhigh，唯讀 sandbox；帳號不支援 gpt-5.4，由代跑員改用同家族 gpt-5.5，統帥接受）
+總評原句：「需先修正後再展開。修正項：把 oauth2Auth response parser/wireType 問題排成 WP0.5 或提前到 WP1 前；把 WP3 測試 host side-effect 與 WP7c 吃牌 fail-closed 拆早；在 U2 實作規格補清楚『缺席才補 0，malformed 不補』。」完整回覆：`.swfd/codex/design-review-wp0/reply.txt`。
+
+| codex 意見 | 處理 | 理由 |
+|---|---|---|
+| 單一根因收斂太窄，降級提示覆蓋、吃對照退 index 0、oauth2Auth 是獨立問題 | 接受措辭修正：§1 的「核心問題」指**最大的一簇**，不是唯一根因；三項獨立問題各自已有 WP（WP3、WP4、WP0.5） | 不影響 WP 內容 |
+| WP3（test host 起 engine 與 server）應緊接 WP0 | **接受**。新順序：WP0 → **WP0.5 ‖ WP3** → WP1 ‖ WP2 → WP4 → WP5 → WP6 → WP7a → WP7b → WP7c → WP8 → WP9 ‖ WP10 → WP11 → WP12 | 兩包都小、互不相干，可平行且不超過 2 棵編譯樹 |
+| WP7c 第 7 項（吃對照失敗只收緊、不送）應提前 | **接受**。移到 WP4（Bot 錯誤語意），WP7c 刪除該項 | 同屬「少送、不多送」的保守收緊，WP4 已是行為語意包。用戶已在裁決前被告知此項（§8 R2） |
+| oauth2Auth parser 應排 WP0.5 | **接受**，見下方 WP0.5 | accountId 是 D16 單一來源，被汙染會讓 seat 找不到並 blocking |
+| U2 實作規格要補「缺席才補 0，malformed 不補」 | **接受**，見下方 U2 實作邊界 | 用戶裁決 B 的前提是「proto3 缺席＝0」，malformed 不在此前提內 |
+| 同一 bridge 跨局只靠 authGame 回應不是完整重置（codex 推測） | 列入 §6 runtime 驗證清單：同頁跨局時 `reset()` 是否每局都被呼叫，用 WP1 的 log 證實 | 既有風險，非 WP0 回歸 |
+
+### WP0.5 登入回應 parser 只接受 varint accountId
+- 目標：`accountId` 的唯一來源只能是 ResLogin 形狀的回應，且欄位必須是 varint。
+- 範圖：`command/Services/Bridge/LiqiParser.swift`；測試檔用既有的 parser 測試檔（實作者先 `grep -l parseLoginResponse NakiTests/*.swift` 找；找不到就用 `NakiTests/LiqiParserFailureTests.swift`）。
+- 不得碰：`MajsoulBridge.swift`、`WebSocketInterceptor.swift`、`LiqiEnvelope.swift`、JS。
+- 內容：
+  1. 依 `docs/protocol/liqi.json` 列出回應型別為 `ResLogin` 的 method（預期：`.lq.Lobby.login`、`.lq.Lobby.oauth2Login`、`.lq.Lobby.emailLogin`；實作者必須用 jq 證實並寫進報告）。`.lq.Lobby.oauth2Auth`（`ResOauth2Auth`，無 account id）不再交給 `parseLoginResponse`。
+  2. `parseLoginResponse` 的 field 2 與 `account.account_id` 只在 wireType 為 varint 時採用；非 varint 不設 accountId，記一筆 degraded fault（site `LiqiParser.loginResponse.wireType`），不得 blocking。
+  3. 測試：(a) oauth2Auth 回應帶 token 字串不設 accountId、不記 blocking；(b) ResLogin field 2 varint 仍設 accountId；(c) field 3 巢狀 `account.account_id` 仍設；(d) field 2 為 length-delimited 時不設且記 degraded fault。
+- 依賴：WP0。可與 WP3 平行。
+- 路由：Sonnet 5.5 medium。
+- 略過清理三條件：不符合（新分支）。
+- 驗證閘：build＋`-only-testing:NakiTests`（基準 892 條 0 失敗）；`grep -n "oauth2Auth" command/Services/Bridge/LiqiParser.swift` 的每一處都不得指向 `parseLoginResponse`。
+- 風險與回退：若某區服登入實際只回 oauth2Auth 而不回 ResLogin，accountId 會缺、authGame 回應記 blocking fault（使用者看得到），比錯座位好。回退 revert。
+- 資源：需編譯。
+
+### U2 實作邊界（WP5 必須遵守）
+1. **只有「欄位缺席」才補 0**；欄位存在但 wireType 錯、解析失敗、值越界，一律視為 malformed：丟棄事件並記 fault（不補 0）。不得用 `as? Int ?? 0` 這類把兩種情況混在一起的寫法。
+2. **`ActionChiPengGang.type` 缺席補 0（＝chi）的前提**是 `pai` 與 `consumed` 都存在且解析成功；任一缺席即 malformed，丟棄並記 fault。不得產出空 `pai`／`consumed` 的事件。
+3. **不套到 repeated 權威欄位**（`seat_list` 等），它們已有 exact／heuristic／fault 語意（`LiqiParser.swift:919-960`）。
+4. 每個補 0 的點都記 degraded fault（用戶裁決），fixture 必須涵蓋「缺席補 0」與「malformed 丟棄」兩種形狀。
+5. 預設 fixture 的自家座位改為非 0（復驗員第 2 項：26 條測試坐在 seat 0 分不出座位對錯）。
+
+### 流程修正
+- 實作者在自己的分支 commit；主線只在獨立復驗裁決「可合併」後 `--ff-only` 合併到 main。WP0 已照此做。
