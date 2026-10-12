@@ -154,7 +154,7 @@ final class JSInjectionState {
 
 /// WebSocket 攔截器，用於監聽 WebPage 中的 WebSocket 通訊
 /// 透過 WKUserScript 注入 JavaScript 程式碼
-class WebSocketInterceptor {
+enum WebSocketInterceptor {
 
     /// JavaScript 模組文件名稱（按載入順序）
     ///
@@ -539,7 +539,7 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         // 處理發送的消息（用於跟蹤請求）
         if direction == "send" {
             // 發送的消息是請求，需要解析以跟蹤 msgId
-            if let parsed = majsoulBridge.parseRaw(binaryData),
+            if let parsed = majsoulBridge.observeOutgoing(binaryData),
                let method = parsed["method"] as? String {
                 wsLog("[WS] socket \(socketId) Sent request: \(method)")
             }

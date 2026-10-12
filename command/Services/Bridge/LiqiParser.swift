@@ -77,7 +77,7 @@ class LiqiParser {
     /// msgId → 方法名。**全 Swift 只有這一份。**
     ///
     /// RESPONSE 的 envelope 不帶方法名，只能靠 msgId 對回當初的 REQUEST。
-    /// 送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.parseRaw`，
+    /// 送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.observeOutgoing`，
     /// 所以遊戲自己送的與 Naki 自己送的（msgId 60000+）都會登記在這裡；
     /// `LiqiResponseStore` 拿得到方法名正是因為如此。
     private var pendingRequests: [Int: String] = [:]

@@ -137,7 +137,7 @@ class MajsoulBridge {
         accountId = id
     }
 
-    /// 最近一次 `parse` / `parseRaw` 的**原始**解析結果（轉不成 MJAI 事件時仍然有值）。
+    /// 最近一次 `parse` / `observeOutgoing` 的**原始**解析結果（轉不成 MJAI 事件時仍然有值）。
     ///
     /// 呼叫端要在 `parse` 回 nil 時 log 方法名，一律讀這個欄位，不要另建 `LiqiParser`
     /// 重解一次：新實例沒有 `pendingRequests`，每一則 RESPONSE 都必然配不上，
@@ -149,7 +149,7 @@ class MajsoulBridge {
     var lastEnvelopeFailure: LiqiEnvelopeDecodeFailure? { liqiParser.lastEnvelopeFailure }
 
     /// 解析雀魂消息並返回原始解析結果（用於調試和請求跟蹤）
-    func parseRaw(_ data: Data) -> [String: Any]? {
+    func observeOutgoing(_ data: Data) -> [String: Any]? {
         let parsed = liqiParser.parse(data)
         lastParsed = parsed
         drainParserFaults()

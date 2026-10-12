@@ -110,20 +110,20 @@ final class LiqiParserFailureTests: XCTestCase {
 
     /// accountId 只來自登入回應（`ResLogin`：2=account_id，3=account{1=account_id}）
     private func logIn(_ bridge: MajsoulBridge, account: LiqiField? = nil) {
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Login", fields: [], msgId: 1)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Login", fields: [], msgId: 1)))
         _ = bridge.parse(response(msgId: 1, fields: [account ?? .varint(field: 2, value: UInt64(accountId))]))
     }
 
     /// 預設自家座位。刻意不放 0：seat 未設定與缺席補 0 都會落在 0，坐在 0 分不出座位對錯
     private static let ownSeat = 2
 
-    /// 照正式路徑登入並進場：送出面只走 `parseRaw`（`WebSocketInterceptor`），收到面走 `parse`。
+    /// 照正式路徑登入並進場：送出面只走 `observeOutgoing`（`WebSocketInterceptor`），收到面走 `parse`。
     /// 預設讓 bridge 進入「已知自家座位 `ownSeat`」的狀態（後續 action 測試的前置）
     @discardableResult
     private func authenticate(_ bridge: MajsoulBridge, msgId: UInt16 = 41,
                               account: LiqiField? = nil, fields: [LiqiField]? = nil) -> [[String: Any]]? {
         logIn(bridge, account: account)
-        _ = bridge.parseRaw(authGameRequest(msgId: msgId))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: msgId))
         return bridge.parse(response(msgId: msgId, fields: fields ?? [
             .bytes(field: 3, value: packed([2, 3, accountId, 4]))
         ]))
@@ -266,7 +266,7 @@ final class LiqiParserFailureTests: XCTestCase {
         let (bridge, state) = makeBridge()
 
         logIn(bridge)
-        _ = bridge.parseRaw(authGameRequest(msgId: 53))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 53))
 
         // 手工組 envelope：[3][msgId LE][field2=payload]——刻意不寫 field 1
         let payload = LiqiEncoder.encodeFields([
@@ -298,7 +298,7 @@ final class LiqiParserFailureTests: XCTestCase {
 
         // ReqAuthGame 帶的 account_id 不是來源：沒有登入回應就不得建立 Bot
         let (bridge, state) = makeBridge()
-        _ = bridge.parseRaw(authGameRequest(msgId: 41))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 41))
         let events = bridge.parse(response(msgId: 41, fields: seated))
         XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" })
         XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list")
@@ -308,14 +308,14 @@ final class LiqiParserFailureTests: XCTestCase {
     func testOauth2AuthResponseNeverProvidesAccountId() {
         let token = LiqiField.string(field: 2, value: "abcdef0123456789")
         let (bridge, state) = makeBridge()
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 1)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 1)))
         _ = bridge.parse(response(msgId: 1, fields: [token]))
         XCTAssertEqual(bridge.accountId, 0)
         XCTAssertEqual(state.totalCount, 0)
         XCTAssertEqual((bridge.lastParsed?["data"] as? [String: Any])?.count, 0, "token 不得進 parsed dict")
 
         // 座位表含 97（token 首字元 "a"）：accountId 若被汙染成 97 就會認到座位
-        _ = bridge.parseRaw(authGameRequest(msgId: 41))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 41))
         let events = bridge.parse(response(msgId: 41, fields: [.bytes(field: 3, value: packed([97, 2, 3, 4]))]))
         XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" })
         XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list", "accountId 缺席要由 authGame 顯性 blocking")
@@ -323,7 +323,7 @@ final class LiqiParserFailureTests: XCTestCase {
         // 已有登入結果時，後到的 oauth2Auth 回應不得覆寫
         let (loggedIn, _) = makeBridge()
         logIn(loggedIn)
-        _ = loggedIn.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 2)))
+        _ = loggedIn.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 2)))
         _ = loggedIn.parse(response(msgId: 2, fields: [token]))
         XCTAssertEqual(loggedIn.accountId, accountId)
     }
@@ -402,7 +402,7 @@ final class LiqiParserFailureTests: XCTestCase {
         ])
 
         let msgId: UInt16 = 77
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
                                                            fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response,
                                                                   msgId: msgId,
@@ -434,7 +434,7 @@ final class LiqiParserFailureTests: XCTestCase {
             .message(field: 4, fields: [.bytes(field: 1, value: snapshot)])
         ])
         let msgId: UInt16 = 78
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
                                                            fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: msgId,
                                                                   method: "", payload: payload)))
@@ -526,7 +526,7 @@ final class LiqiParserFailureTests: XCTestCase {
         })
         let payload = LiqiEncoder.encodeFields([.message(field: 4, fields: [.bytes(field: 1, value: snapshot)])])
         let msgId: UInt16 = 79
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
                                                            fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: msgId,
                                                                   method: "", payload: payload)))
@@ -619,8 +619,8 @@ final class LiqiParserFailureTests: XCTestCase {
     func testSeatListFromPlayersIsMarkedHeuristic() {
         let (bridge, state) = makeBridge()
 
-        _ = bridge.parseRaw(authGameRequest(msgId: 61))
-        let raw = bridge.parseRaw(response(msgId: 61, fields: playerFields([accountId, 2, 3, 4])))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 61))
+        let raw = bridge.observeOutgoing(response(msgId: 61, fields: playerFields([accountId, 2, 3, 4])))
         let data = raw?["data"] as? [String: Any]
 
         XCTAssertEqual(data?["seatList"] as? [Int], [accountId, 2, 3, 4])
@@ -636,8 +636,8 @@ final class LiqiParserFailureTests: XCTestCase {
     func testSeatListFromSchemaIsMarkedExact() {
         let (bridge, _) = makeBridge()
 
-        _ = bridge.parseRaw(authGameRequest(msgId: 62))
-        let raw = bridge.parseRaw(response(msgId: 62, fields: [
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 62))
+        let raw = bridge.observeOutgoing(response(msgId: 62, fields: [
             .bytes(field: 3, value: packed([accountId, 2, 3, 4]))
         ] + playerFields([accountId, 2, 3, 4])))
         let data = raw?["data"] as? [String: Any]
@@ -1152,7 +1152,7 @@ final class LiqiParserFailureTests: XCTestCase {
             [.string(field: 6, value: "1m"), .string(field: 6, value: "2m")]
             + scores.map { .message(field: 9, fields: [.int(field: 1, value: $0)]) })
         let syncId = msgId + 1
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: syncId)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: syncId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(
             type: .response, msgId: syncId, method: "",
             payload: LiqiEncoder.encodeFields([.message(field: 4, fields: [.bytes(field: 1, value: snapshot)])]))))
@@ -1199,7 +1199,7 @@ final class LiqiParserFailureTests: XCTestCase {
                                         .bytes(field: 3, value: LiqiEncoder.encodeFields(data))])
         }
         let msgId: UInt16 = 120
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: msgId)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: msgId)))
         return bridge.parse(Data(LiqiEncoder.encodeEnvelope(
             type: .response, msgId: msgId, method: "",
             payload: LiqiEncoder.encodeFields([.message(field: 4, fields: restore)])))) ?? []
