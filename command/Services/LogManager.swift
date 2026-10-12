@@ -38,7 +38,7 @@ struct LogEntry: Identifiable {
 /// 先前所有東西都寫進同一個檔，而 LiqiParser 每解一個 protobuf 欄位就寫一行——
 /// 單一摸打會產生數十行 `field 1, wireType 0, size 1`，把真正的事件淹掉。
 /// 實測要靠 grep 才找得到「有沒有出現過和牌機會」。
-nonisolated enum LogLevel: Int, Comparable, CaseIterable {
+nonisolated enum LogLevel: Int, Comparable {
     /// 解析內部細節。量極大，只寫進該類別自己的檔案
     case trace = 0
     /// 一般訊息
@@ -66,17 +66,6 @@ enum LogCategory: String, CaseIterable {
     case bridge = "Bridge"
     case bot = "Bot"
     case system = "System"
-
-    var color: String {
-        switch self {
-        case .ws: return "blue"
-        case .liqi: return "purple"
-        case .mjai: return "green"
-        case .bridge: return "orange"
-        case .bot: return "red"
-        case .system: return "gray"
-        }
-    }
 }
 
 /// 日誌管理器（單例）

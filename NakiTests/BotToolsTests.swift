@@ -54,4 +54,23 @@ final class BotToolsTests: XCTestCase {
 
         XCTAssertFalse(runtime.store.isDebugServerRunning)
     }
+
+    /// 旗標為 true 時再次啟動只能回報「已在運行」，不能停掉舊 server 再綁新的。
+    /// 用隨機高位 port：若 guard 失效，新 server 的啟動訊息會蓋掉狀態列。
+    func testStartDebugServerIsNoOpWhileFlagSet() async throws {
+        let runtime = NakiRuntime()
+        let port = UInt16.random(in: 50000...60000)
+        runtime.store.debugServerPort = port
+        runtime.store.isDebugServerRunning = true
+
+        runtime.startDebugServer()
+        let expected = L10n.text("MCP Server 已在運行")
+        XCTAssertEqual(runtime.store.statusMessage, expected)
+
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertEqual(runtime.store.statusMessage, expected, "guard 失效時新 server 的啟動訊息會蓋掉它")
+        XCTAssertEqual(runtime.store.debugServerPort, port)
+        XCTAssertTrue(runtime.store.isDebugServerRunning)
+    }
 }
