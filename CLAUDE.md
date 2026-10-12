@@ -239,7 +239,7 @@ app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，`NakiTests` targ
 
 **測試會碰到用戶的真實設定檔。** `NakiTests` 的 test host 就是 App 本體，與 Naki app 共用 `UserDefaults.standard`，也就是 `~/Library/Preferences/org.39c154f25912233a.akagi.plist`。`TEST_RUNNER_CFFIXED_USER_HOME` 隔離不了它。後果與規則：
 
-- 測試必須用隔離 suite，走現有的注入點：`L10n.defaults`、`SettingsStore(defaults:)`、`AutoPlayModeStore.defaults`（後者由進行中的 WP9c 加入，合併前以 main 上的程式碼為準）。測試用 `.standard` 備份還原寫法仍是汙染來源。
+- 測試必須用隔離 suite，走現有的注入點：`L10n.defaults`、`SettingsStore(defaults:)`、`AutoPlayModeStore.defaults`（WP9c 加入，合併於 `5f78080`；本分支合併前的程式碼沒有它）。測試用 `.standard` 備份還原寫法仍是汙染來源。
 - test host 一啟動，`NakiApp` 的 `@State runtime = NakiRuntime()` 就在任何 `setUp` 之前建構，`adoptStoredAutoPlayMode` 會對 `.standard` 做同值寫入。沒有 `naki.autoPlayMode` key 的乾淨機器上，任何一次測試執行都會新建此 key（基底即有，尚未處理）。
 - `defaults read org.39c154f25912233a.akagi` 對此 app 會回 `Domain ... not found`（它解析到 `~/Library/Containers/org.39c154f25912233a.akagi/` 這個殘留目錄；App 本身不是 sandbox，實際檔案在 `~/Library/Preferences`）。查設定值要用 `plutil -p ~/Library/Preferences/org.39c154f25912233a.akagi.plist`。
 - 隔離 suite 結束時用 `removePersistentDomain`，但它**不刪檔**：`~/Library/Preferences` 會累積 `naki.tests.*` 空殼 plist（2026-10-13 約一萬個）。需要清理由用戶決定，不要在腳本裡自動刪。
