@@ -845,3 +845,14 @@
 - 六筆第二輪變異全殺（R1–R6）。
 - 殘餘（記錄，非阻擋）：`WebSession.syncHighlight` 的 `top.chiVariant ?? 0` 無測試鎖（WebSession 無注入縫；差異限 DebugServer 注入或 Preview 的 `chi_x` 與插件高亮 context）→ 延後表；「chi combination 恆為兩張」需 live 確認（`LiqiOperationStore.swift:23` 自註待驗，live log 無任何「執行: 吃」）→ 整合驗收；`replay-check.sh` 未驗證；`ReplayFingerprintTests` 對 chi 路徑無覆蓋力。
 - 程序備註：第一輪實作者用系統 python3 寫探針（proto 違規），第二輪已改 shell；notes 一處「test-final.log」應為 test-final2.log（WP12 不管，屬 log 內部）。
+
+### WP9b 結果（2026-10-13）
+- 合併到 main：merge commit `d1e9775`（九個 commit `a2ba756`…`10545ea`，基準 `3852d7b`，13 檔 +246/−55）。復驗「可合併」（`.swfd/logs/wp9b-verify/`）：973 → 979；合併態 main 全套與 node 兩腳本見 `.swfd/logs/merge-main/test-d1e9775.log`、`keepalive-d1e9775.log`、`plugin-d1e9775.log`；合併態跑前跑後真實設定檔 sha dc1ed5359702 → dc1ed5359702、mtime 1791828234 → 1791828674。
+- 正式路徑零行為改動（復驗逐 hunk）：十個預設參數等價改寫；`L10n.defaults` 為 `nonisolated(unsafe) static var`，正式碼無寫入點；`ObservedMatchSids.redirect` 只在 DEBUG；JS 兩行註解屬實。
+- 驗收本體：全套測試對真實設定檔的 mtime 變動基底 ≥3 次 → HEAD 1 次（sha 全程不變）；跳過 `BotToolsTests/testSetAutoPlayModeDegradeKeepsNoticeAndPersistsClampedMode` 後 0 次。復驗以 `defaults` CLI 實驗證實同值 `set` 不碰檔（奈秒 mtime 不變），所以「mtime 變、sha 不變」= 寫入不同值後寫回。
+- **新發現（WP12 補進 CLAUDE.md 坑）**：test host 就是 App 本體，`NakiApp.swift:17` 的 `@State runtime = NakiRuntime()` 在任何 setUp 前就跑 `adoptStoredAutoPlayMode` 對 `.standard` 做同值寫入；本機 key 已存在所以看不到，**沒有 `naki.autoPlayMode` 的乾淨機器上任何一次測試執行都會新建此 key**（基底即有，WP9b 範圍外）。
+- 剩餘寫入者三處：`BotToolsTests:79`（走 `AutoPlayAvailability.commit` 的 `.standard` 預設）、六條建構正式 `NakiRuntime()` 的測試（BotTools 3＋新 `NakiRuntimeWiringTests` 3，同值）、host 啟動（同值）。
+- **統帥代決**：開 **WP9c**（Sonnet medium，極小）只做復驗估算的 A 塊——`AutoPlayModeStore` 加與 `L10n.defaults` 同型注入點、`AutoPlayMode.swift` 四個預設參數改取它、`BotToolsTests` 與 `NakiRuntimeWiringTests` 換隔離 suite，目標是全套 mtime 變動 0 次。B 塊（host 啟動同值寫入）**不做**→ 延後表：解法需改正式碼（`commit` 同值跳過或 test host 不持久化），對用戶可觀察行為等價但屬為測試衛生改正式路徑，重啟條件：在乾淨 CI 機器跑測試時。C 塊（鎖 `dismissUpdate(skip:true)`）→ 延後表，與 arch S12「`LiqiResponseStore` 注入」同類，重啟條件相同。
+- 證據紀律缺口（記錄）：實作者 `probe/*.log` 只有 xcodebuild 輸出、無 mtime 讀數；`test-noBT` 在 `10545ea` 之前跑（該 commit 只改測試檔，復驗已在 HEAD 補跑）。
+- 環境：`~/Library/Preferences` 的 `naki.tests.*` 空殼 plist 已達 10273 個（本輪各包累積），待用戶決定清理；全套期間 test host 短暫監聽 55054–55056（推測 `DebugServerFramingTests`，未逐條歸因）。
+- **WP12 啟動裁決**：WP12 與 WP9c 平行開。WP9c 只動 `AutoPlayMode.swift` 四行與兩個測試檔，對文件行號影響可忽略。WP7d（U1）仍無 1306 證據：WP12 依現狀（matchGame 鏈仍在、tools 43 個）寫文件；WP7d 若日後執行，由它自行更新文件與工具數。
