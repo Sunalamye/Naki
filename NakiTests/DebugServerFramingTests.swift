@@ -112,19 +112,17 @@ final class DebugServerFramingTests: XCTestCase {
 @MainActor
 final class DebugServerLifecycleTests: XCTestCase {
 
-    /// 以沒有 SO_REUSEADDR 的 dual-stack wildcard socket 佔住連續 `count` 個 port，
+    /// 以沒有 SO_REUSEADDR 的 IPv6 loopback socket 佔住連續 `count` 個 port，
     /// 讓 `DebugServer` 對這些 port 的 bind 一律 EADDRINUSE。回傳 nil 代表這段區間有 port 已被別人用。
     private func occupyPorts(from base: UInt16, count: Int) -> [Int32]? {
         var fds: [Int32] = []
         for offset in 0..<count {
             let fd = socket(AF_INET6, SOCK_STREAM, 0)
-            var off: Int32 = 0
-            setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, socklen_t(MemoryLayout<Int32>.size))
             var address = sockaddr_in6()
             address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
             address.sin6_family = sa_family_t(AF_INET6)
             address.sin6_port = (base + UInt16(offset)).bigEndian
-            address.sin6_addr = in6addr_any
+            address.sin6_addr = in6addr_loopback
             let bound = withUnsafePointer(to: &address) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                     Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size)) == 0 && listen(fd, 1) == 0

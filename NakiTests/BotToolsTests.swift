@@ -73,4 +73,28 @@ final class BotToolsTests: XCTestCase {
         XCTAssertEqual(runtime.store.debugServerPort, port)
         XCTAssertTrue(runtime.store.isDebugServerRunning)
     }
+
+    /// 不支援自動送出時：模式降級、存檔寫回降級值，狀態列留的是降級提示而不是被「模式已變更」蓋掉。
+    func testSetAutoPlayModeDegradeKeepsNoticeAndPersistsClampedMode() {
+        let defaults = UserDefaults.standard
+        let backup = defaults.object(forKey: AutoPlayModeStore.key)
+        defer {
+            if let backup { defaults.set(backup, forKey: AutoPlayModeStore.key) }
+            else { defaults.removeObject(forKey: AutoPlayModeStore.key) }
+        }
+        let runtime = NakiRuntime()
+        runtime.settings.adoptAutoPlaySupport(false)
+
+        runtime.setAutoPlayMode(.auto)
+
+        XCTAssertEqual(runtime.store.autoPlayMode, .recommend)
+        XCTAssertEqual(AutoPlayModeStore.load(), .recommend)
+        XCTAssertEqual(runtime.store.statusMessage, L10n.text("此裝置不支援自動送出，已改為推薦模式"))
+
+        runtime.setAutoPlayMode(.off)
+
+        XCTAssertEqual(runtime.store.autoPlayMode, .off)
+        XCTAssertNotEqual(runtime.store.statusMessage, L10n.text("此裝置不支援自動送出，已改為推薦模式"),
+                          "沒有降級時不得留著降級提示")
+    }
 }
