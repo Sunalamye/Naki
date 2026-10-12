@@ -93,13 +93,17 @@ final class NakiWebCoordinator {
         websocketHandler.onWebSocketStatusChanged = { [weak self] connected in
             guard let self else { return }
 
+            // bridge 的 reset 必須同步：遊戲在 open 後緊接著送第一個 REQUEST，
+            // 留到 Task 裡會清掉它剛登記的 msgId，回應就配不上
+            if connected {
+                self.websocketHandler.reset()
+            }
+
             Task { @MainActor in
                 self.store.isConnected = connected
                 self.store.statusMessage = L10n.text(connected ? "已連線到雀魂伺服器" : "已斷開連線")
 
                 if connected {
-                    self.websocketHandler.reset()
-
                     if self.eventStream.canResync() {
                         bridgeLog("[協調器] WebSocket 已重連, 嘗試重新同步 Bot...")
                         await self.resyncBot()

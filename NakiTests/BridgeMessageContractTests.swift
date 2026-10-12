@@ -252,4 +252,45 @@ final class BridgeMessageContractTests: XCTestCase {
         XCTAssertTrue(fenced)
         XCTAssertEqual(LogManager.shared.entries.filter { $0.message.contains(failure) }.count, failuresBefore)
     }
+
+    // MARK: - 連線 0→1 的 reset 時序
+
+    private func frame(_ bytes: [UInt8], direction: String) -> [String: Any] {
+        ["socketId": 1, "direction": direction, "data": Data(bytes).base64EncodedString(), "type": "binary"]
+    }
+
+    private let loginRequest = LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Login", fields: [], msgId: 1)
+    private let loginResponse = LiqiEncoder.encodeEnvelope(type: .response, msgId: 1, method: "",
+                                                           payload: LiqiEncoder.encodeFields([.varint(field: 2, value: 123456)]))
+
+    /// 連上 → 送 login REQUEST → 等協調器的 Task 跑完 → 收 RESPONSE，回傳認到的 accountId
+    private func accountIdAfterConnect(requestBeforeConnect: Bool) async -> Int {
+        let store = GameStore()
+        let coordinator = NakiWebCoordinator(store: store)
+        defer { coordinator.eventStream.stopConsumer() }
+        let handler = coordinator.websocketHandler
+        let request = frame(loginRequest, direction: "send")
+
+        if requestBeforeConnect { handler.dispatch(type: "websocket_message", data: request) }
+        handler.dispatch(type: "websocket_connected", data: ["socketId": 1, "isMajsoul": true])
+        if !requestBeforeConnect { handler.dispatch(type: "websocket_message", data: request) }
+
+        let settled = await waitUntil { store.isConnected }
+        XCTAssertTrue(settled)
+        handler.dispatch(type: "websocket_message", data: frame(loginResponse, direction: "receive"))
+        return handler.majsoulAccountId
+    }
+
+    /// reset 清 parser 的 msgId 對照表；留在 Task 裡時，open 後緊接著的 REQUEST 先登記、
+    /// Task 才清，回應就配不上（bridge M4）
+    func testResetRunsBeforeNextMessage() async {
+        let accountId = await accountIdAfterConnect(requestBeforeConnect: false)
+        XCTAssertEqual(accountId, 123456, "connected 之後送的 REQUEST，msgId 要還在 pending")
+    }
+
+    /// 對照：connected 之前的 REQUEST 仍要被這次 reset 清掉（reset 沒有被拿掉）
+    func testResetClearsRequestsSentBeforeConnect() async {
+        let accountId = await accountIdAfterConnect(requestBeforeConnect: true)
+        XCTAssertEqual(accountId, 0)
+    }
 }
