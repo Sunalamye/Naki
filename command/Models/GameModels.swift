@@ -352,7 +352,7 @@ struct Recommendation: Identifiable, Equatable {
         self.actionType = actionType
         self.detail = detail
         self.kanKind = nil
-        self.chiVariant = nil
+        self.chiVariant = Self.parsedChiVariant(label: self.label, actionType: actionType)
     }
 
     /// 從 MJAI 字串初始化（保持兼容性）
@@ -368,7 +368,7 @@ struct Recommendation: Identifiable, Equatable {
         self.actionType = actionType
         self.detail = detail
         self.kanKind = kanKind
-        self.chiVariant = chiVariant
+        self.chiVariant = chiVariant ?? Self.parsedChiVariant(label: tileString, actionType: actionType)
     }
 
     /// 從字典初始化（Legacy）
@@ -388,8 +388,13 @@ struct Recommendation: Identifiable, Equatable {
         self.actionType = type
         self.detail = dict["detail"] as? String
         self.kanKind = nil
-        // 外部 JSON（DebugServer 注入畫面狀態）只有字串；變體在這個邊界解一次
-        self.chiVariant = type == .chi && tileStr.hasPrefix("chi_") ? Int(tileStr.dropFirst(4)) : nil
+        self.chiVariant = Self.parsedChiVariant(label: tileStr, actionType: type)
+    }
+
+    /// 建構邊界：呼叫端沒給變體、只給 `chi_N` 標籤時（字串入口、外部 JSON）在這裡解一次。
+    /// 之後所有讀取點都只看 `chiVariant` 欄位。
+    private static func parsedChiVariant(label: String, actionType: ActionType) -> Int? {
+        actionType == .chi && label.hasPrefix("chi_") ? Int(label.dropFirst(4)) : nil
     }
 
     // MARK: - Computed Properties

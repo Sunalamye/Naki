@@ -218,7 +218,7 @@ final class NativeBotDisplayStateTests: XCTestCase {
     }
 
     func testChiDisplayLabelClampsNegativeIndex() {
-        let rec = Recommendation(tile: "chi_-1", probability: 0.5, actionType: .chi, chiVariant: -1)
+        let rec = Recommendation(actionType: .chi, probability: 0.5, label: "chi_-1")
         XCTAssertEqual(rec.displayLabel, "吃①")
     }
 

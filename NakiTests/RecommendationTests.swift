@@ -94,6 +94,9 @@ final class RecommendationTests: XCTestCase {
             rows.append(("dict \(tile)", Recommendation(from: ["tile": tile, "prob": 0.5,
                                                                "action_type": type])))
         }
+        // 只給 `chi_N` 標籤的建構入口：在建構邊界解一次，與搬移前逐點讀 label 的結果相同
+        rows.append(("init tile: chi_1", Recommendation(tile: "chi_1", probability: 0.5, actionType: .chi)))
+        rows.append(("init label: chi_2", Recommendation(actionType: .chi, probability: 0.5, label: "chi_2")))
         return rows
     }
 
@@ -127,6 +130,22 @@ final class RecommendationTests: XCTestCase {
                     XCTAssertEqual(hit.rec.displayLabel, "吃" + ["①", "②", "③"][variant], hit.source)
                 }
             }
+        }
+    }
+
+    /// 建構邊界規則：只給 label 時解 `chi_N`；明確傳入的欄位優先；非吃的動作與壞標籤為 nil
+    func testLabelOnlyConstructionParsesVariantAtBoundary() {
+        XCTAssertEqual(Recommendation(tile: "chi_2", probability: 1, actionType: .chi).chiVariant, 2)
+        XCTAssertEqual(Recommendation(actionType: .chi, probability: 1, label: "chi_1").chiVariant, 1)
+        XCTAssertEqual(Recommendation(tile: "chi_0", probability: 1, actionType: .chi, chiVariant: 2).chiVariant, 2)
+        XCTAssertNil(Recommendation(tile: "chi_1", probability: 1, actionType: .pon).chiVariant)
+        XCTAssertNil(Recommendation(tile: "chi_x", probability: 1, actionType: .chi).chiVariant)
+        XCTAssertNil(Recommendation(actionType: .chi, probability: 1).chiVariant)
+        // 搬移前的顯示：夾在 ①–③、無法解析時只顯示「吃」
+        for (label, expected) in [("chi_0", "吃①"), ("chi_1", "吃②"), ("chi_2", "吃③"),
+                                  ("chi_7", "吃③"), ("chi_-4", "吃①"), ("chi_x", "吃"), ("chi", "吃")] {
+            XCTAssertEqual(Recommendation(tile: label, probability: 1, actionType: .chi).displayLabel, expected, label)
+            XCTAssertEqual(Recommendation(actionType: .chi, probability: 1, label: label).displayLabel, expected, label)
         }
     }
 
