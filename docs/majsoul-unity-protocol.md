@@ -24,7 +24,7 @@
 | AI 權重 | 仍是既有 bundled Mortal v4 四麻權重；0.5.x 並不是新訓練模型 |
 | 「最新最強」 | **不能這樣宣稱**。0.5.x 只改 encoder／parity，權重未更新，也沒有牌力 benchmark |
 | 四麻 | 唯一有正確模型形狀與 parity 證據的模式 |
-| 三麻 | 本地引擎是 Akagi 三麻（`AkagiSanmaBot`，default strength：模仿天鳳人類，非 Mortal 等級；2026-10-09 D23），雲端啟用時雲端優先；不會退回四麻模型。自動打牌在三麻 fail-closed（推薦須來自雲端 3p 或本地 Akagi 三麻），伺服器授權的和牌照送（2026-09-30）；無 live 三麻對局驗證 |
+| 三麻 | 本地引擎是 Akagi 三麻（`AkagiSanmaBot`，default strength：模仿天鳳人類，非 Mortal 等級；2026-10-09 D23），雲端啟用時雲端優先；不會退回四麻模型。自動打牌在三麻 fail-closed（推薦須來自雲端 3p 或本地 Akagi 三麻），伺服器授權的和牌照送（2026-09-30）；三麻 live 已驗（2026-10-09 三局，`.swfd/logs/s3-live-{4,5,6}`） |
 | 自摸保護 | resolver 純邏輯與整合的兩個漏洞（漏觸發、錯誤完成）在 source 層已收斂，有單測與注入式 fixture；**live 對局未驗證** |
 | 遊戲內高亮 | 現行 WebGL hook 會執行；尚未證明每次都染到正確牌／按鈕 |
 | MCP | 2026-08-01 live `tools/list` 為 42 個；2026-08-02 移除 6 個高亮失敗樁，靜態計數 38（未 live 複查） |
@@ -39,7 +39,7 @@
 - loader、framework、wasm、data 都來自 `chs_t-WebGL-release-4.0.45(45)`。
 - `unityInstance` 是 script-scope 的裸識別字；`window.unityInstance` 不存在。
 - `window.__nakiWebSocket` 與 `window.__nakiHighlight` 存在；highlighter 的 `tinted` counter 持續增加。
-- live `POST /mcp` 的 `tools/list` 回傳 42 個工具（此後移除 6 個高亮失敗樁，數字以下次 live 查詢為準）。
+- 2026-08-01 live `POST /mcp` 的 `tools/list` 回傳 42 個工具；此後移除 6 個高亮失敗樁，後續又新增工具，2026-10-13 靜態註冊為 43 個（數字以下次 live 查詢為準）。
 
 這些 probe 是讀取狀態，不會送遊戲動作。最後重查時，running Naki 的 `/help` 已回 version 3.1 與 42 tools；這只證明部署中的 help／registry 版本，因為架構段落本身是程式內的靜態字串。Unity 客戶端由 `/js` probe 證明，Liqi 動作由 source 與實際 trace 證明；任何一項都不能替尚未走到的自摸、失敗重試或視覺流程背書。running build 未附可識別 commit，因此 source help／Debug 首頁的未提交後續調整仍視為 working-tree candidate。
 
@@ -59,14 +59,14 @@ WebSocket frame
 
 ## 兩條平台路徑並不等價
 
-`WebViewModelFactory` 目前按 OS 版本分流：
+`WebSession.init` 的 `#available` 按 OS 版本挑 backend（p3-4 之後不再有 `WebViewModelFactory`、`WebViewModel`、`LegacyWebViewModel`）：
 
-| 平台路徑 | View model | 自動打牌現況 |
-|----------|------------|--------------|
-| macOS 26+／iOS 26+ | `WebViewModel`（WebPage） | 有 `AutoPlayDecisionResolver`、oplist 合法性與 stale snapshot 檢查 |
-| iOS 17–25 | `LegacyWebViewModel`（WKWebView） | 走同一個 resolver 與 stale 檢查；差別是 send 失敗不重試 |
+| 平台路徑 | Backend | 自動打牌現況 |
+|----------|---------|--------------|
+| macOS 26+／iOS 26+ | `WebPageBackend`（WebPage） | 有 `AutoPlayDecisionResolver`、oplist 合法性與 stale snapshot 檢查，可自動送出 |
+| iOS 17–25 | `LegacyWebBackend`（WKWebView） | 走同一個 resolver、executor 與引擎；`supportsAutoPlay == false`，模式收斂掉 `.auto`，所以不自動送出，MCP 動作類能力回 `legacy_path_action_send_disabled` |
 
-macOS deployment target 是 26.0，所以 macOS 實際只走新路徑；iOS deployment target 是 17.0，仍會走 Legacy 路徑。決策層現在一致，但 Legacy 沒有 live 驗證（本機跑不到），不可宣稱兩條路徑等價。
+macOS deployment target 是 26.0，所以 macOS 實際只走 WebPage；iOS deployment target 是 17.0，仍會走 Legacy。決策層現在一致，但 Legacy 沒有 live 驗證（本機跑不到），不可宣稱兩條路徑等價。
 
 ## 自訂連線（User-Agent／header）
 
@@ -102,12 +102,13 @@ Naki 載入雀魂頁面時可設 User-Agent 與額外 header（`MajsoulRequestBu
 
 1. `naki-core.js`
 2. `naki-websocket.js`
+3. `naki-plugins.js`（插件 runtime，提供 `window.__nakiPlugins`）
 
-順序有意義：`naki-websocket.js` 取用 `naki-core.js` 的 base64／`sendToSwift`。
+順序有意義：`naki-websocket.js` 取用 `naki-core.js` 的 base64／`sendToSwift`；`naki-plugins.js` 排最後也安全，因為 `naki-websocket.js` 的 `handleMessage` 是在 runtime 才查找 `dispatch`。第三方插件不在這三個模組內，走第二個 `WKUserScript`（只注入 main frame）。
 
 `naki-autoplay.js`、`naki-game-api.js`、`naki-coordinator.js` 已於 2026-08-02 整檔刪除（合計約 2,900 行）。它們的每一條路徑都經過 `Laya` / `GameMgr` / `app.NetAgent` / `view.DesktopMgr` / `uiscript`，在 Unity 客戶端一律不存在，所以只會靜默失敗；注入腳本是 `forMainFrameOnly: false`，每個 iframe 都要 parse 一次，留著只有成本。同批移除的還有 `naki-core.js` 的 `__nakiAntiIdle`（改由 Swift 定期送 `.lq.Lobby.heatbeat`）、`__nakiEmojiAutoReply`，以及 `naki-websocket.js` 的 `interceptConsole`（零呼叫者）。
 
-現存的 JS 全域面只有四個：`__nakiCore`（base64／`sendToSwift`）、`__nakiWebSocket`（連線清單／`sendRaw`／`forceReconnect`）、`__nakiHideNames`（authGame 暱稱等長覆寫）、`__nakiHighlight`（WebGL draw hook）。任何 `window.naki`、`NakiCoordinator`、`__nakiGameAPI`、`__nakiAutoPlay`、`__nakiRecommendHighlight`、`__nakiPlayerNames`、`__nakiDoraHook`、`__nakiAntiIdle`、`__nakiEmojiAutoReply` 都已不存在，probe 到的一定是 `undefined`。
+現存的 JS 全域面是：`__nakiCore`（base64／`sendToSwift`）、`__nakiWebSocket`（連線清單／`sendRaw`／`forceReconnect`／`isNakiSent`）、`__nakiHideNames`（authGame 暱稱等長覆寫；未記載於插件 API 的內部函式）、`__nakiHighlight`（WebGL draw hook）、`__nakiPlugins`（插件 runtime）、`__nakiRecommendations`（唯讀推薦通道）、`__nakiKeepAlive`（背景保活）、`__nakiHeap`（wasm heap 唯讀存取）。任何 `window.naki`、`NakiCoordinator`、`__nakiGameAPI`、`__nakiAutoPlay`、`__nakiRecommendHighlight`、`__nakiPlayerNames`、`__nakiDoraHook`、`__nakiAntiIdle`、`__nakiEmojiAutoReply` 都已不存在，probe 到的一定是 `undefined`。
 
 ### Envelope
 
@@ -174,11 +175,13 @@ OS 26+ 主路徑的 `AutoPlayDecisionResolver`：
 - 送出前再比 sequence、seat、source、context tile，拒絕 stale decision。
 - recommend mode 只呈現，off mode 不送。
 
-純 resolver 13 個專項測試與 NakiTests 75 個測試已通過。這證明純函式、encoding 與 builder，不等於 WebViewModel 整合或 live server 已驗證。
+resolver 有專項單測，NakiTests 全套 1002 個測試 0 failures（2026-10-13 整合閘）。這證明純函式、encoding、builder 與注入式 fixture，不等於 live 對局或 live server 已驗證。
 
-### 為什麼現在仍可能「能自摸卻不自摸」
+### 為什麼曾經「能自摸卻不自摸」（歷史診斷，兩個 P0 已於 source 收斂，仍缺 live 驗證）
 
-現行整合還有兩個 P0 漏洞：
+> 下面兩個漏洞與其後的手動工具風險，是 2026-08 的診斷。現況見 `CLAUDE.md`「自摸問題的 current truth」：入口閘門已開例外、`AutoPlayActionExecutor` 只有 `success == true` 才 `markHandled`，手動 `game_action(hora)` 無 snapshot 已改 fail-closed（2026-09-30）。文中的 `WebViewModel` 已不存在，其職責在 `AutoPlayEngine`。
+
+當時的兩個 P0 漏洞：
 
 1. **resolver 的入口仍被 recommendations gate 擋住。** `WebViewModel` 只有在 Mortal 產生非空推薦時才進自動動作；timer 在推薦空時只處理副露 pass。若 server oplist 有 type 8，但 Mortal 回空，resolver 根本不會被呼叫。
 2. **hora 送出失敗仍會被當成已完成。** 外層呼叫送出後，只看 resolved action 是 `.hora` 就 log 成功並 `markHandled`；它沒有取得 `LiqiSendResult`。沒有 game-gateway、JS send 失敗或 server 拒絕時，機會仍可能被吃掉而不重試。
@@ -190,8 +193,8 @@ Legacy iOS 17–25 的第三個漏洞（完全沒走 resolver）已修，見 AUD
 另有一條手動工具風險：MCP／HTTP `game_action` 使用 `action=hora` 且沒有 oplist snapshot 時，
 `NakiGameAction` 目前會 fallback 成 tsumo，而不是 fail closed。這不是自動 resolver 路徑，但同樣應改成缺權威資料就拒絕。
 
-Mode 語意（2026-08-02 收斂）：`.off` 同時關掉自動送出與顯示——`RecommendationView` 顯示「推薦顯示已關閉」，
-`GameHighlightScript.make()` 回 `__nakiHighlight.clear()`。AI 仍在背景推論（刻意保留：否則切回 `.recommend` 是一片空白），
+Mode 語意（2026-08-02 收斂）：`.off` 同時關掉自動送出與顯示——`DecisionSidebar` 顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」），
+`WebSession.syncHighlight` 推空推薦並送 `__nakiHighlight.clear()`（`GameHighlightScript.clear`；`make()` 只剩測試呼叫）。AI 仍在背景推論（刻意保留：否則切回 `.recommend` 是一片空白），
 `/bot/status` 的 recommendations 也照舊為真。「關閉 = 不顯示、不送出」是目前程式事實；
 「關閉 = AI 也不算」**不是**。畫面上真的清空未 live 驗證。
 
@@ -257,7 +260,7 @@ MortalSwift test target 用 libriichi v4 當 oracle。兩套固定 MJAI 劇本�
 3. 若牌名在 Swift 傳入的 target set，暫時覆寫 `_Tint` 或 `_Color`。
 4. draw 完立即還原 uniform。
 
-Swift 由 `WebViewModel.syncGameHighlight()` 呼叫 `window.__nakiHighlight.set(...)`／`clear()`。
+Swift 端目前**不再**自己呼叫 `window.__nakiHighlight.set(...)`：內建自動染色已於 2026-08-10（`c0b7564`）移交插件，`WebSession.syncHighlight` 只發布 `__nakiRecommendations` 並在 `.off` 時 `clear()`。以下是 `GameHighlightScript.make` 參考實作當時的行為（歷史）：
 目前工作樹會把第一推薦牌設為綠色，並把其餘手牌 identity 以帶 alpha 的灰色調淡；
 `naki-core.js` 也把字牌 UV 索引改為 `round(u × 10)`。這兩項是 current source candidate，尚未完成 screenshot／實戰視覺驗收。
 
@@ -271,7 +274,7 @@ live `state()` 的 tinted counter 持續增加，能證明 hook 與染色分支�
 - 沒有 JS 自動測試或 screenshot-based 驗收。
 
 MCP 已沒有手動高亮工具：6 個 `highlight_*` 舊 API 於 2026-08-02 移除（呼叫回 `Unknown tool`）。
-內建自動 WebGL 高亮不受影響，它由 Swift 的 `syncGameHighlight()` 直接驅動。
+內建自動染色已移交插件（`c0b7564`）：Swift 端只維護唯讀推薦通道，是否染色由高亮類插件決定。
 
 ## 客戶端資源與配置表
 
@@ -303,15 +306,15 @@ res/config/lqc.lqbin prefix     v0.11.252.w
 
 ## Debug／MCP 現況
 
-Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-08-02 靜態註冊 38 個工具（live 數字請現查 `tools/list`）：
+Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-10-13 靜態註冊 43 個工具（live 數字請現查 `tools/list`）：
 
 | 類別 | 數量 |
 |------|-----:|
 | 系統 | 6 |
 | Bot | 7 |
-| 遊戲狀態／動作 | 6 |
+| 遊戲狀態／動作（含局間確認、投票結束） | 8 |
 | JavaScript | 1 |
-| 大廳 | 8 |
+| 大廳（含統一匹配） | 11 |
 | 防閒置 | 1 |
 | 友人房 | 7 |
 | 表情 | 2 |
@@ -325,10 +328,10 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-08-02 靜態
 | 已處理 | tsumo snapshot 可能因推薦空而沒進 resolver | source 已收斂，注入式 fixture 覆蓋；尚缺 live 對局 |
 | 已處理 | hora send 失敗仍被 mark handled | source 已收斂（成功才 `markHandled`，bounded retry），fixture 覆蓋；尚缺 live failure |
 | 已處理 | Legacy iOS 已接上 resolver（AUDIT §15.2） | source 已確認；未 live 驗證 |
-| 已處理 | 手動 `game_action(hora)` 無 snapshot 時會猜 tsumo | 已改 fail-closed（`GameTools.swift:109-114`）；單測覆蓋，live 未驗證 |
-| 已處理 | off mode 的顯示閘門（RecommendationView + GameHighlightScript） | source 與單測已確認；畫面未 live 驗證 |
+| 已處理 | 手動 `game_action(hora)` 無 snapshot 時會猜 tsumo | 已改 fail-closed（`GameTools.swift`）；單測覆蓋，live 未驗證 |
+| 已處理 | off mode 的顯示閘門（`DecisionSidebar` + `WebSession.syncHighlight`） | source 與單測已確認；畫面未 live 驗證 |
 | P1 | pass／無效 discard／riichi failure path 會過早 mark handled | source code 已確認；尚缺 failure-path integration tests |
-| 已處理 | 三麻使用四麻模型 | 已改本地 Akagi 三麻＋雲端 3p（原為雲端-only，D23 取代）；無 live 三麻驗證 |
+| 已處理 | 三麻使用四麻模型 | 已改本地 Akagi 三麻＋雲端 3p（原為雲端-only，D23 取代）；三麻 live 已驗（2026-10-09 三局，`.swfd/logs/s3-live-{4,5,6}`） |
 | 已處理 | Package.resolved 已納入版本控制、requirement 下界升到 0.5.2 | 0.5.1 時 clean clone → resolve → build 已機械驗過（`78b048e`）；0.5.2 未重做 |
 | 已處理 | 3 組無效設定已從 UI 移除；隱藏玩家名稱改以協定層重做（AUDIT §15.3） | source 已確認；協定層改寫只有合成 frame 測試，未 live 驗證 |
 | P1 | WebGL highlighter 可能誤染／重複染 | hook 執行已確認；視覺正確性未驗證 |

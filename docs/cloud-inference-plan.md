@@ -29,14 +29,14 @@ NakiWebCoordinator → NativeBotController（遊戲狀態＋世代守衛，持�
 | `Services/Bot/CloudBot.swift` | 雲端裝飾器：本地閘門、覆蓋、fallback、立直兩段、重連重放抑制 |
 | `Services/Bot/KyokuStreamAccumulator.swift` | per-kyoku 視窗＋API 塑形（剝內部欄位、裸 reach、三麻補位）|
 | `Services/Bot/CloudBreaker.swift` | 5s→120s 指數退避斷路器 |
-| `Services/Bot/AkagiApiClient.swift` | `/v3/react`（2s）＋`/healthz`、`/v3/models`（8s）；key 只進 header |
+| `Services/Bot/AkagiApiClient.swift` | `/v3/react`（`reactTimeout` 現為 3s，2026-08-04 計畫值是 2s）＋`/healthz`、`/v3/models`（8s）；key 只進 header |
 | `Services/Bot/CloudDecisionMapper.swift` | reaction＋candidates → `[Recommendation]`（含 chi 變體、立直捨牌插列、pass 列）|
 | `Services/Bot/CloudInferenceConfig.swift` | 設定值快照（Equatable，變更偵測）|
 | `Services/Bot/CloudKeyStore.swift` | API key 的 Keychain 存取 |
 | `NativeBotController.swift`（改）| 持有 `any MahjongBot`；遊戲狀態、世代守衛、`BotReaction` 套用、`decisionSource` |
 | `SettingsStore.swift`（改）| `naki.cloud.*` 欄位＋`cloudConfig` 快照 |
 | `ContentView.swift`（改）| 「雲端推論」GroupBox＋測試連線（healthz＋models）|
-| `BotStatusView.swift`（改）| 常駐「對局資料送往 \<host\>」指示 |
+| `BotStatusView.swift`（改；該檔後來已刪，指示現在由 `DecisionSidebar.swift` 的 `DecisionAlerts` 顯示）| 常駐「對局資料送往 \<host\>」指示 |
 | `NakiRuntime.swift`（改）| `cloudConfigProvider` 接線（唯一注入點）|
 | `NakiMCPDependencies.swift`（改）| `/bot/status` 增 `decisionSource`/`cloudHost` |
 | `NakiTests/CloudInferenceTests.swift`（新）| 28 個元件測試（Akagi 測試清單移植）|
@@ -61,7 +61,9 @@ NakiWebCoordinator → NativeBotController（遊戲狀態＋世代守衛，持�
 - **不做**：`/v3/redeem` 兌換與整套購買流程（PayPal handshake）。**key 由使用者自行取得後貼上**。（2026-08-04 使用者定案）
 - server 不限定：官方（`https://mjapi.shinkuan.me`）或自架皆可，client 只認 URL + key。自架最小集合是 `/react` 一個端點。
 
-## 現況缺口（2026-08-04 盤點）
+## 現況缺口（2026-08-04 盤點；歷史記錄）
+
+> 這是接入雲端推論**之前**的盤點：`NativeBotController` 當時直接持有 `MortalBot?`，下表與第 112 行附近的 `NativeBotController.swift:27`/`:145` 行號都已失效。現況是持有 `any MahjongBot`（`BundledCoreMLBot`/`AkagiSanmaBot`，外包 `CloudBot`），見 `architecture-deep-dive.md`「推論」。
 
 | 缺口 | 位置 |
 |------|------|

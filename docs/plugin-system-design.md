@@ -1,5 +1,7 @@
 # Naki 原生插件系統：設計方案與落地計畫
 
+> **2026-10-13 核對註記**：本文件是 2026-08-09 的設計草案，其後已落地（`PluginRegistry`、`naki-plugins.js`、熱插拔、L3 總開關；契約見 `plugin-api-v1.md`）。下文「尚未實作」「原封未動」與所有 `檔名:行號` 都是當時的狀態，**行號已漂移、不是現況**；實作與本文衝突時以原始碼為準。已知差異：`rewriteSend`/`dropSend`/`dropReceive`/`onSocketClose` 未實作（見 `plugin-api-v1.md` 開頭）；`parseRaw` 已改名 `observeOutgoing`；iOS 沒有 document picker 匯入。
+
 **資料日期**：2026-08-09
 **狀態**：**設計草案。本文件產出過程中未修改任何程式碼、未送出任何 Liqi request、未 build 任何可送 request 的東西。**
 **邊界**：本文件描述的每一項改動都尚未實作。`naki-websocket.js`、`WebSocketInterceptor.swift`、`WebSession.swift`、任何 bridge 程式碼都**原封未動**。
@@ -112,7 +114,7 @@ naki-websocket.js
   │   WebSocketMessageHandler.dispatch(type:data:)             WebSocketInterceptor.swift:409-438
   │     契約表 = BridgeMessageType（六個 case，switch 無 default）:310-317
   ▼
-③ MajsoulBridge.parseRaw / parse                              MajsoulBridge.swift:139-144 / :223-237
+③ MajsoulBridge.observeOutgoing / parse                            MajsoulBridge.swift:139-144 / :223-237
   │   → LiqiParser.parse（envelope → {id, type, method, data}） LiqiParser.swift:119-149
   │   → LiqiResponseStore.capture / LiqiOperationStore
   ▼
@@ -275,7 +277,7 @@ Plugins/
 | 平台 | 路徑 | 事實 |
 |---|---|---|
 | macOS | `~/Library/Application Support/Naki/Plugins/` | App Sandbox = NO（§0 #8），該路徑不在 TCC 保護範圍 ⇒ **讀得到，不需要任何授權對話**。（對照：`~/Documents`、`~/Desktop`、`~/Downloads` 會觸發 TCC，不該用） |
-| iOS | App 容器內 `Application Support/Plugins/` | 讀得到。**問題在檔案怎麼進去**，見下 |
+| iOS | App 容器內 `Library/Application Support/Naki/Plugins/`（實作與 macOS 同一段程式碼） | 讀得到。**問題在檔案怎麼進去**，見下（實作：沒有 document picker，只能 URL 匯入） |
 
 Naki 目前完全不從檔案系統讀 JS（§0 #11），這是全新的能力。
 
@@ -873,7 +875,7 @@ GPL-3.0 §7 同一段還接著寫（已驗證，§0 #4c）：
 | 送出鏈接線（`sendRaw` 的呼叫端） | `command/App/NakiRuntime.swift:114-136` |
 | `LiqiMsgIdAllocator` 60000–63999（插件 64000–65500） | `command/Services/Bridge/LiqiEncoder.swift:208-260` |
 | `ObservedMatchSids` 的 Naki 自送守衛（`isNakiSent`，登記制） | `command/Services/Bridge/LiqiParser.swift:188,219` |
-| `MajsoulBridge.parse` / `parseRaw` | `command/Services/Bridge/MajsoulBridge.swift:139-144`、`:223-237` |
+| `MajsoulBridge.parse` / `observeOutgoing`（舊名 `parseRaw`，已不存在） | `command/Services/Bridge/MajsoulBridge.swift`（行號 2026-08-09 當時為 `:139-144`、`:223-237`，已漂移） |
 | `MJAIEventStream.emit`（Swift 唯讀 hook 點） | `command/Services/Bridge/MJAIEventStream.swift:98-109` |
 | 契約測試掃 bundle 內 JS 原始碼 | `NakiTests/BridgeMessageContractTests.swift:36-51` |
 | `ENABLE_APP_SANDBOX = NO` / `ENABLE_HARDENED_RUNTIME = YES` | `Naki.xcodeproj/project.pbxproj:833-834`、`:865-866` |

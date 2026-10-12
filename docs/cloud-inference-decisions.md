@@ -220,7 +220,7 @@ live 三麻首戰揭露的病理（events.log 20260805-230638）：本地 4p 模
 - 雲端失敗／null＝**本手誠實沒有推薦**（不會有結構無效的本地輸出頂上）；
   三麻閘門本來就不送非雲端決策，行為一致。
 - UI 同步：三麻 modelName=`cloud-3p`（「雲端推論 (3P)」），未生效時後綴
-  「⚠️ 未生效，無推論」；SanmaUnsupportedNotice 文案改「三麻僅雲端推論」。
+  「⚠️ 未生效，無推論」；SanmaUnsupportedNotice 文案改「三麻僅雲端推論」（歷史決策；`SanmaUnsupportedNotice` 型別已不存在，三麻現由本地 Akagi 三麻引擎承接）。
 - null reaction 的警告行現在附**上傳尾巴**（最後 6 個事件），真脫節可直接定位。
 
 **自動發現**（在使用者發現前）：`scripts/cloud-watch.sh` 監看 events.log，
