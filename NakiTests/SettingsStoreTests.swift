@@ -166,4 +166,46 @@ final class SettingsStoreInjectionTests: XCTestCase {
         XCTAssertEqual(loaded.cloudModel4P, "a")
         XCTAssertEqual(loaded.cloudModel3P, "b")
     }
+
+    /// suite 全放非預設值：`init(defaults:)` 若經由屬性賦值（`x` 而非 `_x`）就會觸發 `didSet` 回寫。
+    /// 只看 suite 內容抓不到（寫回的值與讀到的相同），所以數寫入次數；也不依賴 `.standard` 當下的內容。
+    func testInitDoesNotWrite() throws {
+        let counting = try XCTUnwrap(WriteCountingDefaults(suiteName: suiteName))
+        counting.set("en", forKey: SettingsStore.appLanguageKey)
+        counting.set(false, forKey: SettingsStore.keepAliveInBackgroundKey)
+        counting.set(false, forKey: SettingsStore.autoCheckUpdateKey)
+        counting.set(Date(timeIntervalSince1970: 2_000), forKey: SettingsStore.lastUpdateCheckKey)
+        counting.set("9.9", forKey: SettingsStore.skippedUpdateVersionKey)
+        counting.set(["x"], forKey: SettingsStore.enabledPluginIdsKey)
+        counting.set(true, forKey: SettingsStore.pluginsMayModifyOutboundKey)
+        counting.set("intl", forKey: SettingsStore.majsoulServerKey)
+        counting.set("UA2", forKey: SettingsStore.majsoulUserAgentKey)
+        counting.set(["H": "v"], forKey: SettingsStore.majsoulExtraHeadersKey)
+        counting.set(true, forKey: SettingsStore.pinMajsoulServerKey)
+        counting.set(true, forKey: SettingsStore.showStatusBarKey)
+        counting.set(1.5, forKey: SettingsStore.actionDelaySecondsKey)
+        counting.set(true, forKey: SettingsStore.fullAutoPrefersSanmaKey)
+        counting.set("highest", forKey: SettingsStore.fullAutoRoomPreferenceKey)
+        counting.set(true, forKey: SettingsStore.cloudEnabledKey)
+        counting.set("https://u.invalid", forKey: SettingsStore.cloudBaseURLKey)
+        counting.set("a", forKey: SettingsStore.cloudModel4PKey)
+        counting.set("b", forKey: SettingsStore.cloudModel3PKey)
+        counting.writes.removeAll()
+
+        let store = SettingsStore(defaults: counting)
+
+        XCTAssertEqual(store.cloudModel3P, "b", "確認真的讀到 suite 的值")
+        XCTAssertEqual(counting.writes, [], "建構期間不得寫入")
+    }
+}
+
+/// 記下每一次寫入的 key；`UserDefaults` 的各型別 `set` 與 `removeObject` 各自覆寫，因為互不保證轉呼叫。
+private final class WriteCountingDefaults: UserDefaults {
+    nonisolated(unsafe) var writes: [String] = []
+
+    override func set(_ value: Any?, forKey key: String) { writes.append(key); super.set(value, forKey: key) }
+    override func set(_ value: Bool, forKey key: String) { writes.append(key); super.set(value, forKey: key) }
+    override func set(_ value: Double, forKey key: String) { writes.append(key); super.set(value, forKey: key) }
+    override func set(_ value: Int, forKey key: String) { writes.append(key); super.set(value, forKey: key) }
+    override func removeObject(forKey key: String) { writes.append(key); super.removeObject(forKey: key) }
 }
