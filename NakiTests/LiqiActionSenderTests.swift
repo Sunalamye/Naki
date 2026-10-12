@@ -343,6 +343,13 @@ final class LiqiActionSenderTests: XCTestCase {
                                     source: "x")
         XCTAssertNil(selfTurn.kanOperation)
         XCTAssertEqual(selfTurn.isCallOpportunity, false)
+
+        // executor 與 MCP 共用的退路：沒有槓授權時暗槓；「過」的通道跟著是否為副露機會
+        XCTAssertEqual(both.defaultKanType, .ankan)
+        XCTAssertEqual(minkanOnly.defaultKanType, .minkan)
+        XCTAssertEqual(selfTurn.defaultKanType, .ankan)
+        XCTAssertEqual(minkanOnly.passChannel, .chiPengGang)
+        XCTAssertEqual(selfTurn.passChannel, .selfOperation)
     }
 
     /// 未知 type 不得硬塞進 enum，但仍要保留原始值

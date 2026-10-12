@@ -353,6 +353,26 @@ final class AutoPlayActionExecutorTests: XCTestCase {
                       "榮和是 type=9，實際 bytes=\(hex(captured.first))")
     }
 
+    /// 沒有和牌授權就不送（與 MCP `game_action hora` 同一條規則）：不猜自摸
+    @MainActor
+    func testHoraWithoutAuthorizationSendsNothingAndKeepsOplist() async {
+        let store = LiqiOperationStore()
+        var captured: [String] = []
+        let sender = recordingSender { captured.append($0) }
+        var events: [String] = []
+        store.record(seat: 0, operations: [LiqiOperation(type: .discard)], source: "test")
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .hora, tile: "", snapshot: store.pending, recommendations: [],
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0,
+            event: { events.append($0) })
+
+        XCTAssertNil(result)
+        XCTAssertTrue(captured.isEmpty, "沒有和牌授權不得送出，實際 bytes=\(hex(captured.first))")
+        XCTAssertNotNil(store.pending, "沒送出就不能消化 oplist")
+        XCTAssertTrue(events.contains { $0.contains("沒有和牌授權") })
+    }
+
     /// 「過」的通道由這批機會的類型決定：副露機會走 inputChiPengGang
     @MainActor
     func testPassChannelFollowsCallOpportunity() async {

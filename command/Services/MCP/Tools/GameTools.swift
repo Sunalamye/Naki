@@ -51,7 +51,7 @@ enum NakiGameAction {
         case "ankan": return .ankan
         case "minkan", "daiminkan": return .minkan
         case "kakan": return .kakan
-        default: return snapshot?.kanOperation ?? .ankan
+        default: return snapshot?.defaultKanType ?? .ankan
         }
     }
 
@@ -108,12 +108,10 @@ enum NakiGameAction {
 
         case "hora":
             // 由伺服器授權的 oplist 決定自摸還是榮和；沒有快照或沒有和牌授權就不送
-            guard let hora = snapshot?.horaOperation else {
+            guard let spec = snapshot?.horaRequest(timeuse: timeuse) else {
                 throw MCPToolError.notAvailable("hora 授權（game_ops 沒有自摸／榮和機會）")
             }
-            return hora == .ron
-                ? LiqiRequestBuilder.ron(timeuse: timeuse)
-                : LiqiRequestBuilder.tsumo(timeuse: timeuse)
+            return spec
 
         case "kyushu":
             return LiqiRequestBuilder.kyushu(timeuse: timeuse)
@@ -123,8 +121,7 @@ enum NakiGameAction {
 
         case "pass", "none", "cancel":
             // 回應他家打牌走 inputChiPengGang，自家回合的選項走 inputOperation
-            let channel: LiqiActionChannel = (snapshot?.isCallOpportunity ?? true)
-                ? .chiPengGang : .selfOperation
+            let channel = snapshot?.passChannel ?? .chiPengGang
             return LiqiRequestBuilder.cancel(channel: channel, timeuse: timeuse)
 
         default:

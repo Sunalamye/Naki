@@ -42,7 +42,7 @@ enum AutoPlayActionExecutor {
     ///   - log: 逐步細節（主路徑接 `debugServer.addLog`）
     ///   - event: 「為什麼沒送出」這種必須留在 events.log 的關鍵事件
     /// - Returns: 送出結果；**`nil` 代表一個 request 都沒組出來**（牌字串轉不了、
-    ///   找不到宣言牌、推薦的槓種未獲授權、未知動作）。這與「送出失敗」不同，但兩者都不會消化 oplist。
+    ///   找不到宣言牌、推薦的槓種未獲授權、和牌未獲授權、未知動作）。這與「送出失敗」不同，但兩者都不會消化 oplist。
     /// - Parameter awaitResponseMs: > 0 時等同 msgId 的 RESPONSE 並驗第 2 層（伺服器有沒有
     ///   受理）。0＝只驗第 1 層（`sendRaw` 送進 WebSocket）。正式路徑傳 > 0，讓「送成功但伺服器拒絕」
     ///   不再被靜默當成功；不給預設值，漏傳就會退回只驗第 1 層。
@@ -131,19 +131,21 @@ enum AutoPlayActionExecutor {
                 }
                 kanType = wanted
             } else {
-                kanType = snapshot?.kanOperation ?? .ankan
+                kanType = snapshot?.defaultKanType ?? .ankan
             }
             log("執行: 槓 (type=\(kanType.rawValue))")
             spec = LiqiRequestBuilder.kan(type: kanType)
 
         case .hora:
-            let horaType = snapshot?.horaOperation ?? .tsumo
-            log("執行: 和牌 (type=\(horaType.rawValue))")
-            spec = horaType == .ron ? LiqiRequestBuilder.ron() : LiqiRequestBuilder.tsumo()
+            guard let hora = snapshot?.horaOperation, let horaSpec = snapshot?.horaRequest() else {
+                event("❌ 和牌: oplist 沒有和牌授權，未送出，保留 oplist")
+                return nil
+            }
+            log("執行: 和牌 (type=\(hora.rawValue))")
+            spec = horaSpec
 
         case .none:
-            let channel: LiqiActionChannel =
-                (snapshot?.isCallOpportunity ?? true) ? .chiPengGang : .selfOperation
+            let channel = snapshot?.passChannel ?? .chiPengGang
             log("執行: 過 (\(channel.method))")
             spec = LiqiRequestBuilder.cancel(channel: channel)
 
