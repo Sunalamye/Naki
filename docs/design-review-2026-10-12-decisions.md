@@ -797,3 +797,11 @@
   - 跨實例窗口：`DebugServer.swift:675` Task 在 await 期間強持有舊實例，重啟時舊實例 `stop()` 後遲到的 `.cancelled` 走 nil 分支會清掉共用 store 旗標（窄窗口，推測未實測）→ 延後表。
   - 立直第二段取消時 `cloudOverride` 仍多寫一行「呼叫失敗」log（WP4 範圍）→ 延後表（只是 log）。
   - `docs/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12`、`CLAUDE.md` 內 `LogManager`／`AutoPlayEngine`／`BotTools` 行號 → WP12。
+
+### WP7c 結果（2026-10-12）
+- 合併到 main：merge commit `86792ea`（`c6f5f70` 刪 isReady／`b326603` 刪寬鬆預設值／`a30c870` stale 與三麻判斷式／`c2d488f` DecisionSource／`799a04d` snapshot 共用規則／`5f1246a` 改名 sendsActions／`a3a980d` 後續項測試／`b86f329` GameModels 三行，基準 `7a53245`，33 檔）。復驗「可合併」（`.swfd/logs/wp7c-verify/`）：937 → 949 條；fixture F 四條綠；`mutate.py` 11/11 殺；復驗自選手工變異 6/6 殺；合併態 main 全套見 `.swfd/logs/merge-main/test-86792ea.log`。
+- **送出行為變更（已向用戶報備）**：executor 收到 `.hora` 但 oplist 無和牌授權時，改前送 tsumo、改後不送且不消化 oplist（與 MCP 一致，取嚴格邊）。復驗確認正式路徑不可達（resolver 只在 `horaOperation` 非 nil 時給 `.hora`；`bot_trigger` 走同一條路），靜態推論無 live 驗證；測試 `testHoraWithoutAuthorizationSendsNothingAndKeepsOplist` 四斷言鎖住。
+- 預設值判定：刪掉的六個全為寬鬆方向（復驗逐一獨立判定一致）；保留的嚴格預設值 `sanmaCapableDecision`／`sanmaEngineAvailable` 各只有一條測試防護（單點，可接受）。實作者保留三個規格未點名的寬鬆預設值（executor `echo=nil`、Context 的 `isSanma`／`recommendationsOplistSequence`／`seat`）→ 延後表（正式路征都明傳）。
+- 後續項九條全部完成，含 bridge 黃金測試（復驗依封包語意手算三個期望值一致）、`load()` 遷移測試、listener guard 測試（變異 5/5 紅）。
+- **流程事故與規則補強**：實作者結案凍結後收到主線遲到的 GameModels 核准，直接當成解凍在同一 worktree 開 commit 8 跑變異，干擾復驗員在 `a3a980d` 的動態閘門約 10 分鐘；主線改以新 HEAD `b86f329` 復驗。**規則：凍結中收到任何遲到的核准或訊息，一律先回問主線，不得自行動工；主線核准連帶檔的訊息應在派工 brief 內或結案前送達，結案後的核准視為下一輪指示。**
+- 可合併後補：`AutoPlayModeStoreTests.swift:14` 檔頭過時註解 → WP12；Localizable 一個無引用 key → WP12；`passChannel` 對 ron-only 走 chiPengGang 而 `sendPass` 用 `LiqiOperationType.channel` 兩套規則不一致（本包未改任一邊）→ 延後表等 live 證據；`NakiRuntime` weak-self 退路只剩 `.off` 無測試 → 延後表。
