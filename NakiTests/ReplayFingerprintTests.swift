@@ -87,6 +87,30 @@ final class ReplayFingerprintTests: XCTestCase {
         }
     }
 
+    /// 三麻 replay 不得讀 live 單例：錄影沒有 oplist，授權若來自 `.shared`，
+    /// 輸出就取決於當下是否剛好有牌局在進行，結果不可重現。
+    func testSanmaReplayDoesNotReadSharedOperationStore() async throws {
+        let shared = LiqiOperationStore.shared
+        shared.reset()
+        defer { shared.reset() }
+        shared.record(seat: 1,
+                      operations: LiqiOperationType.allCases.map { LiqiOperation(type: $0) },
+                      source: "test")
+
+        let recording = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/replay-sanma-20261009-164439.mjai.jsonl")
+        let result = try await ReplaySupport.run(events: try GameRecorder.load(recording),
+                                                 limit: 10_000, source: recording.lastPathComponent)
+        let dict = try XCTUnwrap(result as? [String: Any])
+        let types = Set((dict["decisions"] as? [[String: Any]] ?? [])
+            .compactMap { ($0["action"] as? [String: Any])?["type"] as? String })
+
+        XCTAssertFalse(types.contains("pon"))
+        XCTAssertTrue(types.isDisjoint(with: ["ankan", "reach", "nukidora", "hora"]))
+        XCTAssertEqual(dict["sanmaAuthorization"] as? String, "unavailable_no_oplist_in_recording")
+    }
+
     /// 與 `scripts/replay-check.sh` 完全相同的 python 片段算 summary 行：
     /// `<name>\t<events>\t<decisions>\t<errors>\t<fp16>`
     private func summaryLine(result: [String: Any], name: String) throws -> String {
