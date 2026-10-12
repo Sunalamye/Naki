@@ -194,9 +194,8 @@ final class AutoPlayEngine {
         var failureBackoffCap: TimeInterval = 30
         /// 「過」最多送幾次（伺服器逾時會代打，不必跟和牌一樣拚）
         var passAttempts: Int = 5
-        /// 閘門判定「模型判斷不做副露」時的送出策略；nil＝`AutoPassDispatcher` 的預設
-        /// （型別本身是 MainActor 隔離的，所以這裡存 optional，用到時才取預設值）
-        var passPolicy: AutoPassDispatcher.RetryPolicy?
+        /// 閘門判定「模型判斷不做副露」時的送出策略
+        var passPolicy: AutoPassDispatcher.RetryPolicy = .default
         /// 送出前的模擬人類延遲；nil＝用 `ActionDelayModel`（正式路徑）。
         ///
         /// 第二個參數是使用者的延遲係數（`Context.actionDelayScale`），第三個是該批
@@ -228,9 +227,8 @@ final class AutoPlayEngine {
         /// 用它而不是 runConfirmCycle 的入口時間——ack 實際發生在 grace + 送出 + 等 RESPONSE
         /// 之後，用入口時間當起算點會讓後段 attempt 成功時 watchdog 立刻誤判逾時。
         var clock: () -> Date = Date.init
-        /// confirmNewRound 的送出策略；nil＝`AutoConfirmDispatcher` 的預設
-        /// （型別在 app target 是 MainActor 隔離的，所以存 optional，用到時才取預設值）
-        var confirmPolicy: AutoConfirmDispatcher.RetryPolicy?
+        /// confirmNewRound 的送出策略
+        var confirmPolicy: AutoConfirmDispatcher.RetryPolicy = .default
         /// 送 confirmNewRound 並判斷伺服器是否受理；nil＝正式路徑
         /// （`sender.sendAwaitingResponse(confirmNewRound)`）。做成 seam 是為了讓
         /// 「成功清 pending／失敗保留」在單測裡不必碰 `LiqiResponseStore` 單例。
@@ -310,7 +308,7 @@ final class AutoPlayEngine {
     init(store: LiqiOperationStore,
          sender: LiqiActionSender,
          timing: Timing = .live,
-         echo: (any SelfActionEchoObserving)? = SelfActionEchoTracker.shared,
+         echo: (any SelfActionEchoObserving)? = nil,
          context: @escaping () -> Context,
          log: @escaping (String) -> Void = { _ in },
          event: @escaping (String) -> Void = { _ in },
@@ -318,7 +316,7 @@ final class AutoPlayEngine {
         self.store = store
         self.sender = sender
         self.timing = timing
-        self.echo = echo
+        self.echo = echo ?? SelfActionEchoTracker.shared
         self.context = context
         self.log = log
         self.event = event
@@ -684,7 +682,7 @@ final class AutoPlayEngine {
 
         case .proceed, .forceHora, .sendPass:
             // allowsConfirm 只會回 .proceed 或 .skip；其餘 case 不可能，但 switch 要窮舉。
-            let policy = timing.confirmPolicy ?? .default
+            let policy = timing.confirmPolicy
             note("🏁 局間結算：送出 confirmNewRound (\(policy.maxAttempts) 次上限)", to: .event)
 
             let outcome = await occupy(delay: timing.confirmGrace) {
@@ -892,7 +890,7 @@ final class AutoPlayEngine {
             let outcome = await AutoPassDispatcher.send(
                 sequence: snapshot.sequence,
                 store: self.store,
-                policy: self.timing.passPolicy ?? .default,
+                policy: self.timing.passPolicy,
                 // 迴圈被停掉（App 收掉／模式切換造成 stop）就別再送
                 isCurrent: { !Task.isCancelled },
                 log: { self.note($0, to: .event) },

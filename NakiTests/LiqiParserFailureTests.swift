@@ -106,7 +106,7 @@ final class LiqiParserFailureTests: XCTestCase {
         }
     }
 
-    private static let hand13 = ["1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m", "1p", "2p", "3p", "4p"]
+    private nonisolated static let hand13 = ["1m", "2m", "3m", "4m", "5m", "6m", "7m", "8m", "9m", "1p", "2p", "3p", "4p"]
 
     /// accountId 只來自登入回應（`ResLogin`：2=account_id，3=account{1=account_id}）
     private func logIn(_ bridge: MajsoulBridge, account: LiqiField? = nil) {

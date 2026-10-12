@@ -8,15 +8,15 @@
 
 import Foundation
 
-struct ReleaseInfo: Sendable, Equatable {
+nonisolated struct ReleaseInfo: Sendable, Equatable {
     /// 已去掉 `v` 前綴
     let version: String
     let url: URL
 }
 
-enum UpdateChecker {
+nonisolated enum UpdateChecker {
 
-    nonisolated static let latestReleaseURL =
+    static let latestReleaseURL =
         URL(string: "https://api.github.com/repos/Sunalamye/Naki/releases/latest")!
 
     private struct Payload: Decodable {
@@ -27,7 +27,7 @@ enum UpdateChecker {
     }
 
     /// 匿名 GET，不帶任何識別。draft／prerelease 回 nil（`/latest` 本來就不會回，這裡只是防線）。
-    nonisolated static func fetchLatest(session: URLSession = .shared) async throws -> ReleaseInfo? {
+    static func fetchLatest(session: URLSession = .shared) async throws -> ReleaseInfo? {
         var request = URLRequest(url: latestReleaseURL, timeoutInterval: 10)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         let (data, response) = try await session.data(for: request)
@@ -37,22 +37,22 @@ enum UpdateChecker {
         return ReleaseInfo(version: normalize(tag: release.tag_name), url: release.html_url)
     }
 
-    nonisolated static func normalize(tag: String) -> String {
+    static func normalize(tag: String) -> String {
         tag.hasPrefix("v") || tag.hasPrefix("V") ? String(tag.dropFirst()) : tag
     }
 
     /// 數字段逐段比（`2.9.0 < 2.13.0`），字串比會判反。
-    nonisolated static func isNewer(_ remote: String, than local: String) -> Bool {
+    static func isNewer(_ remote: String, than local: String) -> Bool {
         remote.compare(local, options: .numeric) == .orderedDescending
     }
 
     /// 自動檢查：開關開著、且距上次成功檢查滿 24 小時。
-    nonisolated static func shouldAutoCheck(enabled: Bool, last: Date?, now: Date) -> Bool {
+    static func shouldAutoCheck(enabled: Bool, last: Date?, now: Date) -> Bool {
         enabled && (last.map { now.timeIntervalSince($0) >= 24 * 3600 } ?? true)
     }
 
     /// 有新版才提示；自動檢查時使用者略過的那一版不再提示，手動檢查不受略過影響。
-    nonisolated static func shouldSurface(_ info: ReleaseInfo, local: String,
+    static func shouldSurface(_ info: ReleaseInfo, local: String,
                                           skipped: String?, manual: Bool) -> Bool {
         isNewer(info.version, than: local) && (manual || info.version != skipped)
     }

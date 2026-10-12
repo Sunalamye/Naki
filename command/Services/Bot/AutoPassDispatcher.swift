@@ -34,7 +34,7 @@ enum AutoPassDispatcher {
     /// 與和牌路徑同型：短間隔、次數有限。用完次數**不** markHandled——
     /// 保留 pending 才能讓 1 秒輪詢在下一輪重新嘗試（還在伺服器的操作時限內，
     /// 多等幾輪沒有代價，靜默放棄機會才有）。
-    struct RetryPolicy {
+    nonisolated struct RetryPolicy {
         var maxAttempts: Int = 5
         var delay: TimeInterval = 0.2
 

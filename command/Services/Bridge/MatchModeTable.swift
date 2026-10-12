@@ -240,7 +240,7 @@ nonisolated enum RematchTargetResolver {
 /// 欄位編號取自實際封包而不是 `liqi.json`——那份 descriptor 已過期（見 CLAUDE.md）。
 /// 解不出來就回 `nil`，呼叫端一律 fail-closed，不要用 0 當預設（0 會比對成
 /// 「什麼房間都進不去」還是「初心」都說不準）。
-nonisolated enum AccountLevelParser {
+enum AccountLevelParser {
 
     /// `ResAccountInfo` 內層 account 訊息裡的段位欄位
     private static let yonmaField = 21

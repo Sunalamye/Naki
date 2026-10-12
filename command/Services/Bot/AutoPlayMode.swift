@@ -15,7 +15,7 @@ import SwiftUI
 // MARK: - Auto Play Mode
 
 /// 自動打牌模式
-enum AutoPlayMode: String, CaseIterable {
+nonisolated enum AutoPlayMode: String, CaseIterable {
     case off = "關閉"            // 不自動打牌，也不顯示推薦（側欄與遊戲內高亮都清空）
     case recommend = "推薦"      // 顯示推薦，需要手動打牌
     case auto = "自動"           // 顯示推薦，自動執行推薦動作
@@ -88,7 +88,7 @@ enum AutoPlayMode: String, CaseIterable {
 /// 起點的值是 `LegacyWebBackend.supportsAutoPlay == false`；收斂規則只定義在這裡，
 /// picker 選項（`ContentView`）與模式收斂（`NakiRuntime.setAutoPlayMode`）都讀它，
 /// 不各寫一份判斷。
-enum AutoPlayAvailability {
+nonisolated enum AutoPlayAvailability {
 
     /// Legacy 路徑不提供自動送出的原因，直接顯示在設定頁上。
     ///
