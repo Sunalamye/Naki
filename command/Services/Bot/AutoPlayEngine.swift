@@ -506,23 +506,10 @@ final class AutoPlayEngine {
             }
             // 推薦必須是針對「這一批 oplist」算出來的。推論是 async 的：新的決策機會
             // （新 snapshot）可能在舊推薦還沒被新推論取代前就到達，此時用舊推薦回應新
-            // 機會會送出不可逆的錯誤動作。
-            //
-            // provenance（`recommendationsOplistSequence`）由 controller 在推薦真的刷新時綁定。
-            // **只在有正面證據時才擋**：provenance 已知且比當前機會**舊**（更小的 sequence）＝
-            // 這份推薦是為更早的機會算的，明確 stale → 不送。provenance 未知（nil）或已對上
-            // 當前機會就放行——寧可偶爾送一次舊推薦（罕見競態），也不要因為 provenance 判不準
-            // 就整局不自動打（strict 等號會這樣，實測會 0 觸發）。
-            // `.forceHora`／`.sendPass` 是不看推薦內容的 server-authoritative 防護，不受此限。
-            //
-            // **和牌機會同樣不受此限**，即使推薦非空。`.forceHora` 只在推薦為**空**時
-            // 觸發，於是「榮和視窗帶新 oplist 抵達、該批沒刷新推薦、上一個決策點的推薦
-            // 還在且序號較舊」這個組合會落在這裡被擋掉——每一拍都回 `notSent`，一路到
-            // 伺服器逾時。放行後照樣走 resolver，而 resolver 會把和牌排在 AI 推薦之上
-            // 並留下「決策覆蓋」的 log；stale 推薦頂多讓覆蓋前的那一列是舊的，
-            // 送出去的仍然是伺服器授權的和牌。漏和不可逆，這個方向的取捨沒有懸念。
-            if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence,
-               snapshot.horaOperation == nil {
+            // 機會會送出不可逆的錯誤動作。nil 與和牌例外的理由見 `AutoPlayGate.isStale`；
+            // 和牌機會放行後照樣走 resolver，會留下「決策覆蓋」的 log。
+            if AutoPlayGate.isStale(recommendationsOplistSequence: ctx.recommendationsOplistSequence,
+                                    for: snapshot) {
                 return finish(gate: gate, outcome: .notSent(reason: "recommendations_stale"))
             }
             let delay = actionDelay(for: top.actionType,
@@ -561,7 +548,8 @@ final class AutoPlayEngine {
 
         // 三麻 fail-closed（同 `AutoPlayGate` 規則）。手動觸發不經閘門，
         // 要自己擋一次；三麻引擎的決策放行，伺服器授權的和牌也放行（resolver 會排在推薦之上）。
-        guard !ctx.isSanma || ctx.sanmaCapableDecision || store.pending?.horaOperation != nil else {
+        guard AutoPlayGate.sanmaAllows(isSanma: ctx.isSanma, sanmaCapableDecision: ctx.sanmaCapableDecision)
+                || store.pending?.horaOperation != nil else {
             note("⏭️ 三麻對局：本批推薦不是三麻引擎算的，自動送出停用（雲端 3p 或本地 Akagi 三麻才放行）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "sanma_unsupported"))
         }
@@ -586,16 +574,10 @@ final class AutoPlayEngine {
             return finish(gate: nil, outcome: .notSent(reason: "no_oplist"))
         }
 
-        // 已知 stale 也要擋：推薦明確是為更早的機會（recSeq < snapshot）
-        // 算的，就算是手動／MCP `bot_trigger` 也不該把它套到新機會——那動作不可逆，
-        // 而 bot_trigger 可能由自動化呼叫。nil provenance 仍放行（與 auto path 一致，
-        // 不重現 strict 等號的 0 觸發），只擋有正面 stale 證據的。
-        //
-        // 和牌機會例外，理由與輪詢路徑同一條：擋下 stale 推薦是為了避免送出**錯的**
-        // 動作，但伺服器已經授權和牌時，resolver 無論如何都會把和牌排在推薦之上，
-        // 擋下來只會讓漏和變成唯一的結果。
-        if let recSeq = ctx.recommendationsOplistSequence, recSeq < snapshot.sequence,
-           snapshot.horaOperation == nil {
+        // 已知 stale 也要擋：就算是手動／MCP `bot_trigger` 也不該把舊推薦套到新機會——
+        // 那動作不可逆，而 bot_trigger 可能由自動化呼叫。規則與輪詢路徑同一式。
+        if AutoPlayGate.isStale(recommendationsOplistSequence: ctx.recommendationsOplistSequence,
+                                for: snapshot) {
             note("略過觸發: 推薦是為更早的機會算的（stale）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "recommendations_stale"))
         }

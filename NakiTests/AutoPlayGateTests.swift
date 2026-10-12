@@ -312,4 +312,28 @@ final class AutoPlayGateTests: XCTestCase {
         XCTAssertEqual(AutoPlayGate.evaluate(
             input(snapshot: call, recs: [rec(.pon)], now: now, recSeq: 5)), .proceed)
     }
+
+    // MARK: - 共用判斷式（輪詢、手動、evaluate 三處同用）
+
+    /// stale 的邊界：只有「provenance 已知、嚴格較舊、且這批沒有和牌」才算
+    func testIsStaleBoundaries() {
+        let discard = snapshot(types: [1], sequence: 5)
+        let tsumo = snapshot(types: [1, 8], sequence: 5)
+        let ron = snapshot(types: [3, 9], sequence: 5)
+        XCTAssertTrue(AutoPlayGate.isStale(recommendationsOplistSequence: 4, for: discard))
+        XCTAssertFalse(AutoPlayGate.isStale(recommendationsOplistSequence: 5, for: discard), "同批不算過期")
+        XCTAssertFalse(AutoPlayGate.isStale(recommendationsOplistSequence: 6, for: discard))
+        XCTAssertFalse(AutoPlayGate.isStale(recommendationsOplistSequence: nil, for: discard),
+                       "provenance 未知不算過期，否則整局 0 觸發")
+        XCTAssertFalse(AutoPlayGate.isStale(recommendationsOplistSequence: 4, for: tsumo), "有自摸不擋")
+        XCTAssertFalse(AutoPlayGate.isStale(recommendationsOplistSequence: 4, for: ron), "有榮和不擋")
+    }
+
+    /// 三麻放行真值表：只有「三麻且非三麻引擎決策」擋下
+    func testSanmaAllowsTruthTable() {
+        XCTAssertTrue(AutoPlayGate.sanmaAllows(isSanma: false, sanmaCapableDecision: false))
+        XCTAssertTrue(AutoPlayGate.sanmaAllows(isSanma: false, sanmaCapableDecision: true))
+        XCTAssertTrue(AutoPlayGate.sanmaAllows(isSanma: true, sanmaCapableDecision: true))
+        XCTAssertFalse(AutoPlayGate.sanmaAllows(isSanma: true, sanmaCapableDecision: false))
+    }
 }
