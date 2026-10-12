@@ -26,7 +26,7 @@ final class DebugServerFramingTests: XCTestCase {
         server.start()
         self.server = server
         for _ in 0..<100 where !store.isDebugServerRunning { try await Task.sleep(for: .milliseconds(50)) }
-        try XCTUnwrap(store.isDebugServerRunning ? true : nil, "server 沒有起來")
+        _ = try XCTUnwrap(store.isDebugServerRunning ? true : nil, "server 沒有起來")
         port = store.debugServerPort
     }
 
@@ -152,6 +152,41 @@ final class DebugServerLifecycleTests: XCTestCase {
 
         for _ in 0..<100 where store.isDebugServerRunning { try await Task.sleep(for: .milliseconds(50)) }
         XCTAssertFalse(store.isDebugServerRunning, "10 個 port 全部綁定失敗後旗標仍為 true")
+    }
+
+    /// listener 身分 guard：換 port 重試期間，舊 listener 遲到的 `.cancelled` 不得歸零旗標。
+    ///
+    /// 舊 `.cancelled` 與新 `.ready` 的先後 Network.framework 不保證，只看最終旗標鎖不住這道 guard；
+    /// 改看「第一次歸零」的時間點：有 guard 時，只有十次重試都失敗、listener 變 nil 之後才會歸零，
+    /// 所以必定晚於最後一個 port 的失敗 log。
+    func testStaleCancelDuringRetriesDoesNotResetFlagEarly() async throws {
+        var occupied: (base: UInt16, fds: [Int32])?
+        for _ in 0..<20 where occupied == nil {
+            let base = UInt16.random(in: 50000...60000)
+            if let fds = occupyPorts(from: base, count: 10) { occupied = (base, fds) }
+        }
+        guard let held = occupied else { throw XCTSkip("無法佔用連續 10 個 loopback port（機器可能沒有 IPv6 loopback）") }
+        defer { held.fds.forEach { close($0) } }
+
+        final class FirstReset: @unchecked Sendable { var at: Date? }
+        let firstReset = FirstReset()
+        let store = GameStore()
+        store.isDebugServerRunning = true
+        withObservationTracking { _ = store.isDebugServerRunning } onChange: { firstReset.at = Date() }
+
+        let server = DebugServer(port: held.base, dependencies: makeTestDependencies(store: store))
+        server.start()
+        defer { server.stop() }
+
+        for _ in 0..<100 where store.isDebugServerRunning { try await Task.sleep(for: .milliseconds(50)) }
+        try await Task.sleep(for: .milliseconds(100))   // LogManager 經 main.async 追加條目
+
+        let resetAt = try XCTUnwrap(firstReset.at, "旗標從未被歸零")
+        let lastFailure = try XCTUnwrap(
+            LogManager.shared.entries.last { $0.message.hasPrefix("Server failed on port \(held.base + 9):") }?.timestamp,
+            "沒有最後一個 port 的失敗 log")
+        XCTAssertGreaterThanOrEqual(resetAt, lastFailure,
+                                    "重試還沒用完就被舊 listener 的 .cancelled 歸零（身分 guard 失效）")
     }
 
     /// 前幾個 port 被佔、後面成功：舊 listener 遲到的 `.cancelled` 不能把新 listener 的 ready 蓋成 false

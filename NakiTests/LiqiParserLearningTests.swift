@@ -30,6 +30,25 @@ final class LiqiParserLearningTests: XCTestCase {
         }
     }
 
+    /// 取消匹配與 mode_list 都在 `parse` 內同步生效（WP6 時序）：不 yield 直接斷言
+    func testCancelAndModeListTakeEffectWithoutYield() {
+        isolateSharedObservedMatchSids(self)
+        ObservedMatchModes.shared.reset()
+        addTeardownBlock { @MainActor in ObservedMatchModes.shared.reset() }
+        let parser = LiqiParser()
+
+        ObservedMatchSids.shared.record(sid: "ranked", clientVersionString: "v1")
+        let cancel = LiqiRequestBuilder.cancelUnifiedMatch(matchSid: "ranked")
+        _ = parser.parse(Data(LiqiEncoder.encodeRequest(method: cancel.method, payload: cancel.payload, msgId: 142)))
+        ObservedMatchSids.shared.gameDidStart(is3P: true)
+        XCTAssertNil(ObservedMatchSids.shared.observations[0].is3P)
+
+        _ = parser.parse(Data(LiqiEncoder.encodeRequest(
+            method: ".lq.Lobby.fetchCurrentMatchInfo",
+            payload: LiqiEncoder.encodeVarintField(field: 1, value: 3), msgId: 143)))
+        XCTAssertEqual(ObservedMatchModes.shared.knownModes, [3])
+    }
+
     func testOtherRequestsKeepAwaitingGameKind() async {
         isolateSharedObservedMatchSids(self)
         ObservedMatchSids.shared.record(sid: "ranked", clientVersionString: "v1")

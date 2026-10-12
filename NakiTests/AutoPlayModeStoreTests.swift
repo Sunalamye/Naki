@@ -51,6 +51,15 @@ final class AutoPlayModeStoreTests: XCTestCase {
         XCTAssertEqual(AutoPlayModeStore.load(defaults), .off)
     }
 
+    /// 正式路徑不另外呼叫遷移：只寫舊 key、直接 `load()` 就要讀到舊值並完成遷移。
+    func testLoadAloneMigratesLegacyKey() {
+        defaults.set(AutoPlayMode.off.rawValue, forKey: AutoPlayModeStore.legacyKey)
+
+        XCTAssertEqual(AutoPlayModeStore.load(defaults), .off)
+        XCTAssertEqual(defaults.string(forKey: AutoPlayModeStore.key), AutoPlayMode.off.rawValue)
+        XCTAssertNil(defaults.object(forKey: AutoPlayModeStore.legacyKey))
+    }
+
     /// 兩個 key 都有值：以新 key 為準（它才是實際驅動送出的那一個），舊 key 一樣清掉。
     func testNewKeyWinsOverLegacyKey() {
         defaults.set(AutoPlayMode.recommend.rawValue, forKey: AutoPlayModeStore.key)

@@ -131,7 +131,6 @@ final class AutoPlayActionExecutorTests: XCTestCase {
     func testRiichiUsesTopDiscardRecommendationAsDeclarationTile() async {
         let store = LiqiOperationStore()
         var captured: [String] = []
-        var events: [String] = []
         let sender = recordingSender { captured.append($0) }
         let snapshot = store.record(seat: 0,
                                     operations: [LiqiOperation(type: .discard),
@@ -231,6 +230,27 @@ final class AutoPlayActionExecutorTests: XCTestCase {
 
         XCTAssertNil(result)
         XCTAssertEqual(sendCount, 0)
+    }
+
+    /// 可達路徑：oplist 有 chi 但 combination 為空（例如解析缺陷）→ 沒有可猜的對象，不送、不消化 oplist
+    @MainActor
+    func testChiOperationWithEmptyCombinationDoesNotSend() async {
+        let store = LiqiOperationStore()
+        var sendCount = 0
+        var events: [String] = []
+        let sender = recordingSender { _ in sendCount += 1 }
+        let snapshot = store.record(seat: 0,
+                                    operations: [LiqiOperation(type: .chi, combination: [])],
+                                    contextTile: "3m", source: "test")
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [],
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
+
+        XCTAssertNil(result)
+        XCTAssertEqual(sendCount, 0)
+        XCTAssertEqual(store.pending?.sequence, snapshot.sequence, "沒送出就不能消化這批 oplist")
+        XCTAssertTrue(events.contains { $0.contains("[-]") }, "event 要標出沒有任何組合，實際: \(events)")
     }
 
     /// `chi_` 前綴解析失敗：照舊以 chi_0 對照，但必須留下一行 log

@@ -183,6 +183,19 @@ final class ObservedMatchSidsParserTests: XCTestCase {
         XCTAssertEqual(ObservedMatchSids.shared.latest?.clientVersionString, "0.11.252.w")
     }
 
+    /// parser 寫觀察表是同步的（WP6 拿掉 actor hop）：`parse` 一回來就讀得到，不必 yield。
+    /// 改回非同步時 `gameDidStart` 可能讀不到剛學到的 sid，這條會紅。
+    @MainActor
+    func testLearnsSynchronouslyWithoutYield() {
+        isolateSharedObservedMatchSids(self)
+        let spec = LiqiRequestBuilder.startUnifiedMatch(matchSid: "sync-sid", clientVersionString: "v1")
+
+        _ = LiqiParser().parse(Data(LiqiEncoder.encodeRequest(
+            method: spec.method, payload: spec.payload, msgId: 142)))
+
+        XCTAssertEqual(ObservedMatchSids.shared.latest?.sid, "sync-sid")
+    }
+
     // MARK: - 取消匹配與 seenAt（獨立 UserDefaults，不碰 .standard／.shared）
 
     @MainActor

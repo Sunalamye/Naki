@@ -35,7 +35,7 @@ nonisolated enum AutoPlayMode: String, CaseIterable {
 
     /// 是否啟用自動送出（`.auto` 與 `.fullAuto` 都送）
     ///
-    /// ⚠️ 名字沿用歷史，語意是「**這一手**由 Naki 自己送」，不是「整場全自動」。
+    /// 語意是「**這一手**由 Naki 自己送」，不是「整場全自動」（那是 `autoRematch`）。
     /// 新增模式時務必讓這裡涵蓋到：Legacy 路徑的能力收斂（`AutoPlayAvailability`）
     /// 就是用它過濾的，漏掉會讓不支援自動送出的裝置選得到、然後靜靜地送出去。
     var sendsActions: Bool {
@@ -151,7 +151,7 @@ nonisolated enum AutoPlayModeStore {
 
     /// 一次性遷移：舊 key 有值而新 key 沒有時，把值搬過去；不論搬不搬都刪掉舊 key。
     ///
-    /// 冪等，重複呼叫安全——App 進入點與 `load()` 都會呼叫。
+    /// 冪等，重複呼叫安全。正式路徑只有 `load()` 呼叫它。
     /// - Returns: 是否真的把舊值搬進新 key。
     @discardableResult
     static func migrateLegacyKeyIfNeeded(_ defaults: UserDefaults = .standard) -> Bool {

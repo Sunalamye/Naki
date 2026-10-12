@@ -346,6 +346,19 @@ final class NakiActionLayerTests: XCTestCase {
             "失敗要寫進 bridgeLog，且帶 label")
     }
 
+    /// 成功時不寫 log（射後不理每秒可能好幾次，成功也記會淹掉 bridge log）
+    func testFireJavaScriptDoesNotLogOnSuccess() async {
+        let session = WebSession(
+            store: GameStore(), settings: SettingsStore(), messageHandler: NoopHandler())
+        let label = "測試射後不理成功-\(UUID().uuidString)"
+
+        await session.fireJavaScript("return 1;", label: label).value
+        try? await Task.sleep(for: .milliseconds(300))   // LogManager 經 main.async 追加條目
+
+        XCTAssertFalse(LogManager.shared.entries.contains { $0.message.contains(label) },
+                       "成功不該留下 log")
+    }
+
     /// Legacy path 走整頁重載：不可以偽裝成「關了 0 條連線」
     func testReloadedOutcomeIsSuccessWithoutClosedConnections() {
         let outcome = ForceReconnectOutcome.reloaded
