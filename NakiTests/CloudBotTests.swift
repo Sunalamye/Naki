@@ -33,6 +33,11 @@ private final class StubEngine: MahjongBot {
     nonisolated deinit {}
 }
 
+/// 讓 URLProtocol 的回呼（背景執行緒）拿得到測試建立的 Task
+private final class TaskBox: @unchecked Sendable {
+    var task: Task<BotReaction?, Error>?
+}
+
 // MARK: - Tests
 
 @MainActor
@@ -347,6 +352,61 @@ final class CloudBotTests: XCTestCase {
         let second = try await decide(bot, local: local, reaction: localDahai("2m"))
         XCTAssertEqual(second?.source, "cloud:4p-x", "下一手照常問雲端——斷路器沒開的直接證據")
         XCTAssertEqual(CloudMockURLProtocol.captured.count, 4)
+    }
+
+    /// 第二段在 429 退避期間被取消（換局／重連）：取消不是雲端故障，不得開斷路器。
+    /// 取消後再發一次請求會因 Task 已取消而失敗，舊寫法會把那次失敗記成 `recordFailure`。
+    func testCancelledReachDiscardDoesNotTripBreaker() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (200, #"{"reaction":{"type":"reach","actor":0},"candidates":[],"model":"4p-x"}"#, [:]),
+            (429, #"{"error":"rate limited"}"#, ["Retry-After": "1"]),
+            (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"#
+                + #""candidates":[],"model":"4p-x"}"#, [:]),
+        ])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+
+        local.script.append(localDahai("1m"))
+        let decision = Task { try await bot.react(events: [["type": "tsumo", "actor": 0, "pai": "1m"]]) }
+        for _ in 0..<400 where CloudMockURLProtocol.captured.count < 2 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 2, "第二段請求（回 429）還沒送出")
+        decision.cancel()
+        let cancelled = try await decision.value
+
+        XCTAssertEqual(cancelled?.source, "local", "取消的第二段＝這一手退回本地")
+        XCTAssertFalse(bot.cloudDegraded, "取消不得開斷路器")
+        XCTAssertEqual(CloudMockURLProtocol.captured.count, 2, "取消後不得再發第三次請求")
+        let next = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(next?.source, "cloud:4p-x", "下一手照常問雲端——斷路器沒開的直接證據")
+    }
+
+    /// 同上，但取消落在第二段請求飛行中：失敗走 catch-all，不得記進斷路器
+    func testCancelledReachDiscardInFlightDoesNotTripBreaker() async throws {
+        CloudMockURLProtocol.reset(script: [
+            (200, #"{"reaction":{"type":"reach","actor":0},"candidates":[],"model":"4p-x"}"#, [:]),
+            (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"9p","tsumogiri":false},"candidates":[],"model":"4p-x"}"#, [:]),
+            (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"#
+                + #""candidates":[],"model":"4p-x"}"#, [:]),
+        ])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+
+        let box = TaskBox()
+        CloudMockURLProtocol.onRequest = { count in if count == 2 { box.task?.cancel() } }
+        local.script.append(localDahai("1m"))
+        let decision = Task { try await bot.react(events: [["type": "tsumo", "actor": 0, "pai": "1m"]]) }
+        box.task = decision
+        let cancelled = try await decision.value
+        CloudMockURLProtocol.onRequest = nil
+
+        XCTAssertEqual(cancelled?.source, "local", "第二段被取消＝這一手退回本地")
+        XCTAssertFalse(bot.cloudDegraded, "取消不得開斷路器")
+        let next = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(next?.source, "cloud:4p-x", "下一手照常問雲端——斷路器沒開的直接證據")
     }
 
     /// Retry-After 是第三方可控的輸入：負數／NaN／Inf 曾讓 `UInt64(seconds * 1e9)` trap

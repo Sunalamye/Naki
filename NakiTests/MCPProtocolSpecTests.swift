@@ -510,6 +510,7 @@ final class MCPProtocolSpecTests: XCTestCase {
         let definitions = MCPToolRegistry.shared.allToolDefinitions()
 
         XCTAssertEqual(definitions.count, MCPToolRegistry.shared.registeredToolNames.count)
+        XCTAssertEqual(definitions.count, 43, "tools/list 的工具數；新增或移除工具時一併改這個數字")
         for definition in definitions {
             let name = definition["name"] as? String ?? "?"
             let output = definition["outputSchema"] as? [String: Any]

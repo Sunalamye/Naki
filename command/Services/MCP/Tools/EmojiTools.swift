@@ -62,9 +62,7 @@ struct SendEmojiTool: MCPTool {
         guard emoId >= 0 && emoId <= 8 else {
             throw MCPToolError.invalidParameter("emo_id", expected: "0-8")
         }
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let count = max(1, min(5, arguments["count"] as? Int ?? 1))
         let exceptSelf = arguments["except_self"] as? Bool ?? false
@@ -77,7 +75,7 @@ struct SendEmojiTool: MCPTool {
         for _ in 0..<count {
             let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
             if outcome.sent?.success == true { successCount += 1 }
-            sends.append(LiqiToolResult.dictionary(outcome, spec: spec))
+            sends.append(LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec))
         }
 
         return [

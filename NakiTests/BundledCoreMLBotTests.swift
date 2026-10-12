@@ -15,7 +15,7 @@ final class BundledCoreMLBotTests: XCTestCase {
 
     func testOwnPonRefreshesDiscardRecommendationsFromCurrentState() async throws {
         let afterPon = ["2m", "3m", "4p", "5p", "6p", "7s", "8s", "9s", "E", "E", "S"].compactMap { Tile(mjaiString: $0) }
-        let bot = try BundledCoreMLBot(playerId: 0, is3P: false, hand: { (afterPon, nil) })
+        let bot = try BundledCoreMLBot(playerId: 0, hand: { (afterPon, nil) })
         let hand = ["1m", "1m", "2m", "3m", "4p", "5p", "6p", "7s", "8s", "9s", "E", "E", "S"]
         let unknown = [String](repeating: "?", count: 13)
         let events: [[String: Any]] = [

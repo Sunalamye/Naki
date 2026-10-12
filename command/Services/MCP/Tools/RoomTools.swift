@@ -96,9 +96,7 @@ struct RoomCreateTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let playerCount = arguments["player_count"] as? Int ?? 4
         guard playerCount == 3 || playerCount == 4 else {
@@ -126,7 +124,7 @@ struct RoomCreateTool: MCPTool {
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
         context.log("🏠 room_create player_count=\(playerCount) time=\(config.timeFixed)+\(config.timeAdd)")
 
-        var result = LiqiToolResult.dictionary(outcome, spec: spec, extra: [
+        var result = LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: [
             "config": [
                 "player_count": playerCount,
                 "mode": Int(config.mode),
@@ -173,15 +171,13 @@ struct RoomAddRobotTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let position = try MCPArguments.uint32(arguments, "position")
         let spec = LiqiRequestBuilder.addRoomRobot(position: position)
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("🤖 room_add_robot position=\(position)")
-        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["position": Int(position)])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: ["position": Int(position)])
     }
 }
 
@@ -208,14 +204,12 @@ struct RoomStartTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.startRoom()
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
         context.log("▶️ room_start")
-        return LiqiToolResult.dictionary(outcome, spec: spec)
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
 
@@ -244,13 +238,11 @@ struct RoomInfoTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.fetchRoom()
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
-        return LiqiToolResult.dictionary(outcome, spec: spec)
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
 
@@ -279,16 +271,14 @@ struct RoomJoinTool: MCPTool {
         guard let roomId = arguments["room_id"] as? Int, roomId > 0 else {
             throw MCPToolError.missingParameter("room_id")
         }
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.joinRoom(
             roomId: try MCPArguments.uint32(roomId, "room_id"),
             clientVersionString: arguments["client_version_string"] as? String ?? "")
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
         context.log("🚪 room_join room_id=\(roomId)")
-        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["room_id": roomId])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: ["room_id": roomId])
     }
 }
 
@@ -312,14 +302,12 @@ struct RoomLeaveTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.leaveRoom()
         let outcome = await nakiContext.sendLiqi(spec,
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         context.log("🚪 room_leave")
-        return LiqiToolResult.dictionary(outcome, spec: spec)
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
 
@@ -359,9 +347,7 @@ struct RoomQuickTestTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let playerCount = arguments["player_count"] as? Int ?? 4
         guard playerCount == 3 || playerCount == 4 else {
@@ -371,7 +357,7 @@ struct RoomQuickTestTool: MCPTool {
         var steps: [[String: Any]] = []
 
         func record(_ name: String, _ outcome: LiqiToolSendOutcome, spec: LiqiRequestSpec) -> Bool {
-            let dict = LiqiToolResult.dictionary(outcome, spec: spec)
+            let dict = LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
             let accepted = (dict["serverAccepted"] as? Bool) ?? false
             steps.append([
                 "step": name,

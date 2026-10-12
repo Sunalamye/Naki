@@ -128,17 +128,17 @@ final class BotAvailableActionsTests: XCTestCase {
         defer { store.reset() }
 
         let controller = NativeBotController()
-        XCTAssertFalse(controller.canPon, "沒有 oplist 時不得有任何可用動作")
+        XCTAssertFalse(controller.availableActions.canPon, "沒有 oplist 時不得有任何可用動作")
 
         store.record(seat: 0, operations: [LiqiOperation(type: .pon)], source: "test")
 
-        XCTAssertTrue(controller.canPon, "oplist 有碰，徽章與 /bot/status 就必須是 true")
-        XCTAssertFalse(controller.canChi)
+        XCTAssertTrue(controller.availableActions.canPon, "oplist 有碰，徽章與 /bot/status 就必須是 true")
+        XCTAssertFalse(controller.availableActions.canChi)
         XCTAssertTrue(controller.botState.canPon)
 
         // 送出後標記已處理 → pending 消失 → 徽章要熄滅（不能停在上一批機會）
         store.markCurrentHandled()
-        XCTAssertFalse(controller.canPon, "已處理過的 oplist 不該繼續點亮徽章")
+        XCTAssertFalse(controller.availableActions.canPon, "已處理過的 oplist 不該繼續點亮徽章")
     }
 
     /// `GameStore.apply` 是 `/bot/status` 與側欄共同的資料面，必須帶到同一組值

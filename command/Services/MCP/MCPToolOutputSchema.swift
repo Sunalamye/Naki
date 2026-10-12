@@ -102,6 +102,7 @@ enum NakiToolOutputSchemas {
                 "decisionCount": integer("回傳的決策數"),
                 "truncated": boolean("是否因 limit 被截斷"),
                 "errors": array("重跑過程中的錯誤"),
+                "sanmaAuthorization": string("三麻錄影沒有 oplist，固定 unavailable_no_oplist_in_recording；四麻不出現"),
                 "note": string("資料語意說明")
             ],
             required: ["source", "events", "decisions", "decisionCount"])
@@ -305,7 +306,7 @@ enum NakiToolOutputSchemas {
 
     // MARK: - 共用 schema
 
-    /// 送 Liqi request 的工具共用這一份（`LiqiToolResult.dictionary` 的輸出）
+    /// 送 Liqi request 的工具共用這一份（`LiqiToolResult.dictionaryLoggingRejection` 的輸出）
     nonisolated static func liqiSend(extra: [String: [String: Any]] = [:]) -> [String: Any] {
         var properties: [String: [String: Any]] = [
             "success": boolean("bytes 是否成功交給 WebSocket——**不等於**伺服器接受"),

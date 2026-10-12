@@ -391,11 +391,6 @@ struct Recommendation: Identifiable, Equatable {
         String(format: "%.1f%%", probability * 100)
     }
 
-    /// 牌的 Unicode 表示
-    var tileUnicode: String {
-        tile?.unicode ?? MahjongTile.mjaiToUnicode[label] ?? label
-    }
-
     /// 顯示用的牌面字串
     nonisolated var displayTile: String {
         tile?.mjaiString ?? label
@@ -453,11 +448,6 @@ struct MahjongTile: Identifiable, Equatable, Hashable {
         self.mjai = tile.mjaiString
     }
 
-    /// Unicode 表示
-    var unicode: String {
-        tile?.unicode ?? Self.mjaiToUnicode[mjai] ?? mjai
-    }
-
     /// 是否為紅寶牌
     var isRed: Bool {
         tile?.isRed ?? mjai.hasSuffix("r")
@@ -487,17 +477,13 @@ struct MahjongTile: Identifiable, Equatable, Hashable {
     /// 數牌「一萬…九萬 / 一筒…九筒 / 一索…九索」、字牌「東南西北白發中」、紅寶牌加「紅」前綴（如「紅五萬」）。
     /// 供 BotStatusView 與 RecommendationView 共用，避免各寫一份牌名轉換。
     var accessibleName: String { L10n.text(.init(displayName)) }
+}
 
-    /// MJAI 到 Unicode 的映射表
-    static let mjaiToUnicode: [String: String] = [
-        "1m": "🀇", "2m": "🀈", "3m": "🀉", "4m": "🀊", "5m": "🀋",
-        "5mr": "🀋", "6m": "🀌", "7m": "🀍", "8m": "🀎", "9m": "🀏",
-        "1p": "🀙", "2p": "🀚", "3p": "🀛", "4p": "🀜", "5p": "🀝",
-        "5pr": "🀝", "6p": "🀞", "7p": "🀟", "8p": "🀠", "9p": "🀡",
-        "1s": "🀐", "2s": "🀑", "3s": "🀒", "4s": "🀓", "5s": "🀔",
-        "5sr": "🀔", "6s": "🀕", "7s": "🀖", "8s": "🀗", "9s": "🀘",
-        "E": "🀀", "S": "🀁", "W": "🀂", "N": "🀃",
-        "P": "🀆", "F": "🀅", "C": "🀄︎",
-        "?": "🀫"
-    ]
+extension Array where Element == Recommendation {
+    /// log 用的前 6 項摘要：`discard:5m@42.1% riichi:-@30.0% ...`
+    var logSummary: String {
+        prefix(6)
+            .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
+            .joined(separator: " ")
+    }
 }

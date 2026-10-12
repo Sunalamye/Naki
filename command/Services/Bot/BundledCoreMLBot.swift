@@ -21,7 +21,6 @@ final class BundledCoreMLBot: MahjongBot {
     private let bot: MortalBot
 
     private let playerId: UInt8
-    private let is3P: Bool
 
     /// mask 索引 → 推薦的解碼器（紅五判斷經 handProvider 讀 controller 的手牌）
     private let mapper: MortalActionMapper
@@ -29,14 +28,13 @@ final class BundledCoreMLBot: MahjongBot {
     /// - Parameter hand: 讀當前手牌的 closure。手牌是遊戲狀態，權威在
     ///   `NativeBotController`（它在呼叫 `react` **之前**先更新手牌，
     ///   所以這裡讀到的一定是本事件之後的狀態——與抽出前的順序一致）。
-    init(playerId: UInt8, is3P: Bool,
+    init(playerId: UInt8,
          hand: @escaping () -> (tehai: [Tile], tsumo: Tile?)) throws {
-        // ⚠️ #3 已知風險：MortalBot 建構子不吃 sanma/is3P，且僅內建單一四麻模型
-        //    (bundledModelURL = "mortal", version 4, obs 1012ch)。三麻仍送進四麻
-        //    model；`identity.supports3P` 如實回 false。
+        // MortalBot 建構子不吃 sanma，且僅內建單一四麻模型
+        // (bundledModelURL = "mortal", version 4, obs 1012ch)；`identity.supports3P` 如實回 false。
+        // 三麻由 `AkagiSanmaBot` 處理，不會建這個引擎。
         self.bot = try MortalBot(playerId: Int(playerId), version: 4, useBundledModel: true)
         self.playerId = playerId
-        self.is3P = is3P
         self.mapper = MortalActionMapper(hand: hand)
     }
 
@@ -155,20 +153,22 @@ final class BundledCoreMLBot: MahjongBot {
         let mask = await bot.getLastMask()
         let probs = await bot.getLastProbs()
 
-        // 建立推薦列表，使用實際機率
-        var recommendations: [Recommendation] = []
+        // legalCount 量在截斷前的 mask 上，不是 recommendations.count——
+        // mapper 對個別索引可回 nil，映射後的數量分不出「強制」與「只映射出一個」
+        return (rankedRecommendations(mask: mask, probs: probs),
+                mask.filter { $0 == 1 }.count)
+    }
 
+    /// mask 內的合法動作解碼成推薦，依機率由高到低
+    private func rankedRecommendations(mask: [UInt8], probs: [Float]) -> [Recommendation] {
+        var recommendations: [Recommendation] = []
         for (index, isAvailable) in mask.enumerated() where isAvailable == 1 {
             let probability = index < probs.count ? Double(probs[index]) : 0.0
             if let action = mapper.actionIndexToRecommendation(index, probability: probability) {
                 recommendations.append(action)
             }
         }
-
-        // legalCount 量在截斷前的 mask 上，不是 recommendations.count——
-        // mapper 對個別索引可回 nil，映射後的數量分不出「強制」與「只映射出一個」
-        return (recommendations.sorted { $0.probability > $1.probability },
-                mask.filter { $0 == 1 }.count)
+        return recommendations.sorted { $0.probability > $1.probability }
     }
 
     /// 立直項維持首位，打牌項換成宣言後的推論；`declaration` 為空就保留原列。
@@ -213,22 +213,8 @@ final class BundledCoreMLBot: MahjongBot {
             return []
         }
 
-        // 建立推薦列表
-        var recommendations: [Recommendation] = []
-
-        for (index, isAvailable) in mask.enumerated() where isAvailable == 1 {
-            let probability = index < probs.count ? Double(probs[index]) : 0.0
-            if let action = mapper.actionIndexToRecommendation(index, probability: probability) {
-                recommendations.append(action)
-            }
-        }
-
-        // 按機率排序（高到低）
-        let sorted = recommendations.sorted { $0.probability > $1.probability }
-        let summary = sorted.prefix(6)
-            .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
-            .joined(separator: " ")
-        eventLog("[Bot] 副露後推論: \(sorted.count) items [\(summary)]")
+        let sorted = rankedRecommendations(mask: mask, probs: probs)
+        eventLog("[Bot] 副露後推論: \(sorted.count) items [\(sorted.logSummary)]")
         return sorted
     }
 }

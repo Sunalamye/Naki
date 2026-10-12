@@ -268,11 +268,8 @@ final class CloudBot: MahjongBot {
         }
 
         let source = "cloud:\(response.model ?? (model.isEmpty ? "default" : model))"
-        let summary = recommendations.prefix(6)
-            .map { "\($0.actionType.rawValue):\($0.displayTile)@\($0.percentageString)" }
-            .joined(separator: " ")
         eventLog("[Bot] ☁️ 雲端決策生效（\(source)）: "
-               + "\(recommendations.count) items [\(summary)]")
+               + "\(recommendations.count) items [\(recommendations.logSummary)]")
 
         // 防禦性把 actor 蓋成自家座位（伺服器應已設對）
         var action = reaction
@@ -312,10 +309,12 @@ final class CloudBot: MahjongBot {
                 // 上限 1s——決策逾時預算才 2s，等更久不如退回本地
                 let seconds = retryAfter.flatMap(Double.init)
                     .flatMap { $0.isFinite && $0 >= 0 ? min($0, 1.0) : nil } ?? 0.4
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                // 取消（換局／重連）時放棄這一手，不再發第二次請求
+                do { try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) } catch { return nil }
             } catch {
-                // 宣告那次成功、跟進失敗＝伺服器不穩：開斷路器，下個決策不再付一次逾時
-                breaker.recordFailure(now: Date())
+                // 宣告那次成功、跟進失敗＝伺服器不穩：開斷路器，下個決策不再付一次逾時。
+                // 取消不是雲端故障（判法同 `cloudOverride`）
+                if !Task.isCancelled { breaker.recordFailure(now: Date()) }
                 return nil
             }
         }

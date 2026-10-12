@@ -6,6 +6,7 @@
 //  port 固定在 8765 以外的高位區，不碰正在執行的 App。
 //
 
+import Darwin
 import Network
 import XCTest
 
@@ -104,4 +105,89 @@ final class DebugServerFramingTests: XCTestCase {
         XCTAssertTrue(line.contains(" 200 "), line)
     }
     #endif
+}
+
+/// listener 失敗或被取消後，`store.isDebugServerRunning` 必須歸零；
+/// 否則 `NakiRuntime.startDebugServer` 的 guard 會一直回「已在運行」，使用者無法重啟。
+@MainActor
+final class DebugServerLifecycleTests: XCTestCase {
+
+    /// 以沒有 SO_REUSEADDR 的 IPv6 loopback socket 佔住連續 `count` 個 port，
+    /// 讓 `DebugServer` 對這些 port 的 bind 一律 EADDRINUSE。回傳 nil 代表這段區間有 port 已被別人用。
+    private func occupyPorts(from base: UInt16, count: Int) -> [Int32]? {
+        var fds: [Int32] = []
+        for offset in 0..<count {
+            let fd = socket(AF_INET6, SOCK_STREAM, 0)
+            var address = sockaddr_in6()
+            address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+            address.sin6_family = sa_family_t(AF_INET6)
+            address.sin6_port = (base + UInt16(offset)).bigEndian
+            address.sin6_addr = in6addr_loopback
+            let bound = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size)) == 0 && listen(fd, 1) == 0
+                }
+            }
+            fds.append(fd)
+            if !bound { fds.forEach { close($0) }; return nil }
+        }
+        return fds
+    }
+
+    func testFailedBindOnEveryRetryResetsRunningFlag() async throws {
+        var occupied: (base: UInt16, fds: [Int32])?
+        for _ in 0..<20 where occupied == nil {
+            let base = UInt16.random(in: 50000...60000)
+            if let fds = occupyPorts(from: base, count: 10) { occupied = (base, fds) }
+        }
+        guard let held = occupied else { throw XCTSkip("無法佔用連續 10 個 loopback port（機器可能沒有 IPv6 loopback）") }
+        defer { held.fds.forEach { close($0) } }
+
+        // 模擬「曾經 ready 後失敗」留下的旗標：fix 前它永遠不會被改回 false
+        let store = GameStore()
+        store.isDebugServerRunning = true
+        let server = DebugServer(port: held.base, dependencies: makeTestDependencies(store: store))
+        server.start()
+        defer { server.stop() }
+
+        for _ in 0..<100 where store.isDebugServerRunning { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(store.isDebugServerRunning, "10 個 port 全部綁定失敗後旗標仍為 true")
+    }
+
+    /// 前幾個 port 被佔、後面成功：舊 listener 遲到的 `.cancelled` 不能把新 listener 的 ready 蓋成 false
+    func testRetryAfterFailedBindEndsUpRunningOnNextFreePort() async throws {
+        var occupied: (base: UInt16, fds: [Int32])?
+        for _ in 0..<20 where occupied == nil {
+            let base = UInt16.random(in: 50000...60000)
+            if let fds = occupyPorts(from: base, count: 2) { occupied = (base, fds) }
+        }
+        guard let held = occupied else { throw XCTSkip("無法佔用連續 2 個 loopback port（機器可能沒有 IPv6 loopback）") }
+        defer { held.fds.forEach { close($0) } }
+
+        let store = GameStore()
+        let server = DebugServer(port: held.base, dependencies: makeTestDependencies(store: store))
+        server.start()
+        defer { server.stop() }
+
+        for _ in 0..<100 where !store.isDebugServerRunning { try await Task.sleep(for: .milliseconds(50)) }
+        try await Task.sleep(for: .milliseconds(300))
+
+        XCTAssertTrue(store.isDebugServerRunning)
+        // 只斷言前兩個 port 綁定失敗；base+2 之後可能被其他程序佔用，確切落點不可預期
+        XCTAssertGreaterThanOrEqual(store.debugServerPort, held.base + 2)
+    }
+
+    func testStopResetsRunningFlagViaCancelledState() async throws {
+        let store = GameStore()
+        let server = DebugServer(port: UInt16.random(in: 40000...49000), dependencies: makeTestDependencies(store: store))
+        server.start()
+        for _ in 0..<100 where !store.isDebugServerRunning { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(store.isDebugServerRunning, "server 沒有起來")
+
+        server.stop()
+
+        // `stop()` 不碰 store；歸零來自 listener 的 `.cancelled` 回呼
+        for _ in 0..<100 where store.isDebugServerRunning { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(store.isDebugServerRunning)
+    }
 }

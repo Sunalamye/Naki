@@ -33,14 +33,6 @@ final class GameRecorder {
     /// 這局的識別碼（開局時間戳）
     private var gameId: String?
 
-    private static let idFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
-        return f
-    }()
-
     init(directory: URL) {
         self.directory = directory
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -55,7 +47,7 @@ final class GameRecorder {
             systemLog("[錄影] 丟棄未完成的對局 \(id)（\(buffer.count) 個事件，沒有 end_game）")
         }
         buffer = []
-        gameId = Self.idFormatter.string(from: Date())
+        gameId = LogManager.sessionStampFormatter.string(from: Date())
     }
 
     func record(_ event: [String: Any]) {
@@ -96,8 +88,8 @@ final class GameRecorder {
         }
     }
 
-    /// 列出這次 session 已錄下的對局
-    func recordedGames() -> [String] {
+    /// 列出某個 games 目錄下已錄下的對局檔名
+    static func recordedGames(in directory: URL) -> [String] {
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
         return entries.filter { $0.hasSuffix(".mjai.jsonl") }.sorted()
     }

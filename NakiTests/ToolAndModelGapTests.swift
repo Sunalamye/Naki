@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import MCPKit
 import XCTest
 
 @testable import Naki
@@ -16,6 +17,39 @@ final class ToolAndModelGapTests: XCTestCase {
 
     private func context(js: ExecuteJavaScriptAction = .unavailable) -> DefaultNakiMCPContext {
         DefaultNakiMCPContext(dependencies: makeTestDependencies(store: GameStore(), executeJavaScript: js))
+    }
+
+    // MARK: - context 向下轉型
+
+    /// 不是 Naki context 的最小實作：驗證 `naki()` 與三處保留原錯誤訊息的 `try?` 寫法
+    private final class PlainMCPContext: MCPContext {
+        let serverPort: UInt16 = 0
+        func getLogs() -> [String] { [] }
+        func clearLogs() {}
+        func log(_ message: String) {}
+    }
+
+    func testNonNakiContextKeepsOriginalNotAvailableErrors() async {
+        let plain = PlainMCPContext()
+        XCTAssertThrowsError(try plain.naki()) { XCTAssertTrue("\($0)".contains("Naki context"), "\($0)") }
+
+        func message(_ tool: some MCPTool) async -> String {
+            do { _ = try await tool.execute(arguments: [:]); return "no error" } catch { return "\(error)" }
+        }
+        let status = await message(BotStatusTool(context: plain))
+        XCTAssertTrue(status.contains("Bot status"), status)
+        let state = await message(GameStateTool(context: plain))
+        XCTAssertTrue(state.contains("Game snapshot"), state)
+        let hand = await message(GameHandTool(context: plain))
+        XCTAssertTrue(hand.contains("Game snapshot"), hand)
+        let trigger = await message(BotTriggerTool(context: plain))
+        XCTAssertTrue(trigger.contains("Naki context"), trigger)
+    }
+
+    func testBotDeepWithNonNakiContextReportsSnapshotError() async throws {
+        let out = try await BotDeepTool(context: PlainMCPContext()).execute(arguments: [:]) as? [String: Any]
+        XCTAssertTrue(out?["snapshot"] is NSNull)
+        XCTAssertEqual(out?["snapshotError"] as? String, "game_snapshot_callback_not_configured")
     }
 
     // MARK: - execute_js
@@ -78,6 +112,17 @@ final class ToolAndModelGapTests: XCTestCase {
         } catch {
             XCTAssertTrue("\(error)".contains("Logs/Naki"), "要是『限 log 根目錄』的訊息，而不是『檔案不存在』：\(error)")
         }
+    }
+
+    func testRecordedGamesListsOnlyJsonlRecordingsSorted() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("naki-recorded-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for name in ["b.mjai.jsonl", "a.mjai.jsonl", "c.txt"] {
+            try Data().write(to: dir.appendingPathComponent(name))
+        }
+        XCTAssertEqual(GameRecorder.recordedGames(in: dir), ["a.mjai.jsonl", "b.mjai.jsonl"])
     }
 
     func testGamesDirectoryRejectsEscapingSessionNames() {

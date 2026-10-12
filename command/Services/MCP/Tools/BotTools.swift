@@ -31,8 +31,7 @@ struct BotStatusTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext,
-              let status = nakiContext.getBotStatus() else {
+        guard let status = (try? context.naki())?.getBotStatus() else {
             throw MCPToolError.notAvailable("Bot status")
         }
         return status
@@ -54,12 +53,10 @@ struct BotTriggerTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         // Legacy path 的 `TriggerAutoPlayAction` 是空閉包，不擋的話會回假的 `queued: true`
         if !nakiContext.supportsAutoPlay {
-            return ["success": false, "error": "legacy_path_action_send_disabled", "queued": false]
+            return ["success": false, "error": LiqiToolResult.legacySendDisabled, "queued": false]
         }
         // 引擎那一輪的 outcome 拿不到（`TriggerAutoPlayAction` 是射後不理），
         // 所以只先擋下明知不會送的情況；success 只代表「已排進引擎下一輪」
@@ -135,8 +132,7 @@ struct BotDeepTool: MCPTool {
             "registeredTools": MCPToolRegistry.shared.registeredToolNames.count
         ]
 
-        if let nakiContext = context as? NakiMCPContext,
-           let snapshot = nakiContext.getGameSnapshot() {
+        if let snapshot = (try? context.naki())?.getGameSnapshot() {
             result["snapshot"] = snapshot
         } else {
             result["snapshot"] = NSNull()
@@ -177,9 +173,7 @@ struct BotChiTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let index = try MCPArguments.uint32(arguments, "index")
         let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
@@ -187,9 +181,9 @@ struct BotChiTool: MCPTool {
         let spec = LiqiRequestBuilder.chi(index: index)
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
         let combos = LiqiOperationStore.shared.pending?.operation(of: .chi)?.combination ?? []
-        return LiqiToolResult.dictionary(outcome, spec: spec,
-                                         extra: ["index": Int(index),
-                                                 "availableCombinations": combos])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
+                                                         extra: ["index": Int(index),
+                                                                 "availableCombinations": combos])
     }
 }
 
@@ -218,9 +212,7 @@ struct BotPonTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let index = try MCPArguments.uint32(arguments, "index")
         let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
@@ -228,9 +220,9 @@ struct BotPonTool: MCPTool {
         let spec = LiqiRequestBuilder.pon(index: index)
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
         let combos = LiqiOperationStore.shared.pending?.operation(of: .pon)?.combination ?? []
-        return LiqiToolResult.dictionary(outcome, spec: spec,
-                                         extra: ["index": Int(index),
-                                                 "availableCombinations": combos])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
+                                                         extra: ["index": Int(index),
+                                                                 "availableCombinations": combos])
     }
 }
 
@@ -252,9 +244,7 @@ struct BotSyncTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         context.log("MCP: Force reconnecting to rebuild Bot state")
 
         // 腳本、回傳值解讀與訊息措辭都在 `ForceReconnectAction`：工具不自己跑 JS，

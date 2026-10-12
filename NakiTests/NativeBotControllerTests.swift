@@ -154,7 +154,7 @@ final class NativeBotControllerTests: XCTestCase {
         let controller = try makeController(is3P: true)
         operations.record(seat: 0, operations: [LiqiOperation(type: .pon)], source: "test")
 
-        XCTAssertTrue(controller.canPon)
+        XCTAssertTrue(controller.availableActions.canPon)
     }
 
     // MARK: 決策來源不黏著

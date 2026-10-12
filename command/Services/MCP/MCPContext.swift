@@ -65,6 +65,16 @@ protocol NakiMCPContext: MCPContext {
     func setAntiIdle(enabled: Bool?, intervalSeconds: TimeInterval?) -> [String: Any]?
 }
 
+extension MCPContext {
+    /// 工具共用的向下轉型。MCPKit 的 `init(context: MCPContext)` 簽章把 context 型別抹掉了。
+    func naki() throws -> NakiMCPContext {
+        guard let context = self as? NakiMCPContext else {
+            throw MCPToolError.notAvailable("Naki context")
+        }
+        return context
+    }
+}
+
 // MARK: - 參數轉型
 
 /// 工具參數的無號整數轉型。

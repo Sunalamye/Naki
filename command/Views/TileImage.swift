@@ -11,12 +11,12 @@ import SwiftUI
 
 /// 一張麻將牌的圖像。
 ///
-/// **為什麼不用 `MahjongTile.unicode`**：`🀇🀙🀐` 在 macOS／iOS 系統字型下被渲染成
+/// **為什麼不用 Unicode 牌字元**（舊的 `MahjongTile.unicode` 已刪）：`🀇🀙🀐` 在 macOS／iOS 系統字型下被渲染成
 /// 黑白線稿，在推薦列那種 22–28pt 的尺寸上，使用者得先「認出」線稿代表哪張牌，
 /// 才能對到牌桌上的立體彩色牌——而那正是這個介面唯一要做的事。
 ///
 /// 更硬的問題是**赤五在 Unicode 裡不存在**：`5mr` 與 `5m` 共用同一個 code point
-/// （見 `MahjongTile.mjaiToUnicode`），舊版只能靠 `.foregroundColor(.red)` 把整張牌
+/// （舊的 `mjaiToUnicode` 對照表也是如此），舊版只能靠 `.foregroundColor(.red)` 把整張牌
 /// 染紅，而「紅色線稿」與「黑色線稿」在小尺寸下幾乎分不出來。改用圖像之後赤五是
 /// 獨立資產（`Manzu/5mr`），染色 hack 一併移除。
 ///
@@ -119,7 +119,6 @@ struct TileImage: View {
     // MARK: - Asset Mapping
 
     private static let honors: Set<String> = ["E", "S", "W", "N", "P", "F", "C"]
-    private static let utilities: Set<String> = ["back", "blank", "front"]
     /// 自己就是一整張牌、不需要疊 `Front` 的資產。
     static let selfContained: Set<String> = ["back", "blank", "front"]
     private static let suitGroups: [Character: String] = [
@@ -133,7 +132,7 @@ struct TileImage: View {
     /// 這個函式回傳合法字串不代表圖存在（imageset 沒被 build 進去時 `Image` 會靜靜
     /// 畫一塊空白，畫面上看起來就只是「牌不見了」）。
     static func assetName(for mjai: String) -> String? {
-        if utilities.contains(mjai) { return "MahjongTiles/Utility/\(mjai)" }
+        if selfContained.contains(mjai) { return "MahjongTiles/Utility/\(mjai)" }
         if honors.contains(mjai) { return "MahjongTiles/Honors/\(mjai)" }
 
         // 數牌：`1m`–`9m`／`1p`–`9p`／`1s`–`9s`，外加赤五 `5mr`／`5pr`／`5sr`。

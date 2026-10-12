@@ -258,8 +258,10 @@ final class AutoPlayEngine {
     /// 目前回報出去的停滯（用來去重，只在真的變化時通知）
     private var reportedStall: AutoPlayStall?
     private let timing: Timing
-    /// 我方權威動作回音的觀測面（第 3 層驗證；`timing.actionEchoTimeoutMs == 0` 時不使用）
-    private let echo: (any SelfActionEchoObserving)?
+    /// 我方權威動作回音的觀測面（第 3 層驗證；`timing.actionEchoTimeoutMs == 0` 時不使用）。
+    /// init 的 `echoOverride` 為 nil 時用 `.shared`；`AutoPlayActionExecutor.echo` 的 nil 則是「不等回音」，
+    /// 兩者語意相反，所以 init 參數不叫 `echo`。
+    private let echo: any SelfActionEchoObserving
 
     // MARK: - 狀態
 
@@ -308,7 +310,7 @@ final class AutoPlayEngine {
     init(store: LiqiOperationStore,
          sender: LiqiActionSender,
          timing: Timing = .live,
-         echo: (any SelfActionEchoObserving)? = nil,
+         echoOverride: (any SelfActionEchoObserving)? = nil,
          context: @escaping () -> Context,
          log: @escaping (String) -> Void = { _ in },
          event: @escaping (String) -> Void = { _ in },
@@ -316,7 +318,7 @@ final class AutoPlayEngine {
         self.store = store
         self.sender = sender
         self.timing = timing
-        self.echo = echo ?? SelfActionEchoTracker.shared
+        self.echo = echoOverride ?? SelfActionEchoTracker.shared
         self.context = context
         self.log = log
         self.event = event
@@ -348,10 +350,7 @@ final class AutoPlayEngine {
         nap?.cancel()
         nap = nil
         state = .idle
-        confirmPending = false
-        confirmAckedAt = nil
-        confirmWatchdogResends = 0
-        confirmInRecovery = false
+        resetConfirm()
     }
 
     /// 提早結束這次輪詢間隔。
@@ -390,18 +389,12 @@ final class AutoPlayEngine {
     /// 不 `wake()`：讓確認等到下一拍輪詢再處理，配合 `confirmGrace` 給終局訊號一個
     /// 先到並取消的窗口（避免對最後一局誤送 confirmNewRound）。
     func roundDidEnd() {
-        confirmPending = true
-        confirmAckedAt = nil   // 新一局結束，重新開始「送出 → 受理 → 等下一局」
-        confirmWatchdogResends = 0
-        confirmInRecovery = false
+        resetConfirm(pending: true)   // 新一局結束，重新開始「送出 → 受理 → 等下一局」
     }
 
     /// 下一局開始（`ActionNewRound` → `start_kyoku`）——權威推進（第 3 層），確認已生效。
     func roundDidBegin() {
-        confirmPending = false
-        confirmAckedAt = nil
-        confirmWatchdogResends = 0
-        confirmInRecovery = false
+        resetConfirm()
     }
 
     /// 對局結束（`NotifyGameEndResult` / `NotifyGameTerminate` → `end_game`）。
@@ -409,7 +402,11 @@ final class AutoPlayEngine {
     /// 終局不進下一局：清掉待確認，避免對終局送 confirmNewRound。
     /// 終局本身客戶端還會做什麼（協定層動作）需 live 觀察，未實作。
     func gameDidEnd() {
-        confirmPending = false
+        resetConfirm()
+    }
+
+    private func resetConfirm(pending: Bool = false) {
+        confirmPending = pending
         confirmAckedAt = nil
         confirmWatchdogResends = 0
         confirmInRecovery = false
@@ -657,10 +654,7 @@ final class AutoPlayEngine {
             if confirmWatchdogResends > timing.confirmMaxWatchdogResends {
                 note("⚠️ confirmNewRound 重送 \(timing.confirmMaxWatchdogResends) 次仍等不到 "
                      + "ActionNewRound → 放掉待確認，讓自動打牌對實際進行中的那局恢復", to: .event)
-                confirmPending = false
-                confirmAckedAt = nil
-                confirmWatchdogResends = 0
-                confirmInRecovery = false
+                resetConfirm()
                 return .abandoned
             }
             note("⏱️ confirmNewRound recovery 重送 "

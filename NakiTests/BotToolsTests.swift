@@ -54,4 +54,47 @@ final class BotToolsTests: XCTestCase {
 
         XCTAssertFalse(runtime.store.isDebugServerRunning)
     }
+
+    /// 旗標為 true 時再次啟動只能回報「已在運行」，不能停掉舊 server 再綁新的。
+    /// 用隨機高位 port：若 guard 失效，新 server 的啟動訊息會蓋掉狀態列。
+    func testStartDebugServerIsNoOpWhileFlagSet() async throws {
+        let runtime = NakiRuntime()
+        let port = UInt16.random(in: 50000...60000)
+        runtime.store.debugServerPort = port
+        runtime.store.isDebugServerRunning = true
+
+        runtime.startDebugServer()
+        let expected = L10n.text("MCP Server 已在運行")
+        XCTAssertEqual(runtime.store.statusMessage, expected)
+
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        XCTAssertEqual(runtime.store.statusMessage, expected, "guard 失效時新 server 的啟動訊息會蓋掉它")
+        XCTAssertEqual(runtime.store.debugServerPort, port)
+        XCTAssertTrue(runtime.store.isDebugServerRunning)
+    }
+
+    /// 不支援自動送出時：模式降級、存檔寫回降級值，狀態列留的是降級提示而不是被「模式已變更」蓋掉。
+    func testSetAutoPlayModeDegradeKeepsNoticeAndPersistsClampedMode() {
+        let defaults = UserDefaults.standard
+        let backup = defaults.object(forKey: AutoPlayModeStore.key)
+        defer {
+            if let backup { defaults.set(backup, forKey: AutoPlayModeStore.key) }
+            else { defaults.removeObject(forKey: AutoPlayModeStore.key) }
+        }
+        let runtime = NakiRuntime()
+        runtime.settings.adoptAutoPlaySupport(false)
+
+        runtime.setAutoPlayMode(.auto)
+
+        XCTAssertEqual(runtime.store.autoPlayMode, .recommend)
+        XCTAssertEqual(AutoPlayModeStore.load(), .recommend)
+        XCTAssertEqual(runtime.store.statusMessage, L10n.text("此裝置不支援自動送出，已改為推薦模式"))
+
+        runtime.setAutoPlayMode(.off)
+
+        XCTAssertEqual(runtime.store.autoPlayMode, .off)
+        XCTAssertNotEqual(runtime.store.statusMessage, L10n.text("此裝置不支援自動送出，已改為推薦模式"),
+                          "沒有降級時不得留著降級提示")
+    }
 }

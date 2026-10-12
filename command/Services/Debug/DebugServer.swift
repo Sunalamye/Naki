@@ -146,8 +146,9 @@ class DebugServer: MCPHTTPResponder {
                 return
             }
 
-            listener = try NWListener(using: parameters, on: nwPort)
-            listener?.stateUpdateHandler = { [weak self] state in
+            let created = try NWListener(using: parameters, on: nwPort)
+            listener = created
+            created.stateUpdateHandler = { [weak self] state in
                 guard let self = self else { return }
                 switch state {
                 case .ready:
@@ -170,17 +171,20 @@ class DebugServer: MCPHTTPResponder {
                     self.startWithPort(nextPort, retryCount: retryCount + 1)
                 case .cancelled:
                     self.log("Server cancelled")
-                    self.isRunning = false
+                    // `.failed` 之後的 `cancel()` 也走這裡；旗標不歸零的話 `startDebugServer` 的 guard
+                    // 會一直回「已在運行」。換 port 重試後，舊 listener 遲到的 `.cancelled` 不能蓋掉
+                    // 新 listener 的 `.ready`，事件次序 Network.framework 不保證，所以比對身分
+                    if self.listener == nil || self.listener === created { self.markStopped() }
                 default:
                     break
                 }
             }
 
-            listener?.newConnectionHandler = { [weak self] connection in
+            created.newConnectionHandler = { [weak self] connection in
                 self?.handleConnection(connection)
             }
 
-            listener?.start(queue: .main)
+            created.start(queue: .main)
 
         } catch {
             log("Failed to start server on port \(port): \(error)")
@@ -189,6 +193,11 @@ class DebugServer: MCPHTTPResponder {
             log("Trying port \(nextPort)...")
             startWithPort(nextPort, retryCount: retryCount + 1)
         }
+    }
+
+    private func markStopped() {
+        isRunning = false
+        dependencies.store.isDebugServerRunning = false
     }
 
     /// 停止 Server
@@ -316,7 +325,6 @@ class DebugServer: MCPHTTPResponder {
         let rawPath = parts[1]
         // query string 要拆掉，否則 `/screenshot?mode=view` 會走到 404
         let path = rawPath.components(separatedBy: "?").first ?? rawPath
-        _ = rawPath.components(separatedBy: "?").dropFirst()  // query 目前沒有端點需要
 
         // Origin 驗證（MCP Streamable HTTP 的 DNS rebinding 防護）。
         //
@@ -364,11 +372,11 @@ class DebugServer: MCPHTTPResponder {
         },
         DebugEndpoint("GET", "/help", group: "Server",
                       summary: "JSON 版 API 說明（等同 MCP get_help）") { server, _, conn in
-            server.handleHelp(connection: conn)
+            server.callToolAndRespond(tool: "get_help", connection: conn)
         },
         DebugEndpoint("GET", "/status", group: "Server",
                       summary: "server 狀態、port、版本、log 路徑、JS 注入結果") { server, _, conn in
-            server.handleStatus(connection: conn)
+            server.callToolAndRespond(tool: "get_status", connection: conn)
         },
         DebugEndpoint("POST", "/mcp", group: "Server",
                       summary: "MCP JSON-RPC（server/discover ／ tools/list ／ tools/call；"
@@ -386,24 +394,24 @@ class DebugServer: MCPHTTPResponder {
         },
         DebugEndpoint("GET", "/logs", group: "Debug",
                       summary: "讀記憶體 log（LogManager，時間排序）") { server, _, conn in
-            server.handleLogs(connection: conn)
+            server.callToolAndRespond(tool: "get_logs", connection: conn)
         },
         DebugEndpoint("DELETE", "/logs", group: "Debug",
                       summary: "清空記憶體 log（檔案 log 不受影響）") { server, _, conn in
-            server.handleClearLogs(connection: conn)
+            server.callToolAndRespond(tool: "clear_logs", connection: conn)
         },
 
         DebugEndpoint("GET", "/game/state", group: "Game（Swift 協定層狀態）",
                       summary: "Liqi 累積出來的對局快照") { server, _, conn in
-            server.handleGameState(connection: conn)
+            server.callToolAndRespond(tool: "game_state", connection: conn)
         },
         DebugEndpoint("GET", "/game/hand", group: "Game（Swift 協定層狀態）",
                       summary: "手牌與 AI 推薦") { server, _, conn in
-            server.handleGameHand(connection: conn)
+            server.callToolAndRespond(tool: "game_hand", connection: conn)
         },
         DebugEndpoint("GET", "/game/ops", group: "Game（Swift 協定層狀態）",
                       summary: "pending／latest 的 Liqi oplist") { server, _, conn in
-            server.handleGameOps(connection: conn)
+            server.callToolAndRespond(tool: "game_ops", connection: conn)
         },
 
         DebugEndpoint("POST", "/game/discard", group: "Game（會送出動作）",
@@ -419,28 +427,28 @@ class DebugServer: MCPHTTPResponder {
 
         DebugEndpoint("GET", "/bot/status", group: "Bot",
                       summary: "Bot、模式、推薦") { server, _, conn in
-            server.handleBotStatus(connection: conn)
+            server.callToolAndRespond(tool: "bot_status", connection: conn)
         },
         DebugEndpoint("GET", "/bot/ops", group: "Bot",
                       summary: "Liqi operation 快照") { server, _, conn in
-            server.handleExploreOps(connection: conn)
+            server.callToolAndRespond(tool: "bot_ops", connection: conn)
         },
         DebugEndpoint("GET", "/bot/deep", group: "Bot",
                       summary: "協定層診斷（request／response 細節）") { server, _, conn in
-            server.handleDeepExplore(connection: conn)
+            server.callToolAndRespond(tool: "bot_deep", connection: conn)
         },
         DebugEndpoint("POST", "/bot/trigger", group: "Bot（會送出動作）",
                       summary: "手動觸發自動打牌（需要當下有合法 oplist）",
                       affectsAccount: true) { server, _, conn in
-            server.handleTriggerAutoPlay(connection: conn)
+            server.callToolAndRespond(tool: "bot_trigger", connection: conn)
         },
         DebugEndpoint("POST", "/bot/chi", group: "Bot（會送出動作）",
                       summary: "送出吃", affectsAccount: true) { server, _, conn in
-            server.handleTestChi(connection: conn)
+            server.callToolAndRespond(tool: "bot_chi", connection: conn)
         },
         DebugEndpoint("POST", "/bot/pon", group: "Bot（會送出動作）",
                       summary: "送出碰", affectsAccount: true) { server, _, conn in
-            server.handleTestPon(connection: conn)
+            server.callToolAndRespond(tool: "bot_pon", connection: conn)
         }
     ] + debugBuildOnlyEndpoints
 
@@ -645,15 +653,6 @@ class DebugServer: MCPHTTPResponder {
             .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
-    private func handleStatus(connection: NWConnection) {
-        callToolAndRespond(tool: "get_status", connection: connection)
-    }
-
-    /// AI 友好的 Help 端點 - 返回結構化的 API 文檔
-    private func handleHelp(connection: NWConnection) {
-        callToolAndRespond(tool: "get_help", connection: connection)
-    }
-
     private func handleJavaScript(body: String, connection: NWConnection) {
         guard !body.isEmpty else {
             sendJSON(connection: connection, data: ["error": "No JavaScript code provided"])
@@ -689,18 +688,6 @@ class DebugServer: MCPHTTPResponder {
 
     // MARK: - Game API Handlers
 
-    private func handleGameState(connection: NWConnection) {
-        callToolAndRespond(tool: "game_state", connection: connection)
-    }
-
-    private func handleGameHand(connection: NWConnection) {
-        callToolAndRespond(tool: "game_hand", connection: connection)
-    }
-
-    private func handleGameOps(connection: NWConnection) {
-        callToolAndRespond(tool: "game_ops", connection: connection)
-    }
-
     /// 打牌：Unity 下沒有 UI 手牌陣列，改以牌字串指定（MJAI 或雀魂記法皆可）
     private func handleGameDiscard(body: String, connection: NWConnection) {
         guard let data = body.data(using: .utf8),
@@ -731,40 +718,6 @@ class DebugServer: MCPHTTPResponder {
         }
         arguments["action"] = action
         callToolAndRespond(tool: "game_action", arguments: arguments, connection: connection)
-    }
-
-    // MARK: - Debug Handlers
-
-    private func handleLogs(connection: NWConnection) {
-        callToolAndRespond(tool: "get_logs", connection: connection)
-    }
-
-    private func handleClearLogs(connection: NWConnection) {
-        callToolAndRespond(tool: "clear_logs", connection: connection)
-    }
-
-    private func handleBotStatus(connection: NWConnection) {
-        callToolAndRespond(tool: "bot_status", connection: connection)
-    }
-
-    private func handleTriggerAutoPlay(connection: NWConnection) {
-        callToolAndRespond(tool: "bot_trigger", connection: connection)
-    }
-
-    private func handleExploreOps(connection: NWConnection) {
-        callToolAndRespond(tool: "bot_ops", connection: connection)
-    }
-
-    private func handleDeepExplore(connection: NWConnection) {
-        callToolAndRespond(tool: "bot_deep", connection: connection)
-    }
-
-    private func handleTestChi(connection: NWConnection) {
-        callToolAndRespond(tool: "bot_chi", connection: connection)
-    }
-
-    private func handleTestPon(connection: NWConnection) {
-        callToolAndRespond(tool: "bot_pon", connection: connection)
     }
 
     // MARK: - Response Helpers
@@ -853,15 +806,5 @@ class DebugServer: MCPHTTPResponder {
     /// 添加外部日誌
     func addLog(_ message: String) {
         log(message)
-    }
-
-    /// 獲取所有日誌（單一來源：LogManager，已依時間排序）
-    func getLogs() -> [String] {
-        LogManager.shared.recentLogLines()
-    }
-
-    /// 清空日誌（記憶體那份；檔案 log 是完整紀錄，不清）
-    func clearLogs() {
-        LogManager.shared.clear()
     }
 }

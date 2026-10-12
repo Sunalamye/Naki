@@ -151,8 +151,7 @@ struct GameStateTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext,
-              let snapshot = nakiContext.getGameSnapshot() else {
+        guard let snapshot = (try? context.naki())?.getGameSnapshot() else {
             throw MCPToolError.notAvailable("Game snapshot")
         }
         return snapshot
@@ -174,8 +173,7 @@ struct GameHandTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext,
-              let snapshot = nakiContext.getGameSnapshot() else {
+        guard let snapshot = (try? context.naki())?.getGameSnapshot() else {
             throw MCPToolError.notAvailable("Game snapshot")
         }
 
@@ -245,9 +243,7 @@ struct GameDiscardTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let snapshot = LiqiOperationStore.shared.pending
         let spec = try NakiGameAction.spec(action: "discard",
@@ -255,9 +251,9 @@ struct GameDiscardTool: MCPTool {
                                            snapshot: snapshot)
         let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
-        return LiqiToolResult.dictionary(outcome, spec: spec,
-                                         extra: ["tile": arguments["tile"] as? String ?? "",
-                                                 "moqie": arguments["moqie"] as? Bool ?? false])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
+                                                         extra: ["tile": arguments["tile"] as? String ?? "",
+                                                                 "moqie": arguments["moqie"] as? Bool ?? false])
     }
 }
 
@@ -297,9 +293,7 @@ struct GameActionTool: MCPTool {
         guard let action = arguments["action"] as? String else {
             throw MCPToolError.missingParameter("action")
         }
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let snapshot = LiqiOperationStore.shared.pending
         let spec = try NakiGameAction.spec(action: action,
@@ -307,8 +301,8 @@ struct GameActionTool: MCPTool {
                                            snapshot: snapshot)
         let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
-        return LiqiToolResult.dictionary(outcome, spec: spec,
-                                         extra: ["action": action])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
+                                                         extra: ["action": action])
     }
 }
 
@@ -345,9 +339,7 @@ struct GameActionVerifyTool: MCPTool {
         guard let action = arguments["action"] as? String else {
             throw MCPToolError.missingParameter("action")
         }
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
 
         let store = LiqiOperationStore.shared
         let before = store.pending
@@ -359,7 +351,7 @@ struct GameActionVerifyTool: MCPTool {
         // 一半時間用來等 RESPONSE，另一半等對局動作推進
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: timeout / 2)
 
-        var result = LiqiToolResult.dictionary(outcome, spec: spec, extra: ["action": action])
+        var result = LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: ["action": action])
 
         guard outcome.sent?.success == true else {
             result["verified"] = false
@@ -423,13 +415,11 @@ struct GameConfirmNewRoundTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.confirmNewRound()
         let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
-        return LiqiToolResult.dictionary(outcome, spec: spec)
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
 
@@ -460,13 +450,11 @@ struct GameVoteEndTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        guard let nakiContext = context as? NakiMCPContext else {
-            throw MCPToolError.notAvailable("Naki context")
-        }
+        let nakiContext = try context.naki()
         let yes = arguments["yes"] as? Bool ?? true
         let spec = LiqiRequestBuilder.voteGameEnd(yes: yes)
         let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
-        return LiqiToolResult.dictionary(outcome, spec: spec, extra: ["yes": yes])
+        return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: ["yes": yes])
     }
 }
