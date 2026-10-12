@@ -12,10 +12,11 @@
 //    看起來有接上，實際上永遠取不到值。
 //  而 `default: break` 讓上述每一種都不留痕跡。
 //
-//  這批 test 鎖三件事：
+//  這批 test 鎖四件事：
 //  1. JS 原始碼裡 `sendToSwift('…')` 的 type 集合 == `BridgeMessageType.allCases`（雙向）。
 //  2. 已刪除的舊 type 不會偷偷回到 JS。
 //  3. 未知 type 的 warning 去重器：同一種只報一次、種類數有上限。
+//  4. 每個 type 的 payload 帶齊 Swift 讀的欄位；缺欄位走 `warnMalformed`，不靜默 return。
 //
 //  註：switch 是否處理了每個 case 不需要 test——`WebSocketMessageHandler` 的 switch
 //  沒有 `default`，漏掉會直接編譯失敗。
@@ -139,18 +140,24 @@ final class BridgeMessageContractTests: XCTestCase {
     // MARK: - JS 端欄位名
 
     /// 取出每一個 `sendToSwift('<type>', { … })` 的 payload 物件字面（皆為單層，無巢狀括號）
-    private func senderPayloads() throws -> [(type: String, body: String)] {
-        let source = try WebSocketInterceptor.loadJavaScript(named: "naki-websocket")
+    private func senderPayloads(modules: [String] = ["naki-websocket"]) throws -> [(type: String, body: String)] {
         let regex = try NSRegularExpression(
             pattern: #"sendToSwift\(\s*['"]([A-Za-z0-9_]+)['"]\s*,\s*\{([^}]*)\}"#)
-        let range = NSRange(source.startIndex..<source.endIndex, in: source)
 
-        return regex.matches(in: source, range: range).compactMap { match in
-            guard match.numberOfRanges > 2,
-                  let typeRange = Range(match.range(at: 1), in: source),
-                  let bodyRange = Range(match.range(at: 2), in: source) else { return nil }
-            return (String(source[typeRange]), String(source[bodyRange]))
+        return try modules.flatMap { module in
+            let source = try WebSocketInterceptor.loadJavaScript(named: module)
+            let range = NSRange(source.startIndex..<source.endIndex, in: source)
+            return regex.matches(in: source, range: range).compactMap { match -> (type: String, body: String)? in
+                guard match.numberOfRanges > 2,
+                      let typeRange = Range(match.range(at: 1), in: source),
+                      let bodyRange = Range(match.range(at: 2), in: source) else { return nil }
+                return (String(source[typeRange]), String(source[bodyRange]))
+            }
         }
+    }
+
+    private func declaresKey(_ key: String, in body: String) -> Bool {
+        body.range(of: #"(^|[\s,])"# + key + #"\s*:"#, options: .regularExpression) != nil
     }
 
     /// Swift 的 handler 一律 `data["socketId"]`；JS 以前每筆同時帶 `id` 與 `socketId`
@@ -169,8 +176,121 @@ final class BridgeMessageContractTests: XCTestCase {
 
             if call.type != BridgeMessageType.forceReconnect.rawValue {
                 XCTAssertTrue(call.body.contains("socketId"),
-                              "\(call.type) 的 payload 必須帶 socketId，Swift 端只讀這個欄位")
+                              "\(call.type) 的 payload 必須帶 socketId，Swift 端靠它辨識連線")
             }
         }
+    }
+
+    /// Swift handler 對每個 type 讀的欄位（`WebSocketMessageHandler` 裡的 `data["…"]`）。
+    /// handler 多讀一個欄位時這張表要跟著加，JS 少送就會在這裡紅，而不是 guard 靜默 return。
+    private static let fieldsSwiftReads: [BridgeMessageType: [String]] = [
+        .websocketConnect: ["socketId", "url", "isMajsoul"],
+        .websocketConnected: ["socketId", "isMajsoul"],
+        .websocketMessage: ["socketId", "direction", "data", "type"],
+        .websocketClose: ["socketId", "isMajsoul"],
+        .websocketError: ["socketId"],
+        .forceReconnect: ["closedCount"],
+        .pluginEvent: ["id", "msg"]
+    ]
+
+    func testEveryTypeDeclaresFieldsSwiftReads() throws {
+        let calls = try senderPayloads(modules: WebSocketInterceptor.jsModules)
+
+        for type in BridgeMessageType.allCases {
+            let fields = try XCTUnwrap(Self.fieldsSwiftReads[type], "\(type.rawValue) 沒有列出 Swift 讀的欄位")
+            let senders = calls.filter { $0.type == type.rawValue }
+            XCTAssertFalse(senders.isEmpty, "\(type.rawValue) 找不到帶 payload 的送出端")
+            for call in senders {
+                for field in fields {
+                    XCTAssertTrue(declaresKey(field, in: call.body), "\(type.rawValue) 的 payload 缺 \(field)：\(call.body)")
+                }
+            }
+        }
+    }
+
+    // MARK: - 缺欄位與 text frame
+
+    private func malformedLogCount() -> Int {
+        LogManager.shared.entries.filter { $0.message.contains("websocket_message 缺少 direction 或 data") }.count
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        return condition()
+    }
+
+    /// 缺 direction／data 以前直接 return，連一行 log 都沒有
+    func testMissingDirectionGoesThroughWarnMalformed() async {
+        let handler = WebSocketMessageHandler()
+        let before = malformedLogCount()
+
+        handler.dispatch(type: "websocket_message", data: ["socketId": 1, "data": "AAAA", "type": "binary"])
+        handler.dispatch(type: "websocket_message", data: ["socketId": 1, "direction": "receive", "type": "binary"])
+
+        let logged = await waitUntil { self.malformedLogCount() > before }
+        XCTAssertTrue(logged, "缺欄位要走 warnMalformed")
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(malformedLogCount(), before + 1, "同一種格式錯誤只報一次")
+    }
+
+    /// text frame 是原始字串：不得當 base64 解（每筆失敗洗版，或把字串當封包解）
+    func testTextFrameIsNotDecodedAsBase64() async {
+        let handler = WebSocketMessageHandler()
+        let failure = "Failed to decode base64"
+        let failuresBefore = LogManager.shared.entries.filter { $0.message.contains(failure) }.count
+        let fenceBefore = malformedLogCount()
+
+        handler.dispatch(type: "websocket_message",
+                         data: ["socketId": 1, "direction": "receive", "data": "{\"hello\"}", "type": "text"])
+        // 圍欄：log 依序進 main queue，看到它就代表前一筆該寫的 log 都已寫入
+        handler.dispatch(type: "websocket_message", data: ["socketId": 1])
+
+        let fenced = await waitUntil { self.malformedLogCount() > fenceBefore }
+        XCTAssertTrue(fenced)
+        XCTAssertEqual(LogManager.shared.entries.filter { $0.message.contains(failure) }.count, failuresBefore)
+    }
+
+    // MARK: - 連線 0→1 的 reset 時序
+
+    private func frame(_ bytes: [UInt8], direction: String) -> [String: Any] {
+        ["socketId": 1, "direction": direction, "data": Data(bytes).base64EncodedString(), "type": "binary"]
+    }
+
+    private let loginRequest = LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Login", fields: [], msgId: 1)
+    private let loginResponse = LiqiEncoder.encodeEnvelope(type: .response, msgId: 1, method: "",
+                                                           payload: LiqiEncoder.encodeFields([.varint(field: 2, value: 123456)]))
+
+    /// 連上 → 送 login REQUEST → 等協調器的 Task 跑完 → 收 RESPONSE，回傳認到的 accountId
+    private func accountIdAfterConnect(requestBeforeConnect: Bool) async -> Int {
+        let store = GameStore()
+        let coordinator = NakiWebCoordinator(store: store)
+        defer { coordinator.eventStream.stopConsumer() }
+        let handler = coordinator.websocketHandler
+        let request = frame(loginRequest, direction: "send")
+
+        if requestBeforeConnect { handler.dispatch(type: "websocket_message", data: request) }
+        handler.dispatch(type: "websocket_connected", data: ["socketId": 1, "isMajsoul": true])
+        if !requestBeforeConnect { handler.dispatch(type: "websocket_message", data: request) }
+
+        let settled = await waitUntil { store.isConnected }
+        XCTAssertTrue(settled)
+        handler.dispatch(type: "websocket_message", data: frame(loginResponse, direction: "receive"))
+        return handler.majsoulAccountId
+    }
+
+    /// reset 清 parser 的 msgId 對照表；留在 Task 裡時，open 後緊接著的 REQUEST 先登記、
+    /// Task 才清，回應就配不上（bridge M4）
+    func testResetRunsBeforeNextMessage() async {
+        let accountId = await accountIdAfterConnect(requestBeforeConnect: false)
+        XCTAssertEqual(accountId, 123456, "connected 之後送的 REQUEST，msgId 要還在 pending")
+    }
+
+    /// 對照：connected 之前的 REQUEST 仍要被這次 reset 清掉（reset 沒有被拿掉）
+    func testResetClearsRequestsSentBeforeConnect() async {
+        let accountId = await accountIdAfterConnect(requestBeforeConnect: true)
+        XCTAssertEqual(accountId, 0)
     }
 }

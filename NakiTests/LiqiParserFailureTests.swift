@@ -110,19 +110,22 @@ final class LiqiParserFailureTests: XCTestCase {
 
     /// accountId 只來自登入回應（`ResLogin`：2=account_id，3=account{1=account_id}）
     private func logIn(_ bridge: MajsoulBridge, account: LiqiField? = nil) {
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Login", fields: [], msgId: 1)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Login", fields: [], msgId: 1)))
         _ = bridge.parse(response(msgId: 1, fields: [account ?? .varint(field: 2, value: UInt64(accountId))]))
     }
 
-    /// 照正式路徑登入並進場：送出面只走 `parseRaw`（`WebSocketInterceptor`），收到面走 `parse`。
-    /// 預設讓 bridge 進入「已知自家座位 0」的狀態（後續 action 測試的前置）
+    /// 預設自家座位。刻意不放 0：seat 未設定與缺席補 0 都會落在 0，坐在 0 分不出座位對錯
+    private static let ownSeat = 2
+
+    /// 照正式路徑登入並進場：送出面只走 `observeOutgoing`（`WebSocketInterceptor`），收到面走 `parse`。
+    /// 預設讓 bridge 進入「已知自家座位 `ownSeat`」的狀態（後續 action 測試的前置）
     @discardableResult
     private func authenticate(_ bridge: MajsoulBridge, msgId: UInt16 = 41,
                               account: LiqiField? = nil, fields: [LiqiField]? = nil) -> [[String: Any]]? {
         logIn(bridge, account: account)
-        _ = bridge.parseRaw(authGameRequest(msgId: msgId))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: msgId))
         return bridge.parse(response(msgId: msgId, fields: fields ?? [
-            .bytes(field: 3, value: packed([accountId, 2, 3, 4]))
+            .bytes(field: 3, value: packed([2, 3, accountId, 4]))
         ]))
     }
 
@@ -247,7 +250,7 @@ final class LiqiParserFailureTests: XCTestCase {
         let events = authenticate(bridge)
 
         XCTAssertEqual(events?.first?["type"] as? String, "start_game")
-        XCTAssertEqual(events?.first?["id"] as? Int, 0, "accountId 在 seatList 的第 0 位")
+        XCTAssertEqual(events?.first?["id"] as? Int, Self.ownSeat, "accountId 在 seatList 的第 \(Self.ownSeat) 位")
         XCTAssertEqual(events?.first?["is3P"] as? Bool, false)
         XCTAssertNil(state.blocking)
         XCTAssertEqual(state.totalCount, 0, "正常 fixture 不得產生任何 fault")
@@ -263,7 +266,7 @@ final class LiqiParserFailureTests: XCTestCase {
         let (bridge, state) = makeBridge()
 
         logIn(bridge)
-        _ = bridge.parseRaw(authGameRequest(msgId: 53))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 53))
 
         // 手工組 envelope：[3][msgId LE][field2=payload]——刻意不寫 field 1
         let payload = LiqiEncoder.encodeFields([
@@ -295,7 +298,7 @@ final class LiqiParserFailureTests: XCTestCase {
 
         // ReqAuthGame 帶的 account_id 不是來源：沒有登入回應就不得建立 Bot
         let (bridge, state) = makeBridge()
-        _ = bridge.parseRaw(authGameRequest(msgId: 41))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 41))
         let events = bridge.parse(response(msgId: 41, fields: seated))
         XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" })
         XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list")
@@ -305,14 +308,14 @@ final class LiqiParserFailureTests: XCTestCase {
     func testOauth2AuthResponseNeverProvidesAccountId() {
         let token = LiqiField.string(field: 2, value: "abcdef0123456789")
         let (bridge, state) = makeBridge()
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 1)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 1)))
         _ = bridge.parse(response(msgId: 1, fields: [token]))
         XCTAssertEqual(bridge.accountId, 0)
         XCTAssertEqual(state.totalCount, 0)
         XCTAssertEqual((bridge.lastParsed?["data"] as? [String: Any])?.count, 0, "token 不得進 parsed dict")
 
         // 座位表含 97（token 首字元 "a"）：accountId 若被汙染成 97 就會認到座位
-        _ = bridge.parseRaw(authGameRequest(msgId: 41))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 41))
         let events = bridge.parse(response(msgId: 41, fields: [.bytes(field: 3, value: packed([97, 2, 3, 4]))]))
         XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" })
         XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list", "accountId 缺席要由 authGame 顯性 blocking")
@@ -320,7 +323,7 @@ final class LiqiParserFailureTests: XCTestCase {
         // 已有登入結果時，後到的 oauth2Auth 回應不得覆寫
         let (loggedIn, _) = makeBridge()
         logIn(loggedIn)
-        _ = loggedIn.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 2)))
+        _ = loggedIn.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 2)))
         _ = loggedIn.parse(response(msgId: 2, fields: [token]))
         XCTAssertEqual(loggedIn.accountId, accountId)
     }
@@ -341,12 +344,14 @@ final class LiqiParserFailureTests: XCTestCase {
 
     /// 非 varint 的 account_id 不設 accountId，只記 degraded（不得 blocking）。直接欄位與巢狀欄位各驗一次。
     func testResLoginNonVarintAccountIdIsRejectedWithDegradedFault() {
-        for account: LiqiField in [.string(field: 2, value: "abcdef"),
-                                   .message(field: 3, fields: [.string(field: 1, value: "abcdef")])] {
+        // fieldId 是壞掉的那個 block：直接欄位是 ResLogin field 2，巢狀是 Account field 1
+        for (account, fieldId): (LiqiField, Int) in [(.string(field: 2, value: "abcdef"), 2),
+                                                     (.message(field: 3, fields: [.string(field: 1, value: "abcdef")]), 1)] {
             let (bridge, state) = makeBridge()
             logIn(bridge, account: account)
             XCTAssertEqual(bridge.accountId, 0, "\(account)")
             XCTAssertEqual(state.recent.first?.site, "LiqiParser.loginResponse.wireType", "\(account)")
+            XCTAssertEqual(state.recent.first?.fieldId, fieldId, "\(account)")
             XCTAssertEqual(state.recent.first?.severity, .degraded, "\(account)")
             XCTAssertEqual(state.totalCount, 1, "\(account)")
             XCTAssertNil(state.blocking, "\(account)")
@@ -397,7 +402,7 @@ final class LiqiParserFailureTests: XCTestCase {
         ])
 
         let msgId: UInt16 = 77
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
                                                            fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response,
                                                                   msgId: msgId,
@@ -429,7 +434,7 @@ final class LiqiParserFailureTests: XCTestCase {
             .message(field: 4, fields: [.bytes(field: 1, value: snapshot)])
         ])
         let msgId: UInt16 = 78
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
                                                            fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: msgId,
                                                                   method: "", payload: payload)))
@@ -521,7 +526,7 @@ final class LiqiParserFailureTests: XCTestCase {
         })
         let payload = LiqiEncoder.encodeFields([.message(field: 4, fields: [.bytes(field: 1, value: snapshot)])])
         let msgId: UInt16 = 79
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame",
                                                            fields: [], msgId: msgId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: msgId,
                                                                   method: "", payload: payload)))
@@ -614,8 +619,8 @@ final class LiqiParserFailureTests: XCTestCase {
     func testSeatListFromPlayersIsMarkedHeuristic() {
         let (bridge, state) = makeBridge()
 
-        _ = bridge.parseRaw(authGameRequest(msgId: 61))
-        let raw = bridge.parseRaw(response(msgId: 61, fields: playerFields([accountId, 2, 3, 4])))
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 61))
+        let raw = bridge.observeOutgoing(response(msgId: 61, fields: playerFields([accountId, 2, 3, 4])))
         let data = raw?["data"] as? [String: Any]
 
         XCTAssertEqual(data?["seatList"] as? [Int], [accountId, 2, 3, 4])
@@ -631,8 +636,8 @@ final class LiqiParserFailureTests: XCTestCase {
     func testSeatListFromSchemaIsMarkedExact() {
         let (bridge, _) = makeBridge()
 
-        _ = bridge.parseRaw(authGameRequest(msgId: 62))
-        let raw = bridge.parseRaw(response(msgId: 62, fields: [
+        _ = bridge.observeOutgoing(authGameRequest(msgId: 62))
+        let raw = bridge.observeOutgoing(response(msgId: 62, fields: [
             .bytes(field: 3, value: packed([accountId, 2, 3, 4]))
         ] + playerFields([accountId, 2, 3, 4])))
         let data = raw?["data"] as? [String: Any]
@@ -939,9 +944,9 @@ final class LiqiParserFailureTests: XCTestCase {
         ] + extra))
     }
 
-    /// `ActionDiscardTile.operation`（4）：自家（seat 0）有一個 type 9 可做
+    /// `ActionDiscardTile.operation`（4）：自家有一個 type 9 可做
     private let oplistField: LiqiField = .message(field: 4, fields: [
-        .varint(field: 1, value: 0),
+        .varint(field: 1, value: UInt64(LiqiParserFailureTests.ownSeat)),
         .message(field: 2, fields: [.varint(field: 1, value: 9)])
     ])
 
@@ -975,7 +980,7 @@ final class LiqiParserFailureTests: XCTestCase {
             data: newRoundPayload(scores: .bytes(field: 6, value: [0xff, 0xff]))))
         let before = SelfActionEchoTracker.shared.count
 
-        XCTAssertNil(bridge.parse(discardFrame(seat: 0, tile: "5p")), "事件本身仍丟棄")
+        XCTAssertNil(bridge.parse(discardFrame(seat: Self.ownSeat, tile: "5p")), "事件本身仍丟棄")
 
         XCTAssertEqual(SelfActionEchoTracker.shared.count, before + 1)
     }
@@ -1147,7 +1152,7 @@ final class LiqiParserFailureTests: XCTestCase {
             [.string(field: 6, value: "1m"), .string(field: 6, value: "2m")]
             + scores.map { .message(field: 9, fields: [.int(field: 1, value: $0)]) })
         let syncId = msgId + 1
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: syncId)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: syncId)))
         let events = bridge.parse(Data(LiqiEncoder.encodeEnvelope(
             type: .response, msgId: syncId, method: "",
             payload: LiqiEncoder.encodeFields([.message(field: 4, fields: [.bytes(field: 1, value: snapshot)])]))))
@@ -1181,7 +1186,7 @@ final class LiqiParserFailureTests: XCTestCase {
 
     // MARK: - 重連 actions 缺 ActionNewRound（Akagi 982ff48）
 
-    /// 座位 0 的 syncGame：snapshot（可省）＋ 未 XOR 的 actions
+    /// 自家座位 `ownSeat` 的 syncGame：snapshot（可省）＋ 未 XOR 的 actions
     private func restoreEvents(hands: [String], doras: [String] = ["3p"], snapshot: Bool = true,
                                actions: [(String, [LiqiField])]) -> [[String: Any]] {
         let (bridge, _) = makeBridge()
@@ -1194,7 +1199,7 @@ final class LiqiParserFailureTests: XCTestCase {
                                         .bytes(field: 3, value: LiqiEncoder.encodeFields(data))])
         }
         let msgId: UInt16 = 120
-        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: msgId)))
+        _ = bridge.observeOutgoing(Data(LiqiEncoder.encodeRequest(method: ".lq.FastTest.syncGame", fields: [], msgId: msgId)))
         return bridge.parse(Data(LiqiEncoder.encodeEnvelope(
             type: .response, msgId: msgId, method: "",
             payload: LiqiEncoder.encodeFields([.message(field: 4, fields: restore)])))) ?? []
@@ -1212,7 +1217,7 @@ final class LiqiParserFailureTests: XCTestCase {
 
         XCTAssertEqual(types(events), ["start_kyoku", "dora", "tsumo", "dahai"],
                        "start_kyoku 在重放事件之前；kan-dora 只由 snapshot 發一次")
-        XCTAssertEqual(events.first?["tehais"] as? [[String]], [Self.hand13] + [[String]](repeating: unknownHand, count: 3))
+        XCTAssertEqual(events.first?["tehais"] as? [[String]], [unknownHand, unknownHand, Self.hand13, unknownHand])
         XCTAssertEqual(events[1]["dora_marker"] as? String, "4p")
         XCTAssertEqual(events[3]["pai"] as? String, "5p")
     }
@@ -1237,8 +1242,8 @@ final class LiqiParserFailureTests: XCTestCase {
         let events = restoreEvents(hands: Self.hand13.reversed() + ["7z"], doras: ["3p", "4p"], actions: [])
 
         XCTAssertEqual(types(events), ["start_kyoku", "dora", "tsumo"])
-        XCTAssertEqual((events.first?["tehais"] as? [[String]])?.first, Self.hand13, "前 13 張排序後進 tehai")
-        XCTAssertEqual(events.last?["actor"] as? Int, 0)
+        XCTAssertEqual((events.first?["tehais"] as? [[String]])?[Self.ownSeat], Self.hand13, "前 13 張排序後進 tehai")
+        XCTAssertEqual(events.last?["actor"] as? Int, Self.ownSeat)
         XCTAssertEqual(events.last?["pai"] as? String, "C")
     }
 
@@ -1246,6 +1251,236 @@ final class LiqiParserFailureTests: XCTestCase {
         let events = restoreEvents(hands: Self.hand13, actions: [])
 
         XCTAssertEqual(types(events), ["start_kyoku"])
-        XCTAssertEqual((events.first?["tehais"] as? [[String]])?.first, Self.hand13)
+        XCTAssertEqual((events.first?["tehais"] as? [[String]])?[Self.ownSeat], Self.hand13)
+    }
+
+    // MARK: - U2：欄位缺席才補 0，壞掉的欄位丟棄（皆記 degraded fault）
+
+    private func actionEvents(_ bridge: MajsoulBridge, _ name: String, _ fields: [LiqiField]) -> [[String: Any]] {
+        bridge.parse(actionPrototypeFrame(name: name, data: LiqiEncoder.encodeFields(fields))) ?? []
+    }
+
+    private func faults(_ state: LiqiParseFaultState, _ site: String) -> [LiqiParseFault] {
+        state.recent.filter { $0.site == site }
+    }
+
+    /// encoder 從不省略 0，fixture 直接不放 field 1 才是「seat 缺席」
+    func testActorSeatMissingFieldRecordsDegradedFault() {
+        let cases: [(String, [LiqiField], String)] = [
+            ("ActionDealTile", [.string(field: 2, value: "1m")], "tsumo"),
+            ("ActionDiscardTile", [.string(field: 2, value: "7p")], "dahai"),
+            ("ActionChiPengGang", [.varint(field: 2, value: 1), .string(field: 3, value: "3m"), .string(field: 3, value: "3m"),
+                                   .string(field: 3, value: "3m"), .bytes(field: 4, value: packed([0, 0, 1]))], "pon"),
+            ("ActionAnGangAddGang", [.varint(field: 2, value: 3), .string(field: 3, value: "1m")], "ankan"),
+            ("ActionBaBei", [.varint(field: 9, value: 0)], "nukidora")
+        ]
+        for (name, fields, type) in cases {
+            let (bridge, state) = makeBridge()
+            authenticate(bridge)
+
+            let event = actionEvents(bridge, name, fields).first { ($0["type"] as? String) == type }
+
+            XCTAssertEqual(event?["actor"] as? Int, 0, "\(name)：缺席依 proto3 視為 0")
+            XCTAssertEqual(faults(state, "\(name).seat.absent").count, 1, "\(name)：補 0 一定要留 fault")
+            XCTAssertEqual(faults(state, "\(name).seat.absent").first?.severity, .degraded, name)
+            XCTAssertNil(state.blocking, name)
+        }
+    }
+
+    /// 欄位存在但型別錯 → malformed：丟棄、記 fault，不補 0（每個 action 的 seat 各驗一次）
+    func testActorSeatMalformedDropsEventWithoutFillingZero() {
+        let malformedSeat: LiqiField = .bytes(field: 1, value: [0x00])
+        let cases: [(String, [LiqiField], String)] = [
+            ("ActionDealTile", [.string(field: 2, value: "1m")], "tsumo"),
+            ("ActionDiscardTile", [.string(field: 2, value: "7p")], "dahai"),
+            ("ActionChiPengGang", [.varint(field: 2, value: 1), .string(field: 3, value: "3m"), .string(field: 3, value: "3m"),
+                                   .string(field: 3, value: "3m"), .bytes(field: 4, value: packed([0, 0, 1]))], "pon"),
+            ("ActionAnGangAddGang", [.varint(field: 2, value: 3), .string(field: 3, value: "1m")], "ankan"),
+            ("ActionBaBei", [.varint(field: 9, value: 0)], "nukidora")
+        ]
+        for (name, fields, type) in cases {
+            let (bridge, state) = makeBridge()
+            authenticate(bridge)
+
+            let events = actionEvents(bridge, name, [malformedSeat] + fields)
+
+            XCTAssertNil(events.first { ($0["type"] as? String) == type }, "\(name)：length-delimited 的 seat 不得被當成 0")
+            XCTAssertFalse(faults(state, "\(name).seat").isEmpty, name)
+            XCTAssertTrue(faults(state, "\(name).seat.absent").isEmpty, "\(name)：壞掉不是缺席")
+            XCTAssertNil(state.blocking, name)
+        }
+    }
+
+    /// 同一個 site 只記一次（重新載入頁面才重新計）
+    func testMissingFieldFaultIsReportedOncePerSite() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+        let noSeat: [LiqiField] = [.string(field: 2, value: "7p")]
+
+        for _ in 0..<3 { _ = actionEvents(bridge, "ActionDiscardTile", noSeat) }
+        XCTAssertEqual(faults(state, "ActionDiscardTile.seat.absent").count, 1)
+
+        bridge.fullReset()
+        authenticate(bridge)
+        _ = actionEvents(bridge, "ActionDiscardTile", noSeat)
+        XCTAssertEqual(faults(state, "ActionDiscardTile.seat.absent").count, 1, "fullReset 後重新回報")
+    }
+
+    func testDiscardTileMissingFieldRecordsDegradedFault() {
+        for tile: LiqiField? in [nil, .string(field: 2, value: "8z")] {
+            let (bridge, state) = makeBridge()
+            authenticate(bridge)
+
+            let events = actionEvents(bridge, "ActionDiscardTile", [.varint(field: 1, value: 1)] + [tile].compactMap { $0 })
+
+            XCTAssertTrue(events.isEmpty, "\(String(describing: tile))")
+            XCTAssertEqual(faults(state, "ActionDiscardTile.tile").first?.severity, .degraded, "\(String(describing: tile))")
+        }
+    }
+
+    /// 自家摸牌缺牌才是錯；別家摸牌本來就沒有牌
+    func testDealTileMissingFieldRecordsDegradedFault() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        XCTAssertNotNil(actionEvents(bridge, "ActionDealTile", [.varint(field: 1, value: 1)]).first,
+                        "別家摸牌照發 tsumo ?")
+        XCTAssertTrue(faults(state, "ActionDealTile.tile").isEmpty)
+
+        let own = actionEvents(bridge, "ActionDealTile", [.varint(field: 1, value: UInt64(Self.ownSeat))])
+
+        XCTAssertNil(own.first { ($0["type"] as? String) == "tsumo" })
+        XCTAssertEqual(faults(state, "ActionDealTile.tile").first?.severity, .degraded)
+    }
+
+    /// type 缺席 + 牌組完整 → 補 chi 並記 fault
+    func testChiPengGangMissingFieldRecordsDegradedFault() {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+
+        let chi = actionEvents(bridge, "ActionChiPengGang", [
+            .varint(field: 1, value: 1),
+            .string(field: 3, value: "1m"), .string(field: 3, value: "2m"), .string(field: 3, value: "3m"),
+            .bytes(field: 4, value: packed([0, 1, 1]))
+        ]).first
+
+        XCTAssertEqual(chi?["type"] as? String, "chi")
+        XCTAssertEqual(chi?["target"] as? Int, 0)
+        XCTAssertEqual(chi?["pai"] as? String, "1m")
+        XCTAssertEqual(chi?["consumed"] as? [String], ["2m", "3m"])
+        XCTAssertEqual(faults(state, "ActionChiPengGang.type.absent").count, 1)
+        XCTAssertNil(state.blocking)
+    }
+
+    /// type 缺席但 pai／consumed 解不完整 → malformed，不得產出空 pai／consumed 的 chi
+    func testChiPengGangTypeAbsentWithIncompleteMeldIsDropped() {
+        let meldCases: [(String, [LiqiField])] = [
+            ("沒有 froms", [.string(field: 3, value: "1m"), .string(field: 3, value: "2m"), .string(field: 3, value: "3m")]),
+            ("牌碼轉不出", [.string(field: 3, value: "1m"), .string(field: 3, value: "2m"), .string(field: 3, value: "8z"),
+                         .bytes(field: 4, value: packed([0, 1, 1]))]),
+            ("沒有牌", [])
+        ]
+        for (label, meld) in meldCases {
+            let (bridge, state) = makeBridge()
+            authenticate(bridge)
+
+            let events = actionEvents(bridge, "ActionChiPengGang", [.varint(field: 1, value: 1)] + meld)
+
+            XCTAssertNil(events.first { ($0["type"] as? String) == "chi" }, label)
+            XCTAssertEqual(faults(state, "ActionChiPengGang.meld").count, 1, label)
+            XCTAssertTrue(faults(state, "ActionChiPengGang.type.absent").isEmpty, label)
+        }
+    }
+
+    /// type 缺席補 chi（依 U2 補 0）的前提，送 type 缺席的鳴牌並檢查是否被當成壞封包丟掉
+    private func assertTypeAbsentMeldDropped(_ meld: [LiqiField], froms: [Int], seatList: [Int]? = nil,
+                                             _ label: String, file: StaticString = #filePath, line: UInt = #line) {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge, fields: seatList.map { [.bytes(field: 3, value: packed($0))] })
+
+        let events = actionEvents(bridge, "ActionChiPengGang",
+                                  [.varint(field: 1, value: 1)] + meld + [.bytes(field: 4, value: packed(froms))])
+
+        XCTAssertTrue(events.isEmpty, label, file: file, line: line)
+        XCTAssertEqual(faults(state, "ActionChiPengGang.meld").count, 1, label, file: file, line: line)
+        XCTAssertTrue(faults(state, "ActionChiPengGang.type.absent").isEmpty, label, file: file, line: line)
+    }
+
+    private func tiles(_ codes: String...) -> [LiqiField] {
+        codes.map { .string(field: 3, value: $0) }
+    }
+
+    /// chi 只能是同花色數牌三連號：字牌、不連號都不是省略了 0，而是壞封包
+    func testChiPengGangTypeAbsentWithNonRunShapeIsDropped() {
+        assertTypeAbsentMeldDropped(tiles("5z", "6z", "7z"), froms: [0, 1, 1], "字牌三張")
+        assertTypeAbsentMeldDropped(tiles("1m", "2m", "4m"), froms: [0, 1, 1], "同花色不連號")
+        assertTypeAbsentMeldDropped(tiles("1m", "2p", "3s"), froms: [0, 1, 1], "三種花色")
+    }
+
+    /// 三麻沒有吃：type 缺席的鳴牌一律是壞封包
+    func testChiPengGangTypeAbsentInSanmaIsDropped() {
+        assertTypeAbsentMeldDropped(tiles("1p", "2p", "3p"), froms: [0, 1, 1], seatList: [2, 3, accountId], "三麻")
+    }
+
+    /// 4 張不會是 chi：槓形（四張同牌），以及形狀連號但張數多一張
+    func testChiPengGangTypeAbsentWithFourTilesIsDropped() {
+        assertTypeAbsentMeldDropped(tiles("3m", "3m", "3m", "3m"), froms: [0, 1, 1, 1], "槓形")
+        assertTypeAbsentMeldDropped(tiles("1m", "2m", "3m", "4m"), froms: [0, 1, 1, 1], "四張連號")
+    }
+
+    /// type 存在但型別錯或越界 → 丟棄並記 fault，不補 chi
+    func testChiPengGangMalformedTypeIsDroppedWithoutFillingZero() {
+        for type: LiqiField in [.bytes(field: 2, value: [0x00]), .varint(field: 2, value: 7)] {
+            let (bridge, state) = makeBridge()
+            authenticate(bridge)
+
+            let events = actionEvents(bridge, "ActionChiPengGang", [
+                .varint(field: 1, value: 1), type,
+                .string(field: 3, value: "1m"), .string(field: 3, value: "2m"), .string(field: 3, value: "3m"),
+                .bytes(field: 4, value: packed([0, 1, 1]))
+            ])
+
+            XCTAssertTrue(events.isEmpty, "\(type)")
+            XCTAssertFalse(faults(state, "ActionChiPengGang.type").isEmpty, "\(type)")
+            XCTAssertTrue(faults(state, "ActionChiPengGang.type.absent").isEmpty, "\(type)")
+        }
+    }
+
+    /// 暗槓／加槓的 type 不補 0（0 不是合法值）：缺 tiles 或 type 都丟棄
+    func testAnGangAddGangMissingFieldRecordsDegradedFault() {
+        for fields: [LiqiField] in [[.varint(field: 2, value: 3)], [.string(field: 3, value: "1m")]] {
+            let (bridge, state) = makeBridge()
+            authenticate(bridge)
+
+            let events = actionEvents(bridge, "ActionAnGangAddGang", [.varint(field: 1, value: 1)] + fields)
+
+            XCTAssertTrue(events.isEmpty, "\(fields)")
+            XCTAssertEqual(faults(state, "ActionAnGangAddGang.tiles/type").first?.severity, .degraded, "\(fields)")
+        }
+    }
+
+    /// oplist 的 seat 與 action 同規則；壞掉的 seat 原樣交給 store（-1，不會被當成任何人的授權）
+    func testOperationSeatMissingFieldRecordsDegradedFault() {
+        let typeNine: LiqiField = .message(field: 2, fields: [.varint(field: 1, value: 9)])
+        let seatCases: [(LiqiField?, Int, Int)] = [(nil, 0, 1), (.bytes(field: 1, value: [0x02]), -1, 0)]
+        for (seatField, expectedSeat, absentFaults) in seatCases {
+            let operations = LiqiOperationStore()
+            let (bridge, state) = makeBridge(operations: operations)
+            authenticate(bridge)
+
+            _ = bridge.parse(discardFrame(seat: 1, tile: "5p", extra: [
+                .message(field: 4, fields: [seatField, typeNine].compactMap { $0 })
+            ]))
+
+            XCTAssertEqual(operations.latest?.seat, expectedSeat, "\(String(describing: seatField))")
+            XCTAssertEqual(faults(state, "OptionalOperationList.seat.absent").count, absentFaults,
+                           "\(String(describing: seatField))")
+        }
+
+        // 空清單用不到 seat：不補也不報
+        let (bridge, state) = makeBridge()
+        authenticate(bridge)
+        _ = bridge.parse(discardFrame(seat: 1, tile: "5p", extra: [.message(field: 4, fields: [.varint(field: 4, value: 5)])]))
+        XCTAssertTrue(faults(state, "OptionalOperationList.seat.absent").isEmpty)
     }
 }

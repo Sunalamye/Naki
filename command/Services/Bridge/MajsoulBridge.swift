@@ -114,30 +114,18 @@ class MajsoulBridge {
 
     /// 完整重置橋接器狀態（包括 accountId，用於頁面重新載入）
     func fullReset() {
-        liqiParser.reset()
+        reset()
         accountId = 0
         seat = 0
-        lastDiscard = nil
-        doras = []
         is3P = false
-        pendingReachAccepted = nil
-        syncing = false
-        hasReceivedAuthGame = false
-        roundBlocked = false
-        operations.clear()
         LiqiResponseStore.shared.reset()
         // 頁面重新載入＝重新開始：上一次載入留下的解析失敗不該掛在新頁面上
         faultState.reset()
-        reportedUnknownActions.removeAll()
+        reportedSites.removeAll()
         bridgeLog("[MajsoulBridge] 完整重置 (accountId 已清除)")
     }
 
-    /// 設置帳號 ID
-    func setAccountId(_ id: Int) {
-        accountId = id
-    }
-
-    /// 最近一次 `parse` / `parseRaw` 的**原始**解析結果（轉不成 MJAI 事件時仍然有值）。
+    /// 最近一次 `parse` / `observeOutgoing` 的**原始**解析結果（轉不成 MJAI 事件時仍然有值）。
     ///
     /// 呼叫端要在 `parse` 回 nil 時 log 方法名，一律讀這個欄位，不要另建 `LiqiParser`
     /// 重解一次：新實例沒有 `pendingRequests`，每一則 RESPONSE 都必然配不上，
@@ -149,7 +137,7 @@ class MajsoulBridge {
     var lastEnvelopeFailure: LiqiEnvelopeDecodeFailure? { liqiParser.lastEnvelopeFailure }
 
     /// 解析雀魂消息並返回原始解析結果（用於調試和請求跟蹤）
-    func parseRaw(_ data: Data) -> [String: Any]? {
+    func observeOutgoing(_ data: Data) -> [String: Any]? {
         let parsed = liqiParser.parse(data)
         lastParsed = parsed
         drainParserFaults()
@@ -177,17 +165,26 @@ class MajsoulBridge {
     ///   動作**靜默記到自己頭上**，污染 observation 而且畫面上完全看不出來。
     ///
     /// 兩種都比「丟掉這一個事件」糟。丟棄記成 degraded：UI 會掛出可查的說明，
-    /// 而不是靜默或崩潰。
+    /// 而不是靜默或崩潰。parser 把型別錯的 seat 記成 -1，同樣在這裡丟棄。
+    ///
+    /// seat **缺席**才補 0（proto3 不送預設值，U2 用戶裁決）。若伺服器省略它的語意其實不是 0，
+    /// 座位會錯記而畫面看不出來，所以補 0 一定要留 fault——那是唯一可觀察的訊號。
     private func actorSeat(_ data: [String: Any], site: String) -> Int? {
-        guard let actor = data["seat"] as? Int else { return nil }
+        guard let value = data["seat"] else {
+            recordDegradedOnce(site: "\(site).absent", fieldId: 1, reason: "seat 缺席 → 依 proto3 視為 0")
+            return 0
+        }
 
         let playerCount = is3P ? 3 : 4
-        guard (0..<playerCount).contains(actor) else {
+        guard let actor = value as? Int, (0..<playerCount).contains(actor) else {
+            // parser 對型別錯的 seat 給 -1（合法 varint 不會是負數），文字要分得出不是越界
+            let problem = (value as? Int).map { $0 < 0 } == true
+                ? "座位型別錯誤（parser 標記 seat=-1）"
+                : "座位超出範圍（seat=\(value)，本局 \(playerCount) 家）"
             let fault = LiqiParseFault(site: site,
                                        fieldId: 1,
                                        byteCount: 0,
-                                       reason: "座位超出範圍（seat=\(actor)，本局 \(playerCount) 家）"
-                                           + " → 丟棄這一個事件",
+                                       reason: problem + " → 丟棄這一個事件",
                                        severity: .degraded)
             faultState.record(fault)
             eventLog("[MajsoulBridge] ⚠️ \(fault.text)")
@@ -196,8 +193,16 @@ class MajsoulBridge {
         return actor
     }
 
-    /// 已經回報過的未知 action（同一個名字只記一次，避免每局洗版）
-    private var reportedUnknownActions: Set<String> = []
+    /// 已經回報過的 degraded site（同一個 site 只記一次，避免每局洗版）
+    private var reportedSites: Set<String> = []
+
+    /// 丟棄點與缺席補 0 的 fault：同一個 site 只記一次
+    private func recordDegradedOnce(site: String, fieldId: Int?, reason: String) {
+        guard reportedSites.insert(site).inserted else { return }
+        let fault = LiqiParseFault(site: site, fieldId: fieldId, byteCount: 0, reason: reason, severity: .degraded)
+        faultState.record(fault)
+        eventLog("[MajsoulBridge] ⚠️ \(fault.text)")
+    }
 
     /// 記一筆「收到了但不認得的 action」。
     ///
@@ -205,17 +210,10 @@ class MajsoulBridge {
     /// `liqi.json` 有 24 個 `Action*` 而這裡處理 9 個——沒處理的多屬活動場，
     /// 而活動場正是雀魂最常改動的部分。
     private func recordUnknownAction(_ name: String) {
-        guard reportedUnknownActions.insert(name).inserted else { return }
-
-        let fault = LiqiParseFault(
-            site: "ActionPrototype.\(name)",
-            fieldId: 2,
-            byteCount: 0,
-            reason: "收到未處理的 action「\(name)」→ 這個事件不進 MJAI 事件流。"
-                + "若它會改變牌局狀態，Naki 之後的推薦會與實際牌局不一致",
-            severity: .degraded)
-        faultState.record(fault)
-        eventLog("[MajsoulBridge] ⚠️ \(fault.text)")
+        recordDegradedOnce(site: "ActionPrototype.\(name)",
+                           fieldId: 2,
+                           reason: "收到未處理的 action「\(name)」→ 這個事件不進 MJAI 事件流。"
+                               + "若它會改變牌局狀態，Naki 之後的推薦會與實際牌局不一致")
     }
 
     /// 記一筆「這一局不會運作」的失敗（UI 會掛出常駐錯誤）
@@ -264,7 +262,7 @@ class MajsoulBridge {
 
         // 處理登入響應 - 獲取帳號 ID
         if (method == ".lq.Lobby.login" || method == ".lq.Lobby.oauth2Login" ||
-            method == ".lq.Lobby.oauth2Auth" || method == ".lq.Lobby.emailLogin") && msgType == "response" {
+            method == ".lq.Lobby.emailLogin") && msgType == "response" {
             bridgeLog("[MajsoulBridge] 偵測到登入回應: \(method)")
             bridgeLog("[MajsoulBridge] 登入資料鍵: \(msgData.keys)")
 
@@ -272,17 +270,10 @@ class MajsoulBridge {
             if let accId = msgData["accountId"] as? Int, accId > 0 {
                 accountId = accId
                 bridgeLog("[MajsoulBridge] 從直接欄位獲取 accountId: \(accountId)")
-            } else if let account = msgData["account"] as? [String: Any] {
-                if let accId = account["accountId"] as? Int {
-                    accountId = accId
-                    bridgeLog("[MajsoulBridge] 從 account.accountId 獲取 accountId: \(accountId)")
-                } else if let accId = account["account_id"] as? Int {
-                    accountId = accId
-                    bridgeLog("[MajsoulBridge] 從 account.account_id 獲取 accountId: \(accountId)")
-                }
-            } else if let accId = msgData["account_id"] as? Int, accId > 0 {
+            } else if let account = msgData["account"] as? [String: Any],
+                      let accId = account["accountId"] as? Int {
                 accountId = accId
-                bridgeLog("[MajsoulBridge] 從 account_id 獲取 accountId: \(accountId)")
+                bridgeLog("[MajsoulBridge] 從 account.accountId 獲取 accountId: \(accountId)")
             }
         }
 
@@ -436,13 +427,6 @@ class MajsoulBridge {
             if let event = parseChiPengGang(data) {
                 results.append(event)
             }
-            // 碰/吃後如果是自己的操作，需要打牌
-            if let actor = data["seat"] as? Int, actor == seat {
-                // 碰/吃後需要發送一個 tsumo-like 事件讓 Bot 知道輪到自己打牌
-                // 但實際上不是自摸，只是表示輪到自己出牌
-                // Bot 在收到自己的 pon/chi 後會自動進入打牌模式
-                bridgeLog("[MajsoulBridge] 自己碰/吃後，等待打牌選擇")
-            }
 
         case "ActionAnGangAddGang":
             if let event = parseAnGangAddGang(data) {
@@ -538,9 +522,17 @@ class MajsoulBridge {
     /// 否則自動打牌可能拿上一個機會的推薦，去回應這一個機會的 oplist。
     @discardableResult
     private func recordOperationSnapshot(name: String, data: [String: Any]) -> UInt64? {
-        guard let operation = data["operation"] as? [String: Any] else {
+        guard var operation = data["operation"] as? [String: Any] else {
             operations.clear()
             return nil
+        }
+
+        // 與 action 的 seat 同一條規則（U2）：缺席補 0 並記 fault；壞掉的 seat 是 parser 給的 -1，
+        // 原樣交給 store（resolver 以 seat_mismatch 不動作）。空清單用不到 seat，不補也不報。
+        if operation["seat"] == nil, let list = operation["operationList"] as? [[String: Any]], !list.isEmpty {
+            operation["seat"] = 0
+            recordDegradedOnce(site: "OptionalOperationList.seat.absent", fieldId: 1,
+                               reason: "oplist 的 seat 缺席 → 依 proto3 視為 0")
         }
 
         let contextTile = data["tile"] as? String
@@ -718,12 +710,11 @@ class MajsoulBridge {
         let tile = data["tile"] as? String ?? ""
         let mjaiTile = tile.isEmpty ? "?" : (LiqiTile.mjai(fromMajsoul: tile) ?? "?")
 
-        // 如果是自己的摸牌但 tile 為空，這是一個解析錯誤
-        // 不應該發送給 Bot，否則會導致狀態損壞
+        // 自家摸牌卻沒有牌是解析錯誤：送給 Bot 會讓手牌狀態壞掉，丟棄
         if actor == seat && mjaiTile == "?" {
-            bridgeLog("[MajsoulBridge] 警告: 自己的摸牌沒有牌資料! 跳過事件。")
             bridgeLog("[MajsoulBridge] parseDealTile 資料: \(data)")
-            // 返回 nil 跳過這個事件，防止 Bot 崩潰
+            recordDegradedOnce(site: "ActionDealTile.tile", fieldId: 2,
+                               reason: "自家摸牌沒有可用的牌（tile=\(data["tile"] ?? "缺席")）→ 丟棄這一個 tsumo")
             return nil
         }
 
@@ -740,9 +731,10 @@ class MajsoulBridge {
     private func parseDiscardTile(_ data: [String: Any]) -> [[String: Any]]? {
         var results: [[String: Any]] = []
 
-        guard let actor = actorSeat(data, site: "ActionDiscardTile.seat"),
-              let tile = data["tile"] as? String,
-              let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) else {
+        guard let actor = actorSeat(data, site: "ActionDiscardTile.seat") else { return nil }
+        guard let tile = data["tile"] as? String, let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) else {
+            recordDegradedOnce(site: "ActionDiscardTile.tile", fieldId: 2,
+                               reason: "打出的牌缺席或轉不出 MJAI 牌碼（tile=\(data["tile"] ?? "缺席")）→ 丟棄這一個 dahai")
             return nil
         }
 
@@ -780,20 +772,12 @@ class MajsoulBridge {
 
     /// 解析吃碰槓
     private func parseChiPengGang(_ data: [String: Any]) -> [String: Any]? {
-        guard let actor = actorSeat(data, site: "ActionChiPengGang.seat"),
-              let opType = data["type"] as? Int else {
-            bridgeLog("[MajsoulBridge] parseChiPengGang: 缺少 seat 或 type")
-            return nil
-        }
+        guard let actor = actorSeat(data, site: "ActionChiPengGang.seat") else { return nil }
+        // type 缺席依 proto3 視為 0（chi，U2 用戶裁決），但只在牌組完整時採用（見 switch 前）
+        let typeAbsent = data["type"] == nil
+        guard let opType = typeAbsent ? 0 : data["type"] as? Int else { return nil }
 
-        // 解析 tiles - 可能是字符串數組或單個字符串
-        var tiles: [String] = []
-        if let tilesArray = data["tiles"] as? [String] {
-            tiles = tilesArray
-        } else if let tilesStr = data["tiles"] as? String {
-            // 單個字符串，需要處理
-            tiles = [tilesStr]
-        }
+        let tiles = data["tiles"] as? [String] ?? []
 
         // 解析 froms - 來源座位數組
         var froms: [Int] = []
@@ -873,6 +857,29 @@ class MajsoulBridge {
 
         bridgeLog("[MajsoulBridge] parseChiPengGang 結果: target=\(target), pai=\(pai), consumed=\(consumed)")
 
+        // 補 chi 的前提是牌組本身就是 chi：froms 對得上、每張牌都轉得出牌碼（不收 `?? tile` 的原碼）、
+        // consumed 剛好 2 張、三張同屬 m／p／s 且去赤後連號、不是三麻（三麻沒有吃）。
+        // 缺一樣就不是「省略了 0」而是封包壞了，不補、丟棄。
+        if typeAbsent {
+            let meld = [pai] + consumed
+            let suits = Set(meld.map { $0.dropFirst().first })
+            let numbers = meld.compactMap { $0.first?.wholeNumberValue }.sorted()
+            let isRun = suits.count == 1 && suits.first.flatMap { $0 }.map { "mps".contains($0) } == true
+                && numbers.count == meld.count
+                && zip(numbers, numbers.dropFirst()).allSatisfy { $1 == $0 + 1 }
+            let complete = froms.count == tiles.count
+                && tiles.allSatisfy { LiqiTile.mjai(fromMajsoul: $0) != nil }
+                && !pai.isEmpty && consumed.count == 2
+                && !is3P && isRun
+            guard complete else {
+                recordDegradedOnce(site: "ActionChiPengGang.meld", fieldId: 3,
+                                   reason: "type 缺席且牌組不完整（tiles=\(tiles)，froms=\(froms)）→ 不補 chi，丟棄")
+                return nil
+            }
+            recordDegradedOnce(site: "ActionChiPengGang.type.absent", fieldId: 2,
+                               reason: "type 缺席 → 依 proto3 視為 0（chi）")
+        }
+
         switch opType {
         case 0: // Chi
             return [
@@ -902,15 +909,18 @@ class MajsoulBridge {
             ]
 
         default:
+            recordDegradedOnce(site: "ActionChiPengGang.type", fieldId: 2,
+                               reason: "鳴牌種類超出範圍（type=\(opType)）→ 丟棄")
             return nil
         }
     }
 
     /// 解析暗槓/加槓
     private func parseAnGangAddGang(_ data: [String: Any]) -> [String: Any]? {
-        guard let actor = actorSeat(data, site: "ActionAnGangAddGang.seat"),
-              let tile = data["tiles"] as? String,
-              let opType = data["type"] as? Int else {
+        guard let actor = actorSeat(data, site: "ActionAnGangAddGang.seat") else { return nil }
+        guard let tile = data["tiles"] as? String, let opType = data["type"] as? Int else {
+            recordDegradedOnce(site: "ActionAnGangAddGang.tiles/type", fieldId: nil,
+                               reason: "暗槓／加槓缺少牌或種類（keys=\(data.keys.sorted())）→ 丟棄")
             return nil
         }
 
