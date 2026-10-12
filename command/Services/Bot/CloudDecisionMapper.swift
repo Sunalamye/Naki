@@ -74,14 +74,17 @@ enum CloudDecisionMapper {
         case "chi":
             guard let pai = reaction["pai"] as? String,
                   let consumed = reaction["consumed"] as? [String],
-                  let variant = chiVariant(called: pai, consumed: consumed) else {
+                  // 雲端只會回 MJAI 寫法；`0m` 這類雀魂寫法代表資料有誤，退回本地而不是猜
+                  ([pai] + consumed).allSatisfy({ LiqiTile.majsoul(fromMJAI: $0) != nil }),
+                  let variant = LiqiTile.chiVariant(called: pai, consumed: consumed) else {
                 return nil
             }
             // 雲端 reaction 帶實際牌組——顯示「用哪兩張吃哪張」，
             // 不再只有 ①②③ 的相對位置（2026-08-05 顯示掃描的增強）
             return [Recommendation(tile: "chi_\(variant)", probability: prob,
                                    actionType: .chi,
-                                   detail: L10n.text("用 \(consumed.joined(separator: "·")) 吃 \(pai)"))]
+                                   detail: L10n.text("用 \(consumed.joined(separator: "·")) 吃 \(pai)"),
+                                   chiVariant: variant)]
 
         case "daiminkan", "ankan", "kakan":
             let detail = (reaction["consumed"] as? [String]).map { $0.joined(separator: "·") }
@@ -127,11 +130,11 @@ enum CloudDecisionMapper {
         case "pon":
             return Recommendation(tile: "pon", probability: prob, actionType: .pon)
         case "chi_low":
-            return Recommendation(tile: "chi_0", probability: prob, actionType: .chi)
+            return Recommendation(tile: "chi_0", probability: prob, actionType: .chi, chiVariant: 0)
         case "chi_mid":
-            return Recommendation(tile: "chi_1", probability: prob, actionType: .chi)
+            return Recommendation(tile: "chi_1", probability: prob, actionType: .chi, chiVariant: 1)
         case "chi_high":
-            return Recommendation(tile: "chi_2", probability: prob, actionType: .chi)
+            return Recommendation(tile: "chi_2", probability: prob, actionType: .chi, chiVariant: 2)
         case "kan":
             return Recommendation(tile: "kan", probability: prob, actionType: .kan)
         case "hora":
@@ -146,28 +149,5 @@ enum CloudDecisionMapper {
         default:
             return nil
         }
-    }
-
-    /// chi 變體：0＝被吃的牌最小（consumed 都比它大）、1＝中間、2＝最大。
-    /// 與 `LiqiOperationSnapshot.chiCombinationIndex` 的推導同一套。
-    static func chiVariant(called: String, consumed: [String]) -> Int? {
-        guard let calledNumber = tileNumber(called),
-              consumed.count == 2 else { return nil }
-        let numbers = consumed.compactMap(tileNumber)
-        guard numbers.count == 2 else { return nil }
-
-        let below = numbers.filter { $0 < calledNumber }.count
-        let above = numbers.filter { $0 > calledNumber }.count
-        if above == 2 { return 0 }
-        if below == 2 { return 2 }
-        if below == 1 && above == 1 { return 1 }
-        return nil
-    }
-
-    /// mjai 數牌字串的數字（"3m" → 3、"5mr" → 5）；字牌回 nil（chi 用不到）。
-    private nonisolated static func tileNumber(_ tile: String) -> Int? {
-        guard let first = tile.first, let number = first.wholeNumberValue,
-              (1...9).contains(number) else { return nil }
-        return number
     }
 }

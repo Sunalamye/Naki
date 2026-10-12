@@ -34,17 +34,17 @@ nonisolated enum LiqiTile {
 
     // MARK: 字牌對照
 
+    /// MJAI 字牌，依雀魂 `1z`–`7z` 的順序（東南西北白發中）。字牌的查詢與轉換都以這份為準；
+    /// `mjaiOrder` 另有一份排序用的字面列，`LiqiTileTests` 鎖住兩者一致。
+    static let honors = ["E", "S", "W", "N", "P", "F", "C"]
+
     /// 字牌（雀魂 → MJAI）
-    private static let honorToMJAI: [String: String] = [
-        "1z": "E", "2z": "S", "3z": "W", "4z": "N",
-        "5z": "P", "6z": "F", "7z": "C"
-    ]
+    private static let honorToMJAI = Dictionary(
+        uniqueKeysWithValues: honors.enumerated().map { ("\($0.offset + 1)z", $0.element) })
 
     /// 字牌（MJAI → 雀魂）
-    private static let honorToMajsoul: [String: String] = [
-        "E": "1z", "S": "2z", "W": "3z", "N": "4z",
-        "P": "5z", "F": "6z", "C": "7z"
-    ]
+    private static let honorToMajsoul = Dictionary(
+        uniqueKeysWithValues: honors.enumerated().map { ($0.element, "\($0.offset + 1)z") })
 
     // MARK: 轉換
 
@@ -75,6 +75,36 @@ nonisolated enum LiqiTile {
         let suit = chars[1]
         guard suit == "m" || suit == "p" || suit == "s" else { return nil }
         return number == 0 ? "5\(suit)r" : "\(number)\(suit)"
+    }
+
+    /// 牌的數字（雀魂 `0m` 與 MJAI `5mr` 的紅五都算 5）；字牌與無法辨識回 nil。
+    ///
+    /// 只看數字與花色字元，不驗長度與是否同為雀魂／MJAI 寫法：吃的變體分類只需要大小。
+    static func number(of tile: String?) -> Int? {
+        guard let tile, tile.count >= 2 else { return nil }
+        let chars = Array(tile)
+        guard let digit = chars.first.flatMap({ Int(String($0)) }) else { return nil }
+        let suit = chars[1]
+        guard suit == "m" || suit == "p" || suit == "s" else { return nil }
+        return digit == 0 ? 5 : digit
+    }
+
+    /// 吃的變體：0＝被吃的牌最小（consumed 都比它大）、1＝中間、2＝最大；其餘回 nil。
+    ///
+    /// Mortal 的 `chi_low` / `chi_mid` / `chi_high` 與雀魂 `combination` 的對照共用這一份分類。
+    /// 與牌號放在一起：分類只吃牌號，Bot 與 Bridge 兩層都已依賴本檔。
+    /// 刻意不驗花色與是否相連，只看 consumed 恰為兩張數牌時各自在被吃牌的哪一側。
+    static func chiVariant(called: String?, consumed: [String]) -> Int? {
+        guard let calledNumber = number(of: called), consumed.count == 2 else { return nil }
+        let numbers = consumed.compactMap(number(of:))
+        guard numbers.count == 2 else { return nil }
+
+        let below = numbers.filter { $0 < calledNumber }.count
+        let above = numbers.filter { $0 > calledNumber }.count
+        if above == 2 { return 0 }
+        if below == 2 { return 2 }
+        if below == 1 && above == 1 { return 1 }
+        return nil
     }
 
     // MARK: 排序

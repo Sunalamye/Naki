@@ -118,7 +118,6 @@ struct TileImage: View {
 
     // MARK: - Asset Mapping
 
-    private static let honors: Set<String> = ["E", "S", "W", "N", "P", "F", "C"]
     /// 自己就是一整張牌、不需要疊 `Front` 的資產。
     static let selfContained: Set<String> = ["back", "blank", "front"]
     private static let suitGroups: [Character: String] = [
@@ -133,7 +132,7 @@ struct TileImage: View {
     /// 畫一塊空白，畫面上看起來就只是「牌不見了」）。
     static func assetName(for mjai: String) -> String? {
         if selfContained.contains(mjai) { return "MahjongTiles/Utility/\(mjai)" }
-        if honors.contains(mjai) { return "MahjongTiles/Honors/\(mjai)" }
+        if LiqiTile.honors.contains(mjai) { return "MahjongTiles/Honors/\(mjai)" }
 
         // 數牌：`1m`–`9m`／`1p`–`9p`／`1s`–`9s`，外加赤五 `5mr`／`5pr`／`5sr`。
         let isRed = mjai.hasSuffix("r")
@@ -179,7 +178,7 @@ extension TileImage {
             ForEach(1...9, id: \.self) { TileImage(mjai: "\($0)s", size: .medium) }
         }
         HStack(spacing: 4) {
-            ForEach(["E", "S", "W", "N", "P", "F", "C"], id: \.self) {
+            ForEach(LiqiTile.honors, id: \.self) {
                 TileImage(mjai: $0, size: .medium)
             }
         }

@@ -290,11 +290,11 @@ final class CloudDecisionMapperTests: XCTestCase {
 
     func test_chiVariants_matchLiqiCombinationSemantics() {
         // 0＝被吃的牌最小、1＝中間、2＝最大（與 chiCombinationIndex 同一套推導）
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "3m", consumed: ["4m", "5m"]), 0)
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "3m", consumed: ["2m", "4m"]), 1)
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "3m", consumed: ["1m", "2m"]), 2)
-        XCTAssertEqual(CloudDecisionMapper.chiVariant(called: "5s", consumed: ["4s", "6s"]), 1)
-        XCTAssertNil(CloudDecisionMapper.chiVariant(called: "E", consumed: ["1m", "2m"]),
+        XCTAssertEqual(LiqiTile.chiVariant(called: "3m", consumed: ["4m", "5m"]), 0)
+        XCTAssertEqual(LiqiTile.chiVariant(called: "3m", consumed: ["2m", "4m"]), 1)
+        XCTAssertEqual(LiqiTile.chiVariant(called: "3m", consumed: ["1m", "2m"]), 2)
+        XCTAssertEqual(LiqiTile.chiVariant(called: "5s", consumed: ["4s", "6s"]), 1)
+        XCTAssertNil(LiqiTile.chiVariant(called: "E", consumed: ["1m", "2m"]),
                      "字牌不能吃")
 
         let recs = CloudDecisionMapper.recommendations(
@@ -304,6 +304,27 @@ final class CloudDecisionMapperTests: XCTestCase {
             reachDiscard: nil)
         XCTAssertEqual(recs?[0].actionType, .chi)
         XCTAssertEqual(recs?[0].displayTile, "chi_0")
+    }
+
+    /// 層級：mapper。雀魂寫法（`0m`）或非牌字串不是合法 MJAI，整列回 nil 讓呼叫端退回本地
+    func test_chiReaction_withNonMJAITiles_returnsNil() {
+        let cases: [(pai: String, consumed: [String])] = [
+            ("0m", ["6m", "7m"]), ("3m", ["4m", "0m"]), ("6m", ["0m", "7m"]),
+            ("1z", ["2m", "3m"]), ("3m", ["4m", "5x"]),
+        ]
+        for c in cases {
+            XCTAssertNil(
+                CloudDecisionMapper.recommendations(
+                    reaction: ["type": "chi", "actor": 1, "pai": c.pai,
+                               "consumed": c.consumed, "target": 0],
+                    candidates: [], reachDiscard: nil),
+                "pai=\(c.pai) consumed=\(c.consumed)")
+        }
+        let valid = CloudDecisionMapper.recommendations(
+            reaction: ["type": "chi", "actor": 1, "pai": "3m",
+                       "consumed": ["4m", "5mr"], "target": 0],
+            candidates: [], reachDiscard: nil)
+        XCTAssertEqual(valid?.first?.chiVariant, 0, "合法 MJAI 赤五照常通過")
     }
 
     func test_kanReactions_mapToKan() {

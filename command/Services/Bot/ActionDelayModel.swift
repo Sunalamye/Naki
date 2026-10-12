@@ -117,7 +117,7 @@ nonisolated enum ActionDelayModel {
     /// 從 MJAI 牌名判斷牌種。認不出來時當中張（最保守：那是思考最久的一類）。
     static func tileClass(of tile: String) -> TileClass {
         // MJAI 字牌：E/S/W/N/P/F/C
-        if ["E", "S", "W", "N", "P", "F", "C"].contains(tile) { return .honor }
+        if LiqiTile.honors.contains(tile) { return .honor }
         guard let first = tile.first, let number = first.wholeNumberValue else { return .middle }
         return (number == 1 || number == 9) ? .terminal : .middle
     }

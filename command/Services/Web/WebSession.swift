@@ -297,8 +297,7 @@ final class WebSession {
             if let type, let combinations = snapshot?.operation(of: type)?.combination {
                 let index: Int?
                 if type == .chi {
-                    let variant = top.label.hasPrefix("chi_") ? Int(top.label.dropFirst(4)) : 0
-                    index = variant.flatMap { snapshot?.chiCombinationIndex(variant: $0) }
+                    index = snapshot?.chiCombinationIndex(variant: top.chiVariant ?? 0)
                 } else {
                     index = combinations.count == 1 ? 0 : nil
                 }

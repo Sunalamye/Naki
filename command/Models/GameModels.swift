@@ -260,6 +260,9 @@ struct Recommendation: Identifiable, Equatable {
     /// 槓的種類（暗槓／加槓／大明槓）。只有來源分得出種類時才有值（雲端、三麻）；
     /// 本地 Mortal 只給 `kan` ⇒ nil，executor 退回 oplist 的第一個可用槓。
     let kanKind: LiqiOperationType?
+    /// 吃的變體：0＝被吃的牌最小、1＝中間、2＝最大（Mortal 的 chi_low／mid／high）。
+    /// 非吃的動作為 nil；`label` 的 `chi_N` 只剩顯示用，executor 與高亮都讀這個欄位。
+    let chiVariant: Int?
 
     /// 動作類型
     enum ActionType: String, CaseIterable {
@@ -337,6 +340,7 @@ struct Recommendation: Identifiable, Equatable {
         self.actionType = .discard
         self.detail = detail
         self.kanKind = nil
+        self.chiVariant = nil
     }
 
     /// 強類型初始化（非打牌動作）
@@ -348,11 +352,12 @@ struct Recommendation: Identifiable, Equatable {
         self.actionType = actionType
         self.detail = detail
         self.kanKind = nil
+        self.chiVariant = Self.parsedChiVariant(label: self.label, actionType: actionType)
     }
 
     /// 從 MJAI 字串初始化（保持兼容性）
     init(tile tileString: String, probability: Double, actionType: ActionType,
-         detail: String? = nil, kanKind: LiqiOperationType? = nil) {
+         detail: String? = nil, kanKind: LiqiOperationType? = nil, chiVariant: Int? = nil) {
         if actionType == .discard, let t = Tile(mjaiString: tileString) {
             self.tile = t
         } else {
@@ -363,6 +368,7 @@ struct Recommendation: Identifiable, Equatable {
         self.actionType = actionType
         self.detail = detail
         self.kanKind = kanKind
+        self.chiVariant = chiVariant ?? Self.parsedChiVariant(label: tileString, actionType: actionType)
     }
 
     /// 從字典初始化（Legacy）
@@ -382,6 +388,13 @@ struct Recommendation: Identifiable, Equatable {
         self.actionType = type
         self.detail = dict["detail"] as? String
         self.kanKind = nil
+        self.chiVariant = Self.parsedChiVariant(label: tileStr, actionType: type)
+    }
+
+    /// 建構邊界：呼叫端沒給變體、只給 `chi_N` 標籤時（字串入口、外部 JSON）在這裡解一次。
+    /// 之後所有讀取點都只看 `chiVariant` 欄位。
+    private static func parsedChiVariant(label: String, actionType: ActionType) -> Int? {
+        actionType == .chi && label.hasPrefix("chi_") ? Int(label.dropFirst(4)) : nil
     }
 
     // MARK: - Computed Properties
@@ -401,9 +414,9 @@ struct Recommendation: Identifiable, Equatable {
         switch actionType {
         case .chi:
             // chi_0, chi_1, chi_2 -> 吃①, 吃②, 吃③
-            if label.hasPrefix("chi_"), let idx = Int(String(label.dropFirst(4))) {
+            if let chiVariant {
                 let symbols = ["①", "②", "③"]
-                return "吃\(symbols[max(0, min(idx, 2))])"
+                return "吃\(symbols[max(0, min(chiVariant, 2))])"
             }
             return "吃"
         case .pon: return "碰"
