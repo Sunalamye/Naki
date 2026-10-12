@@ -805,3 +805,11 @@
 - 後續項九條全部完成，含 bridge 黃金測試（復驗依封包語意手算三個期望值一致）、`load()` 遷移測試、listener guard 測試（變異 5/5 紅）。
 - **流程事故與規則補強**：實作者結案凍結後收到主線遲到的 GameModels 核准，直接當成解凍在同一 worktree 開 commit 8 跑變異，干擾復驗員在 `a3a980d` 的動態閘門約 10 分鐘；主線改以新 HEAD `b86f329` 復驗。**規則：凍結中收到任何遲到的核准或訊息，一律先回問主線，不得自行動工；主線核准連帶檔的訊息應在派工 brief 內或結案前送達，結案後的核准視為下一輪指示。**
 - 可合併後補：`AutoPlayModeStoreTests.swift:14` 檔頭過時註解 → WP12；Localizable 一個無引用 key → WP12；`passChannel` 對 ron-only 走 chiPengGang 而 `sendPass` 用 `LiqiOperationType.channel` 兩套規則不一致（本包未改任一邊）→ 延後表等 live 證據；`NakiRuntime` weak-self 退路只剩 `.off` 無測試 → 延後表。
+
+### WP9 結果（2026-10-12）
+- 合併到 main：merge commit `53d173e`（`a8d2f8f` defaults 注入／`b23b71d` manifest 收斂，基準 `35e0f01`，7 檔 +401/−104）。復驗「可合併」（`.swfd/logs/wp9-verify/`）：949 → 959；合併態 main 全套見 `.swfd/logs/merge-main/test-53d173e.log`，跑前跑後真實設定檔 sha 相同（dc1ed5359702 → dc1ed5359702）。
+- Deviation（核可）：規格的 `init(defaults: = .standard)` 做不到——`nonisolated init()` 不能覆寫 19 個 `@Observable` 屬性（復驗實驗證實 error）；改成另加 MainActor `init(defaults:)` 無預設值、覆蓋全部 19 個 UserDefaults 屬性（復驗逐一核對完整），直接寫備份欄位繞過 `didSet` 無副作用；正式路徑 `SettingsStore()` 行為與基底相同。
+- manifest 收斂：復驗自製差異表，四條規則兩邊相同、無任何一邊放寬；對外可見變化只有 import 的 schema 訊息變長。`validate(directoryName:)` 比規格多一參數以保留 load 檢查順序。
+- **事故與證據問題**：實作者第一輪變異寫了三個值到用戶真實設定檔 `~/Library/Preferences/org.39c154f25912233a.akagi.plist`（`naki.cloud.model4p`／`MajsoulExtraHeaders`／`naki.appLanguage`），已還原。但 logs 內標示「變異前快照」的檔是 23:35 事後拍的（晚於所有變異）；復驗從實作者 scratchpad 找回 23:20:12 的真實檔 SHA 指紋與副本（早於第一次變異），證實現值逐位元組相同。**規則：證據檔的時間戳必須早於它宣稱證明的事件，復驗員核對時間線；關鍵證據不得只放 scratchpad。**
+- 關鍵發現（WP12 補進 CLAUDE.md 坑）：**NakiTests 的 test host 與 Naki app 共用 `.standard`，就是用戶真實設定檔**；`TEST_RUNNER_CFFIXED_USER_HOME` 隔離不了。本包三個測試檔已不再寫它，但範圍外仍有 5 處備份還原寫法（`MajsoulRequestBuilderTests:101-110`、`ToolAndModelGapTests:193-205`、`WebLayerGapTests:107-112`、`ObservedMatchSidsTests:20-28`、`NakiTests.swift:48` `pinAppLanguage` 7 處呼叫）→ **ui S2 剩餘實害，新增 WP9b（Sonnet medium，排 WP11 後）**。WP10 在 wp9 汙染時段出現停滯訊息變日文的 flaky，歸因於此。
+- 可合併後補：`SettingsStore.swift:78` 註解不實（另有 10 個 `= .standard` 預設參數）→ WP9b 一併改成 `SettingsStore.standard`；m6／m8 在乾淨機器仍存活（近似等價：把預設值物化回同一 suite）→ WP9b 用計數子類補「init 期間不寫入」斷言；`Localizable.xcstrings:1396` stale key → WP12；規格閘門類別名應為 `SettingsStoreInjectionTests` → WP12；`removePersistentDomain` 不刪檔，`~/Library/Preferences` 已有 8580 個 `naki.tests.*` 空殼 plist（基底模式）＋實作者留下的 `naki.mutation.leak.plist` → 報用戶決定是否清理。
