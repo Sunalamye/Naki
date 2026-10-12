@@ -1010,12 +1010,16 @@ struct NakiActions {
   var setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction
   /// 移除插件（刪目錄 + 熱停用 + 重掃）
   var removePlugin: RemovePluginAction
+  /// 從 URL 抓插件供預覽（不安裝）
+  var fetchPluginImport: FetchPluginImportAction
   /// 安裝（匯入／更新）插件
   var installPlugins: InstallPluginsAction
   /// 檢查插件更新
   var checkPluginUpdates: CheckPluginUpdatesAction
   /// 檢查 App 有沒有新版（`manual` 略過節流與略過清單）
   var checkForUpdate: CheckForUpdateAction
+  /// 收起新版提示（`skip` 時記住略過的版本）
+  var dismissUpdate: DismissUpdateAction
   /// 改插件設定值
   var setPluginSetting: SetPluginSettingAction
   /// 強制斷線重連以重建 Bot
@@ -1046,6 +1050,8 @@ struct NakiActions {
   var testCloudConnection: TestCloudConnectionAction
   /// 插件頁的目前頁面診斷（可先重新注入已啟用插件）
   var pluginDiagnostics: PluginDiagnosticsAction
+  /// 清空日誌面板的記憶體 log
+  var clearLogs: ClearLogsAction
   /// 交出這條 path 的 WebView
   var webView: WebViewAction
 }
@@ -1061,9 +1067,11 @@ extension NakiActions {
     self.setPluginEnabled = SetPluginEnabledAction()
     self.setPluginsMayModifyOutbound = SetPluginsMayModifyOutboundAction()
     self.removePlugin = RemovePluginAction()
+    self.fetchPluginImport = FetchPluginImportAction()
     self.installPlugins = InstallPluginsAction()
     self.checkPluginUpdates = CheckPluginUpdatesAction()
     self.checkForUpdate = CheckForUpdateAction()
+    self.dismissUpdate = DismissUpdateAction()
     self.setPluginSetting = SetPluginSettingAction()
     self.forceReconnect = ForceReconnectAction()
     self.setAutoPlayMode = SetAutoPlayModeAction()
@@ -1079,6 +1087,7 @@ extension NakiActions {
     self.probeCloud = ProbeCloudAction()
     self.testCloudConnection = TestCloudConnectionAction()
     self.pluginDiagnostics = PluginDiagnosticsAction()
+    self.clearLogs = ClearLogsAction()
     self.webView = WebViewAction()
   }
 }
@@ -1144,7 +1153,32 @@ struct SetPluginsMayModifyOutboundAction {
   func callAsFunction(_ on: Bool) { perform(on) }
 }
 
-// MARK: - 安裝／檢查更新／改設定
+// MARK: - 抓取／安裝／檢查更新／改設定
+
+/// 從 URL 抓插件供預覽（repo → 多個；gist／plugin.json → 一個），只抓不安裝。
+struct FetchPluginImportAction {
+
+  private nonisolated(unsafe) let perform: (String) async -> Result<[ImportedPlugin], PluginImportError>
+
+  private init(perform: @escaping (String) async -> Result<[ImportedPlugin], PluginImportError>) {
+    self.perform = perform
+  }
+
+  static let live = FetchPluginImportAction(perform: { await PluginImportSource.fetchAny(urlString: $0) })
+
+  /// Preview 不連網：回空清單。
+  nonisolated init() { self.perform = { _ in .success([]) } }
+
+  #if DEBUG
+    init(stub: @escaping (String) async -> Result<[ImportedPlugin], PluginImportError>) {
+      self.init(perform: stub)
+    }
+  #endif
+
+  func callAsFunction(urlString: String) async -> Result<[ImportedPlugin], PluginImportError> {
+    await perform(urlString)
+  }
+}
 
 /// 逐一落地插件（匯入與確認更新共用），成功的有重掃；回傳失敗原因。
 struct InstallPluginsAction {
@@ -1210,6 +1244,32 @@ struct CheckForUpdateAction {
   #endif
 
   func callAsFunction(manual: Bool) async { await perform(manual) }
+}
+
+/// 收起新版提示。`skip` 時先記住這個版本（之後自動檢查不再提示），再收起。
+struct DismissUpdateAction {
+
+  private nonisolated(unsafe) let perform: (Bool) -> Void
+
+  private init(perform: @escaping (Bool) -> Void) {
+    self.perform = perform
+  }
+
+  init(store: GameStore, settings: SettingsStore) {
+    self.init(perform: { [weak store, weak settings] skip in
+      guard let store else { return }
+      if skip, let version = store.availableUpdate?.version { settings?.skippedUpdateVersion = version }
+      store.availableUpdate = nil
+    })
+  }
+
+  nonisolated init() { self.perform = { _ in } }
+
+  #if DEBUG
+    init(stub: @escaping (Bool) -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(skip: Bool) { perform(skip) }
 }
 
 /// 存插件設定值；插件已啟用才熱重載（改設定不該順便把插件啟用並執行）。
@@ -1441,4 +1501,28 @@ struct PluginDiagnosticsAction {
   #endif
 
   func callAsFunction(reinject: Bool) async -> PluginDiagnostics { await perform(reinject) }
+}
+
+// MARK: - 清空日誌
+
+/// 清空記憶體 log（日誌面板的清除鈕）；檔案 log 不動。
+struct ClearLogsAction {
+
+  private nonisolated(unsafe) let perform: () -> Void
+
+  private init(perform: @escaping () -> Void) {
+    self.perform = perform
+  }
+
+  init(logManager: LogManager) {
+    self.init(perform: { [weak logManager] in logManager?.clear() })
+  }
+
+  nonisolated init() { self.perform = {} }
+
+  #if DEBUG
+    init(stub: @escaping () -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction() { perform() }
 }

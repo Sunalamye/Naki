@@ -571,9 +571,11 @@ final class NakiRuntime {
             setPluginEnabled: SetPluginEnabledAction(runtime: self),
             setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction(runtime: self),
             removePlugin: RemovePluginAction(runtime: self),
+            fetchPluginImport: .live,
             installPlugins: InstallPluginsAction(runtime: self),
             checkPluginUpdates: CheckPluginUpdatesAction(runtime: self),
             checkForUpdate: CheckForUpdateAction(runtime: self),
+            dismissUpdate: DismissUpdateAction(store: store, settings: settings),
             setPluginSetting: SetPluginSettingAction(runtime: self),
             forceReconnect: ForceReconnectAction(session: session),
             setAutoPlayMode: SetAutoPlayModeAction(runtime: self),
@@ -592,6 +594,7 @@ final class NakiRuntime {
             probeCloud: .live(),
             testCloudConnection: .live(),
             pluginDiagnostics: PluginDiagnosticsAction(runtime: self),
+            clearLogs: ClearLogsAction(logManager: .shared),
             webView: WebViewAction(session: session))
     }
 }

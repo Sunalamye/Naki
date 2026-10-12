@@ -63,12 +63,9 @@ struct UpdateAvailableBanner: View {
 
                 Button("前往下載") { openURL(update.url) }
                     .buttonStyle(.borderedProminent)
-                Button("略過此版本") {
-                    naki.settings.skippedUpdateVersion = update.version
-                    naki.store.availableUpdate = nil
-                }
-                .buttonStyle(.bordered)
-                Button("關閉提示", systemImage: "xmark") { naki.store.availableUpdate = nil }
+                Button("略過此版本") { naki.actions.dismissUpdate(skip: true) }
+                    .buttonStyle(.bordered)
+                Button("關閉提示", systemImage: "xmark") { naki.actions.dismissUpdate(skip: false) }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
             }

@@ -9,6 +9,7 @@
 import SwiftUI
 
 struct LogPanel: View {
+    @Environment(\.naki) private var naki
     private let logManager = LogManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var autoScroll = true
@@ -51,7 +52,7 @@ struct LogPanel: View {
                 #endif
 
                 // 清除按鈕
-                Button("清除日誌", systemImage: "trash") { logManager.clear() }
+                Button("清除日誌", systemImage: "trash") { naki.actions.clearLogs() }
                     .labelStyle(.iconOnly)
                 .accessibilityIdentifier("log-clear-button")
                 #if os(macOS)

@@ -267,3 +267,79 @@ final class ConnectionSettingsHeadersTests: XCTestCase {
         XCTAssertEqual(saved, expected)
     }
 }
+
+// MARK: - View 改走 Action 的三個副作用
+
+@MainActor
+final class ViewSideEffectActionTests: XCTestCase {
+
+    private var suiteName = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "naki.tests.wp8.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        super.tearDown()
+    }
+
+    private func makeUpdate() throws -> ReleaseInfo {
+        ReleaseInfo(version: "9.9.9", url: try XCTUnwrap(URL(string: "https://example.invalid/r")))
+    }
+
+    /// 改動前「略過此版本」：先寫 skippedUpdateVersion，再清 availableUpdate。
+    func testDismissUpdateWithSkipRemembersVersionAndClears() throws {
+        let store = GameStore()
+        let settings = SettingsStore(defaults: defaults)
+        store.availableUpdate = try makeUpdate()
+
+        DismissUpdateAction(store: store, settings: settings)(skip: true)
+
+        XCTAssertEqual(settings.skippedUpdateVersion, "9.9.9")
+        XCTAssertEqual(defaults.string(forKey: SettingsStore.skippedUpdateVersionKey), "9.9.9")
+        XCTAssertNil(store.availableUpdate)
+    }
+
+    /// 改動前「關閉提示」：只清 availableUpdate，不記略過。
+    func testDismissUpdateWithoutSkipOnlyClears() throws {
+        let store = GameStore()
+        let settings = SettingsStore(defaults: defaults)
+        store.availableUpdate = try makeUpdate()
+
+        DismissUpdateAction(store: store, settings: settings)(skip: false)
+
+        XCTAssertNil(settings.skippedUpdateVersion)
+        XCTAssertNil(defaults.string(forKey: SettingsStore.skippedUpdateVersionKey))
+        XCTAssertNil(store.availableUpdate)
+    }
+
+    func testFetchPluginImportForwardsURLAndResult() async {
+        var asked: [String] = []
+        let action = FetchPluginImportAction(stub: { asked.append($0); return .failure(.notHTTPS) })
+
+        let result = await action(urlString: "http://example.invalid/p")
+
+        XCTAssertEqual(asked, ["http://example.invalid/p"])
+        guard case .failure(.notHTTPS) = result else { return XCTFail("應原樣回傳 stub 結果：\(result)") }
+    }
+
+    /// Preview 預設值不連網：直接回空清單。
+    func testDefaultFetchPluginImportReturnsEmptyWithoutNetwork() async {
+        let result = await FetchPluginImportAction()(urlString: "https://example.invalid/p")
+        guard case .success(let list) = result else { return XCTFail("\(result)") }
+        XCTAssertTrue(list.isEmpty)
+    }
+
+    /// 真實實作清的是 test host 共用的 `LogManager.shared`，這裡只驗轉發。
+    func testClearLogsForwards() {
+        var cleared = 0
+        ClearLogsAction(stub: { cleared += 1 })()
+        ClearLogsAction()()
+        XCTAssertEqual(cleared, 1)
+    }
+}

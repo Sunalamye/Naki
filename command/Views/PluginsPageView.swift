@@ -462,8 +462,7 @@ struct PluginsPageView: View {
 
     private func fetchImport() async {
         importing = true; importError = nil; importMessage = nil; importPreview = []
-        // fetchAny：repo → 多個；gist / plugin.json → 一個
-        let result = await PluginImportSource.fetchAny(urlString: importURL)
+        let result = await naki.actions.fetchPluginImport(urlString: importURL)
         importing = false
         switch result {
         case .success(let list):
