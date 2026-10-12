@@ -106,6 +106,8 @@ final class ReplayFingerprintTests: XCTestCase {
         let types = Set((dict["decisions"] as? [[String: Any]] ?? [])
             .compactMap { ($0["action"] as? [String: Any])?["type"] as? String })
 
+        XCTAssertGreaterThan((dict["decisions"] as? [[String: Any]])?.count ?? 0, 0, "replay 全部失敗時下面的斷言會空轉成立")
+        XCTAssertTrue((dict["errors"] as? [Any] ?? []).isEmpty)
         XCTAssertFalse(types.contains("pon"))
         XCTAssertTrue(types.isDisjoint(with: ["ankan", "reach", "nukidora", "hora"]))
         XCTAssertEqual(dict["sanmaAuthorization"] as? String, "unavailable_no_oplist_in_recording")

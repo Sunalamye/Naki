@@ -89,6 +89,25 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         }
     }
 
+    /// 九種九牌：ReqSelfOperation type=10（kyushu），成功才消化 oplist
+    @MainActor
+    func testRyukyokuGoesThroughExecutor() async {
+        let store = LiqiOperationStore()
+        var captured: [String] = []
+        let sender = recordingSender { captured.append($0) }
+        let snapshot = store.record(seat: 0, operations: [LiqiOperation(type: .kyushu)], source: "test")
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .ryukyoku, tile: "", snapshot: snapshot, recommendations: [],
+            sender: sender, store: store)
+
+        XCTAssertEqual(result?.success, true)
+        XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputOperation")
+        XCTAssertTrue(hex(captured.first).hasSuffix("1202080a"),
+                      "九種九牌是 type=10，實際 bytes=\(hex(captured.first))")
+        XCTAssertNil(store.pending, "送出成功才消化這批 oplist")
+    }
+
     /// 非摸切：tsumoTile 不同就不能帶 moqie（proto3 省略 false）
     @MainActor
     func testDiscardWithoutMoqieOmitsField() async {
@@ -173,6 +192,64 @@ final class AutoPlayActionExecutorTests: XCTestCase {
                       "退回索引 0（proto3 省略），實際 bytes=\(hex(captured.first))")
         XCTAssertTrue(logs.contains { $0.contains("無法對照組合") },
                       "退回保守索引是猜的，不可以靜默")
+    }
+
+    /// 多組 combination 且對照不到：猜 0 會吃錯牌 → 不送、不消化 oplist、留下 event
+    @MainActor
+    func testChiWithMultipleCombinationsAndNoMatchDoesNotSend() async {
+        let store = LiqiOperationStore()
+        var sendCount = 0
+        var events: [String] = []
+        let sender = recordingSender { _ in sendCount += 1 }
+        // 吃 3m：兩組都是 chi_2／chi_1 變體，沒有 chi_0（above==2）可對
+        let snapshot = store.record(
+            seat: 0,
+            operations: [LiqiOperation(type: .chi, combination: ["1m|2m", "2m|4m"])],
+            contextTile: "3m",
+            source: "test")
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [],
+            sender: sender, store: store, event: { events.append($0) })
+
+        XCTAssertNil(result)
+        XCTAssertEqual(sendCount, 0)
+        XCTAssertEqual(store.pending?.sequence, snapshot.sequence, "沒送出就不能消化這批 oplist")
+        XCTAssertTrue(events.contains { $0.contains("保留 oplist") })
+    }
+
+    /// 沒有任何候選組合（無快照）：沒有可猜的對象 → 不送
+    @MainActor
+    func testChiWithoutAnyCombinationDoesNotSend() async {
+        let store = LiqiOperationStore()
+        var sendCount = 0
+        let sender = recordingSender { _ in sendCount += 1 }
+
+        let result = await AutoPlayActionExecutor.execute(
+            action: .chi, tile: "chi_0", snapshot: nil, recommendations: [],
+            sender: sender, store: store)
+
+        XCTAssertNil(result)
+        XCTAssertEqual(sendCount, 0)
+    }
+
+    /// `chi_` 前綴解析失敗：照舊以 chi_0 對照，但必須留下一行 log
+    @MainActor
+    func testChiWithUnparsableVariantLogs() async {
+        let store = LiqiOperationStore()
+        var logs: [String] = []
+        let sender = recordingSender { _ in }
+        let snapshot = store.record(
+            seat: 0,
+            operations: [LiqiOperation(type: .chi, combination: ["4m|5m"])],
+            contextTile: "3m",
+            source: "test")
+
+        await AutoPlayActionExecutor.execute(
+            action: .chi, tile: "chi_x", snapshot: snapshot, recommendations: [],
+            sender: sender, store: store, log: { logs.append($0) })
+
+        XCTAssertTrue(logs.contains { $0.contains("無法解析變體") })
     }
 
     /// 槓型由 oplist 決定：只有加槓可用時就送加槓（type=6），不是預設的暗槓

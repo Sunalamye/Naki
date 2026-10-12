@@ -232,6 +232,28 @@ final class CloudBotTests: XCTestCase {
         XCTAssertEqual(CloudMockURLProtocol.captured.count, 2)
     }
 
+    /// 決策被取消（換局／重連）＝沒問到雲端，不是雲端壞了：斷路器與 fallback 計數都不動，
+    /// 下一個正常決策照問雲端
+    func testCancelledReactDoesNotTripBreaker() async throws {
+        let cloud = (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"#
+            + #""candidates":[],"model":"4p-x"}"#, [String: String]())
+        CloudMockURLProtocol.reset(script: [cloud, cloud])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+
+        // MainActor 上建立的 Task 在本測試下一次 await 才開跑，此時已是取消狀態
+        let cancelled = Task { try await decide(bot, local: local, reaction: localDahai("1m")) }
+        cancelled.cancel()
+        let first = try await cancelled.value
+        XCTAssertEqual(first?.source, "local", "取消的決策沿用本地，不採雲端結果")
+        XCTAssertEqual(bot.cloudFallbackStreak, 0, "取消不是 fallback")
+        XCTAssertFalse(bot.cloudDegraded)
+
+        let second = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(second?.source, "cloud:4p-x", "斷路器未開：下一個決策照問雲端")
+    }
+
     // MARK: 立直兩段式
 
     func test_reachTwoStep_insertsCloudDiscard() async throws {

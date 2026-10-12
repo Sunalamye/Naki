@@ -102,10 +102,18 @@ enum AutoPlayActionExecutor {
             var variant = 0
             if tile.hasPrefix("chi_"), let index = Int(String(tile.dropFirst(4))) {
                 variant = index
+            } else {
+                log("⚠️ 吃: 無法解析變體 \(tile)，以 chi_0 對照")
             }
             let resolved = snapshot?.chiCombinationIndex(variant: variant)
+            let combination = snapshot?.operation(of: .chi)?.combination ?? []
+            let combos = combination.isEmpty ? "-" : combination.joined(separator: ", ")
+            // 對照不到時只有唯一候選才能猜（猜 0 必然是那一組）；多組猜錯會吃錯牌
+            if resolved == nil, combination.count != 1 {
+                event("❌ 吃: 無法對照 mortal=chi_\(variant) 到 [\(combos)]，未送出，保留 oplist")
+                return nil
+            }
             let index = UInt32(resolved ?? 0)
-            let combos = snapshot?.operation(of: .chi)?.combination.joined(separator: ", ") ?? "-"
             log("執行: 吃 mortal=chi_\(variant) → index=\(index) [\(combos)]"
                 + (resolved == nil ? " ⚠️ 無法對照組合, 退回 0" : ""))
             spec = LiqiRequestBuilder.chi(index: index)

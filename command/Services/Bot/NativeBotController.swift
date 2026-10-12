@@ -276,12 +276,15 @@ class NativeBotController {
         do {
             reaction = try await bot.react(events: [event])
         } catch {
+            // 舊世代的錯誤與新局無關：不清推薦、不往上拋，呼叫端不會把它記成新局的錯誤
+            guard gen == generation else {
+                botLog("[NativeBotController] 丟棄過期 react 錯誤 (gen=\(gen) != 現世代=\(generation)): \(error)")
+                return nil
+            }
             botLog("[NativeBotController] ERROR: bot.react threw error: \(error)")
             // 上一個成功事件的推薦已不對應現在的牌局，留著會被當成當前推薦
-            if gen == generation {
-                lastRecommendations = []
-                lastRecommendationsOplistSequence = nil
-            }
+            lastRecommendations = []
+            lastRecommendationsOplistSequence = nil
             throw error
         }
 
@@ -638,6 +641,11 @@ class NativeBotController {
     /// 能偽造模型輸出的入口不該存在於使用者跑的 binary 裡。
     func injectRecommendationsForTesting(_ recommendations: [Recommendation]) {
         lastRecommendations = recommendations
+    }
+
+    /// 換上指定引擎（不動世代）：世代守衛測試需要一個可在 `react` 內暫停的引擎。
+    func injectBotForTesting(_ bot: any MahjongBot) {
+        self.bot = bot
     }
     #endif
 }
