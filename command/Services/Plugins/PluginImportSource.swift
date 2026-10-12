@@ -241,24 +241,12 @@ nonisolated enum PluginImportSource {
         guard let manifest = try? JSONDecoder().decode(PluginManifest.self, from: mData) else {
             return .failure(.invalidManifest(L10n.text("plugin.json 缺欄位或格式錯")))
         }
-        guard manifest.apiVersion == 1 else {
-            return .failure(.invalidManifest(L10n.text("apiVersion \(manifest.apiVersion) 不支援（只收 1）")))
-        }
-        // id／entry 會變成落地路徑：預覽階段就擋掉路徑穿越與怪字元
-        guard PluginRegistry.isSafeName(manifest.id) else {
-            return .failure(.invalidManifest(L10n.text("id 只允許 A-Z a-z 0-9 . _ -，且不得以 . 開頭或含 ..")))
-        }
-        guard PluginRegistry.isSafeEntry(manifest.entry) else {
-            return .failure(.invalidManifest(L10n.text("entry 必須是單一 .js 檔名（字元集同 id）")))
+        if let failure = manifest.validate() {
+            if case .manifestInvalid(let detail) = failure { return .failure(.invalidManifest(detail)) }
+            return .failure(.invalidManifest(failure.text))
         }
         guard files[manifest.entry] != nil else {
             return .failure(.invalidManifest(L10n.text("找不到 entry：\(manifest.entry)")))
-        }
-        // settings schema 有效性（與 PluginRegistry.load 同規則）
-        if let schema = manifest.settings {
-            for (key, field) in schema where !field.isValid {
-                return .failure(.invalidManifest(L10n.text("settings.\(key) schema 無效")))
-            }
         }
         let total = files.values.reduce(0) { $0 + $1.count }
         guard total <= bundleMax else { return .failure(.tooLarge(L10n.text("整包 \(total) bytes"))) }

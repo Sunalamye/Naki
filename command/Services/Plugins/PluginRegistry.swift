@@ -123,6 +123,33 @@ nonisolated enum PluginLoadFailure: Sendable, Equatable {
     }
 }
 
+// MARK: - Manifest 驗證
+
+extension PluginManifest {
+    /// 載入（`PluginRegistry.load`）與匯入預覽（`PluginImportSource.finalize`）共用的規則；
+    /// 順序即優先序。`directoryName` 只有載入時有（匯入時還沒有目錄），給了才驗 id 與它相同。
+    func validate(directoryName: String? = nil) -> PluginLoadFailure? {
+        // id／entry 會被內插進路徑與注入 script：字元集不合就整個插件不載入
+        guard PluginRegistry.isSafeName(id) else {
+            return .manifestInvalid(L10n.text("id 只允許 A-Z a-z 0-9 . _ -，且不得以 . 開頭或含 .."))
+        }
+        guard PluginRegistry.isSafeEntry(entry) else {
+            return .manifestInvalid(L10n.text("entry 必須是單一 .js 檔名（字元集同 id）"))
+        }
+        // apiVersion exact match（§7.10(b)）
+        guard apiVersion == 1 else { return .apiVersionUnsupported(apiVersion) }
+        // 移除與啟用清單都以實際目錄為準：id 必須與目錄名相同，否則同一份插件能用不同 id 重複註冊
+        if let directoryName, id != directoryName {
+            return .idMismatch(L10n.text("manifest '\(id)' ≠ 目錄 '\(directoryName)'"))
+        }
+        // settings schema 有效性（§7.10a）：型別必須是 string/number/boolean 且 default 相符
+        for (key, field) in settings ?? [:] where !field.isValid {
+            return .manifestInvalid(L10n.text("settings.\(key) schema 無效（type 或 default 不合）"))
+        }
+        return nil
+    }
+}
+
 // MARK: - Descriptor
 
 /// 掃描一個插件目錄的結果。有效插件帶 manifest 與 entry 源碼；無效插件帶 failure。
@@ -209,41 +236,9 @@ nonisolated enum PluginRegistry {
                                     failure: .manifestInvalid("\(error.localizedDescription)"))
         }
 
-        // id／entry 會被內插進路徑與注入 script：字元集不合就整個插件不載入
-        guard isSafeName(manifest.id) else {
+        if let failure = manifest.validate(directoryName: dirName) {
             return PluginDescriptor(id: dirName, directory: directory, manifest: nil,
-                                    entrySource: nil,
-                                    failure: .manifestInvalid(L10n.text("id 只允許 A-Z a-z 0-9 . _ -，且不得以 . 開頭或含 ..")))
-        }
-        guard isSafeEntry(manifest.entry) else {
-            return PluginDescriptor(id: dirName, directory: directory, manifest: nil,
-                                    entrySource: nil,
-                                    failure: .manifestInvalid(L10n.text("entry 必須是單一 .js 檔名（字元集同 id）")))
-        }
-
-        // apiVersion exact match（§7.10(b)）。id 取目錄名：移除與啟用清單都以實際目錄為準，
-        // 不讓 manifest 自稱的 id 指到另一個插件。
-        guard manifest.apiVersion == 1 else {
-            return PluginDescriptor(id: dirName, directory: directory, manifest: nil,
-                                    entrySource: nil,
-                                    failure: .apiVersionUnsupported(manifest.apiVersion))
-        }
-
-        // id 必須與目錄名相同（避免同一份插件用不同 id 重複註冊）
-        guard manifest.id == dirName else {
-            return PluginDescriptor(id: dirName, directory: directory, manifest: nil,
-                                    entrySource: nil,
-                                    failure: .idMismatch(L10n.text("manifest '\(manifest.id)' ≠ 目錄 '\(dirName)'")))
-        }
-
-        // settings schema 有效性（§7.10a）：型別必須是 string/number/boolean 且 default 相符。
-        // 無效 ⇒ 整個插件不載入（與其它 manifest 錯誤同語意）。
-        if let schema = manifest.settings {
-            for (key, field) in schema where !field.isValid {
-                return PluginDescriptor(id: manifest.id, directory: directory, manifest: nil,
-                                        entrySource: nil,
-                                        failure: .manifestInvalid(L10n.text("settings.\(key) schema 無效（type 或 default 不合）")))
-            }
+                                    entrySource: nil, failure: failure)
         }
 
         // entry 源碼
