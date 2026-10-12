@@ -114,27 +114,15 @@ class MajsoulBridge {
 
     /// 完整重置橋接器狀態（包括 accountId，用於頁面重新載入）
     func fullReset() {
-        liqiParser.reset()
+        reset()
         accountId = 0
         seat = 0
-        lastDiscard = nil
-        doras = []
         is3P = false
-        pendingReachAccepted = nil
-        syncing = false
-        hasReceivedAuthGame = false
-        roundBlocked = false
-        operations.clear()
         LiqiResponseStore.shared.reset()
         // 頁面重新載入＝重新開始：上一次載入留下的解析失敗不該掛在新頁面上
         faultState.reset()
         reportedSites.removeAll()
         bridgeLog("[MajsoulBridge] 完整重置 (accountId 已清除)")
-    }
-
-    /// 設置帳號 ID
-    func setAccountId(_ id: Int) {
-        accountId = id
     }
 
     /// 最近一次 `parse` / `observeOutgoing` 的**原始**解析結果（轉不成 MJAI 事件時仍然有值）。
@@ -271,7 +259,7 @@ class MajsoulBridge {
 
         // 處理登入響應 - 獲取帳號 ID
         if (method == ".lq.Lobby.login" || method == ".lq.Lobby.oauth2Login" ||
-            method == ".lq.Lobby.oauth2Auth" || method == ".lq.Lobby.emailLogin") && msgType == "response" {
+            method == ".lq.Lobby.emailLogin") && msgType == "response" {
             bridgeLog("[MajsoulBridge] 偵測到登入回應: \(method)")
             bridgeLog("[MajsoulBridge] 登入資料鍵: \(msgData.keys)")
 
@@ -279,17 +267,10 @@ class MajsoulBridge {
             if let accId = msgData["accountId"] as? Int, accId > 0 {
                 accountId = accId
                 bridgeLog("[MajsoulBridge] 從直接欄位獲取 accountId: \(accountId)")
-            } else if let account = msgData["account"] as? [String: Any] {
-                if let accId = account["accountId"] as? Int {
-                    accountId = accId
-                    bridgeLog("[MajsoulBridge] 從 account.accountId 獲取 accountId: \(accountId)")
-                } else if let accId = account["account_id"] as? Int {
-                    accountId = accId
-                    bridgeLog("[MajsoulBridge] 從 account.account_id 獲取 accountId: \(accountId)")
-                }
-            } else if let accId = msgData["account_id"] as? Int, accId > 0 {
+            } else if let account = msgData["account"] as? [String: Any],
+                      let accId = account["accountId"] as? Int {
                 accountId = accId
-                bridgeLog("[MajsoulBridge] 從 account_id 獲取 accountId: \(accountId)")
+                bridgeLog("[MajsoulBridge] 從 account.accountId 獲取 accountId: \(accountId)")
             }
         }
 
@@ -442,13 +423,6 @@ class MajsoulBridge {
         case "ActionChiPengGang":
             if let event = parseChiPengGang(data) {
                 results.append(event)
-            }
-            // 碰/吃後如果是自己的操作，需要打牌
-            if let actor = data["seat"] as? Int, actor == seat {
-                // 碰/吃後需要發送一個 tsumo-like 事件讓 Bot 知道輪到自己打牌
-                // 但實際上不是自摸，只是表示輪到自己出牌
-                // Bot 在收到自己的 pon/chi 後會自動進入打牌模式
-                bridgeLog("[MajsoulBridge] 自己碰/吃後，等待打牌選擇")
             }
 
         case "ActionAnGangAddGang":
@@ -800,14 +774,7 @@ class MajsoulBridge {
         let typeAbsent = data["type"] == nil
         guard let opType = typeAbsent ? 0 : data["type"] as? Int else { return nil }
 
-        // 解析 tiles - 可能是字符串數組或單個字符串
-        var tiles: [String] = []
-        if let tilesArray = data["tiles"] as? [String] {
-            tiles = tilesArray
-        } else if let tilesStr = data["tiles"] as? String {
-            // 單個字符串，需要處理
-            tiles = [tilesStr]
-        }
+        let tiles = data["tiles"] as? [String] ?? []
 
         // 解析 froms - 來源座位數組
         var froms: [Int] = []

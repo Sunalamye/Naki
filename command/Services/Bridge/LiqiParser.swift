@@ -82,9 +82,6 @@ class LiqiParser {
     /// `LiqiResponseStore` 拿得到方法名正是因為如此。
     private var pendingRequests: [Int: String] = [:]
 
-    /// 當前消息 ID
-    private var currentMsgId: Int = 1
-
     /// 這條連線配不到 request 的 RESPONSE 累計（`reset()` 歸零）。
     private(set) var unmatchedResponseCount = 0
 
@@ -101,7 +98,6 @@ class LiqiParser {
     /// 重置解析器狀態
     func reset() {
         pendingRequests.removeAll()
-        currentMsgId = 1
         unmatchedResponseCount = 0
         faults.removeAll()
         lastEnvelopeFailure = nil
@@ -200,7 +196,6 @@ class LiqiParser {
 
         // 記錄請求以便匹配響應
         pendingRequests[msgId] = method
-        currentMsgId = msgId
 
         // 從遊戲自己的流量學 match_mode。寫死的對照表是錯的（見 ObservedMatchModes）。
         if method == ".lq.Lobby.fetchCurrentMatchInfo" {
@@ -528,13 +523,7 @@ class LiqiParser {
                     tiles.append(tile)
                 }
             case 5: // dora (寶牌指示牌)
-                if let tile = block.stringValue {
-                    if result["doras"] == nil { result["doras"] = [] }
-                    if var doras = result["doras"] as? [String] {
-                        doras.append(tile)
-                        result["doras"] = doras
-                    }
-                }
+                appendDora(block, to: &result)
             case 6: // scores（liqi.json：`repeated int32`）
                 // 調試: 打印原始數據
                 liqiLog("[LiqiParser] NewRound field 6 (scores) raw bytes: "
@@ -573,11 +562,7 @@ class LiqiParser {
             case 13: // left_tile_count
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["leftTileCount"] = v }
             case 14: // doras (repeated)
-                if result["doras"] == nil { result["doras"] = [] }
-                if var doras = result["doras"] as? [String], let tile = block.stringValue {
-                    doras.append(tile)
-                    result["doras"] = doras
-                }
+                appendDora(block, to: &result)
             default:
                 break
             }
@@ -631,32 +616,13 @@ class LiqiParser {
             case 5: // liqi (LiQiSuccess)
                 result["liqi"] = parseProtobufBlocks(block.data).count > 0
             case 6: // doras (repeated string)
-                if let tile = block.stringValue {
-                    if result["doras"] == nil { result["doras"] = [] }
-                    if var doras = result["doras"] as? [String] {
-                        doras.append(tile)
-                        result["doras"] = doras
-                    }
-                }
+                appendDora(block, to: &result)
             case 7: // zhenting (bool)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["zhenting"] = v != 0 }
             default:
                 // 記錄未知字段
                 liqiLog("[LiqiParser] DealTile unknown field \(block.fieldId): "
                         + "\(liqiHexPreview(block.data, limit: 20))")
-            }
-        }
-
-        // 如果還沒有找到 tile，嘗試從 operation 中獲取
-        if result["tile"] == nil {
-            if let operation = result["operation"] as? [String: Any],
-               let opList = operation["operationList"] as? [[String: Any]] {
-                liqiLog("[LiqiParser] DealTile: tile not found, checking operation for hints")
-                for op in opList {
-                    if let combination = op["combination"] as? [String], !combination.isEmpty {
-                        liqiLog("[LiqiParser] DealTile operation combination: \(combination)")
-                    }
-                }
             }
         }
 
@@ -684,13 +650,7 @@ class LiqiParser {
             case 6: // zhenting
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["zhenting"] = v != 0 }
             case 8: // doras (repeated string)
-                if let tile = block.stringValue {
-                    if result["doras"] == nil { result["doras"] = [] }
-                    if var doras = result["doras"] as? [String] {
-                        doras.append(tile)
-                        result["doras"] = doras
-                    }
-                }
+                appendDora(block, to: &result)
             case 9: // is_wliqi (是否 W 立直)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["isWliqi"] = v != 0 }
             default:
@@ -1371,6 +1331,12 @@ class LiqiParser {
         recordFault(site: site, fieldId: fieldId, byteCount: block.data.count,
                     reason: "預期 varint，實際 wireType \(block.wireType)")
         return -1
+    }
+
+    /// repeated `doras` 逐 block 累積（NewRound／DealTile／DiscardTile 共用）
+    private func appendDora(_ block: ProtobufBlock, to result: inout [String: Any]) {
+        guard let tile = block.stringValue else { return }
+        result["doras"] = (result["doras"] as? [String] ?? []) + [tile]
     }
 
     private func parseOperation(_ data: Data) -> [String: Any] {
