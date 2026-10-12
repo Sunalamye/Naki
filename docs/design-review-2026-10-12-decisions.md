@@ -721,3 +721,13 @@
 - 復驗（HEAD `4695b79`）裁決「要修正」，唯一阻擋項：雲端-only 路徑取消時不累加 `cloudFallbackStreak`（`CloudBot.swift:178`）無測試鎖住，復驗員自選變異存活。
 - 統帥裁決：**補測試，不撤回該行**。理由：該行方向正確（取消不應誤記故障，與 R5 同一精神），缺的是鎖不是正確性；撤回會讓斷線期間 UI 顯示錯誤的降級計數。修正以新 commit 進行，再交同一復驗員對新 HEAD 復驗。
 - 復驗確認的其他結論：8 個 hunk 無一增加送出；「沒有任何組合也不送」為安全收緊（正式路徑唯一可達情況是 combination 解析缺陷，不送後引擎重試 15 次再退避，不卡死、不擋 pass 通道）；舊世代結果回 nil 可能暫時抹掉新局 `botFailure` 顯示，只影響顯示不影響送出，列已知風險。
+
+### WP4 結果（2026-10-12）
+- 合併到 main：merge commit `79096b6`（WP4 原 sha `4695b79` ＋ 修正 `5bc131e`，基準 `d861648`，7 檔）。復驗兩輪（`.swfd/logs/wp4-verify/`）：第一輪「要修正」（雲端-only 取消判斷無測試鎖），補測試後第二輪「可合併」，新測試經兩個變異實證同時鎖住 `CloudBot.swift:178` 與 `:223`。910/910；合併態 main 全套見 `.swfd/logs/merge-main/test-79096b6.log`。
+- 行為變更（已向用戶報備）：吃對照失敗只收緊——恰一組才退回 index 0，多組或沒有任何組合都不送、不消化 oplist。復驗判定安全：正式路徑唯一可達的情況是 combination 解析缺陷，不送後引擎重試 15 次再退避，不卡死、不擋 pass 通道。
+- 已知風險：舊世代結果回 nil 走成功路徑可能暫時抹掉新局 `botFailure` 顯示（只影響顯示）；吃對照失敗每輪重試會記 15 次 event log（噪音）。
+- 復驗員列出的後續項，歸屬：
+  - `resolveReachDiscard` 的 catch-all 在取消時仍 `recordFailure`，`try? await Task.sleep` 吞掉取消（`CloudBot.swift:279-285`）→ WP7b。
+  - R4 另一半（本地丟錯清推薦 vs 雲端失敗保留舊推薦不一致）→ 延後表，等 live 證據決定統一方向。
+  - `testChiWithoutAnyCombinationDoesNotSend` 測的是正式路徑到不了的 nil snapshot，可達的「有 chi 但 combination 為空」未直接測 → WP7c 補。
+  - 同類多組槓一律送 index 0 仍是已知未實作（WP5 等 live 抓包）。
