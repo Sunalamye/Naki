@@ -762,3 +762,15 @@
   - `AutoPlayEngine.init` 的 `echo: nil` 現等於 `.shared`，與 `AutoPlayActionExecutor` 同名參數「nil = 不等回音」語意相反，stored `echo` 型別仍 optional → WP7b（改名或改非 optional）。
   - `LiqiParserLearningTests.swift:17`、`ObservedMatchSidsTests` 的 `Task.yield` 等待已多餘且守不住新時序 → WP7c 補一條不 yield 直接斷言的測試。
   - 純 wire 層被 `liqiLog` 綁在 MainActor（arch S4 殘餘，需動 `LiqiEnvelope.swift` 與全域 log 函式）→ 延後表。
+
+### WP7a 結果（2026-10-12）
+- 合併到 main：merge commit `a252f3d`（四批 `3f815f9`／`f5bc2bc`／`dce9760`／`b462815`，基準 `9398a2d`，15 檔 +105/−411）。復驗「可合併」（`.swfd/logs/wp7a-verify/`）：每個刪除項在 main 全專案 grep 無人用；JS 隱藏名稱鏈 3 → 3 行、JS diff 為空；macOS Debug／Release／iOS 三個 clean build 皆過；927/927（−2 `hidePlayerNames` 測試、+1 `testFireJavaScriptLogsFailureWithLabel`）。合併態 main 全套見 `.swfd/logs/merge-main/test-a252f3d.log`。
+- arch S16 memberwise init 合成成功（`nonisolated init()` 移到 extension，刪 55 行手寫 init；參數仍全必填）。Deviation 1（`ForceReconnectAction` 三條測試改建真 `WebSession` 放假 `__nakiWebSocket`）語意等價，重複 10 次 0 失敗、每條約 0.1 秒。Deviation 3 多刪 `RescanPluginsAction` 型別，main 上無 MCP 引用，不是錯刪。
+- JS 側：`__nakiHideNames` 在 Swift 與 bundled 插件已無呼叫端、plugin-api-v1 未記載 → WP12 判定是否移除；`setNameMask` 是 plugin-api-v1 記載的 API，保留。
+- 可合併後補（歸屬）：
+  - `AutoPlayModeStoreTests` 的遷移測試都先手動呼叫 migrate，沒有一條鎖「只呼叫 `load()` 就完成遷移」；顯式呼叫已刪，`load()` 內是唯一路徑 → **WP7c 補一條只寫舊 key 直接 `load()` 的測試**。
+  - `project.pbxproj` 的 `Naki-MTests` 成為孤兒 target（無原始檔、資料夾不存在、不在任何 scheme）→ WP12 刪 target 或延後表。
+  - 規格項「`LiqiToolResult.dictionary` 的 `eventLog` 移到呼叫端或改名」未做（需動 MCP Tools 二十多處，屬 WP7b 檔）→ **交接 WP7b**。
+  - `AutoPlayMode.swift:150` doc 仍寫「App 進入點與 load() 都會呼叫」→ WP7c。
+  - 基底就有：`build-for-testing -scheme Naki-M` 在 Naki-MUITests target 報 `akagi.entitlements` 重複複製（`Unexpected duplicate tasks`），純 build 不受影響 → 延後表。
+  - `fireJavaScript` 測試只驗失敗寫 log，未驗成功不寫 → 次要，WP7c 順手。
