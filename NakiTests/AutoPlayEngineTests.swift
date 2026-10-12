@@ -43,7 +43,6 @@ final class AutoPlayEngineTests: XCTestCase {
                             recommendations: [Recommendation] = [],
                             isSanma: Bool = false,
                             sanmaCapableDecision: Bool = false,
-                            isReady: Bool = true,
                             maxAttempts: Int = 15,
                             poll: TimeInterval = 1.0) -> AutoPlayEngine {
         AutoPlayEngine(
@@ -57,7 +56,6 @@ final class AutoPlayEngineTests: XCTestCase {
                                        isSanma: isSanma,
                                        sanmaCapableDecision: sanmaCapableDecision,
                                        tsumoTile: nil,
-                                       isReady: isReady,
                                        // 預設「推薦對應當前 oplist」＝ production 常態
                                        // （推薦就是針對當前決策機會算的）。p5 #1 的 stale 情境
                                        // 由專屬測試故意設成不一致。
@@ -111,7 +109,7 @@ final class AutoPlayEngineTests: XCTestCase {
             context: {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: self.discardRecommendation,
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: snapshot.sequence - 1)
             })
         let staleRun = await stale.runCycle()
@@ -124,7 +122,7 @@ final class AutoPlayEngineTests: XCTestCase {
             context: {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: self.discardRecommendation,
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: snapshot.sequence)
             })
         let freshRun = await fresh.runCycle()
@@ -149,7 +147,7 @@ final class AutoPlayEngineTests: XCTestCase {
             context: {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: self.discardRecommendation,
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: nil)   // provenance 未知
             })
         _ = snapshot
@@ -175,7 +173,7 @@ final class AutoPlayEngineTests: XCTestCase {
             context: {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: self.discardRecommendation,
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: snapshot.sequence - 1)
             })
         let run = await engine.runManualCycle()
@@ -196,7 +194,7 @@ final class AutoPlayEngineTests: XCTestCase {
             context: {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: [],
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: 999_999)
             })
         let run = await engine.runCycle()
@@ -353,7 +351,6 @@ final class AutoPlayEngineTests: XCTestCase {
                                        seat: 0,
                                        isSanma: false,
                                        tsumoTile: nil,
-                                       isReady: true,
                                        actionDelayScale: 2.5,
                                        recommendationsOplistSequence: store.pending?.sequence)
             })
@@ -501,7 +498,7 @@ final class AutoPlayEngineTests: XCTestCase {
             context: {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: [],
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: nil)
             },
             onStallChanged: { reported.append($0) })
@@ -533,7 +530,7 @@ final class AutoPlayEngineTests: XCTestCase {
             store: store, sender: sender, timing: timing(),
             context: {
                 AutoPlayEngine.Context(mode: .auto, recommendations: [],
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: nil)
             },
             onStallChanged: { reported.append($0) })
@@ -562,7 +559,7 @@ final class AutoPlayEngineTests: XCTestCase {
                 AutoPlayEngine.Context(mode: .auto,
                                        recommendations: [Recommendation(tile: "5p", probability: 0.9,
                                                                         actionType: .discard)],
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: store.pending?.sequence)
             },
             onStallChanged: { reported.append($0) })
@@ -655,7 +652,7 @@ final class AutoPlayEngineTests: XCTestCase {
             store: store, sender: sender, timing: t,
             context: {
                 AutoPlayEngine.Context(mode: .auto, recommendations: self.discardRecommendation,
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: store.pending?.sequence)
             })
 
@@ -703,7 +700,7 @@ final class AutoPlayEngineTests: XCTestCase {
                     mode: .auto,
                     recommendations: [Recommendation(tile: "1m", probability: 0.9,
                                                      actionType: .discard)],
-                    seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                    seat: 0, isSanma: false, tsumoTile: nil,
                     recommendationsOplistSequence: snapshot.sequence - 1)
             })
 
@@ -725,7 +722,7 @@ final class AutoPlayEngineTests: XCTestCase {
             store: store, sender: sender, timing: slow,
             context: {
                 AutoPlayEngine.Context(mode: .auto, recommendations: self.discardRecommendation,
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: store.pending?.sequence)
             })
 
@@ -750,7 +747,7 @@ final class AutoPlayEngineTests: XCTestCase {
             store: store, sender: sender, timing: timing(maxAttempts: 3),
             context: {
                 AutoPlayEngine.Context(mode: .auto, recommendations: [],
-                                       seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: nil,
                                        recommendationsOplistSequence: nil)
             },
             onStallChanged: { reported.append($0) })
@@ -777,7 +774,7 @@ final class AutoPlayEngineTests: XCTestCase {
                 store: store, sender: sender, timing: t,
                 context: {
                     AutoPlayEngine.Context(mode: mode, recommendations: [],
-                                           seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                                           seat: 0, isSanma: false, tsumoTile: nil,
                                            recommendationsOplistSequence: nil)
                 },
                 onStallChanged: { reported.append($0) })
@@ -810,7 +807,7 @@ final class AutoPlayEngineTests: XCTestCase {
                 AutoPlayEngine.Context(
                     mode: .auto,
                     recommendations: [Recommendation(tile: "none", probability: 0.9, actionType: .none)],
-                    seat: 0, isSanma: false, tsumoTile: nil, isReady: true,
+                    seat: 0, isSanma: false, tsumoTile: nil,
                     recommendationsOplistSequence: store.pending?.sequence)
             })
 
@@ -838,7 +835,7 @@ final class AutoPlayEngineTests: XCTestCase {
             store: store, sender: sender, timing: t,
             context: {
                 AutoPlayEngine.Context(mode: .auto, recommendations: recommendations,
-                                       seat: 0, isSanma: false, tsumoTile: "N", isReady: true,
+                                       seat: 0, isSanma: false, tsumoTile: "N",
                                        recommendationsOplistSequence: store.pending?.sequence)
             },
             onStallChanged: onStall)

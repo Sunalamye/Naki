@@ -172,7 +172,7 @@ final class NakiRuntime {
             store: LiqiOperationStore.shared,
             sender: liqiSender,
             context: { [weak self] in
-                guard let self else { return .init(mode: .off, isReady: false) }
+                guard let self else { return .init(mode: .off) }
                 return .init(
                     mode: self.store.autoPlayMode,
                     recommendations: self.store.recommendations,
@@ -182,7 +182,6 @@ final class NakiRuntime {
                     sanmaCapableDecision: self.store.botStatus.isSanmaCapableDecision,
                     sanmaEngineAvailable: self.coordinator.bot.supports3P,
                     tsumoTile: self.store.tsumoTile,
-                    isReady: self.session.isReady,
                     // 延遲 stepper 的讀取端：每輪重取，調一下下一手就生效
                     actionDelayScale: self.settings.actionDelayScale,
                     // 推薦綁定的 oplist sequence：讓 .proceed 確認推薦與機會同源
@@ -207,9 +206,8 @@ final class NakiRuntime {
     private func startAutoRematchEngine() {
         autoRematchEngine = AutoRematchEngine(
             context: { [weak self] in
-                guard let self else { return .init(mode: .off, isReady: false) }
+                guard let self else { return .init(mode: .off) }
                 return .init(mode: self.store.autoPlayMode,
-                             isReady: self.session.isReady,
                              prefersSanma: self.settings.fullAutoPrefersSanma,
                              sanmaEngineAvailable: self.coordinator.bot.supports3P,
                              roomPreference: self.settings.fullAutoRoomPreference)

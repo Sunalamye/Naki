@@ -26,8 +26,6 @@ final class AutoRematchEngine {
     /// 每次判斷都重取的執行環境（模式可能在等待期間被使用者改掉）
     nonisolated struct Context {
         let mode: AutoPlayMode
-        /// 頁面／送出通道是否就緒
-        let isReady: Bool
         /// 全自動要排三麻還是四麻（使用者在切到全自動時選的；預設四麻）
         let prefersSanma: Bool
         /// 目前引擎是否支援三麻（雲端 3p 或本地 Akagi 三麻，`NativeBotController.supports3P`）。
@@ -39,13 +37,11 @@ final class AutoRematchEngine {
         let prefersEast: Bool
 
         init(mode: AutoPlayMode,
-             isReady: Bool,
              prefersSanma: Bool = false,
              sanmaEngineAvailable: Bool = false,
              roomPreference: RoomPreference = .lowest,
              prefersEast: Bool = true) {
             self.mode = mode
-            self.isReady = isReady
             self.prefersSanma = prefersSanma
             self.sanmaEngineAvailable = sanmaEngineAvailable
             self.roomPreference = roomPreference
@@ -61,8 +57,6 @@ final class AutoRematchEngine {
         case noObservedSid(sanma: Bool)
         /// 選了三麻但沒有三麻引擎：排得進去卻一手都不會打
         case sanmaEngineMissing
-        /// 頁面／送出通道沒就緒
-        case notReady
         /// 大廳 session 探針一直不通
         case lobbyNotReady
         /// 等待期間模式被改掉或被取消
@@ -193,9 +187,6 @@ final class AutoRematchEngine {
         guard context().mode.autoRematch else {
             log("[自動續局] 模式已變更，取消續局")
             return .cancelled
-        }
-        guard context().isReady else {
-            return fail("送出通道未就緒，放棄續局", .notReady)
         }
 
         let sanma = context().prefersSanma

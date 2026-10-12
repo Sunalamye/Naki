@@ -46,7 +46,6 @@ final class AutoConfirmEngineTests: XCTestCase {
 
     private func makeEngine(mode: AutoPlayMode,
                             isSanma: Bool = false,
-                            isReady: Bool = true,
                             confirmAckWatchdog: TimeInterval = 6.0,
                             maxWatchdogResends: Int = 3,
                             clock: (() -> Date)? = nil,
@@ -69,8 +68,7 @@ final class AutoConfirmEngineTests: XCTestCase {
                                        recommendations: [],
                                        seat: 0,
                                        isSanma: isSanma,
-                                       tsumoTile: nil,
-                                       isReady: isReady)
+                                       tsumoTile: nil)
             })
     }
 
@@ -315,20 +313,6 @@ final class AutoConfirmEngineTests: XCTestCase {
         let result = await engine.runConfirmCycle()
         XCTAssertEqual(result, .noPending)
         XCTAssertEqual(calls, 0, "終局不得送 confirmNewRound")
-    }
-
-    /// WebView 尚未就緒：保留 pending，不送
-    func testNotReadyKeepsPending() async {
-        var calls = 0
-        let engine = makeEngine(mode: .auto, isReady: false,
-                                confirmSend: { calls += 1; return self.confirmed() })
-
-        engine.roundDidEnd()
-        let result = await engine.runConfirmCycle()
-
-        XCTAssertEqual(result, .notReady)
-        XCTAssertEqual(calls, 0)
-        XCTAssertTrue(engine.confirmPending)
     }
 
     /// stop() 清掉待確認（App 收掉 / 測試結束）

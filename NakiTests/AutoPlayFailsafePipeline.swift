@@ -103,7 +103,6 @@ struct AutoPlayFailsafePipeline {
                                        seat: seat,
                                        isSanma: false,
                                        tsumoTile: nil,
-                                       isReady: true,
                                        // 預設推薦對應當前 oplist（p5 #1）——fixture 走正常同源路徑；
                                        // 明確注入較小的序號才會踩到 stale 那條分支。
                                        recommendationsOplistSequence:

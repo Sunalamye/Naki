@@ -37,7 +37,6 @@ final class WebPageBackend: WebSessionBackend {
 
     private var navigationTask: Task<Void, Never>?
 
-    var isReady: Bool { true }
     let supportsAutoPlay = true
 
     init(userContentController: WKUserContentController) {
@@ -221,7 +220,6 @@ final class LegacyWebBackend: NSObject, WebSessionBackend, WKNavigationDelegate,
 
     weak var sink: (any WebNavigationSink)?
 
-    var isReady: Bool { true }
     let supportsAutoPlay = false
 
     init(userContentController: WKUserContentController) {

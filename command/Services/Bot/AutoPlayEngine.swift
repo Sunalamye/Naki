@@ -40,7 +40,7 @@ nonisolated enum AutoPlayCycleOutcome: Equatable {
     case sent(action: Recommendation.ActionType, tile: String, attempts: Int)
     /// 有值得做的動作，但模式不允許自動送出
     case surfaced(Recommendation.ActionType)
-    /// 沒送：閘門之外的原因（resolver 判斷、oplist 已換批、去抖、尚未就緒）
+    /// 沒送：閘門之外的原因（resolver 判斷、oplist 已換批、去抖）
     case notSent(reason: String)
     /// 送了但沒成功；此時 **oplist 必須仍然 pending**
     case sendFailed(action: Recommendation.ActionType, attempts: Int)
@@ -103,8 +103,6 @@ nonisolated enum AutoPlayExecutionState: Equatable {
 nonisolated enum AutoConfirmCycleResult: Equatable {
     /// 這一輪沒有待確認的局間結算
     case noPending
-    /// WebView 尚未就緒（保留 pending）
-    case notReady
     /// 閘門擋下（`.off`/`.recommend` 非自動、或三麻 fail-closed）；pending 保留
     case skipped(AutoPlayGate.Reason)
     /// 真的走了送出流程，附 dispatcher 的結論
@@ -138,8 +136,6 @@ final class AutoPlayEngine {
         var sanmaEngineAvailable: Bool = false
         /// 這一巡摸到的牌，用來判斷 moqie
         var tsumoTile: String?
-        /// WebView 是否已就緒（正式路徑 `webPage != nil`）
-        var isReady: Bool = true
         /// 使用者的延遲基準係數（`SettingsStore.actionDelayScale`）。
         ///
         /// 每輪從 context 重取，所以 stepper 一調就在下一手生效，不必重啟引擎。
@@ -450,9 +446,6 @@ final class AutoPlayEngine {
         beginCycle()
 
         let ctx = context()
-        guard ctx.isReady else {
-            return finish(gate: nil, outcome: .notSent(reason: "web_view_not_ready"))
-        }
 
         // 這一份 snapshot 會一路傳到 resolver 與 executor。
         // 舊實作在這裡讀一次、延遲之後再讀一次，兩份可以不是同一批（TOCTOU）。
@@ -565,10 +558,6 @@ final class AutoPlayEngine {
         beginCycle()
 
         let ctx = context()
-        guard ctx.isReady else {
-            note("無法觸發: WebView 尚未就緒", to: .log)
-            return finish(gate: nil, outcome: .notSent(reason: "web_view_not_ready"))
-        }
 
         // 三麻 fail-closed（同 `AutoPlayGate` 規則）。手動觸發不經閘門，
         // 要自己擋一次；三麻引擎的決策放行，伺服器授權的和牌也放行（resolver 會排在推薦之上）。
@@ -662,11 +651,6 @@ final class AutoPlayEngine {
         }
 
         let ctx = context()
-        guard ctx.isReady else {
-            // 保留 pending：頁面就緒後的下一輪會接手
-            return .notReady
-        }
-
         switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.isFullAuto, isSanma: ctx.isSanma,
                                           sanmaEngineAvailable: ctx.sanmaEngineAvailable) {
         case .skip(let reason):

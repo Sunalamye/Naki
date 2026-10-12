@@ -29,7 +29,6 @@ final class AutoRematchEngineTests: XCTestCase {
     @MainActor
     private func makeEngine(
         mode: AutoPlayMode = .fullAuto,
-        isReady: Bool = true,
         prefersSanma: Bool = false,
         sanmaEngine: Bool = true,
         room: RoomPreference = .lowest,
@@ -46,7 +45,6 @@ final class AutoRematchEngineTests: XCTestCase {
         AutoRematchEngine(
             context: {
                 .init(mode: modeBox?() ?? mode,
-                      isReady: isReady,
                       prefersSanma: prefersSanma,
                       sanmaEngineAvailable: sanmaEngine,
                       roomPreference: room)
@@ -108,16 +106,6 @@ final class AutoRematchEngineTests: XCTestCase {
         let engine = makeEngine(sanmaEngine: false, sids: [Self.obs("1:2", is3P: false)])
         let outcome = await engine.run()
         XCTAssertEqual(outcome, .queued(sid: "1:2", attempts: 1))
-    }
-
-    /// 送出通道沒就緒時不排隊
-    @MainActor
-    func testNotReadyDoesNotSend() async {
-        var sent = false
-        let engine = makeEngine(isReady: false, accepts: { _, _ in sent = true; return true })
-        let outcome = await engine.run()
-        XCTAssertEqual(outcome, .notReady)
-        XCTAssertFalse(sent)
     }
 
     /// 大廳 session 探針不通時不排隊（剛回大廳那條 socket 還沒完成登入）
