@@ -18,11 +18,11 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 |------|------|------|
 | 客戶端 | live Naki `/js` 唯讀 probe | Unity WebGL 4.0.45；Laya／DesktopMgr／uiscript 不存在 |
 | Debug API | live `/status`、`/bot/status`、`/game/*` | loopback server 與 Swift protocol state 可用 |
-| MCP registry | live `tools/list`（2026-08-01） | 42 tools；含 6 個已於 2026-08-02 移除的 highlight 失敗樁，移除後靜態計數 38，**未 live 複查** |
-| Liqi schema | live manifest fresh download + byte compare | repo `liqi.json` 與 CDN 完全相同 |
+| MCP registry | live `tools/list`（2026-08-01） | 2026-08-01 live 為 42 tools（含 6 個已於 2026-08-02 移除的 highlight 失敗樁）；2026-10-13 靜態計數 43（43 個工具型別的 `static let name`、`MCPToolRegistry.registerBuiltInTools` 43 處 `register(`），**未 live 複查**；現行數字一律現查 `tools/list` |
+| Liqi schema | live manifest fresh download + byte compare | 2026-08-01 當時 repo `liqi.json` 與 CDN 完全相同；**2026-10-09 起已不同**：repo 補了 `ReqSelfOperation.auto_operation`（field 11），而那個 CDN 基準本身落後 client 好幾版（見 `CLAUDE.md`「Unity 與 Liqi 必知事實」），所以此列只證明當時 byte 相同、不證明 schema 正確 |
 | config | live manifest fresh download + repo parser | 41 tables／263 sheets／119,289 rows |
 | Mortal parity | fresh Debug／Release tests | 各 47 tests 通過；固定 fixtures obs／mask 零落差 |
-| Naki unit tests | fresh NakiTests（2026-10-01，代碼審查修正後的整合閘） | 714 tests、0 failures（218 為 2026-08-02 舊數字）；含 resolver、fail-safe fixture、協定負分／NOTIFY 按欄位號、Debug server 加固、插件載入與更新預覽 |
+| Naki unit tests | fresh NakiTests（2026-10-13 整合閘；本列的測試覆蓋清單是 2026-10-01 審查修正當時所寫） | 1002 tests、0 failures（2026-10-13 整合閘，`.swfd/logs/merge-main/test-d1e9775.log`；218 為 2026-08-02 的舊數字）；含 resolver、fail-safe fixture、協定負分／NOTIFY 按欄位號、Debug server 加固、插件載入與更新預覽 |
 | JS 回歸（node 合成） | `scripts/plugin-regression.cjs`、`keepalive-regression.cjs`、name-hider | 23/23、11/11、7/7；**只驗 JS 邏輯，不是 live 頁面** |
 | 建置 | macOS Release、iOS Simulator | 皆 BUILD SUCCEEDED（2026-10-01）；iOS 實機未驗 |
 | runtime ron | request／response／ActionHule trace | type 9 走 `inputOperation` 成功 |
@@ -54,11 +54,11 @@ p2-1 之後 fixture 走的是**正式的** `AutoPlayActionExecutor`（不再是 
 
 iOS 17–25 的 `LegacyWebViewModel` 曾直接使用 AI 第一推薦，沒有 resolver、oplist action 檢查、seat check、stale check 或 fail-closed。p3-4 之後兩條路徑共用 `AutoPlayEngine`／`AutoPlayDecisionResolver`，Legacy 且不自動送出（`AutoPlayAvailability`）；macOS 跑不到 Legacy，未 live 驗證。
 
-手動 MCP／HTTP `game_action(action=hora)` 的缺口（沒有 oplist snapshot 時猜 tsumo）**已修（2026-09-30）**：無快照或沒有自摸／榮和授權一律回 `notAvailable`（`GameTools.swift:109-114`），有授權才送。單測覆蓋，live 未驗證。
+手動 MCP／HTTP `game_action(action=hora)` 的缺口（沒有 oplist snapshot 時猜 tsumo）**已修（2026-09-30）**：無快照或沒有自摸／榮和授權一律回 `notAvailable`（`GameTools.swift`），有授權才送。單測覆蓋，live 未驗證。
 
 ### 已處理：off mode 的顯示語意（2026-08-02）
 
-`.off` 現在同時關掉顯示：`RecommendationView` 讀 `autoPlayMode.showRecommendation`，關閉時顯示「推薦顯示已關閉」；`GameHighlightScript.make()` 在 `.off` 一律回 `__nakiHighlight.clear()`，切回 `.recommend`／`.auto` 恢復染色。`setAutoPlayMode` 會立刻重推一次，不必等下一個 Bot 回應。AI 仍在背景計算（刻意：否則切回來是空白）。
+`.off` 現在同時關掉顯示：`DecisionSidebar` 讀 `autoPlayMode.showRecommendation`，關閉時顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」）；`WebSession.syncHighlight` 在 `.off` 時推空推薦並送 `__nakiHighlight.clear()`（正式路徑只用 `GameHighlightScript.clear`，`make()` 只剩測試呼叫），切回 `.recommend`／`.auto` 恢復推薦通道。內建染色已於 `c0b7564` 移交插件。`setAutoPlayMode` 會立刻重推一次，不必等下一個 Bot 回應。AI 仍在背景計算（刻意：否則切回來是空白）。
 
 腳本內容有 7 條單測（`GameHighlightScriptTests`）。**畫面上真的清空／恢復未 live 驗證**——WebGL hook 沒有 screenshot regression。
 
@@ -74,11 +74,11 @@ iOS 17–25 的 `LegacyWebViewModel` 曾直接使用 AI 第一推薦，沒有 re
 
 ### P1：模型版本宣稱過度
 
-- 已釘住 MortalSwift 0.5.2／`6223548`：requirement `[0.5.2,0.6.0)`（`project.pbxproj:1203`）+ 已提交的 `Package.resolved`。版本可重現這一半已解決。
+- 已釘住 MortalSwift 0.6.0／`da7238c`：requirement `[0.6.0,0.7.0)`（`upToNextMinorVersion`，`project.pbxproj` 的 MortalSwift package reference）+ 已提交的 `Package.resolved`。版本可重現這一半已解決。
 - 但 0.5.x 修的是 encoder／計算與 parity；bundled model blobs 沒換。
 - 沒有大規模實戰 benchmark。
 
-正確說法是「目前使用 MortalSwift 0.5.2 的 encoder/parity 修正版」；不能說「已換最新最強權重」。
+正確說法是「目前使用 MortalSwift 0.6.0（含 encoder/parity 修正與三麻 AkagiSanma 引擎）」；不能說「已換最新最強權重」。
 
 ### P1：三麻沒有專用模型（2026-10-09 已由本地 Akagi 三麻取代，本節以下為歷史記錄）
 
@@ -111,11 +111,11 @@ iOS 實機。
 - **自動送出在三麻停用**（伺服器授權的和牌例外，見下），三層 fail-closed：`AutoPlayGate`（輪詢路徑，含**繞過 resolver 的
   `.sendPass`** 那條路）、`AutoPlayDecisionResolver`（`.auto` 降級成 `.recommend`）、
   `AutoPlayEngine.runManualCycle`（手動／MCP `bot_trigger` 入口，不經閘門所以自己擋）。
-- **UI 明示**：`BotStatusView` 的 `SanmaUnsupportedNotice` 顯示
+- **UI 明示**（2026-08-02 當時；`BotStatusView` 與 `SanmaUnsupportedNotice` 已不存在，歷史記錄）：`SanmaUnsupportedNotice` 顯示
   「三麻不支援：內建只有四麻模型，推薦結果無效；自動打牌已停用。」
   模型標籤仍是 `Mortal (4P) ⚠️ 三麻無專用模型`。
 
-**和牌例外（2026-09-30）**：和牌由伺服器授權、不需模型，三層都放行（`AutoPlayGate.swift:86`、`AutoPlayDecisionResolver.swift:86-95`、`AutoPlayEngine.swift:570`）；其餘動作仍擋。
+**和牌例外（2026-09-30）**：和牌由伺服器授權、不需模型，三層都放行（`AutoPlayGate.evaluate` 的 `.forceHora`、`AutoPlayDecisionResolver.resolve` 的終局保護、`AutoPlayEngine.runManualCycle`）；其餘動作仍擋。
 
 單元測試覆蓋三層 fail-closed 與和牌例外。**沒有 live 三麻對局驗證**（含三麻雲端事件過濾，見「未驗證」）。
 
@@ -123,7 +123,7 @@ iOS 實機。
 
 `canDiscard/canRiichi/canChi/canPon/canKan/canAgari` 的唯一寫入點曾是零呼叫的
 `NativeBotController.updateAvailableActions()`（`updateInternalState` 尾巴只留了
-「移到 react() 後處理」的註解），所以 `BotStatusView` 六個徽章與 `/bot/status` 六個欄位永遠 false。
+「移到 react() 後處理」的註解），所以舊的 `BotStatusView`（已刪；徽章現在由 `DecisionSidebar` 顯示）的六個徽章與 `/bot/status` 六個欄位永遠 false。
 
 現在改為協定層 oplist 的投影（`BotAvailableActions(snapshot:)` 讀 `LiqiOperationStore.pending`）：
 權威與送出端（`AutoPlayGate` / resolver / sender）一致，不會出現「徽章亮著但送不出去」。
@@ -137,13 +137,13 @@ iOS 實機。
 `highlight_tile` / `reset_tile_color` / `highlight_status` / `highlight_settings` /
 `show_recommendations` / `hide_highlight` 直接移除（呼叫回 `Unknown tool`）。
 它們的參數契約源自 Laya 牌物件、從未接到 `__nakiHighlight`，且有明確替代面
-（`bot_status` / `game_hand` 讀推薦；內建高亮由 `syncGameHighlight()` 驅動）。
-靜態註冊數 44 → 38。**live `tools/list` 未複查**。
+（`bot_status` / `game_hand` 讀推薦；內建高亮當時由 `syncGameHighlight()` 驅動，現已移交插件、該函式不存在）。
+靜態註冊數 44 → 38（2026-08-02 當時；現為 43，見「已驗證」表）。**live `tools/list` 未複查**。
 
 ### 已處理：無效 UI 控制已移除
 
 位置校準、推薦溫度、旋轉 Laya 高亮與隱藏玩家名稱四組控制都已從 UI 移除。
-底層名稱 API 仍依賴 live 已確認不存在的 `uiscript`，所以不可重新掛回 UI；若要恢復功能，必須另做真正的 Unity 實作。
+這些控制依賴的 `uiscript` 層（live 已確認不存在）已於 `341f1a6` 刪除，所以不可重新掛回 UI；若要恢復功能，必須另做真正的 Unity 實作。
 
 ### P1：遊戲內高亮只有活性證據
 
@@ -153,19 +153,19 @@ iOS 實機。
 
 | 差距 | 現況 | 位置 |
 |------|------|------|
-| 對局中 lobby socket 開啟觸發 `MajsoulBridge.reset()`（舊 P0） | 只在雀魂連線數由 0 變非 0 才報 connected | `WebSocketInterceptor.swift:503-509` |
-| 負分 int32 解不出來 | 有號 varint 只用在 int32 欄位（scores）；超出 Int32 或型別錯 → 本局不餵 bot | `LiqiEnvelope.swift:106`、`MajsoulBridge.swift:514` |
-| NOTIFY／REQUEST 按位置取 block（MajsoulMax 省略欄位即失明，issue #2） | 三種 envelope 都按欄位號取，payload 缺席視為空 | `LiqiEnvelope.swift:325-335` |
-| 自動送出對三麻和牌也擋 | 伺服器授權的和牌三層放行，其餘動作仍擋 | `AutoPlayGate.swift:86` 等 |
-| 副露搶先送「過」、首選未授權時亂退次選 | 寬限期 8 秒（不足 timeFixed 時夾小）；退次選只退到同批 oplist 的 discard／none | `AutoPlayEngine.swift:171,462`、`AutoPlayDecisionResolver.swift` |
-| 手動 `game_action(hora)` 無 snapshot 猜 tsumo | fail-closed | `GameTools.swift:109-114` |
-| `LiqiResponseStore` 一律讀 field 1 當 error | 依 method 查 error 欄位號（21 個 method） | `LiqiResponseStore.swift:46` |
-| 用號段（≥ 60000）判斷 Naki 自送 | msgId 登記制（插件號段另計） | `LiqiEncoder.swift:257`、`LiqiParser.swift:188` |
-| Bot 推論失敗仍合成推薦／失敗無提示 | 不合成推薦；`GameStore.botFailure` 顯示橫幅 | `BundledCoreMLBot.swift`、`GameStore.swift:69` |
+| 對局中 lobby socket 開啟觸發 `MajsoulBridge.reset()`（舊 P0） | 只在雀魂連線數由 0 變非 0 才報 connected | `WebSocketInterceptor.handleWebSocketConnected` |
+| 負分 int32 解不出來 | 有號 varint 只用在 int32 欄位（scores）；超出 Int32 或型別錯 → 本局不餵 bot | `LiqiWire.decodeSignedVarint`、`MajsoulBridge.roundBlocked` |
+| NOTIFY／REQUEST 按位置取 block（MajsoulMax 省略欄位即失明，issue #2） | 三種 envelope 都按欄位號取，payload 缺席視為空 | `LiqiEnvelope.swift` |
+| 自動送出對三麻和牌也擋 | 伺服器授權的和牌三層放行，其餘動作仍擋 | `AutoPlayGate.evaluate` 等 |
+| 副露搶先送「過」、首選未授權時亂退次選 | 寬限期 8 秒（不足 timeFixed 時夾小）；退次選只退到同批 oplist 的 discard／none | `AutoPlayEngine.swift`、`AutoPlayDecisionResolver.swift` |
+| 手動 `game_action(hora)` 無 snapshot 猜 tsumo | fail-closed | `GameTools.swift` |
+| `LiqiResponseStore` 一律讀 field 1 當 error | 依 method 查 error 欄位號（21 個 method） | `LiqiResponseStore.swift` |
+| 用號段（≥ 60000）判斷 Naki 自送 | msgId 登記制（插件號段另計） | `LiqiMsgIdAllocator.isIssued`、`LiqiParser.isNakiSent` |
+| Bot 推論失敗仍合成推薦／失敗無提示 | 不合成推薦；`GameStore.botFailure` 顯示橫幅 | `BundledCoreMLBot.swift`、`GameStore.swift` |
 | Retry-After、`/js` 非 JSON 型別、MCP 參數轉型、⌘N 等崩潰點 | 已加守衛 | 見 `code-audit-implementation-notes.md` |
-| Debug server 無 Host 檢查、chunked 無界、連線可無限掛著 | Host 403、411、30 秒收齊期限 | `DebugServer.swift:93,273,327` |
-| 測試清掉正式 App 偏好／輪替刪掉執行中 session 與錄影 | 測試用獨立 suite；test host 不輪替；有錄影的舊 session 只留 `games/` | `LogManager.swift:186,204` |
-| 全自動續局失敗只寫 log | 經 `onFailure` 寫進 `statusMessage` | `NakiRuntime.swift:255` |
+| Debug server 無 Host 檢查、chunked 無界、連線可無限掛著 | Host 403、411、30 秒收齊期限 | `DebugServer.swift` |
+| 測試清掉正式 App 偏好／輪替刪掉執行中 session 與錄影 | 測試用獨立 suite；test host 不輪替；有錄影的舊 session 只留 `games/` | `LogManager.pruneOldSessions` |
+| 全自動續局失敗只寫 log | 經 `onFailure` 寫進 `statusMessage` | `NakiRuntime.swift` |
 
 仍**不處理**的已知項目（附理由）見 `code-audit-implementation-notes.md`（槓種、回音逾時重送、Debug server 認證等）。
 
@@ -188,7 +188,7 @@ iOS 實機。
 - WebGL 高亮與 action popup 的視覺正確性（含 `.off` 是否真的在畫面上清空、切回是否恢復）。
 - 三麻對局的 fail-closed 行為與和牌例外：2026-10-09 三局 live 已走過本地引擎、和牌與拔北送出（見 P1 三麻一節）；被擠下線的退避與停滯顯示仍無 live 樣本。
 - 三麻雲端事件過濾：`CloudBot` 把 `start_kyoku`／`reach` 等非決策事件排除在 seq 之外，伺服器實際行為未驗證（無真實三麻 log）。
-- **時限單位**：`timeFixed`／`timeAdd` 按毫秒處理（`AutoPlayEngine.swift:536`），依同訊息推定，**無 live 樣本**；寬限期與擬人延遲上限都依賴它。
+- **時限單位**：`timeFixed`／`timeAdd` 按毫秒處理（`AutoPlayEngine.swift`），依同訊息推定，**無 live 樣本**；寬限期與擬人延遲上限都依賴它。
 - 立直宣言牌：從 riichi operation 的 `combination`（以 `|` 拆、假設單張雀魂牌字串）取可宣言牌；格式未經 live 驗證，對不上時退回舊行為（取最高機率 discard）。
 - W 立直：`isLiqi || isWliqi` 皆視為立直（`MajsoulBridge.swift` parseDiscardTile），W 立直旗標與普通立直是否互斥無 live 樣本。
 - 背景保活（`__nakiKeepAlive`＋`WebSession` tick 迴圈）：live 效果未驗證；短時間對照開關無差別，長時間對照結果未定。
