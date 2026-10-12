@@ -136,19 +136,17 @@ final class MCPHandler {
                 context: context
             )
 
-            await MainActor.run {
-                switch result {
-                case .success(let value):
-                    self.sendResult(connection: connection,
-                                    id: id,
-                                    result: NakiMCPProtocol.toolSuccessPayload(content: value, era: era))
-                case .error(let message):
-                    // 參數驗證／執行失敗一律回 Tool Execution Error（`isError`），
-                    // 不是 protocol error——模型才有機會自己改參數重試
-                    self.sendResult(connection: connection,
-                                    id: id,
-                                    result: NakiMCPProtocol.toolErrorPayload(message: message, era: era))
-                }
+            switch result {
+            case .success(let value):
+                self.sendResult(connection: connection,
+                                id: id,
+                                result: NakiMCPProtocol.toolSuccessPayload(content: value, era: era))
+            case .error(let message):
+                // 參數驗證／執行失敗一律回 Tool Execution Error（`isError`），
+                // 不是 protocol error——模型才有機會自己改參數重試
+                self.sendResult(connection: connection,
+                                id: id,
+                                result: NakiMCPProtocol.toolErrorPayload(message: message, era: era))
             }
         }
     }
@@ -170,9 +168,7 @@ final class MCPHandler {
                 context: context
             )
 
-            await MainActor.run {
-                completion(result)
-            }
+            completion(result)
         }
     }
 
