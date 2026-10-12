@@ -175,7 +175,7 @@ final class CloudBot: MahjongBot {
                 fallbackStreak = 0
                 return cloud
             }
-            fallbackStreak += 1
+            if !Task.isCancelled { fallbackStreak += 1 }
             return nil
         }
 
@@ -194,8 +194,8 @@ final class CloudBot: MahjongBot {
             return cloud
         }
         // 雲端有設定卻沒能服務這一手（失敗/退避/null）＝ rollback 中；
-        // 未設定（client nil）不算 fallback，維持 0
-        if client != nil { fallbackStreak += 1 }
+        // 未設定（client nil）與取消（不是雲端沒服務）不算 fallback
+        if client != nil, !Task.isCancelled { fallbackStreak += 1 }
         return localReaction
     }
 
@@ -218,6 +218,9 @@ final class CloudBot: MahjongBot {
             response = try await client.react(model: model.isEmpty ? nil : model,
                                               playerId: Int(playerId), events: events)
         } catch {
+            // 取消（換局／重連）不是雲端故障。`send` 把 URLError.cancelled 壓成
+            // `.transport(String)`，錯誤型別已不可辨，只能看當前 Task。
+            if Task.isCancelled { return nil }
             let backoff = breaker.recordFailure(now: Date())
             recordHealth(ok: false, detail: error.localizedDescription)
             eventLog("[Bot] ☁️ 雲端推論失敗（\(error.localizedDescription)），"

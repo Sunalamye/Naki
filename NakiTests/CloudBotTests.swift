@@ -232,6 +232,28 @@ final class CloudBotTests: XCTestCase {
         XCTAssertEqual(CloudMockURLProtocol.captured.count, 2)
     }
 
+    /// 決策被取消（換局／重連）＝沒問到雲端，不是雲端壞了：斷路器與 fallback 計數都不動，
+    /// 下一個正常決策照問雲端
+    func testCancelledReactDoesNotTripBreaker() async throws {
+        let cloud = (200, #"{"reaction":{"type":"dahai","actor":0,"pai":"5p","tsumogiri":true},"#
+            + #""candidates":[],"model":"4p-x"}"#, [String: String]())
+        CloudMockURLProtocol.reset(script: [cloud, cloud])
+        let local = StubEngine()
+        let bot = makeCloudBot(local: local)
+        try await feedOpening(bot)
+
+        // MainActor 上建立的 Task 在本測試下一次 await 才開跑，此時已是取消狀態
+        let cancelled = Task { try await decide(bot, local: local, reaction: localDahai("1m")) }
+        cancelled.cancel()
+        let first = try await cancelled.value
+        XCTAssertEqual(first?.source, "local", "取消的決策沿用本地，不採雲端結果")
+        XCTAssertEqual(bot.cloudFallbackStreak, 0, "取消不是 fallback")
+        XCTAssertFalse(bot.cloudDegraded)
+
+        let second = try await decide(bot, local: local, reaction: localDahai("2m"))
+        XCTAssertEqual(second?.source, "cloud:4p-x", "斷路器未開：下一個決策照問雲端")
+    }
+
     // MARK: 立直兩段式
 
     func test_reachTwoStep_insertsCloudDiscard() async throws {
@@ -505,6 +527,28 @@ final class CloudBotTests: XCTestCase {
                 ["type": "tsumo", "actor": 0, "pai": "1m", MJAIEventKey.oplistSequence: seq]])
             XCTAssertEqual(CloudMockURLProtocol.captured.count, 1)
         }
+    }
+
+    /// 雲端-only 路徑的取消：沒問到雲端不是 fallback，斷路器也不動，下一批授權照問
+    func testCancelledCloudOnlyReactDoesNotCountFallback() async throws {
+        let kita = (200, #"{"reaction":{"type":"kita","actor":0,"pai":"N"},"#
+            + #""candidates":[{"action":"nukidora","prob":0.5}],"model":"3p-x"}"#, [String: String]())
+        CloudMockURLProtocol.reset(script: [kita, kita])
+        let bot = makeCloudOnlyBot()
+        try await feedSanmaOpening(bot)
+
+        func tsumo(_ seq: UInt64) -> [[String: Any]] {
+            [["type": "tsumo", "actor": 0, "pai": "N", MJAIEventKey.oplistSequence: seq]]
+        }
+        let cancelled = Task { try await bot.react(events: tsumo(5)) }
+        cancelled.cancel()
+        let first = try await cancelled.value
+        XCTAssertNil(first, "取消的決策不採雲端結果")
+        XCTAssertEqual(bot.cloudFallbackStreak, 0, "取消不是 fallback")
+        XCTAssertFalse(bot.cloudDegraded)
+
+        let second = try await bot.react(events: tsumo(6))
+        XCTAssertEqual(second?.source, "cloud:3p-x", "斷路器未開：下一批授權照問雲端")
     }
 
     /// 雲端失敗＝本手誠實沒有推薦（不會有本地無效輸出頂上）

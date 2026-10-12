@@ -42,6 +42,35 @@ private final class LoopbackServer: @unchecked Sendable {
     deinit { listener.cancel() }
 }
 
+/// 在 `react` 內暫停、由測試放行的引擎：讓「await 期間換了 bot」可以確定性地重現
+@MainActor
+private final class GatedBot: MahjongBot {
+    let identity = BotIdentity(name: "gated", displayName: "Gated", supports3P: false, isLocal: true)
+    private let outcome: Result<BotReaction?, Error>
+    private var gate: CheckedContinuation<Void, Never>?
+
+    init(outcome: Result<BotReaction?, Error>) { self.outcome = outcome }
+
+    /// react 已進入並停在閘門上
+    var isWaiting: Bool { gate != nil }
+
+    func react(events: [[String: Any]]) async throws -> BotReaction? {
+        await withCheckedContinuation { gate = $0 }
+        return try outcome.get()
+    }
+
+    func open() {
+        gate?.resume()
+        gate = nil
+    }
+
+    func reset() {}
+
+    nonisolated deinit {}
+}
+
+private struct GatedBotError: Error {}
+
 @MainActor
 final class NativeBotControllerTests: XCTestCase {
 
@@ -160,6 +189,43 @@ final class NativeBotControllerTests: XCTestCase {
             XCTAssertTrue(controller.lastRecommendations.isEmpty)
             XCTAssertNil(controller.lastRecommendationsOplistSequence)
         }
+    }
+
+    // MARK: 世代守衛
+
+    /// 讓 `react` 停在引擎內，換掉 bot（世代 +1）並給新局一組推薦，再放行引擎；回傳 react 的結果
+    private func reactAcrossBotReplacement(
+        _ outcome: Result<BotReaction?, Error>
+    ) async throws -> (controller: NativeBotController, response: [String: Any]?) {
+        let controller = try makeController(is3P: false)
+        let gated = GatedBot(outcome: outcome)
+        controller.injectBotForTesting(gated)
+        let task = Task { try await controller.react(event: ["type": "tsumo", "actor": 0, "pai": "1p"]) }
+        while !gated.isWaiting { await Task.yield() }
+        controller.deleteBot()
+        controller.injectRecommendationsForTesting([Recommendation(tile: "1m", probability: 0.9, actionType: .discard)])
+        gated.open()
+        return (controller, try await task.value)
+    }
+
+    /// inflight 推論在換 bot 之後才回來：結果丟棄，不得寫進新局的推薦與決策來源
+    func testStaleGenerationResultIsDiscarded() async throws {
+        let stale = BotReaction(action: ["type": "dahai", "actor": 0, "pai": "5p", "tsumogiri": false],
+                                recommendations: [Recommendation(tile: "5p", probability: 0.9, actionType: .discard)],
+                                source: "cloud:stale")
+        let (controller, response) = try await reactAcrossBotReplacement(.success(stale))
+
+        XCTAssertNil(response, "過期結果不得回給呼叫端")
+        XCTAssertEqual(controller.lastRecommendations.map(\.displayTile), ["1m"], "過期結果不得覆寫新局推薦")
+        XCTAssertEqual(controller.lastDecisionSource, "local")
+    }
+
+    /// inflight 推論在換 bot 之後才丟錯：與新局無關，不 rethrow、不清新局推薦
+    func testStaleGenerationErrorIsNotRethrown() async throws {
+        let (controller, response) = try await reactAcrossBotReplacement(.failure(GatedBotError()))
+
+        XCTAssertNil(response)
+        XCTAssertEqual(controller.lastRecommendations.map(\.displayTile), ["1m"], "舊世代的錯誤不得清掉新局推薦")
     }
 
     // MARK: 暗槓後手牌
