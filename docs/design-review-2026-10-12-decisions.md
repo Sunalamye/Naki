@@ -739,3 +739,16 @@
 - 其他復驗結論：巢狀 `account.accountId` 顯式 0 覆寫是既有行為（d861648 相同），非本包引入；Deviation 7 改測試輸入合理（保留「自家打牌」語意）；Deviation 2（malformed oplist seat 以 -1 建快照，不 clear）接受——resolver 以 `seat_mismatch` fail-closed，且 `pending != nil` 會亮停滯橫幅，是可見訊號；改 `clear()` → WP7b 評估。
 - 給 live 驗證的訊號：依錄影證據，live 直連下 `.absent` fault 照理不會出現；出現就代表中間有代理或重新序列化（寫進 §6）。
 - 延後表新增：MortalSwift `kinds[kind]` 無 `< 3` 守衛（上游，type 顯式 0 的字牌 chi 也會走到）；`LiqiActionSender.swift:23`、`LiqiEnvelope.swift:23`、`docs/plugin-system-design.md` 的 `parseRaw` 文件漂移 → WP12。
+
+### WP5 結果（2026-10-12）
+- 合併到 main：merge commit `f4fd238`（五項各自 commit `46ecc1c`／`bb08e47`／`1e1c59f`／`f3a6b7f`／`57a27ee` ＋ 修正 `43c0787`，基準 `d861648`，6 檔 `WebSession.swift` 零改動）。復驗兩輪（`.swfd/logs/wp5-verify/`）：第一輪「要修正」（type 缺席補 chi 未檢查形狀與三麻），第二輪「可合併」。902 → 920 條；合併態 main 全套見 `.swfd/logs/merge-main/test-f4fd238.log`。備份分支 `wp5-backup-pre-amend` 已刪（patch-id 已核對一致）。
+- U2 落地：六個 seat 補 0 點（五個 action ＋ oplist）與 `ChiPengGang.type` 各記 `<site>.absent` degraded fault、同 site 一次；malformed（wireType 錯／越界）給 -1 後丟棄不補 0；type 缺席補 chi 的前提是四人局、pai 與 consumed 三張同花色連號（赤視為 5）。預設 fixture 自家座位改 2，只 5 條測試需修（非 WP0 估的 26 條）。
+- 流程偏離（已核可）：實作者送報告前 amend Commit 1 補強測試並 cherry-pick 其餘四個；復驗以 patch-id 證實 c2–c5 不變、amend 只動測試檔。**規則補強：之後的包不得改寫已結案的 commit，補強一律新 commit。**
+- 可合併後補（歸屬）：
+  - Deviation 2：malformed oplist seat 以 -1 建快照而非 `clear()`（resolver fail-closed、停滯橫幅可見）→ WP7b 評估。
+  - 赤寶牌連號正向測試（4m 0m 6m type 缺席應補 chi）→ WP7c。
+  - bridge 黃金測試「Liqi bytes 進、MJAI 事件出」（指紋閘不經 bridge）→ WP7c。
+  - `MajsoulBridge.swift:774` `guard let opType` else 分支靜默丟棄不記 fault（parser 一律寫 Int，目前走不到）→ WP7b。
+  - MortalSwift `AgariCalculator.swift:330-338` `kinds[kind]` 無 `< 3` 守衛 → 延後表（上游）。
+  - `parseRaw` 文件漂移（`LiqiActionSender.swift:23`、`LiqiEnvelope.swift:23`、`docs/plugin-system-design.md`）→ WP12。
+  - §6 第 1 項 live 重連對照（M4 reset 提前）未做 → 整合驗收。
