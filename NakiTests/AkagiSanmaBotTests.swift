@@ -347,6 +347,16 @@ final class AkagiSanmaBotTests: XCTestCase {
         XCTAssertFalse(key(name: "cloud-only", source: "cloud:m").contains("未生效"))
     }
 
+    /// `decisionSource` 是 `/bot/status` 的對外欄位，常數化不得改字面值；寫入端的雲端前綴要被讀取端認得
+    func testDecisionSourceConstantsKeepWireValues() {
+        XCTAssertEqual(DecisionSource.local, "local")
+        XCTAssertEqual(DecisionSource.akagiSanma, "local-akagi3p")
+        XCTAssertEqual(AkagiSanmaBot.source, DecisionSource.akagiSanma)
+        XCTAssertEqual(DecisionSource.cloud(model: "3p-x"), "cloud:3p-x")
+        XCTAssertTrue(status(source: DecisionSource.cloud(model: "3p-x")).isSanmaCapableDecision)
+        XCTAssertFalse(status(source: DecisionSource.local).isSanmaCapableDecision)
+    }
+
     func testSanmaCapableDecisionBySource() {
         XCTAssertTrue(status(source: AkagiSanmaBot.source).isSanmaCapableDecision)
         XCTAssertTrue(status(source: "cloud:akagi-3p").isSanmaCapableDecision)

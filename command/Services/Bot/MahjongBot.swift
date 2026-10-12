@@ -58,6 +58,18 @@ extension MahjongBot {
     var cloudFallbackStreak: Int { 0 }
 }
 
+/// `BotReaction.source` 的值，寫入端一律從這裡取。
+///
+/// `BotStatus.isSanmaCapableDecision` 以前綴與字面比對放行三麻自動打牌，
+/// 任一處拼錯就會讓 fail-closed 失效或誤擋，而編譯器不會報錯。
+nonisolated enum DecisionSource {
+    static let local = "local"
+    static let akagiSanma = "local-akagi3p"
+    static let cloudPrefix = "cloud:"
+
+    static func cloud(model: String) -> String { cloudPrefix + model }
+}
+
 /// 引擎自述。
 struct BotIdentity: Equatable {
     /// 機器名（log 用），例如 "mortal-bundled"、"cloud+mortal-bundled"
@@ -82,7 +94,7 @@ struct BotReaction {
     /// 第一個對應 actionType 的列）。空陣列＝清空畫面上的推薦。
     let recommendations: [Recommendation]
 
-    /// 這批推薦由誰算出："local" 或 "cloud:<model>"。
+    /// 這批推薦由誰算出（`DecisionSource`）。
     /// fallback 原則——可以更弱，但必須讓人看得出來。
     let source: String
 
