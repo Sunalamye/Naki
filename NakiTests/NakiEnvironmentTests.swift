@@ -12,6 +12,7 @@
 //  「雙重真實來源」，只是換了個入口回來。
 //
 
+import SwiftUI
 import XCTest
 
 @testable import Naki
@@ -204,5 +205,35 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(AutoPlayAvailability.modes(autoPlaySupported: store.supportsAutoPlay),
                        [.off, .recommend],
                        "不支援自動送出時 picker 上不該有「自動」")
+    }
+}
+
+// MARK: - Recommendation.actionName
+
+/// 期望值抄自改動前 `DecisionSidebar` 兩處的三元式（打牌 → `actionType.displayName`，其餘 → `displayLabel`）。
+@MainActor
+final class RecommendationActionNameTests: XCTestCase {
+
+    func testActionNameMatchesFormerSidebarLogic() {
+        let cases: [(Recommendation, String)] = [
+            (Recommendation(tile: "8p", probability: 0.4, actionType: .discard), "打"),
+            (Recommendation(tile: "?", probability: 0.4, actionType: .discard), "打"),
+            (Recommendation(actionType: .riichi, probability: 0.1), "立直"),
+            (Recommendation(tile: "chi_0", probability: 0.1, actionType: .chi), "吃①"),
+            (Recommendation(tile: "chi_1", probability: 0.1, actionType: .chi), "吃②"),
+            (Recommendation(tile: "chi_2", probability: 0.1, actionType: .chi), "吃③"),
+            (Recommendation(actionType: .chi, probability: 0.1), "吃"),
+            (Recommendation(actionType: .pon, probability: 0.1), "碰"),
+            (Recommendation(actionType: .kan, probability: 0.1), "槓"),
+            (Recommendation(actionType: .hora, probability: 0.1), "和"),
+            (Recommendation(actionType: .kita, probability: 0.1), "拔北"),
+            (Recommendation(actionType: .ryukyoku, probability: 0.1), "九種九牌"),
+            (Recommendation(actionType: .none, probability: 0.1), "過"),
+            (Recommendation(tile: "foo", probability: 0.1, actionType: .unknown), "foo"),
+        ]
+        for (recommendation, expected) in cases {
+            XCTAssertEqual(recommendation.actionName, expected, "\(recommendation.actionType) \(recommendation.label)")
+        }
+        XCTAssertEqual(cases[0].0.actionNameKey, LocalizedStringKey("打"))
     }
 }
