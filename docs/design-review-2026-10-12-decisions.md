@@ -716,3 +716,8 @@
   - `sanmaAuthorization` 未列進 `replay_game` 的 outputSchema properties（`MCPToolOutputSchema.swift:94-107`，`additionalProperties: true` 所以不違約）→ WP7b。
   - 變異 5（`opsSummary` 純 log 字串）存活，不補攔截縫 → 不處理。
   - 四麻 `scripts/replay-check.sh` 未跑（需執行中 Naki）→ 整合驗收。
+
+### WP4 進行中裁決（2026-10-12）
+- 復驗（HEAD `4695b79`）裁決「要修正」，唯一阻擋項：雲端-only 路徑取消時不累加 `cloudFallbackStreak`（`CloudBot.swift:178`）無測試鎖住，復驗員自選變異存活。
+- 統帥裁決：**補測試，不撤回該行**。理由：該行方向正確（取消不應誤記故障，與 R5 同一精神），缺的是鎖不是正確性；撤回會讓斷線期間 UI 顯示錯誤的降級計數。修正以新 commit 進行，再交同一復驗員對新 HEAD 復驗。
+- 復驗確認的其他結論：8 個 hunk 無一增加送出；「沒有任何組合也不送」為安全收緊（正式路徑唯一可達情況是 combination 解析缺陷，不送後引擎重試 15 次再退避，不卡死、不擋 pass 通道）；舊世代結果回 nil 可能暫時抹掉新局 `botFailure` 顯示，只影響顯示不影響送出，列已知風險。
