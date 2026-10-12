@@ -678,3 +678,11 @@
 
 ### 流程修正
 - 實作者在自己的分支 commit；主線只在獨立復驗裁決「可合併」後 `--ff-only` 合併到 main。WP0 已照此做。
+
+### WP0.5 結果（2026-10-12）
+- 合併到 main：`408035e`（基準 `be8ea47`，兩檔）。復驗裁決「可合併」（`.swfd/logs/wp05-verify/`）：896/896，7 個變異全殺，oauth2Auth 回應回 `[:]` 不進 `lastParsed`。
+- 復驗員列出的後續項（不擋合併），歸屬：
+  - `MajsoulBridge.swift:266-267` 登入條件仍列 oauth2Auth，現為死碼只印誤導 log → WP5。
+  - `parseLoginResponse` field 3 為 varint、或 field 2 為 wireType 1／5 時不記 fault（後者因 `LiqiEnvelope.parseProtobufBlocks` 直接跳過）→ 延後表，等 live 證據。
+  - `ResLogin` field 1 `error` 以 varint 解、恆為 8，全 repo 無讀取者 → WP7a 死碼清理時一併刪或改。
+  - 測試 (d) 補 fault 的 fieldId 斷言 → WP5。
