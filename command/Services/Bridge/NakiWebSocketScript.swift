@@ -32,8 +32,10 @@ enum NakiWebSocketScript {
   /// 把一筆已編碼的 Liqi REQUEST（base64）丟進第一條 OPEN 的雀魂 WebSocket。
   ///
   /// base64 只含 `A-Za-z0-9+/=`，可安全放進單引號字串。
+  /// 模組缺席時回短碼：直接呼叫會丟 TypeError，到 Swift 變成 `js_error: <自由文字>`。
   static func sendRaw(base64: String) -> String {
-    "return JSON.stringify(window.__nakiWebSocket.sendRaw('\(base64)'))"
+    "return JSON.stringify(window.__nakiWebSocket && window.__nakiWebSocket.sendRaw"
+      + " ? window.__nakiWebSocket.sendRaw('\(base64)') : {success: false, reason: 'no_websocket_module'})"
   }
 
   /// 更新唯讀推薦通道並通知插件（插件 hook 見 `naki-plugins.js` 的 `recommendationsChanged`）。

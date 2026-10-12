@@ -68,6 +68,21 @@ final class JSContractTests: XCTestCase {
         XCTAssertEqual(missing, [], "Swift 呼叫了注入的 JS 裡不存在的方法")
     }
 
+    /// 模組缺席或 sendRaw 不見時回可辨識的短碼；模組在時照常呼叫進去。
+    func testSendRawScriptReportsMissingModule() throws {
+        let script = "(function () { \(NakiWebSocketScript.sendRaw(base64: "AAEC")) })()"
+        for page in ["var window = this;", "var window = this; window.__nakiWebSocket = {};"] {
+            let context = try XCTUnwrap(JSContext())
+            context.evaluateScript(page)
+            let result = context.evaluateScript(script)?.toString()
+            XCTAssertNil(context.exception, page)
+            XCTAssertEqual(NakiWebSocketScript.sendResult(from: result).detail, "no_websocket_module", page)
+        }
+        let reached = try loadedPage().evaluateScript(
+            "(function () { \(NakiWebSocketScript.sendRaw(base64: "A")) })()")?.toString()
+        XCTAssertEqual(NakiWebSocketScript.sendResult(from: reached).detail, "invalid_base64")
+    }
+
     /// 抽取與查找都不能空轉：已知呼叫要抓得到，別的物件的同名方法不能算數。
     func testExtractionIsNotVacuous() throws {
         let calls = try swiftCalls()
