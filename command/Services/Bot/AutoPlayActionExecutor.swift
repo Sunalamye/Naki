@@ -33,7 +33,7 @@ enum AutoPlayActionExecutor {
     ///
     /// - Parameters:
     ///   - action: resolver 裁決後的動作（不是 AI 的原始推薦）
-    ///   - tile: 動作附帶的牌名（MJAI 格式）；吃是 `chi_0` / `chi_1` / `chi_2`
+    ///   - tile: 動作附帶的牌名（MJAI 格式）；吃的變體不讀這裡，讀 `recommendations` 裡吃的 `chiVariant`
     ///   - snapshot: 這次動作依據的 oplist 快照；index／槓型／和牌型／pass 通道都由它推導
     ///   - recommendations: 目前的推薦清單（立直要從裡面找宣言牌）
     ///   - tsumoTile: 這一巡摸到的牌，用來判斷 moqie；nil 表示不是摸切
@@ -99,12 +99,9 @@ enum AutoPlayActionExecutor {
             spec = LiqiRequestBuilder.riichi(tile: majsoulTile, moqie: moqie)
 
         case .chi:
-            var variant = 0
-            if tile.hasPrefix("chi_"), let index = Int(String(tile.dropFirst(4))) {
-                variant = index
-            } else {
-                log("⚠️ 吃: 無法解析變體 \(tile)，以 chi_0 對照")
-            }
+            let recommended = recommendations.first(where: { $0.actionType == .chi })?.chiVariant
+            if recommended == nil { log("⚠️ 吃: 推薦沒有吃的變體，以 chi_0 對照") }
+            let variant = recommended ?? 0
             let resolved = snapshot?.chiCombinationIndex(variant: variant)
             let combination = snapshot?.operation(of: .chi)?.combination ?? []
             let combos = combination.isEmpty ? "-" : combination.joined(separator: ", ")

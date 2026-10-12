@@ -81,7 +81,8 @@ enum CloudDecisionMapper {
             // 不再只有 ①②③ 的相對位置（2026-08-05 顯示掃描的增強）
             return [Recommendation(tile: "chi_\(variant)", probability: prob,
                                    actionType: .chi,
-                                   detail: L10n.text("用 \(consumed.joined(separator: "·")) 吃 \(pai)"))]
+                                   detail: L10n.text("用 \(consumed.joined(separator: "·")) 吃 \(pai)"),
+                                   chiVariant: variant)]
 
         case "daiminkan", "ankan", "kakan":
             let detail = (reaction["consumed"] as? [String]).map { $0.joined(separator: "·") }
@@ -127,11 +128,11 @@ enum CloudDecisionMapper {
         case "pon":
             return Recommendation(tile: "pon", probability: prob, actionType: .pon)
         case "chi_low":
-            return Recommendation(tile: "chi_0", probability: prob, actionType: .chi)
+            return Recommendation(tile: "chi_0", probability: prob, actionType: .chi, chiVariant: 0)
         case "chi_mid":
-            return Recommendation(tile: "chi_1", probability: prob, actionType: .chi)
+            return Recommendation(tile: "chi_1", probability: prob, actionType: .chi, chiVariant: 1)
         case "chi_high":
-            return Recommendation(tile: "chi_2", probability: prob, actionType: .chi)
+            return Recommendation(tile: "chi_2", probability: prob, actionType: .chi, chiVariant: 2)
         case "kan":
             return Recommendation(tile: "kan", probability: prob, actionType: .kan)
         case "hora":

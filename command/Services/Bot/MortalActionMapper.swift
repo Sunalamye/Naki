@@ -156,11 +156,11 @@ struct MortalActionMapper {
         case AI.riichi:
             return Recommendation(tile: "reach", probability: probability, actionType: .riichi)
         case AI.chiLow:
-            return Recommendation(tile: "chi_0", probability: probability, actionType: .chi)
+            return Recommendation(tile: "chi_0", probability: probability, actionType: .chi, chiVariant: 0)
         case AI.chiMid:
-            return Recommendation(tile: "chi_1", probability: probability, actionType: .chi)
+            return Recommendation(tile: "chi_1", probability: probability, actionType: .chi, chiVariant: 1)
         case AI.chiHigh:
-            return Recommendation(tile: "chi_2", probability: probability, actionType: .chi)
+            return Recommendation(tile: "chi_2", probability: probability, actionType: .chi, chiVariant: 2)
         case AI.pon:
             return Recommendation(tile: "pon", probability: probability, actionType: .pon)
         case AI.kan:

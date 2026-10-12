@@ -150,12 +150,14 @@ final class ToolAndModelGapTests: XCTestCase {
     // MARK: - 吃的標籤
 
     func testChiLabelClampsIndexIntoCircledDigits() {
-        func label(_ l: String) -> String { Recommendation(actionType: .chi, probability: 1, label: l).displayLabel }
-        XCTAssertEqual(label("chi_0"), "吃①")
-        XCTAssertEqual(label("chi_1"), "吃②")
-        XCTAssertEqual(label("chi_2"), "吃③")
-        XCTAssertEqual(label("chi_7"), "吃③")
-        XCTAssertEqual(label("chi_-4"), "吃①")
+        func label(_ variant: Int) -> String {
+            Recommendation(tile: "chi_\(variant)", probability: 1, actionType: .chi, chiVariant: variant).displayLabel
+        }
+        XCTAssertEqual(label(0), "吃①")
+        XCTAssertEqual(label(1), "吃②")
+        XCTAssertEqual(label(2), "吃③")
+        XCTAssertEqual(label(7), "吃③")
+        XCTAssertEqual(label(-4), "吃①")
     }
 
     // MARK: - BotStatus 顯示名稱

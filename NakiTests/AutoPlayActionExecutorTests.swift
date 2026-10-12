@@ -44,6 +44,12 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         return sender
     }
 
+    /// 吃的推薦：executor 從 `chiVariant` 讀變體，不再解析 `tile` 字串
+    private func chiRecommendation(_ variant: Int?) -> Recommendation {
+        Recommendation(tile: variant.map { "chi_\($0)" } ?? "chi", probability: 1,
+                       actionType: .chi, chiVariant: variant)
+    }
+
     // MARK: - 每一個 case 送出的是哪一種 request
 
     /// 打牌：MJAI `5m` → 雀魂 `5m`；tsumoTile 相同時 moqie=true（field 5 = `28 01`）
@@ -162,12 +168,32 @@ final class AutoPlayActionExecutorTests: XCTestCase {
             source: "test")
 
         await AutoPlayActionExecutor.execute(
-            action: .chi, tile: "chi_1", snapshot: snapshot, recommendations: [],
+            action: .chi, tile: "chi_1", snapshot: snapshot, recommendations: [chiRecommendation(1)],
             sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertEqual(sender.lastResult?.method, ".lq.FastTest.inputChiPengGang")
         XCTAssertTrue(hex(captured.first).hasSuffix("08021001"),
                       "chi_1 必須對到 index=1，實際 bytes=\(hex(captured.first))")
+    }
+
+    /// 變體讀推薦的 `chiVariant`，不解析 `tile` 字串：兩者不一致時以欄位為準
+    @MainActor
+    func testChiReadsVariantFromRecommendationNotTileString() async {
+        let store = LiqiOperationStore()
+        var captured: [String] = []
+        let sender = recordingSender { captured.append($0) }
+        let snapshot = store.record(
+            seat: 0,
+            operations: [LiqiOperation(type: .chi, combination: ["1m|2m", "2m|4m"])],
+            contextTile: "3m",
+            source: "test")
+
+        await AutoPlayActionExecutor.execute(
+            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [chiRecommendation(1)],
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
+
+        XCTAssertTrue(hex(captured.first).hasSuffix("08021001"),
+                      "chiVariant=1 必須對到 index=1，實際 bytes=\(hex(captured.first))")
     }
 
     /// 對照不到組合時退回索引 0，而且**必須留下警告**——Legacy 那份漏的就是這行
@@ -184,7 +210,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
             source: "test")
 
         await AutoPlayActionExecutor.execute(
-            action: .chi, tile: "chi_1", snapshot: snapshot, recommendations: [],
+            action: .chi, tile: "chi_1", snapshot: snapshot, recommendations: [chiRecommendation(1)],
             sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, log: { logs.append($0) })
 
         XCTAssertTrue(hex(captured.first).hasSuffix("0802"),
@@ -208,7 +234,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
             source: "test")
 
         let result = await AutoPlayActionExecutor.execute(
-            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [],
+            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [chiRecommendation(0)],
             sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
 
         XCTAssertNil(result)
@@ -225,7 +251,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         let sender = recordingSender { _ in sendCount += 1 }
 
         let result = await AutoPlayActionExecutor.execute(
-            action: .chi, tile: "chi_0", snapshot: nil, recommendations: [],
+            action: .chi, tile: "chi_0", snapshot: nil, recommendations: [chiRecommendation(0)],
             sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
 
         XCTAssertNil(result)
@@ -244,7 +270,7 @@ final class AutoPlayActionExecutorTests: XCTestCase {
                                     contextTile: "3m", source: "test")
 
         let result = await AutoPlayActionExecutor.execute(
-            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [],
+            action: .chi, tile: "chi_0", snapshot: snapshot, recommendations: [chiRecommendation(0)],
             sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, event: { events.append($0) })
 
         XCTAssertNil(result)
@@ -253,9 +279,9 @@ final class AutoPlayActionExecutorTests: XCTestCase {
         XCTAssertTrue(events.contains { $0.contains("[-]") }, "event 要標出沒有任何組合，實際: \(events)")
     }
 
-    /// `chi_` 前綴解析失敗：照舊以 chi_0 對照，但必須留下一行 log
+    /// 推薦沒有 chiVariant：照舊以 chi_0 對照，但必須留下一行 log
     @MainActor
-    func testChiWithUnparsableVariantLogs() async {
+    func testChiWithoutVariantLogs() async {
         let store = LiqiOperationStore()
         var logs: [String] = []
         let sender = recordingSender { _ in }
@@ -266,10 +292,10 @@ final class AutoPlayActionExecutorTests: XCTestCase {
             source: "test")
 
         await AutoPlayActionExecutor.execute(
-            action: .chi, tile: "chi_x", snapshot: snapshot, recommendations: [],
+            action: .chi, tile: "chi", snapshot: snapshot, recommendations: [chiRecommendation(nil)],
             sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0, log: { logs.append($0) })
 
-        XCTAssertTrue(logs.contains { $0.contains("無法解析變體") })
+        XCTAssertTrue(logs.contains { $0.contains("推薦沒有吃的變體") })
     }
 
     /// 槓型由 oplist 決定：只有加槓可用時就送加槓（type=6），不是預設的暗槓
