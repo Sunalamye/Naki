@@ -686,3 +686,16 @@
   - `parseLoginResponse` field 3 為 varint、或 field 2 為 wireType 1／5 時不記 fault（後者因 `LiqiEnvelope.parseProtobufBlocks` 直接跳過）→ 延後表，等 live 證據。
   - `ResLogin` field 1 `error` 以 varint 解、恆為 8，全 repo 無讀取者 → WP7a 死碼清理時一併刪或改。
   - 測試 (d) 補 fault 的 fieldId 斷言 → WP5。
+
+### WP3 結果（2026-10-12）
+- 合併到 main：merge commit `c1b12e6`（WP3 原 sha `9721f0d`，基準 `be8ea47`，6 檔）。復驗裁決「可合併」（`.swfd/logs/wp3-verify/`）：894/894，iOS build 成功，test host 不再綁 8765。合併態在 main 全套 898/898（`.swfd/logs/merge-main/test-c1b12e6.log`）。
+- 紀律偏離（統帥接受）：實作者改了範圖外 `MCPContext.swift`（協定加唯讀 `supportsAutoPlay`，5 行）。復驗專項結論：必要；唯一不改協定的做法是借 `setAntiIdle(nil,nil)` 的接線當探針，會讓 `bot_trigger` 依賴心跳接線這個不相干細節，不採。協定唯一 conformer 是 `DefaultNakiMCPContext`，無 mock 受影響。
+- 自報偏離：第 3 項「失敗後 `debugServer = nil`」改為下次啟動時替換舊實例（`DebugServer` 失敗無回呼且不在範圍）；第 5 項 UI 測試斷言略過（需在 `command/` 加注入掛鉤）。
+- 復驗員列出的後續項，歸屬：
+  - `DebugServer` 的 `.failed`／`.cancelled` handler 不把 `isDebugServerRunning` 設回 false，曾 ready 後全敗時 guard 仍回「已在運行」→ WP7b（需改 `DebugServer.swift`）。
+  - Legacy 不可用時各工具短碼放置不一致（`bot_trigger` 放 `error`，`sendLiqi` 系列放 `reason`，`lobby_anti_idle` 另一碼）；短碼字串在 `BotTools.swift:62` 與 `NakiRuntime.swift:342` 各寫一份 → WP7b。
+  - 第 3 項 guard 的鎖法（預設 `isDebugServerRunning = true` 與隨機高位 port 後呼叫 `startDebugServer()`）與第 1 項降級提示的測試（備份還原 `naki.autoPlayMode` key）都可做、不必等 WP9 → WP7b 補測。
+  - 第 4 項只鎖 server 未鎖 engine 略過 → WP7b 補測。
+  - `BotTools.swift:79` note 過時 → WP12。
+  - UI 測試驗 iOS 橫幅需 launch argument 注入 `pageLoadFailure` → 延後表。
+- 新順序下一步：WP1（進行中）‖ WP2。
