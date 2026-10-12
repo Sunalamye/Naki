@@ -342,10 +342,15 @@ class LiqiParser {
             return parseSyncGame(innerBlocks)
         }
 
-        // 處理登入響應
+        // 只有 ResLogin 形狀（liqi.json responseType == ResLogin）才有 account_id
         if (methodName == ".lq.Lobby.login" || methodName == ".lq.Lobby.oauth2Login" ||
-            methodName == ".lq.Lobby.oauth2Auth" || methodName == ".lq.Lobby.emailLogin") && isResponse {
+            methodName == ".lq.Lobby.emailLogin") && isResponse {
             return parseLoginResponse(innerBlocks)
+        }
+
+        // ResOauth2Auth 只有 error 與 access_token：token 不進 parsed dict，也不得被當成 account_id
+        if methodName == ".lq.Lobby.oauth2Auth" && isResponse {
+            return [:]
         }
 
         // 通用解析：將塊轉換為字典
@@ -1118,7 +1123,7 @@ class LiqiParser {
             case 1: // error (如果有錯誤)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["error"] = v }
             case 2: // account_id (直接的帳號 ID)
-                if let (v, _) = parseVarint(block.data, offset: 0) {
+                if let v = loginAccountId(block) {
                     result["accountId"] = v
                     liqiLog("[LiqiParser] Found accountId: \(v)")
                 }
@@ -1137,6 +1142,19 @@ class LiqiParser {
         return result
     }
 
+    /// accountId 是座位判定的單一來源：非 varint 的欄位（例如字串）首 byte 會被誤當成 id，
+    /// 所以寧可缺席（authGame 會顯性 blocking）也不採用，並留下 degraded fault。
+    private func loginAccountId(_ block: ProtobufBlock) -> Int? {
+        guard block.wireType == 0 else {
+            recordFault(site: "LiqiParser.loginResponse.wireType",
+                        fieldId: block.fieldId,
+                        byteCount: block.data.count,
+                        reason: "account_id 預期 varint，實際 wireType \(block.wireType)")
+            return nil
+        }
+        return parseVarint(block.data, offset: 0)?.0
+    }
+
     /// 解析帳號信息
     private func parseAccountInfo(_ data: Data) -> [String: Any] {
         var result: [String: Any] = [:]
@@ -1145,7 +1163,7 @@ class LiqiParser {
         for block in blocks {
             switch block.fieldId {
             case 1: // account_id
-                if let (v, _) = parseVarint(block.data, offset: 0) {
+                if let v = loginAccountId(block) {
                     result["accountId"] = v
                     liqiLog("[LiqiParser] Account.accountId: \(v)")
                 }

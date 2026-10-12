@@ -301,6 +301,58 @@ final class LiqiParserFailureTests: XCTestCase {
         XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list")
     }
 
+    /// `ResOauth2Auth` 只有 error 與 access_token（string）：token 首 byte 不得被當成 accountId。
+    func testOauth2AuthResponseNeverProvidesAccountId() {
+        let token = LiqiField.string(field: 2, value: "abcdef0123456789")
+        let (bridge, state) = makeBridge()
+        _ = bridge.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 1)))
+        _ = bridge.parse(response(msgId: 1, fields: [token]))
+        XCTAssertEqual(bridge.accountId, 0)
+        XCTAssertEqual(state.totalCount, 0)
+        XCTAssertEqual((bridge.lastParsed?["data"] as? [String: Any])?.count, 0, "token 不得進 parsed dict")
+
+        // 座位表含 97（token 首字元 "a"）：accountId 若被汙染成 97 就會認到座位
+        _ = bridge.parseRaw(authGameRequest(msgId: 41))
+        let events = bridge.parse(response(msgId: 41, fields: [.bytes(field: 3, value: packed([97, 2, 3, 4]))]))
+        XCTAssertNil(events?.first { ($0["type"] as? String) == "start_game" })
+        XCTAssertEqual(state.blocking?.site, "ResAuthGame.seat_list", "accountId 缺席要由 authGame 顯性 blocking")
+
+        // 已有登入結果時，後到的 oauth2Auth 回應不得覆寫
+        let (loggedIn, _) = makeBridge()
+        logIn(loggedIn)
+        _ = loggedIn.parseRaw(Data(LiqiEncoder.encodeRequest(method: ".lq.Lobby.oauth2Auth", fields: [], msgId: 2)))
+        _ = loggedIn.parse(response(msgId: 2, fields: [token]))
+        XCTAssertEqual(loggedIn.accountId, accountId)
+    }
+
+    func testResLoginVarintAccountIdIsAdopted() {
+        let (bridge, state) = makeBridge()
+        logIn(bridge)
+        XCTAssertEqual(bridge.accountId, accountId)
+        XCTAssertEqual(state.totalCount, 0)
+    }
+
+    func testResLoginNestedAccountIdIsAdopted() {
+        let (bridge, state) = makeBridge()
+        logIn(bridge, account: .message(field: 3, fields: [.varint(field: 1, value: UInt64(accountId))]))
+        XCTAssertEqual(bridge.accountId, accountId)
+        XCTAssertEqual(state.totalCount, 0)
+    }
+
+    /// 非 varint 的 account_id 不設 accountId，只記 degraded（不得 blocking）。直接欄位與巢狀欄位各驗一次。
+    func testResLoginNonVarintAccountIdIsRejectedWithDegradedFault() {
+        for account: LiqiField in [.string(field: 2, value: "abcdef"),
+                                   .message(field: 3, fields: [.string(field: 1, value: "abcdef")])] {
+            let (bridge, state) = makeBridge()
+            logIn(bridge, account: account)
+            XCTAssertEqual(bridge.accountId, 0, "\(account)")
+            XCTAssertEqual(state.recent.first?.site, "LiqiParser.loginResponse.wireType", "\(account)")
+            XCTAssertEqual(state.recent.first?.severity, .degraded, "\(account)")
+            XCTAssertEqual(state.totalCount, 1, "\(account)")
+            XCTAssertNil(state.blocking, "\(account)")
+        }
+    }
+
     func testNormalNewRoundStillEmitsStartKyoku() {
         let (bridge, state) = makeBridge()
         authenticate(bridge)
