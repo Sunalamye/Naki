@@ -177,11 +177,14 @@ class MajsoulBridge {
 
         let playerCount = is3P ? 3 : 4
         guard let actor = value as? Int, (0..<playerCount).contains(actor) else {
+            // parser 對型別錯的 seat 給 -1（合法 varint 不會是負數），文字要分得出不是越界
+            let problem = (value as? Int).map { $0 < 0 } == true
+                ? "座位型別錯誤（parser 標記 seat=-1）"
+                : "座位超出範圍（seat=\(value)，本局 \(playerCount) 家）"
             let fault = LiqiParseFault(site: site,
                                        fieldId: 1,
                                        byteCount: 0,
-                                       reason: "座位超出範圍（seat=\(value)，本局 \(playerCount) 家）"
-                                           + " → 丟棄這一個事件",
+                                       reason: problem + " → 丟棄這一個事件",
                                        severity: .degraded)
             faultState.record(fault)
             eventLog("[MajsoulBridge] ⚠️ \(fault.text)")
@@ -854,12 +857,20 @@ class MajsoulBridge {
 
         bridgeLog("[MajsoulBridge] parseChiPengGang 結果: target=\(target), pai=\(pai), consumed=\(consumed)")
 
-        // 補 chi 的前提是牌組本身完整：froms 對得上、每張牌都轉得出牌碼（不收 `?? tile` 的原碼）、
-        // consumed 剛好 2 張。缺一樣就不是「省略了 0」而是封包壞了，不補、丟棄。
+        // 補 chi 的前提是牌組本身就是 chi：froms 對得上、每張牌都轉得出牌碼（不收 `?? tile` 的原碼）、
+        // consumed 剛好 2 張、三張同屬 m／p／s 且去赤後連號、不是三麻（三麻沒有吃）。
+        // 缺一樣就不是「省略了 0」而是封包壞了，不補、丟棄。
         if typeAbsent {
+            let meld = [pai] + consumed
+            let suits = Set(meld.map { $0.dropFirst().first })
+            let numbers = meld.compactMap { $0.first?.wholeNumberValue }.sorted()
+            let isRun = suits.count == 1 && suits.first.flatMap { $0 }.map { "mps".contains($0) } == true
+                && numbers.count == meld.count
+                && zip(numbers, numbers.dropFirst()).allSatisfy { $1 == $0 + 1 }
             let complete = froms.count == tiles.count
                 && tiles.allSatisfy { LiqiTile.mjai(fromMajsoul: $0) != nil }
                 && !pai.isEmpty && consumed.count == 2
+                && !is3P && isRun
             guard complete else {
                 recordDegradedOnce(site: "ActionChiPengGang.meld", fieldId: 3,
                                    reason: "type 缺席且牌組不完整（tiles=\(tiles)，froms=\(froms)）→ 不補 chi，丟棄")

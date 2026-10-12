@@ -1392,6 +1392,42 @@ final class LiqiParserFailureTests: XCTestCase {
         }
     }
 
+    /// type 缺席補 chi（依 U2 補 0）的前提，送 type 缺席的鳴牌並檢查是否被當成壞封包丟掉
+    private func assertTypeAbsentMeldDropped(_ meld: [LiqiField], froms: [Int], seatList: [Int]? = nil,
+                                             _ label: String, file: StaticString = #filePath, line: UInt = #line) {
+        let (bridge, state) = makeBridge()
+        authenticate(bridge, fields: seatList.map { [.bytes(field: 3, value: packed($0))] })
+
+        let events = actionEvents(bridge, "ActionChiPengGang",
+                                  [.varint(field: 1, value: 1)] + meld + [.bytes(field: 4, value: packed(froms))])
+
+        XCTAssertTrue(events.isEmpty, label, file: file, line: line)
+        XCTAssertEqual(faults(state, "ActionChiPengGang.meld").count, 1, label, file: file, line: line)
+        XCTAssertTrue(faults(state, "ActionChiPengGang.type.absent").isEmpty, label, file: file, line: line)
+    }
+
+    private func tiles(_ codes: String...) -> [LiqiField] {
+        codes.map { .string(field: 3, value: $0) }
+    }
+
+    /// chi 只能是同花色數牌三連號：字牌、不連號都不是省略了 0，而是壞封包
+    func testChiPengGangTypeAbsentWithNonRunShapeIsDropped() {
+        assertTypeAbsentMeldDropped(tiles("5z", "6z", "7z"), froms: [0, 1, 1], "字牌三張")
+        assertTypeAbsentMeldDropped(tiles("1m", "2m", "4m"), froms: [0, 1, 1], "同花色不連號")
+        assertTypeAbsentMeldDropped(tiles("1m", "2p", "3s"), froms: [0, 1, 1], "三種花色")
+    }
+
+    /// 三麻沒有吃：type 缺席的鳴牌一律是壞封包
+    func testChiPengGangTypeAbsentInSanmaIsDropped() {
+        assertTypeAbsentMeldDropped(tiles("1p", "2p", "3p"), froms: [0, 1, 1], seatList: [2, 3, accountId], "三麻")
+    }
+
+    /// 4 張不會是 chi：槓形（四張同牌），以及形狀連號但張數多一張
+    func testChiPengGangTypeAbsentWithFourTilesIsDropped() {
+        assertTypeAbsentMeldDropped(tiles("3m", "3m", "3m", "3m"), froms: [0, 1, 1, 1], "槓形")
+        assertTypeAbsentMeldDropped(tiles("1m", "2m", "3m", "4m"), froms: [0, 1, 1, 1], "四張連號")
+    }
+
     /// type 存在但型別錯或越界 → 丟棄並記 fault，不補 chi
     func testChiPengGangMalformedTypeIsDroppedWithoutFillingZero() {
         for type: LiqiField in [.bytes(field: 2, value: [0x00]), .varint(field: 2, value: 7)] {
