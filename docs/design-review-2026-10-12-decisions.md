@@ -707,3 +707,12 @@
 - 措辭備註：log 寫「本連線累計」，實際是一個 reset 週期內所有雀魂 socket 的合計（lobby 與 game-gateway 共用同一個 parser）；對照要靠前一行 `[WS] socket N ← bytes`。歸 WP12。
 - 實作 notes 寫 5 條 `wsLog`，實際 6 條；同函式另 2 條 `[Action]` wsLog 未帶 socketId。歸 WP5。
 - 已知未驗證量級：三麻 syncGame 重放後序號不一致 log 可能每次重連多出數十行 `.info`（復驗員推測）。列入 §6 runtime 驗證，live 一局後決定是否降 `.trace`。
+
+### WP2 結果（2026-10-12）
+- 合併到 main：merge commit `f5edbb8`（WP2 原 sha `1c77b27`，基準 `ee309a7`，5 檔含三麻錄影 fixture 47016 bytes、暱稱已匿名）。復驗裁決「可合併」（`.swfd/logs/wp2-verify/`）：900/900，變異 1 與 6 證實三麻隔離斷言不是恆真，正式路徑唯一建構點 `NakiWebCoordinator.swift:47` 零改動。合併態 main 全套見 `.swfd/logs/merge-main/test-f5edbb8.log`。
+- 復驗員列出的後續項，歸屬：
+  - `testSanmaReplayDoesNotReadSharedOperationStore` 在 replay 全部 throw 時 pon／isDisjoint 斷言會空轉成立 → **WP4 補 `decisionCount > 0` 與 `errors.isEmpty` 斷言**（WP4 範圍加入 `ReplayFingerprintTests.swift`）。
+  - §6 第 13 項的 runtime 驗收照原文跑不起來：`ReplayGameTool` 只接受 `~/Library/Logs/Naki/` 內的檔，`.swfd/logs/s3-live-5/…` 會被拒 → 整合驗收時先複製到某 session 的 `games/` 下。
+  - `sanmaAuthorization` 未列進 `replay_game` 的 outputSchema properties（`MCPToolOutputSchema.swift:94-107`，`additionalProperties: true` 所以不違約）→ WP7b。
+  - 變異 5（`opsSummary` 純 log 字串）存活，不補攔截縫 → 不處理。
+  - 四麻 `scripts/replay-check.sh` 未跑（需執行中 Naki）→ 整合驗收。
