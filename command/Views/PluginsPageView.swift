@@ -12,7 +12,7 @@ import SwiftUI
 /// 插件的獨立頁面：上半是插件清單（帶**熱插拔**開關，即時生效免 reload），
 /// 下半是即時的 `[Plugin]` log——啟用的插件經 `ctx.log` 送出的每一行都會出現在這。
 ///
-/// log 即時性：`LogManager.shared` 是 `@Observable`，body 直接讀它的 `recentLogLines()`
+/// log 即時性：`naki.logManager` 是 `@Observable`，body 直接讀它的 `entries`
 /// ⇒ 有新 log 進來就自動重繪（不必自己輪詢）。
 struct PluginsPageView: View {
     @Environment(\.naki) private var naki
@@ -641,7 +641,7 @@ struct PluginsPageView: View {
 
     /// 由新往舊掃，湊滿 300 筆就停：緩衝最多數千筆，body 每次重繪都會跑。
     private func recentPluginLogs() -> [LogEntry] {
-        Array(LogManager.shared.entries.reversed().lazy
+        Array(naki.logManager.entries.reversed().lazy
             .filter { $0.message.contains("[Plugin]") }
             .prefix(300).reversed())
     }

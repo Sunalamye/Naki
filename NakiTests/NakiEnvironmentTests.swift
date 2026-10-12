@@ -343,3 +343,69 @@ final class ViewSideEffectActionTests: XCTestCase {
         XCTAssertEqual(cleared, 1)
     }
 }
+
+// MARK: - environment 上的三個 service ref
+
+@MainActor
+final class NakiEnvironmentTests: XCTestCase {
+
+    private var suiteName = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "naki.tests.wp8.env.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        super.tearDown()
+    }
+
+    private func makeEnvironment(store: GameStore, jsInjection: JSInjectionState,
+                                 parseFault: LiqiParseFaultState) -> NakiEnvironment {
+        NakiEnvironment(store: store, settings: SettingsStore(defaults: defaults), actions: NakiActions(),
+                        pluginStore: PluginStore(), ui: UIState(), logManager: .shared,
+                        jsInjection: jsInjection, parseFault: parseFault)
+    }
+
+    /// 四個來源各自單獨成立都要算故障；全不成立才不算。全用注入的新實例，不碰 `.shared`。
+    func testHasFaultReadsFourSourcesFromEnvironment() {
+        let faults: [(String, (GameStore, JSInjectionState, LiqiParseFaultState) -> Void)] = [
+            ("botFailure", { store, _, _ in store.botFailure = "bot" }),
+            ("pageLoadFailure", { store, _, _ in store.pageLoadFailure = "page" }),
+            ("jsInjection", { _, js, _ in
+                js.record(.failed(loaded: [], failures: [JSModuleFailure(module: "naki-core", reason: .notFound)]))
+            }),
+            ("parseFault", { _, _, fault in
+                fault.record(LiqiParseFault(site: "ResAuthGame.seat_list", byteCount: 0,
+                                            reason: "missing", severity: .blocking))
+            }),
+        ]
+
+        let clean = makeEnvironment(store: GameStore(), jsInjection: JSInjectionState(),
+                                    parseFault: LiqiParseFaultState())
+        XCTAssertFalse(clean.hasFault)
+
+        for (name, inject) in faults {
+            let store = GameStore()
+            let js = JSInjectionState()
+            let fault = LiqiParseFaultState()
+            inject(store, js, fault)
+            let environment = makeEnvironment(store: store, jsInjection: js, parseFault: fault)
+            XCTAssertTrue(environment.hasFault, "\(name) 單獨成立時應算故障")
+            XCTAssertTrue(environment.jsInjection === js && environment.parseFault === fault,
+                          "environment 必須回傳注入的那一份")
+        }
+    }
+
+    /// Preview 預設值讀取時解析成 `.shared`（判斷理由見 `NakiEnvironment`），兩次讀取是同一份。
+    func testPreviewRefsResolveToShared() {
+        let preview = NakiEnvironment()
+        XCTAssertTrue(preview.logManager === LogManager.shared)
+        XCTAssertTrue(preview.jsInjection === JSInjectionState.shared)
+        XCTAssertTrue(preview.parseFault === LiqiParseFaultState.shared)
+    }
+}

@@ -10,14 +10,13 @@ import SwiftUI
 
 struct LogPanel: View {
     @Environment(\.naki) private var naki
-    private let logManager = LogManager.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var autoScroll = true
     @State private var filterCategory: LogCategory? = nil
     @State private var searchText = ""
 
     var body: some View {
-        let shown = logManager.recentEntries(category: filterCategory, search: searchText, limit: .max)
+        let shown = naki.logManager.recentEntries(category: filterCategory, search: searchText, limit: .max)
         VStack(spacing: 0) {
             // 工具欄
             HStack(spacing: 8) {

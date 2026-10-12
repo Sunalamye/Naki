@@ -63,7 +63,8 @@ final class NakiRuntime {
     /// 注入 Scene 的值
     var environment: NakiEnvironment {
         NakiEnvironment(store: store, settings: settings, actions: actions,
-                        pluginStore: pluginStore, ui: ui)
+                        pluginStore: pluginStore, ui: ui,
+                        logManager: .shared, jsInjection: .shared, parseFault: .shared)
     }
 
     // MARK: - 組裝
