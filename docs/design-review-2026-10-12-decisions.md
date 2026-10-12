@@ -423,7 +423,7 @@
 
 | # | 待驗證點 | 來源 | 最便宜的驗證方式 | 影響的判定 |
 |---|---|---|---|---|
-| 1 | reset 延後是否真的吞掉第一個 REQUEST | bridge M4、M2 | WP1 合併後 live 做一次強制重連（工具列重連或 MCP force reconnect），`grep "no pending request" ~/Library/Logs/Naki/<ts>/all.log`；WP5 合併後再做一次比對次數 | WP5 第 3 項是否保留 |
+| 1 | reset 延後是否真的吞掉第一個 REQUEST | bridge M4、M2 | WP1 合併後 live 做一次強制重連（工具列重連或 MCP force reconnect），`grep "RESPONSE 配不到 request" ~/Library/Logs/Naki/<ts>/all.log`（WP1 新增的 .info 字串；原 trace 行「no pending request」不進 all.log）；WP5 合併後再做一次比對次數 | WP5 第 3 項是否保留 |
 | 2 | `resyncBot` 與 authGame `start_game` 先後 | bridge S5、bot R7 | 同一次重連，看 `[協調器] WebSocket 已重連` 與 `start_game` 在 `all.log` 的順序 | 延後表「連線事件進 intake」 |
 | 3 | test host 是否載入雀魂頁並登入 | bot R1 | 非 live 時跑一次 `-only-testing:NakiTests`，看最新 `~/Library/Logs/Naki/<ts>/all.log` 有無導覽／載入 majsoul 的行 | WP3 第 4 項是否擴到載頁 |
 | 4 | 三麻 `SanmaEngine.decide` 在 main 的耗時 | bot R11 | 三麻友人房一局，`rockettrace` 錄 main thread，或暫時在 `AkagiSanmaBot.react` 前後記時間差（不進 WP） | 延後表「包 actor」 |
@@ -699,3 +699,11 @@
   - `BotTools.swift:79` note 過時 → WP12。
   - UI 測試驗 iOS 橫幅需 launch argument 注入 `pageLoadFailure` → 延後表。
 - 新順序下一步：WP1（進行中）‖ WP2。
+
+### WP1 結果（2026-10-12）
+- 合併到 main：merge commit `ae40747`（WP1 原 sha `1123a84`，基準 `10d81cd`，7 檔）。復驗裁決「可合併」（`.swfd/logs/wp1-verify/`）：「不改行為」逐 hunk 獨立成立，5 個變異獨立重現全殺，898/898，改動檔 0 新警告。合併態 main 全套 900/900（`.swfd/logs/merge-main/test-ae40747.log`）。
+- 解讀偏離（統帥接受復驗建議，保留）：配不到 request 的 `.info` 在第 1、2、4、8… 次報並帶累計，fault 只記首次。理由：log 行數為 log2(N) 上界又保留量級，正是 bridge M4 要對照的資訊。
+- 復驗員指出的文件問題已修：§6 第 1 條 grep 字串改為 WP1 新增的 `.info` 字串（原 trace 行不進 all.log）。
+- 措辭備註：log 寫「本連線累計」，實際是一個 reset 週期內所有雀魂 socket 的合計（lobby 與 game-gateway 共用同一個 parser）；對照要靠前一行 `[WS] socket N ← bytes`。歸 WP12。
+- 實作 notes 寫 5 條 `wsLog`，實際 6 條；同函式另 2 條 `[Action]` wsLog 未帶 socketId。歸 WP5。
+- 已知未驗證量級：三麻 syncGame 重放後序號不一致 log 可能每次重連多出數十行 `.info`（復驗員推測）。列入 §6 runtime 驗證，live 一局後決定是否降 `.trace`。
