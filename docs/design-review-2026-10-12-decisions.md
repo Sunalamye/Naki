@@ -779,3 +779,10 @@
 - §11 把 U1（移除 `matchGame` 鏈）排進 WP7b，前置條件是「先以 MCP 呼叫一次 `lobby_start_match` 確認仍回 error 1306」。這需要執行中的 Naki 與登入的測試帳號在大廳，只有用戶能提供；實作者不得啟動 app、不得連網。
 - 裁決：U1 從 WP7b 拆出成獨立小包 **WP7d**，排在 WP7c 之後、WP8 之前，**等用戶提供 1306 證據後才派**（證據存 `.swfd/logs/wp7d/`）。不先拆掉程式碼再補證據，因為 U1 是用戶裁決的行為移除，證據鏈順序不能反。
 - WP7d 範圔：`lobby_start_match`／`cancel_match`／`match_modes` 三個 MCP 工具、`StartMatchAction`／`CancelMatchAction`、`ObservedMatchModes` 與對應測試；`tools/list` 數量會減 3（契約變更，WP12 文件同步）。arch S6 的 4 個匹配 Action 收斂在 WP7d 一併定案。
+
+### WP7b 進行中裁決（2026-10-12）
+- 復驗（HEAD `6580ab0`）裁決「要修正」，阻擋項：新 lifecycle 測試 `DebugServerFramingTests.swift:176` 的 port 等式斷言機制性 flaky（40 次失敗 1 次；`occupyPorts` 只佔 base 與 base+1，macOS 臨時 port 範圍 49152–65535 涵蓋測試用區間）。修法：改 `>= base + 2`。
+- 統帥裁決附帶兩項：(1) **恢復 listener 身分 guard**——實作者以「main queue FIFO 所以等價」為由把存活變異判為等價並移除 guard，復驗判定跨 listener 事件入隊次序無 Network.framework API 保證，40/40 未觀察到反轉只是「未觀察到」，依「變異存活即 revert 該項」恢復；(2) `occupyPorts` 失敗改 `XCTSkip`。
+- 規則補強：**實作者不得自行把存活變異判為「等價變異」後移除被測的 guard**；判等價必須附證明（API 契約或窮舉），否則保留原碼、記為未鎖。
+- 其他復驗結論：13 項一致；`eventLog` 改名只改 Swift 名稱不改輸出 key，非契約變更；`resetConfirm` 五處逐處等價；`resolveReachDiscard` 取消在 sleep 期間與飛行中都不記故障，變異兩邊都紅。
+- 可合併後補：`DebugServer.swift:675` 的 Task 在 await 期間強持有 self，重啟時舊實例遲到的 `.cancelled` 理論上可清掉新 server 旗標（窗口極窄，推測未實測）→ 延後表；`docs/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12` 提到已刪符號 → WP12。
