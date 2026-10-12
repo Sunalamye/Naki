@@ -607,10 +607,7 @@ class LiqiParser {
 
             switch block.fieldId {
             case 1: // seat
-                if let (v, _) = parseVarint(block.data, offset: 0) {
-                    result["seat"] = v
-                    liqiLog("[LiqiParser] DealTile seat: \(v)")
-                }
+                result["seat"] = varintOrInvalid(block, site: "ActionDealTile.seat", fieldId: 1)
             case 2: // tile
                 if let tile = block.stringValue {
                     result["tile"] = tile
@@ -673,7 +670,7 @@ class LiqiParser {
         for block in blocks {
             switch block.fieldId {
             case 1: // seat
-                if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
+                result["seat"] = varintOrInvalid(block, site: "ActionDiscardTile.seat", fieldId: 1)
             case 2: // tile
                 if let tile = block.stringValue { result["tile"] = tile }
             // 欄位編號依 docs/protocol/liqi.json 的 ActionDiscardTile。
@@ -715,9 +712,9 @@ class LiqiParser {
         for block in blocks {
             switch block.fieldId {
             case 1: // seat
-                if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
+                result["seat"] = varintOrInvalid(block, site: "ActionChiPengGang.seat", fieldId: 1)
             case 2: // type (0=chi, 1=pon, 2=daiminkan)
-                if let (v, _) = parseVarint(block.data, offset: 0) { result["type"] = v }
+                result["type"] = varintOrInvalid(block, site: "ActionChiPengGang.type", fieldId: 2)
             case 3: // tiles（repeated string：一個 block 就是一張牌）
                 // schema 已經說清楚一個 block 一張牌，解不出牌就是解錯了——
                 // 舊版在這裡退回 `parseTileList` 的逐 byte 掃描，掃出來的東西
@@ -758,7 +755,7 @@ class LiqiParser {
         for block in blocks {
             switch block.fieldId {
             case 1: // seat
-                if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
+                result["seat"] = varintOrInvalid(block, site: "ActionAnGangAddGang.seat", fieldId: 1)
             case 2: // type (2=kakan, 3=ankan)
                 if let (v, _) = parseVarint(block.data, offset: 0) { result["type"] = v }
             case 3: // tiles
@@ -904,7 +901,7 @@ class LiqiParser {
         for block in blocks {
             switch block.fieldId {
             case 1: // seat
-                if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
+                result["seat"] = varintOrInvalid(block, site: "ActionBaBei.seat", fieldId: 1)
             case 4: // operation（liqi.json ActionBaBei：operation 是 field 4）
                 result["operation"] = parseOperation(block.data)
             case 9: // moqie
@@ -1367,7 +1364,8 @@ class LiqiParser {
 
     // MARK: - Helper Methods
 
-    /// 場風／局數欄位：型別錯誤回 -1（超出範圍，讓呼叫端的範圍守衛擋下這一局）並記 fault
+    /// 缺席會被呼叫端當成 0 的 singular uint32（場風、局數、座位、鳴牌種類）：型別錯誤回 -1
+    /// 並記 fault，讓「欄位缺席」（key 不存在）與「欄位壞掉」分得開，-1 由呼叫端的範圍守衛擋下
     private func varintOrInvalid(_ block: ProtobufBlock, site: String, fieldId: Int) -> Int {
         if block.wireType == 0, let (v, _) = parseVarint(block.data, offset: 0) { return v }
         recordFault(site: site, fieldId: fieldId, byteCount: block.data.count,
@@ -1387,7 +1385,7 @@ class LiqiParser {
         for block in blocks {
             switch block.fieldId {
             case 1: // seat
-                if let (v, _) = parseVarint(block.data, offset: 0) { result["seat"] = v }
+                result["seat"] = varintOrInvalid(block, site: "OptionalOperationList.seat", fieldId: 1)
             case 2: // operation_list（repeated，逐筆累積）
                 operations.append(parseOptionalOperation(block.data))
             case 4: // timeAdd
