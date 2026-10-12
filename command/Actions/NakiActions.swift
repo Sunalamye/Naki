@@ -19,6 +19,9 @@
 //  3. **Preview 拉得起來。** View 呼叫的是 Action 本身而不是某個可為 nil 的物件，
 //     沒接線時仍有按鈕行為可看，不是只剩靜態畫面。
 //
+//  沒接線時的空值有兩種形狀：`init()`（Preview，無副作用，什麼都不做或回 `not_wired`）
+//  與 `.unavailable`（這條 path 明講不提供，帶可 grep 的短碼或 throw）。
+//
 //  邊界：Action 只包「做這件事」；決策（要不要做、做哪一個）仍在
 //  `AutoPlayGate` / `AutoPlayDecisionResolver` / `AutoPlayEngine`，
 //  資料仍在 `GameStore` / `LiqiOperationStore`。

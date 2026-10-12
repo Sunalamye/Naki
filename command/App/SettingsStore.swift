@@ -11,13 +11,6 @@
 import Foundation
 import SwiftUI
 
-/// 使用者設定與「這條 WebView 路徑能做什麼」的唯一持有者。
-///
-/// 邊界：
-/// - 自動打牌**模式**不在這裡。它的持久化權威是 `AutoPlayModeStore`、收斂權威是
-///   `AutoPlayAvailability.commit`，而「現在生效的是哪一個」住在 `GameStore`。
-///   這裡只放「這條 path 允不允許 `.auto` 這個選項」。
-/// - 牌局資料不在這裡（`GameStore`）。
 /// 雀魂的區服。
 ///
 /// **三個服跑同一份 client**：2026-08-09 實測三個 `version.json` 完全相同
@@ -71,6 +64,13 @@ enum MajsoulServer: String, CaseIterable, Identifiable, Sendable {
     nonisolated var host: String { URL(string: urlString)?.host ?? urlString }
 }
 
+/// 使用者設定與「這條 WebView 路徑能做什麼」的唯一持有者。
+///
+/// 邊界：
+/// - 自動打牌**模式**不在這裡。它的持久化權威是 `AutoPlayModeStore`、收斂權威是
+///   `AutoPlayAvailability.commit`，而「現在生效的是哪一個」住在 `GameStore`。
+///   這裡只放「這條 path 允不允許 `.auto` 這個選項」。
+/// - 牌局資料不在這裡（`GameStore`）。
 @Observable
 @MainActor
 final class SettingsStore {
