@@ -4,8 +4,8 @@
 //
 //  「已經決定要做什麼」之後，真正把它組成 Liqi request 送出去的那一層。
 //
-//  兩條 WebView path 共用的唯一 7-case switch（discard / riichi / chi / pon / kan /
-//  hora / pass）。
+//  兩條 WebView path 共用的唯一動作 switch（9 種動作 + unknown：discard / riichi / chi / pon / kan /
+//  hora / pass / kita / ryukyoku）。
 //
 //  **markHandled 的語意內聚在這裡**：只有 `sendRaw` 回 success 才消化這批 oplist——
 //  沒有送出成功就不能把機會當成處理完。呼叫端不需要、也不應該自己標記。

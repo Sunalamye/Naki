@@ -1393,35 +1393,6 @@
         }
       }
     },
-    "settings.%@ schema 無效": {
-      "comment": "manifest 無效的細節，%@＝設定 key",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "settings.%@ schema is invalid"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "settings.%@ の schema が無効です"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "settings.%@ schema가 잘못됨"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "settings.%@ schema 无效"
-          }
-        }
-      }
-    },
     "settings.%@ schema 無效（type 或 default 不合）": {
       "comment": "manifest 無效的細節，%@＝設定 key",
       "localizations": {
@@ -7801,35 +7772,6 @@
         }
       }
     },
-    "無法重連：WebView 不可用": {
-      "comment": "statusMessage：強制重連但頁面未就緒",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cannot reconnect: WebView unavailable"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "再接続できません：WebView が利用できません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "재연결 불가: WebView를 사용할 수 없음"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "无法重连：WebView 不可用"
-          }
-        }
-      }
-    },
     "牌局": {
       "comment": "詳情分組標題",
       "localizations": {
@@ -9445,35 +9387,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "发送前的模拟人类延迟基准；1.0s 为默认，调高更慢、调低更快（保留随机分布）"
-          }
-        }
-      }
-    },
-    "送出通道未就緒，放棄續局": {
-      "comment": "續局失敗原因",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Send channel not ready; rematch abandoned"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "送信経路が準備できていないため、次局を中止しました"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "전송 채널이 준비되지 않아 다음 대국을 포기함"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "发送通道未就绪，放弃续局"
           }
         }
       }

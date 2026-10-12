@@ -14,7 +14,7 @@ final class NakiUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        // WebView 容器（Laya/WebGL 黑盒，但容器有 identifier 可斷言存在）
+        // WebView 容器（Unity WebGL 黑盒，但容器有 identifier 可斷言存在）
         XCTAssertTrue(
             app.descendants(matching: .any)["majsoul-webview"].waitForExistence(timeout: 10),
             "找不到 majsoul-webview —— WebView 容器的 accessibilityIdentifier 可能被移除"

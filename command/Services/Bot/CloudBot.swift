@@ -21,7 +21,7 @@
 //    不動斷路器——伺服器只可能回同一手（Akagi #227/#228）
 //  - null reaction＝事件流不同步：打本地決策並 warn，絕不默默 pass 掉真回合
 //  - 重連重放歷史事件期間抑制雲端呼叫（`suppressCloud(forNextEvents:)`）——
-//    歷史決策早就做完了，重放時打 API 是純浪費（N 個決策 × 2s 逾時預算＋額度）。
+//    歷史決策早就做完了，重放時打 API 是純浪費（N 個決策 × 3s 逾時預算＋額度）。
 //    syncGame 重放走 live 路徑，靠 `serverAuthorization` 擋掉授權已被取代的過期決策點
 //
 
@@ -306,7 +306,7 @@ final class CloudBot: MahjongBot {
                 guard !retriedAfterRateLimit else { return nil }
                 retriedAfterRateLimit = true
                 // Retry-After 解不出（缺席、HTTP-date、負數、NaN/Inf）用 0.4s；
-                // 上限 1s——決策逾時預算才 2s，等更久不如退回本地
+                // 上限 1s——決策逾時預算才 3s，等更久不如退回本地
                 let seconds = retryAfter.flatMap(Double.init)
                     .flatMap { $0.isFinite && $0 >= 0 ? min($0, 1.0) : nil } ?? 0.4
                 // 取消（換局／重連）時放棄這一手，不再發第二次請求

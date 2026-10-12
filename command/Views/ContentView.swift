@@ -54,7 +54,7 @@ private struct StatusDot: View {
 
 struct ContentView: View {
 
-    /// Naki 的三件東西：狀態、設定、副作用。
+    /// Naki 的環境：狀態、設定、副作用，加上插件清單、畫面開關與三個 service 狀態的唯讀 ref。
     ///
     /// **View 不自己建這些東西**：由 App 層（`NakiApp` / `Naki_MApp`）持有 `NakiRuntime`
     /// 並顯式注入。改成在 View 裡用 `@State` 建的話，「誰擁有 App 的生命週期」就變成

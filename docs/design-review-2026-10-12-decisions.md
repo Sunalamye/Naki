@@ -340,7 +340,7 @@
 - 依賴：WP7a（`SettingsStore` 衝突）。可與 WP10 平行。
 - 路由：Sonnet 5.5 medium。
 - 略過清理三條件：不符合。
-- 驗證閘：build＋`-only-testing:NakiTests`；`grep -c "UserDefaults.standard" command/App/SettingsStore.swift` 只剩預設參數那 1 處。要補的測試：`SettingsStoreTests.testInstanceUsesInjectedSuite`；`PluginManifestValidationTests` 四條規則各一。
+- 驗證閘：build＋`-only-testing:NakiTests`；`grep -c "UserDefaults.standard" command/App/SettingsStore.swift` 只剩預設參數那 1 處。要補的測試：`SettingsStoreInjectionTests.testInstanceUsesInjectedSuite`（類別在 `SettingsStoreTests.swift` 內，2026-10-13 更正類別名）；`PluginManifestValidationTests` 四條規則各一。
 - 風險與回退：revert。
 - 資源：需編譯。
 

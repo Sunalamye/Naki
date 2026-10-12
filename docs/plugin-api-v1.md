@@ -1,7 +1,7 @@
 # Naki 插件 API 契約（`apiVersion: 1`）
 
-**資料日期**：2026-08-09
-**狀態**：**契約規格，對應實作尚未存在。** 本文件描述 `apiVersion: 1` 的介面約定，供插件作者參照。Naki 這側的載入器、`naki-plugins.js`、`PluginRegistry` 都還沒寫（見 `plugin-system-design.md` §10 落地計畫）。標「未驗證」的行為在對應 Phase 動工前不得當保證使用。
+**資料日期**：2026-08-09；2026-10-13 核對實作現況
+**狀態**：**對應實作已存在**（`PluginRegistry`、`naki-plugins.js`、熱插拔都已落地）。本文件描述 `apiVersion: 1` 的介面約定，供插件作者參照。**規格與實作有差**：下列項目只在文件裡，目前**未實作**（manifest 宣告了也沒有作用，呼叫也不存在）——`rewriteSend`、`dropSend`、`dropReceive`、`ctx.drop()`、`onSocketClose`。其餘 capability 已實作：`observe`、`rewriteReceive`（`ctx.replace`，等長就地改寫）、`injectSend`（`ctx.sendRequest`，受 L3 總開關把關）；hook 已實作：`onReceive`、`onSend`、`onRecommendations`、`onInjectResponse`、`onDisable`。標「未驗證」的行為不得當保證使用。
 **權威來源**：本文件從 `plugin-system-design.md` §6–§8 抽出，面向插件作者。兩份衝突時以設計文件為準；涉及實際行為時以**執行中的 Naki 與原始碼**為準（Naki 的文件漂移過，見 `CLAUDE.md`）。
 
 ---
@@ -82,13 +82,13 @@ window.__nakiPlugins.register({
   id: 'com.example.myplugin',   // 必須與 manifest id 相同，否則拒絕註冊
   onReceive(ctx) { /* 選用 */ },
   onSend(ctx)    { /* 選用 */ },
-  onSocketClose(info) { /* 選用：{ socketId, url } */ },
+  onSocketClose(info) { /* 規格保留，目前未實作（JS 端沒有呼叫端）：{ socketId, url } */ },
 });
 ```
 
 - **manifest 是權威**：你在 JS 裡宣稱什麼 capability／method 一律不算數，Naki 只認 manifest。
 - id 對不上、未在啟用清單、或重複註冊 ⇒ 拒絕並記一行 log。
-- 三個 hook 全部選用；沒有的就不會被呼叫。
+- hook 全部選用；沒有的就不會被呼叫。已實作的有 `onReceive`、`onSend`、`onRecommendations`、`onInjectResponse`（§5）、`onDisable`（熱停用或自動移除時呼叫，用來清理）。
 - **回傳值一律被忽略**——所有作用都必須經 `ctx` 的方法，這樣「插件做了什麼」在 Naki 這側才可觀測。
 
 ---
@@ -105,13 +105,13 @@ ctx = {
   method    : string | null,       // REQUEST 直接解出；RESPONSE 由 pending 對回（可能 null）
   bytes     : Uint8Array,          // 完整 envelope。可就地改（等長，見 §4）
   payload   : { from, to } | null, // envelope 內 field 2 的 byte range，不必自己再剝 wrapper
-  isNaki    : boolean,             // msgId 落在 Naki／插件號段
+  isNaki    : boolean,             // 這筆是 Naki 或插件自己送的：msgId 在 sendRaw 送出登記表（上限 256 筆，FIFO）或插件號段 64000–65500（見 §5）
   settings  : object,              // manifest 有宣告 settings 才存在，唯讀快照（見 §6）
   log(msg)  : void,                // 進 Naki 的 log，自動帶你的 id 前綴
 
   // 以下需要對應 capability，否則不存在或一律回 false：
-  replace(newBytes) : boolean,     // 需要 rewriteReceive / rewriteSend；isNaki 流量不提供
-  drop()            : boolean,     // 需要 dropReceive / dropSend
+  replace(newBytes) : boolean,     // 需要 rewriteReceive（rewriteSend 未實作）；isNaki 流量不提供
+  drop()            : boolean,     // 【規格保留，目前未實作】需要 dropReceive / dropSend
   sendRequest(method, payloadBytes) : {ok, msgId} | {ok:false, reason}   // 需要 injectSend
 }
 ```
@@ -140,7 +140,7 @@ ctx = {
 **做「牌改色」插件**：讀 `window.__nakiRecommendations` 拿到推薦 → 自己呼叫 `window.__nakiHighlight.set(...)`。
 **做「暱稱隱藏」插件**：直接 `window.__nakiHighlight.setNameMask(true)`（不需要推薦）。
 
-⚠️ 這是唯讀通道，插件**改不了** Naki 的推薦或牌局狀態（只能讀）。想改遊戲畫面內容仍走 `rewriteReceive` 改封包。內建 highlighter 與插件若同時開會打架——要讓插件接管，把 AI 推薦模式切 `.off`（推薦照算、內建不高亮），插件自己畫。
+⚠️ 這是唯讀通道，插件**改不了** Naki 的推薦或牌局狀態（只能讀）。想改遊戲畫面內容仍走 `rewriteReceive` 改封包。內建自動染色已於 2026-08-10 移除（`c0b7564`）、移交插件，所以不會與插件打架；AI 推薦模式切 `.off` 時 Naki 會推空推薦並 `clear()` 高亮，插件讀到的 `__nakiRecommendations` 也是空的。
 
 ---
 
@@ -148,8 +148,8 @@ ctx = {
 
 | 方向 | 等長改寫 | 改長度 | drop |
 |---|---|---|---|
-| **send** | 就地改 `bytes` | ✅ 可以（wrapper 換掉傳給底層的參數） | 需 `dropSend`，且預設禁止（遊戲會卡在「以為送出去了」） |
-| **receive** | 就地改 `bytes`（唯一已驗證機制） | ⚠️ 需 Phase 4 機制，**未驗證** | 需 `dropReceive`，同上風險 |
+| **send** | 【規格保留，目前未實作】就地改 `bytes` | 【未實作】 | 【未實作】需 `dropSend`，且預設禁止（遊戲會卡在「以為送出去了」） |
+| **receive** | 就地改 `bytes`（唯一已實作、已驗證機制） | ⚠️ 需 Phase 4 機制，**未驗證、未實作** | 【未實作】需 `dropReceive`，同上風險 |
 
 **v1 的 receive 改寫是嚴格等長。** 理由：protobuf 的 string／bytes 前面是 varint 長度，改長度就要連動所有外層 nested message 的長度前綴，一路錯到底。等長覆寫不碰結構，最壞情況只是顯示怪字串，不會讓遊戲解析爆掉。
 
@@ -177,7 +177,7 @@ if (!ok) ctx.log('長度不等，放棄');
 具體的坑（Naki 已踩過，issue #2 根因）：Liqi wrapper 是 `{1: method, 2: payload}`，RESPONSE 的 field 1 是**空字串**，官方伺服器照寫（`0a 00`），但 canonical encoder 會省略預設值欄位，於是重編過的 RESPONSE 只剩 field 2。因此：
 
 1. `injectSend` / `rewriteSend` 產生的 REQUEST **必須自己寫出 field 1**（method 非空）。
-2. 重編 NOTIFY／REQUEST 時 **field 1（method）不能省**——Naki 三種 envelope 都按欄位號取（`LiqiEnvelope.swift:325-335`），缺 method 會**顯式失敗**（`notEnoughBlocks`）；field 2（payload）缺席則視為空。
+2. 重編 NOTIFY／REQUEST 時 **field 1（method）不能省**——Naki 三種 envelope 都按欄位號取（`LiqiEnvelope.decode`），缺 method 會**顯式失敗**（`notEnoughBlocks`）；field 2（payload）缺席則視為空。
 3. 「等長就地改」不會踩到這個；只有整包重編才會。
 
 ### 送 REQUEST 的四個協定事實（injectSend / rewriteSend）
@@ -195,13 +195,15 @@ if (!ok) ctx.log('長度不等，放棄');
 |---|---|---|---|
 | **L1 唯讀** | `observe` | 只看不改 | 啟用後即可用 |
 | **L2 改本機顯示** | `rewriteReceive` | 改遊戲客戶端看到的東西。**不影響伺服器、不影響其他玩家** | 啟用後可用，受 §7 禁改名單限制 |
-| **L3 改送出** | `rewriteSend` / `dropSend` / `injectSend` / `dropReceive` | **能替使用者送遊戲動作** | **完全不可用**，除非使用者另開總開關 `pluginsMayModifyOutbound`（預設 false）並通過一次性確認 |
+| **L3 改送出** | `injectSend`（已實作）；`rewriteSend` / `dropSend` / `dropReceive`（規格保留，**未實作**） | **能替使用者送遊戲動作** | **完全不可用**，除非使用者另開總開關 `pluginsMayModifyOutbound`（預設 false）並通過一次性確認 |
 
 L3 只能在使用者的**測試帳號**上用（Naki 的既有邊界）。
 
 ### msgId 號段（injectSend）
 
-你注入的 request 用 **64000–65500** 號段（Naki 自送的是 60000–63999，遊戲自己的是低位遞增，跑久了也可能進入 60000+）。Swift 端（`ObservedMatchSids`、`LiqiResponseStore`）判斷「是不是 Naki 自己送的」靠配發器登記（插件號段另計）；JS 端的 `ctx.isNaki` 仍是 `msgId >= 60000`。這是 Naki 自動分配的，你不用管。
+你注入的 request 用 **64000–65500** 號段（Naki 自送的是 60000–63999，遊戲自己的是低位遞增，跑久了也可能進入 60000+）。Swift 端（`ObservedMatchSids`、`LiqiResponseStore`）判斷「是不是 Naki 自己送的」靠配發器登記（插件號段另計）。
+
+**`ctx.isNaki` 的語意（2026-10-13 起，D9 契約變更）**：不再是「msgId ≥ 60000」的號段猜測（遊戲自己的 msgId 跑久了也會進 60000+），而是「`sendRaw` 送出登記表 ∪ 插件號段 64000–65500」。`sendRaw` 每送一筆就把 msgId 記進登記表，**上限 256 筆，FIFO 淘汰**；被淘汰的 id 之後再出現，一律當成遊戲自己的。頁面 API `window.__nakiWebSocket.isNakiSent(msgId)` 回傳該 msgId 此刻是否在登記表內（只含 `sendRaw` 送出的，不含插件號段）。符號 `ctx.isNaki` 不變，但實作它的語意變了：頁面自己送出的 60000+ 不再被誤認成 Naki；繞過 `sendRaw` 直接 `ws.send` 的送出會被當成遊戲自己的。這些 msgId 都是 Naki 自動分配的，你不用管。
 
 ### 收自己請求的回應（`onInjectResponse`）
 
@@ -224,8 +226,8 @@ window.__nakiPlugins.register({
 ```
 
 - RESPONSE 是**稍後**另一則訊息才到，所以走 callback（不是 `sendRequest` 當場回傳）。
-- 逾時（預設約 10s）沒等到 ⇒ `onInjectResponse` 帶 `timedOut: true`，別無限等。
-- **這是設計候選，對應實作尚未存在**（`plugin-system-design.md` §7.7b）。Phase 3 動工才落地；在那之前 `injectSend` 不保證可用。
+- 規格寫的是逾時（約 10s）沒等到 ⇒ `onInjectResponse` 帶 `timedOut: true`；**目前未實作**（`naki-plugins.js` 只有 `timedOut = false`），所以自己要設計等待上限，別無限等。
+- 這條路徑已實作（`naki-plugins.js` 的 `sendRequest` 與回應路由，設計見 `plugin-system-design.md` §7.7b），但 L3 總開關預設關閉，關閉時 `sendRequest` 回 `{ok:false, reason:'outbound_disabled'}`。回應逾時通知**未實作**：`timedOut` 目前恆為 `false`，沒等到回應就沒有任何 callback。
 
 ---
 
@@ -253,9 +255,10 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 
 - **順序**：`priority` 升冪，同值按 id 字典序。
 - **鏈式**：每個插件看到**前一個改完**的 `bytes`。
-- **drop 短路**：任一插件 `drop()` 成功 ⇒ 鏈**立即中止**，後續插件不再收到這則。
+- **drop 短路**（規格保留，`drop` 目前未實作）：任一插件 `drop()` 成功 ⇒ 鏈**立即中止**，後續插件不再收到這則。
 - **replace 換 buffer**：`replace()` 成功後，後續插件的 `ctx.bytes` 指向新 buffer。
 - **isNaki 分流**：Naki／插件自送的封包（`isNaki===true`）走**另一條只含 observer 的鏈**——只有在 manifest 宣告 `observeNakiTraffic: true` 且**僅** `observe` 的插件收得到，永遠不給 rewrite。
+  - **溢出邊界**：`isNaki` 依賴上述 256 筆登記表。若 Naki 送出一筆後，又經 `sendRaw` 送了 ≥256 筆且全部往返完成，那筆的回應才到，登記已被淘汰，該回應的 `isNaki` 會是 `false`，等於違反「isNaki 流量永不給 rewrite」。這需要回應延遲到數百次往返之後，實務上不可達（判定為推測，未實測）；插件自己的 `sendRequest` 與 Naki 共用同一個登記表，只會更快湊滿，不是新的觸發路徑。
 - **錯誤隔離**：你的 hook throw ⇒ 這一則跳過你、記一行 log（同 id 同錯只記一次），**封包原樣通過**（fail-open）。其他插件不受影響。
 - **自動停用**：失敗計數**按 hook 分開**（`onReceive`／`onSend`／`onRecommendations`／`onInjectResponse`／`replace` 各算各的），某個 hook 連續失敗 10 次 ⇒ 該插件在本次頁面生命週期內整個停用；該 hook 成功一次（`replace` 以一次成功改寫算）就把它自己的計數歸零。
 - **注入範圍**：插件 script 只注入 main frame，不跑進第三方 iframe。
@@ -270,6 +273,14 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 - `.lq.FastTest.authGame` 的 `players` / `robots` **以外**的欄位
 
 要解除必須在 manifest 逐一列出，Naki UI 會以紅字警告使用者「這個插件會改動 Naki 用來判斷牌局的資料」。
+
+### 授權防誤用，不防惡意插件
+
+`capabilities`、`methods` 與 L3 總開關在 JS 這側的實體，是頁面 realm 裡**可寫的全域變數**：授權表 `window.__nakiPluginGrants`（Swift 注入，熱插拔時 `setGrant` 寫入）與總開關 `window.__nakiPluginsMayModifyOutbound`。同一個 realm 的任何插件都能直接改寫它們，或乾脆呼叫 `window.__nakiWebSocket.sendRaw`。所以這套機制的定位是**防誤用**（manifest 與 UI 把「這個插件宣稱要做什麼」寫清楚、讓正常插件各守本分、讓 log 可稽核），**不是**防惡意插件的安全邊界。插件由使用者自行安裝，信任邊界本來就包含插件（2026-10-12 用戶裁決 U4：只改文件，不加防護）。
+
+### 未記載的內部函式
+
+`window.__nakiHideNames`（`naki-websocket.js`，authGame 暱稱等長覆寫）是**未記載於本 API 的內部函式**：Swift 與 bundled 插件都沒有呼叫端，只有 `scripts/plugin-regression.cjs` 測它。不屬於 `apiVersion: 1` 契約，可能不經通知就改動或移除；要隱藏暱稱請用本文記載的 `window.__nakiHighlight.setNameMask`。
 
 ### 你**不可以**自己呼叫 `sendToSwift`
 
@@ -330,7 +341,7 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 
 | 方式 | 說明 |
 |---|---|
-| **手放檔案** | macOS：`~/Library/Application Support/Naki/Plugins/<id>/`；iOS：容器內 `Application Support/Plugins/`（經 document picker 匯入） |
+| **手放檔案** | macOS：`~/Library/Application Support/Naki/Plugins/<id>/`；iOS：App 容器內 `Library/Application Support/Naki/Plugins/<id>/`（與 macOS 同一段程式碼，目錄名同為 `Naki/Plugins`）。iOS **沒有** document picker 匯入，使用者端只能走下面的 URL 匯入 |
 | **貼 URL 一次性匯入** | 使用者在 Naki 設定頁貼你的 gist 或任意 HTTPS `plugin.json` URL。見下 |
 
 ### URL 匯入的格式要求（HTTPSource）
@@ -350,7 +361,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
 
 - `apiVersion: 1` 是目前唯一版本。**exact match**——Naki 不承諾向前相容範圍。
 - v2 出現時的相容矩陣屆時再定。現在把你的 manifest 釘 `apiVersion: 1`。
-- 生命週期：插件狀態的生命週期＝**頁面生命週期**。頁面 reload 全清，沒有 deactivate 級的清理鉤子（也不需要）。唯一的連線層 hook 是 `onSocketClose({ socketId, url })`——多條 WebSocket 並存時，按 socketId 存狀態的插件用它知道哪條死了。
+- 生命週期：插件狀態的生命週期＝**頁面生命週期**。頁面 reload 全清，清理鉤子是 `onDisable(ctx)`（熱停用或自動移除時呼叫）。規格另有連線層 hook `onSocketClose({ socketId, url })`（讓按 socketId 存狀態的插件知道哪條連線死了），但**目前未實作**，JS 端沒有呼叫端。
 
 ---
 

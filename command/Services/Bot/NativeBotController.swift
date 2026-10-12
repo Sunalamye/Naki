@@ -113,7 +113,7 @@ final class NativeBotController {
     ///
     /// 以前這六個是 stored property，唯一的寫入點 `updateAvailableActions()` 是 private
     /// 而且**零呼叫**（`updateInternalState` 尾巴只留了一行「移到 react() 後處理」的註解，
-    /// 沒有人接上）。結果 `BotStatusView` 的六個徽章與 `/bot/status` 的 canXxx 恆為 false，
+    /// 沒有人接上）。結果舊的 `BotStatusView`（已刪，徽章現在由 `DecisionSidebar` 顯示）的六個徽章與 `/bot/status` 的 canXxx 恆為 false，
     /// 是 AUDIT §13「不能運作又不說」的同一類問題。
     ///
     /// 改成從 oplist 導出而不是把 mask 掃描接回來，理由是**權威不同**：
@@ -531,7 +531,7 @@ final class NativeBotController {
 
     /// 重連重放歷史事件前呼叫（`NakiWebCoordinator.resyncBot`）：
     /// 接下來 `eventCount` 個事件只走本地引擎，不打雲端 API——
-    /// 歷史決策早就做完了，重放時重問伺服器是純浪費（N 決策 × 2s 預算＋額度）。
+    /// 歷史決策早就做完了，重放時重問伺服器是純浪費（N 決策 × 3s 預算＋額度）。
     func prepareForResyncReplay(eventCount: Int) {
         (bot as? CloudBot)?.suppressCloud(forNextEvents: eventCount)
     }

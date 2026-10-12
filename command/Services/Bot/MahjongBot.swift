@@ -48,7 +48,10 @@ protocol MahjongBot: AnyObject {
     /// 回傳 nil ＝ 這批事件不是決策點（無動作、也不刷新推薦——畫面保持現狀）。
     func react(events: [[String: Any]]) async throws -> BotReaction?
 
-    /// 清內部狀態（對局結束／重連重建時由呼叫端觸發）。
+    /// 清內部狀態。
+    ///
+    /// 正式路徑目前沒有呼叫者：換局（`start_game`）一律由 `NativeBotController.createBot` 重建新實例，
+    /// 對局結束由 `deleteBot` 丟掉實例；`CloudBot.reset` 只轉發給它的本地引擎，目前只有測試用到。
     func reset()
 }
 

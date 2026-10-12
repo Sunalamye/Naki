@@ -1,5 +1,7 @@
 # Majsoul Bridge 訊息處理流程比對
 
+> **歷史文件**，引用的 `WebViewController.swift` 已不存在；`handleMJAIEvent` 現在位於 `command/Services/Bridge/NakiWebCoordinator.swift`，下文的檔名與行號僅供對照當時的比對結論，不是現況。
+
 ## 🔴 關鍵問題總結
 
 ### 問題 1：Bot 模型重建
@@ -11,7 +13,7 @@ if e["type"] == "start_game":
 ```
 
 **Swift (已實作)**: 每次 `start_game` 都刪除舊 Bot 並創建新的，`end_game` 時清理
-- 已實作於 `NakiWebCoordinator.handleMJAIEvent`（`command/Views/WebViewController.swift:165-194`）
+- 已實作於 `NakiWebCoordinator.handleMJAIEvent`（當時在 `command/Views/WebViewController.swift:165-194`，檔案已不存在）
 
 ### 問題 2：XOR 編碼差異
 - **Notify (ActionPrototype)**: `data` 欄位需要 **XOR 解碼**
@@ -104,7 +106,7 @@ def react(self, events: str) -> str:
 ## Swift 流程 (已實作)
 
 Bot 生命週期（每次 `start_game` 重建 Bot / `end_game` 清理）**已實作**於
-`NakiWebCoordinator.handleMJAIEvent`（`command/Views/WebViewController.swift:159-199`）。
+`NakiWebCoordinator.handleMJAIEvent`（當時在 `command/Views/WebViewController.swift:159-199`，檔案已不存在）。
 與 Python Akagi 行為一致。
 
 ### 已實作行為：
@@ -119,7 +121,7 @@ Bot 生命週期（每次 `start_game` 重建 Bot / `end_game` 清理）**已實
 
 ### 1. `NakiWebCoordinator.handleMJAIEvent` — start_game 重建 Bot
 
-`command/Views/WebViewController.swift:165-184`
+當時在 `command/Views/WebViewController.swift:165-184`（檔案已不存在）
 
 ```swift
 case "start_game":
@@ -140,7 +142,7 @@ case "start_game":
 
 ### 2. `NakiWebCoordinator.handleMJAIEvent` — end_game 清理
 
-`command/Views/WebViewController.swift:186-194`
+當時在 `command/Views/WebViewController.swift:186-194`（檔案已不存在）
 
 ```swift
 case "end_game":

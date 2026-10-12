@@ -148,7 +148,8 @@ final class AutoRematchEngine {
         }
     }
 
-    /// 模式被改掉、頁面重載或 App 收攤時取消待排的續局。
+    /// 取消待排的續局。目前只有「模式離開全自動」會呼叫（`NakiRuntime.setAutoPlayMode`）；
+    /// 頁面重載與 App 收攤時沒有呼叫者。
     ///
     /// 不取消的話，使用者切回「推薦」之後 45 秒，帳號還是會被排進隊列。
     func cancel() {

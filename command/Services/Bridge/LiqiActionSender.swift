@@ -20,7 +20,7 @@
 //
 //  本類別**不再**自己記一份 `pendingMethods`。收到 RESPONSE 時要知道那是哪個方法，
 //  唯一的來源是 `LiqiParser.pendingRequests`：Naki 送出的 frame 會經過 JS 端
-//  `ws.send` 的 hook 回到 `MajsoulBridge.parseRaw`，所以自送請求與遊戲自己的請求
+//  `ws.send` 的 hook 回到 `MajsoulBridge.observeOutgoing`，所以自送請求與遊戲自己的請求
 //  都在那一份表裡（`LiqiResponseStore` 正是靠它拿到方法名）。
 //  在這裡另存一份不會有任何讀取端用它配對回應，只會多一份會漂的事實。
 //

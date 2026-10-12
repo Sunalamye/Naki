@@ -63,7 +63,7 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 工具數以 live `tools/list`、`get_status.toolsCount` 或 `get_help.tools_count` 為準；
 `MCPToolRegistry.registerBuiltInTools()` 是程式端唯一真實來源，三個回報欄位都直接數 registry，
 所以文件與註解不再寫死數字（下表分組標題只是給人讀的索引，數字對不上時以 registry 為準）。
-2026-08-01 的 live snapshot 是 42，其中含 6 個已於 2026-08-02 移除的 highlight 失敗樁。
+2026-08-01 的 live snapshot 是 42，其中含 6 個已於 2026-08-02 移除的 highlight 失敗樁；2026-10-13 靜態註冊為 43 個（各分組合計相同）。
 
 ### 系統（6）
 
@@ -96,7 +96,7 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 | `success: false, error: "no_recommendation", queued: false` | 目前沒有推薦**且** oplist 沒有和牌授權，擋下、沒排入（有和牌授權時即使無推薦也會排入，交給 resolver 和牌） |
 | `success: false, error: "no_oplist", queued: false` | 伺服器沒有授權的 oplist，擋下、沒排入 |
 
-### 遊戲狀態／動作（6）
+### 遊戲狀態／動作（8）
 
 | Tool | 作用 |
 |------|------|
@@ -106,6 +106,8 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 | `game_discard` | 以牌字串 discard |
 | `game_action` | 送一般 action；`hora` 只在 `game_ops` 有自摸／榮和授權時送出，否則回錯誤 |
 | `game_action_verify` | 送 action 並等 RESPONSE／snapshot 前進 |
+| `game_confirm_new_round` | 送 `.lq.FastTest.confirmNewRound`，確認局間結算並進下一局（走 game-gateway）。會改變對局狀態；自動模式下引擎會自己送，本工具供手動除錯 |
+| `game_vote_game_end` | 送 `.lq.FastTest.voteGameEnd`，投票提前結束對局（`yes` 預設 true）。破壞性操作，不接進任何自動路徑 |
 
 ### JavaScript（1）
 
@@ -113,14 +115,17 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 |------|------|
 | `execute_js` | 在 WebView 執行 function body；取值必須 `return`。`timeout` 秒數（預設 30，上限 60），逾時回錯誤但頁面端 Promise 可能仍在背景執行 |
 
-### 大廳（8）
+### 大廳（11）
 
 | Tool | 作用 |
 |------|------|
 | `lobby_status` | Naki lobby／connection 狀態 |
 | `lobby_match_modes` | 從 current config 提供可用 match modes |
-| `lobby_start_match` | 開始匹配 |
-| `lobby_cancel_match` | 取消匹配 |
+| `lobby_match_sids` | 列出從遊戲流量觀察到的 `match_sid`（string，統一匹配用）；沒有靜態表，要先在遊戲裡自己點一次段位場入口才有資料 |
+| `lobby_start_unified_match` | 開始段位場匹配（現行入口，`.lq.Lobby.startUnifiedMatch`）；`match_sid` 不填則用最近觀察到的一組。會真的排進伺服器隊列 |
+| `lobby_cancel_unified_match` | 取消段位場匹配（`.lq.Lobby.cancelUnifiedMatch`） |
+| `lobby_start_match` | 舊匹配入口（`.lq.Lobby.matchGame`）；2026-08-09 實測一律回 error 1306，改用 `lobby_start_unified_match` |
+| `lobby_cancel_match` | 取消舊匹配入口的匹配 |
 | `lobby_account_info` | 查帳號資訊 |
 | `lobby_server_time` | 唯讀 server-time request／連線自檢 |
 | `lobby_heartbeat` | 送 lobby heartbeat |
@@ -157,7 +162,7 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 `show_recommendations`／`hide_highlight` 已移除，呼叫會得到 `Unknown tool: <name>`。
 
 它們的參數契約源自 Laya 牌物件，從來沒接到現行的 `window.__nakiHighlight` WebGL hook，
-也不打算接：App 內建的自動推薦高亮由 Swift 的 `WebViewModel.syncGameHighlight()` 直接驅動
+也不打算接：內建的自動染色已於 2026-08-10 移交插件：Swift 的 `WebSession.syncHighlight` 只發布唯讀推薦通道 `__nakiRecommendations`
 （模式 = 關閉時送 `clear()`），MCP 不需要第二個入口。要程式化取得推薦請用
 `bot_status` / `game_hand`。
 
@@ -188,7 +193,7 @@ game_emoji_auto_reply
 get_status, get_help, get_logs
 bot_status, bot_ops, bot_deep
 game_state, game_hand, game_ops
-lobby_status, lobby_match_modes, lobby_account_info, lobby_server_time
+lobby_status, lobby_match_modes, lobby_match_sids, lobby_account_info, lobby_server_time
 room_info, game_emoji_listen(clear=false)
 ```
 
@@ -208,8 +213,8 @@ game_emoji_listen(clear=true)
 ```text
 bot_trigger
 bot_chi, bot_pon
-game_discard, game_action, game_action_verify
-lobby_start_match, lobby_cancel_match, lobby_heartbeat, lobby_login_beat
+game_discard, game_action, game_action_verify, game_confirm_new_round, game_vote_game_end
+lobby_start_unified_match, lobby_cancel_unified_match, lobby_start_match, lobby_cancel_match, lobby_heartbeat, lobby_login_beat
 room_create, room_add_robot, room_start, room_join, room_leave, room_quick_test
 game_emoji
 ```
@@ -264,6 +269,6 @@ return JSON.stringify({
 - `outputSchema` 只宣告程式碼保證的欄位，其餘 `additionalProperties: true`——它是契約，不是完整欄位清單。
 - `game_state`／`game_hand`／`game_ops` 讀 Naki 的 Swift protocol state，不是 server 完整查詢。
 - `game_action_verify` 比單純 send 更好，但仍應針對終局動作確認 `ActionHule`。
-- Legacy iOS 17–25 的自動路徑沒有主路徑 resolver；MCP sender 與自動模式不可混為一談。
-- 三麻沒有專用 AI model。
+- Legacy iOS 17–25 與主路徑共用同一個 resolver 和 executor，但 Legacy 不自動送出（`supportsAutoPlay == false`），MCP 的動作類工具回 `legacy_path_action_send_disabled`；MCP sender 與自動模式仍不可混為一談。
+- 三麻本地 AI 是 `AkagiSanmaBot`（Akagi v3 三麻 BC 權重，模仿天鳳人類，不是 Mortal 等級；2026-10-09 三局 live 已驗），雲端啟用時雲端優先。
 - 完整 current facts 見 [majsoul-unity-protocol.md](majsoul-unity-protocol.md)。

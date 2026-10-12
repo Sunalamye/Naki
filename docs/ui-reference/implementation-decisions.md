@@ -9,7 +9,7 @@
 
 ## 牌面：Unicode → Asset Catalog
 
-**決策**：側欄牌面改用 FluffyStuff/riichi-mahjong-tiles（CC0）的 SVG，不再用 `MahjongTile.unicode`。
+**決策**：側欄牌面改用 FluffyStuff/riichi-mahjong-tiles（CC0）的 SVG，不再用 `MahjongTile.unicode`（該符號後來已刪）。
 
 **為什麼**：系統字型把 `🀇🀙🀐` 畫成黑白線稿，在推薦列的尺寸下必須先「認出」線稿代表哪張牌，
 才能對到牌桌上的立體彩色牌——而那是這個介面唯一要做的事。更硬的問題是**赤五無法表示**：
@@ -304,7 +304,7 @@ defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
 
 | 項目 | 狀態 |
 |---|---|
-| `BotStatusView.swift` 全檔、`RecommendationView.swift` 大部分 | **死碼**——換成 `DecisionSidebar` 後外部零使用者，約 700 行待刪 |
+| `BotStatusView.swift` 全檔、`RecommendationView.swift` 大部分 | **死碼**——換成 `DecisionSidebar` 後外部零使用者，約 700 行待刪（當時的判斷；`BotStatusView.swift` 之後已刪，現在已不存在）|
 | 自動打牌停滯 122 秒（`skip:awaitingInference`） | 實測畫面上出現過；未查，屬 `AutoPlayEngine` 範圍 |
 | 「吃①②③」不可解讀 | 本地 mapper 不產 `consumed`，只有雲端有；要修得動資料層 |
 | 動作色仍是 7 色 | 紅同時是「槓」與「危險」 |

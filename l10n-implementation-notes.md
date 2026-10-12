@@ -58,7 +58,7 @@
 | 閘 | 結果 |
 |---|---|
 | catalog | 375 條 key，四語齊全，格式符一致；異體字機械檢查（ICU 簡繁互轉＋日文新舊字體表）唯一例外為 ja 品牌名「雀魂麻將」保留原字 |
-| NakiTests | 726 tests，0 failures |
+| NakiTests | 726 tests，0 failures（2026-10-01 快照，當時的數字；現況見 `CLAUDE.md`） |
 | macOS Debug／iOS Simulator build | 成功；bundle 內 en／ja／ko／zh-Hans 四個 `.lproj` |
 | Live（`-AppleLanguages` 啟動） | 五語主畫面截圖；ja 側欄與狀態列確認已翻 |
 | 獨立復驗（Opus，兩輪） | verify.sh 全閘通過；五語 × 7 畫面截圖無裸 key、無爆版；App 內切換：工具列／側欄／狀態列／各 sheet／確認框即時更新，切回跟隨系統即時；視窗記憶修正後重啟兩次 key 數不變；iOS 模擬器「設定 → Naki-M → 語言」列出五種、系統切 ja 跟著變；用詞與異體字抽查修正後通過 |

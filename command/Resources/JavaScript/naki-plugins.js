@@ -33,6 +33,8 @@
     var TYPE_RESPONSE = 3;
 
     // manifest 是權威。grants 由 Swift 注入，插件在 JS 裡自稱什麼一律不算數。
+    // 但這是「防誤用、不防惡意插件」：grants 與總開關 `__nakiPluginsMayModifyOutbound` 都是同一個 realm 裡
+    // 可寫的全域變數，惡意插件能直接改寫（見 docs/plugin-api-v1.md §8）。
     // 形狀：{ id: { capabilities:[String], methods:[String], priority:Number,
     //              observeNakiTraffic:Bool, settings:Object } }
     function grantFor(id) {
