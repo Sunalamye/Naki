@@ -20,7 +20,7 @@
 //
 //  RESPONSE 的 field 1 是空的：方法名要用 msgId 對回當初送出的 REQUEST。
 //  那份 msgId→method 對照表全 Swift 只有一份，在 `LiqiParser.pendingRequests`
-//  （送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.parseRaw`，
+//  （送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.observeOutgoing`，
 //  所以連 Naki 自己送的請求也在那份表裡）。
 //
 //  注意：envelope 本身**沒有** XOR。XOR 只作用在 notify 的 ActionPrototype.data

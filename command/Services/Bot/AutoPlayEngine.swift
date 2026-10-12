@@ -160,7 +160,7 @@ final class AutoPlayEngine {
         /// 副露機會在多久之後才允許「因為沒推薦而自動送過」
         ///
         /// 要比「oplist 到達 → 推論完成 → 推薦同步」的總延遲長。context 沒有「推論進行中」
-        /// 的訊號可用，只能靠時間：live 曾見事件佇列延遲後推論 5 秒才到、雲端逾時預算 2 秒，
+        /// 的訊號可用，只能靠時間：live 曾見事件佇列延遲後推論 5 秒才到、雲端逾時預算 3 秒，
         /// 2 秒會在推論完成前搶先送過（不可逆）。上限而已：實際寬限期不超過
         /// 該批 `timeFixed - 1` 秒（見 `runCycle`）。段位場的等待會吃到長考時間，
         /// 這是取捨——搶送「過」不可逆，晚送最壞是伺服器逾時自己判過。
@@ -775,7 +775,7 @@ final class AutoPlayEngine {
 
             note("第 \(attempt) 次嘗試: ops=\(snapshot.rawTypes) → \(action.rawValue)", to: .event)
 
-            // ③ 實際送出：7-case switch 與「成功才 markHandled」都在 executor
+            // ③ 實際送出：動作 switch（9 種動作 + unknown）與「成功才 markHandled」都在 executor
             let result = await AutoPlayActionExecutor.execute(
                 action: action,
                 tile: tile,

@@ -26,8 +26,8 @@ struct MortalActionMapper {
     /// 並註解成「保留 (3麻用)」——那是事實錯誤，`ObsEncoder` 一直都在用它們表示
     /// 打出紅五萬／紅五筒／紅五索（`applyAkaToCandidates`：手上只有紅五時，
     /// 普通五的格子是 0、紅五的格子才是 1）。上游已改名為
-    /// `akaDiscardMan5/Pin5/Sou5`，但本專案 pin 的是 0.5.x，還沒有那組符號，
-    /// 所以在這裡自己定名，不再讓 34–36 被當成不存在的格子。
+    /// `akaDiscardMan5/Pin5/Sou5`（本專案現在 pin 的 0.6.0／`da7238c` 已有這組符號，值為 34/35/36）；
+    /// 這裡仍自己定名，沒有改用上游符號，不再讓 34–36 被當成不存在的格子。
     enum AkaDiscardIndex {
         static let man5 = 34
         static let pin5 = 35

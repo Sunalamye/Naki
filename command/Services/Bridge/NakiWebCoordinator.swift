@@ -160,7 +160,7 @@ final class NakiWebCoordinator {
         }
 
         // 一次寫完整份快照（`GameStore.apply` 是牌局資料唯一的寫入點）。
-        // 側欄的顯示閘門在 `RecommendationView`（讀 `autoPlayMode.showRecommendation`）：
+        // 側欄的顯示閘門在 `DecisionSidebar`（讀 `autoPlayMode.showRecommendation`）：
         // 資料層保持真實，`/bot/status` 仍看得到模型實際算出什麼；只有
         // `highlightedTile`（現在標了哪一張）在 `.off` 時必須是 nil。
         store.apply(controller: bot,
@@ -281,7 +281,7 @@ final class NakiWebCoordinator {
             try createBot(playerId: playerId, is3P: is3P)
             // ☁️ 重放歷史事件期間抑制雲端呼叫：歷史決策不重問伺服器
             // （只涵蓋這條 history 重放；syncGame 重放走 live 路徑，由 CloudBot 依授權序號擋）
-            // （否則重連要付 N 決策 × 2s 逾時預算＋額度）
+            // （否則重連要付 N 決策 × 3s 逾時預算＋額度）
             bot.prepareForResyncReplay(eventCount: eventStream.eventCount)
             store.statusMessage = L10n.text("Bot 已重新同步 (Player \(playerId))")
             startEventConsumer()
@@ -298,7 +298,7 @@ extension NakiWebCoordinator: WebNavigationLifecycle {
 
     /// 頁面開始重新載入 → 丟掉本局的一切。
     ///
-    /// 狀態列與「隱藏名稱要重推」由 `WebSession` 自己處理；這裡只管牌局側。
+    /// 狀態列由 `WebSession` 自己處理；這裡只管牌局側。
     func webNavigationDidStart() {
         websocketHandler.fullReset()
         eventStream.endGame()

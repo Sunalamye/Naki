@@ -171,7 +171,7 @@ nonisolated enum PluginRegistry {
 
     /// 插件根目錄。
     /// macOS：`~/Library/Application Support/Naki/Plugins/`（App Sandbox = NO，不觸 TCC）。
-    /// iOS：App 容器內 `Application Support/Plugins/`（同一段程式碼）。
+    /// iOS：App 容器內 `Library/Application Support/Naki/Plugins/`（同一段程式碼，同樣的 `Naki/Plugins` 子路徑）。
     static var pluginsDirectory: URL? {
         guard let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {

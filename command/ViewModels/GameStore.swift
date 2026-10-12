@@ -2,7 +2,8 @@
 //  GameStore.swift
 //  Naki
 //
-//  牌局資料的單一真實來源（SwiftUI 側欄與 MCP 讀同一份）
+//  牌局資料的單一真實來源（SwiftUI 側欄與 MCP 讀同一份）。
+//  除牌局外，也放更新提示、Debug server 狀態、載頁失敗等需要常駐畫面的狀態。
 //
 
 import Foundation

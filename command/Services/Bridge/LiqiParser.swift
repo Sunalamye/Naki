@@ -252,7 +252,7 @@ class LiqiParser {
             unmatchedResponseCount += 1
             let count = unmatchedResponseCount
             if count & (count - 1) == 0 {
-                liqiLog("[LiqiParser] RESPONSE 配不到 request：msgId=\(msgId)，本連線累計 \(count) 次", level: .info)
+                liqiLog("[LiqiParser] RESPONSE 配不到 request：msgId=\(msgId)，自上次 reset 起所有雀魂 socket 累計 \(count) 次", level: .info)
             }
             if count == 1 {
                 recordFault(site: "LiqiParser.unmatchedResponse",

@@ -73,7 +73,7 @@ struct BotTriggerTool: MCPTool {
         return [
             "success": true,
             "queued": true,
-            "note": "已排進引擎下一輪；三麻 fail-closed、stale、Legacy path 仍可能不送，結果看 bot_status／get_logs"
+            "note": "已排進引擎下一輪；三麻 fail-closed、stale、閘門仍可能不送（Legacy path 已在前面直接回錯誤），結果看 bot_status／get_logs"
         ]
     }
 }

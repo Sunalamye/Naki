@@ -163,7 +163,8 @@ final class SettingsStore {
     nonisolated static let enabledPluginIdsKey = "naki.plugins.enabledIds"
 
     /// 已啟用插件的 id 集合。**預設空集合——所有插件預設關閉**（§6.4）。
-    /// 改變只在下次頁面載入生效（WKUserScript 只在 document start 注入）。
+    /// 改變**立即生效**：`NakiRuntime.setPluginEnabled` 走熱插拔（`hotApplyPlugin` 呼叫 enable/disable JS，不必重載頁面）；
+    /// 頁面重載時，第二個 WKUserScript 在 document start 依這個集合注入。
     var enabledPluginIds: Set<String> =
         Set(SettingsStore.standard.stringArray(forKey: SettingsStore.enabledPluginIdsKey) ?? []) {
         didSet {
@@ -176,7 +177,7 @@ final class SettingsStore {
     nonisolated static let pluginsMayModifyOutboundKey = "naki.plugins.mayModifyOutbound"
 
     /// L3 總開關（§8.1）：插件能不能送出／改寫 Liqi request（用你的帳號送遊戲動作）。
-    /// **預設 false**——即使插件有 injectSend/rewriteSend capability，總開關關著就一律拒絕。
+    /// **預設 false**——即使插件有 injectSend capability（規格中的 rewriteSend 尚未實作），總開關關著就一律拒絕。
     /// 這對應 CLAUDE.md「送 Liqi request 前先確認」；開啟前 UI 要一次性確認。
     var pluginsMayModifyOutbound: Bool = SettingsStore.standard
         .bool(forKey: SettingsStore.pluginsMayModifyOutboundKey) {
@@ -469,8 +470,8 @@ final class SettingsStore {
     }
 
     /// 三麻模型 id；空字串 ⇒ 伺服器預設。
-    /// 雲端是 Naki 目前**唯一**的真三麻推論路徑（本地 fallback 仍是四麻模型，
-    /// 三麻局 fallback 時 `decisionSource` 會如實顯示降級）。
+    /// 雲端優先、本地接手：三麻局雲端失敗或未啟用時，由本地 `AkagiSanmaBot`（Akagi v3 三麻，
+    /// 非 Mortal 等級）決策，`decisionSource` 如實顯示來源。
     var cloudModel3P: String = SettingsStore.standard
         .string(forKey: SettingsStore.cloudModel3PKey) ?? ""
     {

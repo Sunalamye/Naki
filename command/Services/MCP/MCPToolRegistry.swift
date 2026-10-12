@@ -136,7 +136,7 @@ extension MCPToolRegistry {
     ///   `show_recommendations` / `hide_highlight`（2026-08-02 移除）：
     ///   6 個固定回 unavailable 的相容失敗樁。它們的參數契約源自 Laya 牌物件，
     ///   從來沒有接到現行的 `window.__nakiHighlight` WebGL hook，也不打算接——
-    ///   App 內建的自動推薦高亮由 `WebSession.syncHighlight()` 直接驅動，
+    ///   內建的自動染色已移交插件（`WebSession.syncHighlight()` 只發布唯讀推薦通道 `__nakiRecommendations`），
     ///   MCP 不需要第二個入口。留著只是讓 `tools/list` 多 6 個永遠失敗的工具，
     ///   還會讓人誤以為「Unity 下高亮不可能」。推薦資料請讀 `bot_status` / `game_hand`。
     func registerBuiltInTools() {

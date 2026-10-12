@@ -39,6 +39,8 @@ final class PluginStore {
 /// - `store`：牌局／連線／狀態列的唯一真實來源（MCP 讀同一個物件）
 /// - `settings`：使用者設定與這條 WebView path 的能力
 /// - `actions`：副作用的型別化入口
+/// - `pluginStore`：插件清單的 reactive 容器；`ui`：畫面開關
+/// - log、JS 注入結果、封包解析失敗：三個 service 狀態的唯讀 ref
 struct NakiEnvironment {
 
     var store: GameStore
@@ -96,12 +98,14 @@ struct NakiEnvironment {
     ///
     /// 正式 Scene 一律由 App 層顯式注入（`NakiApp` / `Naki_MApp` 的
     /// `.environment(\.naki, runtime.environment)`）。這裡的預設值是一組全新的
-    /// 空 store 與**沒有任何副作用**的 Action：Preview 按下按鈕不會送出動作、
-    /// 不會建立 WebView、不會綁 loopback 8765；而正式路徑若忘了注入，畫面會是空的
+    /// 空 `GameStore`/`SettingsStore`/`PluginStore`/`UIState` 與**沒有任何副作用**的 Action：
+    /// Preview 按下按鈕不會送出動作、不會建立 WebView、不會綁 loopback 8765。
+    /// log、JS 注入、封包解析失敗三個唯讀 ref 是例外：讀取時解析成 `.shared`，不是新實例。
+    /// 正式路徑若忘了注入，畫面會是空的
     /// ——那比「悄悄用了第二個 `GameStore` 於是側欄永遠不更新」好排查得多。
     ///
     /// `nonisolated`：`@Entry` 生成的 `EnvironmentKey.defaultValue` 是 nonisolated 的
-    /// static，叫不動 `@MainActor` 的 init。三個型別因此都提供 nonisolated 的
+    /// static，叫不動 `@MainActor` 的 init。這幾個型別因此都提供 nonisolated 的
     /// 「空值」建構子（它們只寫值型別欄位與無副作用的 closure）。
     nonisolated init() {
         self.store = GameStore()

@@ -47,7 +47,8 @@ nonisolated enum AutoPlayDecisionResolver {
     ///   - recommendations: Mortal 的評分結果（可為空）
     ///   - mode: 使用者選的模式
     ///   - seat: 自家座位，用來確認這批 oplist 確實是給我們的
-    ///   - isSanma: 這局是不是三麻。true 時**一律不自動送出**（見下方 fail-closed 說明）。
+    ///   - isSanma: 這局是不是三麻。true 時**預設不自動送出**（見下方 fail-closed 說明）；兩個例外：
+    ///     推薦來自三麻引擎的那一手（`sanmaCapableDecision`），以及伺服器授權的和牌（不吃三麻降級）。
     ///   - recommendationsOplistSequence: 推薦是針對哪一批 oplist 算的；退次選的前提（見下方）
     static func resolve(snapshot: LiqiOperationSnapshot?,
                         recommendations: [Recommendation],
