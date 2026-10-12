@@ -752,3 +752,13 @@
   - MortalSwift `AgariCalculator.swift:330-338` `kinds[kind]` 無 `< 3` 守衛 → 延後表（上游）。
   - `parseRaw` 文件漂移（`LiqiActionSender.swift:23`、`LiqiEnvelope.swift:23`、`docs/plugin-system-design.md`）→ WP12。
   - §6 第 1 項 live 重連對照（M4 reset 提前）未做 → 整合驗收。
+
+### WP6 結果（2026-10-12）
+- 合併到 main：merge commit `be11e5b`（三批 `7d7cf90`／`1673921`／`f2818d7`，基準 `9398a2d`，23 檔）。復驗「可合併」（`.swfd/logs/wp6-verify/`）：乾淨 build（獨立 derivedData）app target `warning:` 1 條且為 appintents 工具訊息、`Swift 6 language mode` 0；§4 目標的 10 條 `command/` Swift 6 警告 10/10 歸零；928/928 不變；Release 與 iOS build 皆過。合併態 main 全套見 `.swfd/logs/merge-main/test-be11e5b.log`。
+- 五處 actor hop 移除判定安全（呼叫點皆 MainActor；`ObservedMatchSids` 同步後 `gameDidStart` 讀到 sid 的時序等於或優於原本）；`assumeIsolated` 前提成立（全檔唯一 `NWConnection` 來源 `start(queue: .main)`）。動態證據弱：parser 測試的 `Task.yield` 迴圈同步與延後都會過。
+- 測試 target 剩 4 條警告不歸零：`MCPTestSupport.swift:14`／`ToolAndModelGapTests.swift:17` 根因是 `ExecuteJavaScriptAction.unavailable` 為 MainActor static 當預設引數（K1 禁區，**WP7a 動 `NakiActions.swift` 時順手評估**）；另兩條 `#NoUsage` 非隔離類 → WP7c 一併清。
+- 流程：批 2 commit 漏 `Claude-Session` 尾行，由 merge commit 補記；規格寫 9 處多餘 `await` 實為 11 處；`GameHighlightScript.swift` 的警告隨 `AutoPlayMode` 改 `nonisolated` 自然消失，未直接改。
+- 可合併後補（歸屬）：
+  - `AutoPlayEngine.init` 的 `echo: nil` 現等於 `.shared`，與 `AutoPlayActionExecutor` 同名參數「nil = 不等回音」語意相反，stored `echo` 型別仍 optional → WP7b（改名或改非 optional）。
+  - `LiqiParserLearningTests.swift:17`、`ObservedMatchSidsTests` 的 `Task.yield` 等待已多餘且守不住新時序 → WP7c 補一條不 yield 直接斷言的測試。
+  - 純 wire 層被 `liqiLog` 綁在 MainActor（arch S4 殘餘，需動 `LiqiEnvelope.swift` 與全域 log 函式）→ 延後表。
