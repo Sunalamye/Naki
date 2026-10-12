@@ -201,4 +201,12 @@ final class LiqiTileTests: XCTestCase {
         XCTAssertEqual(legacyStoreComboVariant(called: "3m", combo: "4m|E|5m"), 0)
         XCTAssertNil(LiqiTile.chiVariant(called: "3m", consumed: ["4m", "E", "5m"]))
     }
+
+    /// `mjaiOrder` 的字牌段（赤五、數牌之後，`?` 之前）與 `honors` 同序
+    func testMjaiOrderHonorSegmentMatchesHonors() {
+        let order = LiqiTile.mjaiOrder
+        XCTAssertEqual(Array(order[(order.count - 1 - LiqiTile.honors.count)..<(order.count - 1)]),
+                       LiqiTile.honors)
+        XCTAssertEqual(order.last, "?")
+    }
 }

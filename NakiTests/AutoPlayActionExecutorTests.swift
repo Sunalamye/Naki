@@ -196,6 +196,28 @@ final class AutoPlayActionExecutorTests: XCTestCase {
                       "chiVariant=1 必須對到 index=1，實際 bytes=\(hex(captured.first))")
     }
 
+    /// 推薦清單開頭不是吃（例如先有一列打牌）時，仍從吃的那一列取變體
+    @MainActor
+    func testChiVariantIsTakenFromTheChiRowNotTheFirstRow() async {
+        let store = LiqiOperationStore()
+        var captured: [String] = []
+        let sender = recordingSender { captured.append($0) }
+        let snapshot = store.record(
+            seat: 0,
+            operations: [LiqiOperation(type: .chi, combination: ["1m|2m", "2m|4m"])],
+            contextTile: "3m",
+            source: "test")
+        let recommendations = [Recommendation(tile: "5m", probability: 0.6, actionType: .discard),
+                               chiRecommendation(1)]
+
+        await AutoPlayActionExecutor.execute(
+            action: .chi, tile: "chi_1", snapshot: snapshot, recommendations: recommendations,
+            sender: sender, store: store, awaitResponseMs: 0, echoTimeoutMs: 0)
+
+        XCTAssertTrue(hex(captured.first).hasSuffix("08021001"),
+                      "吃的那一列 chiVariant=1 必須對到 index=1，實際 bytes=\(hex(captured.first))")
+    }
+
     /// 對照不到組合時退回索引 0，而且**必須留下警告**——Legacy 那份漏的就是這行
     @MainActor
     func testChiWithoutMatchingCombinationFallsBackToZeroAndWarns() async {

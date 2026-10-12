@@ -34,7 +34,8 @@ nonisolated enum LiqiTile {
 
     // MARK: 字牌對照
 
-    /// MJAI 字牌，依雀魂 `1z`–`7z` 的順序（東南西北白發中）。全專案的字牌表只有這一份。
+    /// MJAI 字牌，依雀魂 `1z`–`7z` 的順序（東南西北白發中）。字牌的查詢與轉換都以這份為準；
+    /// `mjaiOrder` 另有一份排序用的字面列，`LiqiTileTests` 鎖住兩者一致。
     static let honors = ["E", "S", "W", "N", "P", "F", "C"]
 
     /// 字牌（雀魂 → MJAI）
