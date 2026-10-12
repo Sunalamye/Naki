@@ -856,3 +856,9 @@
 - 證據紀律缺口（記錄）：實作者 `probe/*.log` 只有 xcodebuild 輸出、無 mtime 讀數；`test-noBT` 在 `10545ea` 之前跑（該 commit 只改測試檔，復驗已在 HEAD 補跑）。
 - 環境：`~/Library/Preferences` 的 `naki.tests.*` 空殼 plist 已達 10273 個（本輪各包累積），待用戶決定清理；全套期間 test host 短暫監聽 55054–55056（推測 `DebugServerFramingTests`，未逐條歸因）。
 - **WP12 啟動裁決**：WP12 與 WP9c 平行開。WP9c 只動 `AutoPlayMode.swift` 四行與兩個測試檔，對文件行號影響可忽略。WP7d（U1）仍無 1306 證據：WP12 依現狀（matchGame 鏈仍在、tools 43 個）寫文件；WP7d 若日後執行，由它自行更新文件與工具數。
+
+### WP9c 結果（2026-10-13）
+- 合併到 main：merge commit `5f78080`（`81afffe`，基準 `f8fc8da`，4 檔 +53/−10）。復驗「可合併」（`.swfd/logs/wp9b-verify/wp9c-*`）：1002 → 1003；合併態 main 全套見 `.swfd/logs/merge-main/test-5f78080.log`，跑前跑後真實設定檔 sha dc1ed5359702 → dc1ed5359702、奈秒 mtime 不變。
+- **ui S2 驗收達成（本機）**：NakiTests 全套對用戶真實設定檔 mtime 變動 0 次（基底 ≥3 → WP9 → WP9b 1 → WP9c 0）。剩餘唯一寫入者是 host 啟動的同值寫入（B 塊，延後表；乾淨機器會新建 `naki.autoPlayMode`）。
+- 正式路徑零行為改動：`AutoPlayModeStore.defaults` 注入點與四個預設參數等價改寫；`save` 的預設參數是死碼（3 處呼叫端皆顯式傳 `to:`），新測試註解「四個各驅一次」實際驗三個 → WP12 下一輪修註解。
+- **規則補強**：對真實設定檔做變異後必須顯式還原並附前後 sha，不得依賴測試順序巧合（本包 M1 值回到「自動」是 `NakiRuntimeWiringTests` 排最後才巧合寫回）。
