@@ -14,6 +14,11 @@ import XCTest
 @MainActor
 final class NakiRuntimeWiringTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        isolateAutoPlayDefaults()
+    }
+
     /// 只有 `.live` 會走 `PluginImportSource.fetchAny`（空字串回 `badURL`，不發請求）；Preview 預設回 `.success([])`。
     func testFetchPluginImportIsWiredToLiveSource() async {
         let runtime = NakiRuntime()
