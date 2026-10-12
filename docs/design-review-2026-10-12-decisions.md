@@ -862,3 +862,12 @@
 - **ui S2 驗收達成（本機）**：NakiTests 全套對用戶真實設定檔 mtime 變動 0 次（基底 ≥3 → WP9 → WP9b 1 → WP9c 0）。剩餘唯一寫入者是 host 啟動的同值寫入（B 塊，延後表；乾淨機器會新建 `naki.autoPlayMode`）。
 - 正式路徑零行為改動：`AutoPlayModeStore.defaults` 注入點與四個預設參數等價改寫；`save` 的預設參數是死碼（3 處呼叫端皆顯式傳 `to:`），新測試註解「四個各驅一次」實際驗三個 → WP12 下一輪修註解。
 - **規則補強**：對真實設定檔做變異後必須顯式還原並附前後 sha，不得依賴測試順序巧合（本包 M1 值回到「自動」是 `NakiRuntimeWiringTests` 排最後才巧合寫回）。
+
+### WP12 結果（2026-10-13）
+- 合併到 main：merge commit `fab50c9`（13 個 commit `832a697`…`ba929a5`，基準 `f8fc8da`，43 檔 +368/−310，只改文字）。兩輪復驗（`.swfd/logs/wp12-verify/`），第二輪「可合併」；合併態 main 全套見 `.swfd/logs/merge-main/test-fab50c9.log`，node 兩腳本綠，真實設定檔 sha／mtime 不變。
+- §7 48 項：38 項完成、8 項（含兩個半項）核對後現況已被後續 WP 改掉不需再改、#3 的 `AutoPlayMode.swift:24-26` 留下一輪（WP9c 禁碰檔）。§12 指派項全部完成：CLAUDE.md 坑 (1)–(6)、U3／U4 文字、`isNaki` 新語意與 `isNakiSent`、溢出邊界標推測、`__nakiHideNames` 判「保留 JS、文件標未記載內部函式」、`Naki-MTests` 孤兒 target 只寫判定不改 pbxproj、三個無引用 Localizable key 刪除（grep 0、JSON 合法）。
+- 零邏輯改動：復驗以過濾腳本證明 command/ 非註解變動行只有三處字串常數（`LiqiParser` log、`BotTools` note、`SystemTools` get_help 說明）。
+- 第一輪復驗 11 項文字落差第二輪全關閉；`CLAUDE.md:180`「0.5.2 移除」是歷史事實，閘 2 例外一行（實作者第一輪為過 grep 改模糊，已改回）。測試數四處改 1003 標「主線整合閘數字」引用 `test-5f78080.log`。
+- plugin-api-v1 既有漂移：`onSocketClose`／`drop`／`dropReceive`／`dropSend`／`rewriteSend` 標「規格保留，目前未實作」；另發現 `injectSend` 的 `timedOut` 恆 false 未實作、`onDisable` 實際存在。
+- 留給下一輪（非阻擋）：WP9c 四檔的註解（`AutoPlayMode.swift:24-26` 的 RecommendationView／GameHighlightScript.make、`AutoPlayModeStoreTests:14` 檔頭、新測試「四個各驅一次」實為三個、`save` 預設參數死碼）；`WebSocketInterceptor.swift:161` jsModules 註解「只剩兩個模組」；`GameModels.swift:499`、`TileImage.swift:62` 仍提已刪 view；plugin-system-design 與 protocol 文件剩餘 2026-08 歷史行號表；英日 README 翻譯未經母語校對（英日「遊戲內高亮」表格列措辭與中文略異）；WP7d 落地後工具數 43 連動檔清單在 notes。
+- 程序：實作者凍結中收到主線遲到的測試數通報，先回問未動工（規則生效）。
