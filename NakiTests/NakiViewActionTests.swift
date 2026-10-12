@@ -13,21 +13,19 @@ import XCTest
 @MainActor
 final class NakiViewActionTests: XCTestCase {
 
-    private let defaultsKeys = [
-        SettingsStore.majsoulServerKey, SettingsStore.pinMajsoulServerKey,
-        SettingsStore.fullAutoPrefersSanmaKey, SettingsStore.fullAutoRoomPreferenceKey,
-    ]
-    private var savedDefaults: [String: Any?] = [:]
+    private var suiteName: String!
+    private var defaults: UserDefaults!
 
     override func setUp() {
         super.setUp()
-        savedDefaults = Dictionary(uniqueKeysWithValues: defaultsKeys.map {
-            ($0, UserDefaults.standard.object(forKey: $0))
-        })
+        suiteName = "naki.tests.viewaction.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)
     }
 
     override func tearDown() {
-        for (key, value) in savedDefaults { UserDefaults.standard.set(value, forKey: key) }
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        suiteName = nil
         super.tearDown()
     }
 
@@ -124,7 +122,7 @@ final class NakiViewActionTests: XCTestCase {
     // MARK: - startFullAuto
 
     func testStartFullAutoWritesPreferencesBeforeModeThenStarts() {
-        let settings = SettingsStore()
+        let settings = SettingsStore(defaults: defaults)
         settings.fullAutoPrefersSanma = false
         settings.fullAutoRoomPreference = .lowest
         var events: [String] = []
@@ -149,7 +147,7 @@ final class NakiViewActionTests: XCTestCase {
     }
 
     func testChooseSameServerOnlyWritesSettings() {
-        let settings = SettingsStore()
+        let settings = SettingsStore(defaults: defaults)
         settings.majsoulServer = .cn
         settings.pinMajsoulServer = false
         var switched: [MajsoulServer] = []
@@ -161,7 +159,7 @@ final class NakiViewActionTests: XCTestCase {
     }
 
     func testChooseDifferentServerSwitchesAndStillWritesPin() {
-        let settings = SettingsStore()
+        let settings = SettingsStore(defaults: defaults)
         settings.majsoulServer = .cn
         settings.pinMajsoulServer = true
         var switched: [MajsoulServer] = []
