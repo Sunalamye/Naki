@@ -78,10 +78,27 @@ final class SettingsStore {
     /// test host 就是 App 本體，`NakiRuntime()` 在任何 `setUp` 之前就建構。
     nonisolated static let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
-    /// 預設落點的唯一出入口（inline 初值（`init()` 路徑）、`defaults`、`AutoPlayModeStore.defaults`、所有 `load…(from:)`／`save…(to:)` 的預設參數）；
-    /// test host 改落 `naki.tests.host`，不碰真實設定檔。
-    nonisolated static let standard: UserDefaults =
-        isTestHost ? UserDefaults(suiteName: "naki.tests.host")! : .standard
+    /// 預設落點的唯一出入口（inline 初值（`init()` 路徑）、`defaults`、`AutoPlayModeStore.defaults`、`L10n.defaults`、
+    /// `ObservedMatchSids.shared`、ContentView 的 `@AppStorage`、所有 `load…(from:)`／`save…(to:)` 的預設參數）。
+    nonisolated static let standard = resolveDefaults(environment: ProcessInfo.processInfo.environment)
+
+    private nonisolated static let uiTestSuite = "naki.tests.ui"
+
+    /// suite 名稱無效（`UserDefaults(suiteName:)` 回 nil）時退回 `uiTestSuite`，不退回真實設定檔。
+    nonisolated static func resolveDefaults(environment: [String: String]) -> UserDefaults {
+        guard let name = resolveSuiteName(environment: environment) else { return .standard }
+        return UserDefaults(suiteName: name) ?? UserDefaults(suiteName: uiTestSuite)!
+    }
+
+    /// nil＝真實設定檔。test host 落 `naki.tests.host`；Debug 下 UI 測試以 `NAKI_UI_TEST_DEFAULTS_SUITE` 指定 suite，
+    /// key 一出現就不落真實設定檔（不以 `naki.tests.` 開頭，含空字串，一律退回 `uiTestSuite`）。Release 忽略該 key。
+    nonisolated static func resolveSuiteName(environment: [String: String]) -> String? {
+        if environment["XCTestConfigurationFilePath"] != nil { return "naki.tests.host" }
+        #if DEBUG
+        if let suite = environment["NAKI_UI_TEST_DEFAULTS_SUITE"] { return suite.hasPrefix("naki.tests.") ? suite : uiTestSuite }
+        #endif
+        return nil
+    }
 
     /// 所有寫入與 plugin 設定讀取的落點；正式碼是 `standard`，測試用 `init(defaults:)` 換成獨立 suite。
     @ObservationIgnored private var defaults = SettingsStore.standard

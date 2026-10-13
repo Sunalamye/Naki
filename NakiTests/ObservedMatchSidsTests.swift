@@ -16,15 +16,14 @@ import XCTest
 
 @testable import Naki
 
-/// `.shared` 預設落在 `UserDefaults.standard`，而 test host 與正式 App 共用那份偏好設定。
-/// parser 只寫 `.shared`，所以把它的落點換成獨立 suite，結束後還原；全程不寫真實設定檔。
+/// parser 只寫 `.shared`（預設落點 `SettingsStore.standard`），所以把它的落點換成獨立 suite，結束後還原。
 @MainActor
 func isolateSharedObservedMatchSids(_ testCase: XCTestCase) {
     let suite = "naki.tests.sids.shared.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
     ObservedMatchSids.shared.redirect(to: defaults)
     testCase.addTeardownBlock { @MainActor in
-        ObservedMatchSids.shared.redirect(to: .standard)
+        ObservedMatchSids.shared.redirect(to: SettingsStore.standard)
         defaults.removePersistentDomain(forName: suite)
     }
 }

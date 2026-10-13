@@ -41,8 +41,8 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
 nonisolated enum L10n {
 
-    /// 語言來源；正式碼是 `.standard`，測試換成獨立 suite 釘語言，不碰真實設定檔。
-    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+    /// 語言來源；正式碼是 `SettingsStore.standard`，測試換成獨立 suite 釘語言，不碰真實設定檔。
+    nonisolated(unsafe) static var defaults: UserDefaults = SettingsStore.standard
 
     /// 目前生效的 locale：使用者選的語言，`system` 時用系統的。iOS 一律系統的。
     ///

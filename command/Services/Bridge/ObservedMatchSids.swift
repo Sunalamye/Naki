@@ -71,18 +71,23 @@ final class ObservedMatchSids {
 
     private var defaults: UserDefaults
 
-    private init(defaults: UserDefaults = .standard) {
+    private init(defaults: UserDefaults = SettingsStore.standard) {
         self.defaults = defaults
         observations = Self.load(from: defaults)
     }
 
     #if DEBUG
-        /// 測試用：不碰 `.standard`
+        /// 測試用：不碰 `SettingsStore.standard`
         static func makeForTesting(defaults: UserDefaults) -> ObservedMatchSids {
             ObservedMatchSids(defaults: defaults)
         }
 
-        /// 測試用：parser 只寫 `.shared`，所以把它的落點換成獨立 suite 並重讀；傳 `.standard` 還原。
+        /// 測試用：以預設參數建新實例（只讀不寫），驗預設落點。
+        static func makeWithDefaultDefaults() -> ObservedMatchSids { ObservedMatchSids() }
+
+        var defaultsForTesting: UserDefaults { defaults }
+
+        /// 測試用：parser 只寫 `.shared`，所以把它的落點換成獨立 suite 並重讀；傳 `SettingsStore.standard` 還原。
         func redirect(to defaults: UserDefaults) {
             self.defaults = defaults
             observations = Self.load(from: defaults)

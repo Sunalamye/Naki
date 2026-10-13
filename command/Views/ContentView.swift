@@ -297,7 +297,7 @@ struct ContentView: View {
     ///
     /// **只讀不寫。** 寫入仍然只有 `SettingsStore.pinMajsoulServer` 一個入口——
     /// 同一個設定兩個寫入點是先前踩過的坑。
-    @AppStorage(SettingsStore.pinMajsoulServerKey) private var serverPinned = false
+    @AppStorage(SettingsStore.pinMajsoulServerKey, store: SettingsStore.standard) private var serverPinned = false
 
     /// 這次啟動已經選過了（選完就不再擋，即使沒勾「以後都用這個」）
     @State private var serverChosen = false

@@ -23,7 +23,19 @@ import Security
 /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`。Security API 本身執行緒安全。
 nonisolated enum CloudKeyStore {
 
-    static let service = "org.naki.cloud-inference"
+    static let service = resolveService(environment: ProcessInfo.processInfo.environment)
+
+    /// Debug 下 UI 測試以 `NAKI_UI_TEST_KEYCHAIN_SERVICE` 換掉 service，key 一出現就不碰真實項目
+    /// （空字串或等於正式 service 都退回 `.uitest`）。Release 忽略該 key。
+    static func resolveService(environment: [String: String]) -> String {
+        let production = "org.naki.cloud-inference"
+        #if DEBUG
+        if let service = environment["NAKI_UI_TEST_KEYCHAIN_SERVICE"] {
+            return service.isEmpty || service == production ? production + ".uitest" : service
+        }
+        #endif
+        return production
+    }
     static let account = "api-key"
 
     private static var baseQuery: [String: Any] {
