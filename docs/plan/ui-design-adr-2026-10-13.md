@@ -35,6 +35,7 @@
 | 5 | 「Bot」「MCP Server」系列名稱 | 保留。why：貫穿 MCP 工具名，改一處要改全部 |
 | 6 | JavaScript 注入失敗橫幅標題 | 改「App 元件載入失敗」，「JavaScript」留在第二行技術摘要 |
 | 7 | 槓的動作色 | 改 `.indigo`。why：紅同時代表槓與危險是已知遺留；WP-E 連動原型與三張 `rendered/` 基準 |
+| 8 | 設定分頁三件事 | 接受：(a) 設定分四組（一般／連線／AI／開發者），iOS 單頁四組、開發者預設折疊；(b) 每個 GroupBox 說明縮成一句；(c) macOS 標題列顯示分頁名稱，選單與 iOS 導覽列寫「設定」；(d) 補充裁決：macOS 採原生 `Settings` scene（toolbar 圖示分頁、標題列顯示分頁名、⌘, 開啟），iOS 仍是 sheet；`/debug/ui` 的開啟、關閉狀態與截圖的代價與對策見 §8.2，不留假功能。設計者其後提出改用 sheet 的方案與證據，用戶維持原生 scene（2026-10-13）。Astra 審查設定分頁 13 條全部採納（2026-10-13）：§8.4 原「待裁決」兩項依主線指示保留，各縮成一句提示；截圖改為 `/screenshot?window=settings` 明確參數。(e) 主線復驗（2026-10-13）：必修 4 條全採納（可見判定、UI 測試隔離、三麻提醒改名、WP-D／WP-F 判準統一）。**統帥代決**兩項：視覺驗證以 HTTP `/screenshot?window=settings` 為主（依 2026-10-09 用戶定案），只有 HTTP 截不到的 toolbar 分頁列與標題列用 `NakiUITests` 的 Accessibility 斷言；UI 測試隔離鉤子是 WP-F 執行任何 UI 測試的前置。設計見 `ui-design-reference.md` §8，新增 WP-F，順序改為 WP-0p → 0 → A → B → C → D → F → E（F 的位置由設計者判斷，理由見 §8.8） |
 
 ## 流程紀錄
 
