@@ -242,7 +242,7 @@ app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，`NakiTests` targ
 - 測試必須用隔離 suite，走現有的注入點：`L10n.defaults`、`SettingsStore(defaults:)`、`AutoPlayModeStore.defaults`（WP9c 加入，合併於 `5f78080`；本分支合併前的程式碼沒有它）。測試用 `.standard` 備份還原寫法仍是汙染來源。
 - test host 一啟動，`NakiApp` 的 `@State runtime = NakiRuntime()` 就在任何 `setUp` 之前建構，之後 ContentView 的自動檢查更新也會寫 `lastUpdateCheck`。所以 test host 的預設落點整體改成 `naki.tests.host` suite：`SettingsStore.standard` 依 `SettingsStore.isTestHost` 選擇，`AutoPlayModeStore.defaults` 取同一個值（WP-0p，`TestHostDefaultsTests` 鎖住）。本專案程式碼中仍落在 `.standard` 的只剩 `L10n.defaults`（只讀）、`ObservedMatchSids.shared`（測試以 `redirect` 隔離）、ContentView 的 `@AppStorage`（只讀）；AppKit 視窗 frame autosave 等框架自己的寫入不在此列。test host 中 `L10n` 與 `@AppStorage` 讀 `.standard`，`SettingsStore` 寫 host suite，讀寫分家。
 - `defaults read org.39c154f25912233a.akagi` 對此 app 會回 `Domain ... not found`（它解析到 `~/Library/Containers/org.39c154f25912233a.akagi/` 這個殘留目錄；App 本身不是 sandbox，實際檔案在 `~/Library/Preferences`）。查設定值要用 `plutil -p ~/Library/Preferences/org.39c154f25912233a.akagi.plist`。
-- 隔離 suite 結束時用 `removePersistentDomain`，但它**不刪檔**：`~/Library/Preferences` 會累積 `naki.tests.*` 空殼 plist（2026-10-13 約一萬個）。需要清理由用戶決定，不要在腳本裡自動刪。
+- 隔離 suite 結束時用 `removePersistentDomain`，但它**不刪檔**：`~/Library/Preferences` 會累積 `naki.tests.*` 空殼 plist。2026-10-13 依用戶指示由主線清除 235 個，備份在 `.swfd/logs/prefs-cleanup/`，host plist 保留。清理由用戶決定，不要在腳本裡自動刪。
 
 `project.pbxproj` 裡的 `Naki-MTests` 是**孤兒 target**：它對應的 `Naki-MTests` 資料夾不存在、沒有任何原始檔、不在 `Naki.xcscheme` 或 `Naki-M.xcscheme` 裡，所以 `-only-testing` 找不到、也不會被跑。不要把它當成「iOS 單測」；本輪只記錄判定、不改 `project.pbxproj`；刪 target 或補測試要另案處理。
 

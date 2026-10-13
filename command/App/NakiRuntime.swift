@@ -43,6 +43,8 @@ final class NakiRuntime {
 
     /// 自動打牌狀態機（單一 Task 迴圈；輪詢／延遲／重試都是 `Task.sleep`）
     private var autoPlayEngine: AutoPlayEngine?
+    var isAutoPlayEngineRunning: Bool { autoPlayEngine != nil }
+    var isDebugServerStarted: Bool { debugServer != nil }
 
     /// 對局結束後自動排下一場（只有 `.fullAuto` 模式會動）
     private var autoRematchEngine: AutoRematchEngine?
