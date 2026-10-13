@@ -1,6 +1,6 @@
 ---
 name: mcp-tool-writer
-description: Create or modify Naki MCP tools against the current 42-tool Swift registry, Unity WebGL client, and Liqi protocol state/action boundaries.
+description: Create or modify Naki MCP tools against the current 40-tool Swift registry, Unity WebGL client, and Liqi protocol state/action boundaries.
 allowed-tools: Read, Glob, Grep, Write, Edit, Bash
 ---
 
@@ -62,17 +62,17 @@ authorized MCP action
   → RESPONSE and/or authoritative state transition
 ```
 
-## Current registered tools: 42
+## Current registered tools: 40
 
-This is the 2026-08-01 source snapshot. Before runtime work, call live `tools/list`; do not assume this count remains current after code changes.
+This is the 2026-10-13 source snapshot. Before runtime work, call live `tools/list`; do not assume this count remains current after code changes.
 
 | Category | Count | Current names |
 |---|---:|---|
-| System | 4 | `get_status`, `get_help`, `get_logs`, `clear_logs` |
+| System | 6 | `get_status`, `get_help`, `get_logs`, `replay_list`, `replay_game`, `clear_logs` |
 | Bot | 7 | `bot_status`, `bot_trigger`, `bot_ops`, `bot_deep`, `bot_chi`, `bot_pon`, `bot_sync` |
-| Game | 6 | `game_state`, `game_hand`, `game_ops`, `game_discard`, `game_action`, `game_action_verify` |
+| Game | 8 | `game_state`, `game_hand`, `game_ops`, `game_discard`, `game_action`, `game_action_verify`, `game_confirm_new_round`, `game_vote_game_end` |
 | JavaScript | 1 | `execute_js` |
-| Lobby | 8 | `lobby_status`, `lobby_match_modes`, `lobby_start_match`, `lobby_cancel_match`, `lobby_account_info`, `lobby_server_time`, `lobby_heartbeat`, `lobby_login_beat` |
+| Lobby | 8 | `lobby_status`, `lobby_match_sids`, `lobby_start_unified_match`, `lobby_cancel_unified_match`, `lobby_account_info`, `lobby_server_time`, `lobby_heartbeat`, `lobby_login_beat` |
 | Anti-idle | 1 | `lobby_anti_idle` |
 | Friend room | 7 | `room_create`, `room_add_robot`, `room_start`, `room_info`, `room_join`, `room_leave`, `room_quick_test` |
 | Emoji | 2 | `game_emoji`, `game_emoji_listen` |

@@ -10,7 +10,7 @@
 #
 #   用法:
 #     scripts/replay-check.sh                    重跑當次 session 的所有錄影
-#     scripts/replay-check.sh --session <dir>    指定 session 目錄
+#     scripts/replay-check.sh --session <目錄名>   指定 session 目錄
 #     scripts/replay-check.sh --save <file>      把結果存成 baseline
 #     scripts/replay-check.sh --baseline <file>  跟 baseline 比對，有差異就非零退出
 #

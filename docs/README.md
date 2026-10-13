@@ -35,7 +35,7 @@ Repo 根目錄另有：
 - AI：MortalSwift 釘在 0.6.0／`da7238c`（lockfile 已提交），但 bundled 權重未更新，沒有「最強」benchmark。
 - 四麻：有固定 parity fixtures。三麻：本地 `AkagiSanmaBot`（MortalSwift `AkagiSanma`，模仿天鳳人類，強度不是 Mortal 等級），2026-10-09 三局 live 已驗。
 - 自摸：recommendation gate 與 send-result 兩個 P0 在 source 層已收斂（`AUDIT.md` 為準），仍缺 live 對局驗證。
-- MCP：靜態註冊 43 個工具（2026-10-13 計數；現行數字一律現查 `tools/list`）。
+- MCP：靜態註冊 40 個工具（2026-10-13 計數；現行數字一律現查 `tools/list`）。
 - 配置：2026-08-01 live manifest fresh parse 為 41 tables／263 sheets／119,289 rows。
 
 ## 文件維護規則

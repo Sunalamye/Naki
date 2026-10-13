@@ -134,7 +134,7 @@ OptionalOperationList
 - **段位場入口已換人**（2026-08-09 實測）：`.lq.Lobby.matchGame` 對 match_mode
   1／2／3 一律回 **error 1306**；現行入口是 `.lq.Lobby.startUnifiedMatch`
   （`ReqStartUnifiedMatch`：`match_sid` 是 **string**，不是舊的 uint32 match_mode）。
-  `lobby_start_match` 因此已標為過時，改用 `lobby_start_unified_match`。
+  `lobby_start_match`、`lobby_cancel_match`、`lobby_match_modes` 已於 2026-10-13 移除（live 1306 證據），改用 `lobby_start_unified_match`。
 - **`match_sid` 猜不出來**：形狀是 `"{match_group}:{mode_id}"`（實測 `"1:2"` ＝銅之間
   四人東），但 `liqi.json` 裡**沒有任何訊息會產生它**，`lqc.lqbin` 的 41 表 263 sheets
   也沒有 sid 欄位。唯一來源是攔玩家自己點入口時送出的那一筆

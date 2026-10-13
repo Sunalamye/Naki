@@ -18,7 +18,7 @@ Naki 的 Unity WebSocket → Liqi → MortalSwift → Liqi sender 主鏈已存�
 |------|------|------|
 | 客戶端 | live Naki `/js` 唯讀 probe | Unity WebGL 4.0.45；Laya／DesktopMgr／uiscript 不存在 |
 | Debug API | live `/status`、`/bot/status`、`/game/*` | loopback server 與 Swift protocol state 可用 |
-| MCP registry | live `tools/list`（2026-08-01） | 2026-08-01 live 為 42 tools（含 6 個已於 2026-08-02 移除的 highlight 失敗樁）；2026-10-13 靜態計數 43（43 個工具型別的 `static let name`、`MCPToolRegistry.registerBuiltInTools` 43 處 `register(`），**未 live 複查**；現行數字一律現查 `tools/list` |
+| MCP registry | live `tools/list`（2026-08-01） | 2026-08-01 live 為 42 tools（含 6 個已於 2026-08-02 移除的 highlight 失敗樁）；2026-10-13 靜態計數 40（40 個工具型別的 `static let name`、`MCPToolRegistry.registerBuiltInTools` 40 處 `register(`；同日移除三個過時匹配工具，原為 43），**未 live 複查**；現行數字一律現查 `tools/list` |
 | Liqi schema | live manifest fresh download + byte compare | 2026-08-01 當時 repo `liqi.json` 與 CDN 完全相同；**2026-10-09 起已不同**：repo 補了 `ReqSelfOperation.auto_operation`（field 11），而那個 CDN 基準本身落後 client 好幾版（見 `CLAUDE.md`「Unity 與 Liqi 必知事實」），所以此列只證明當時 byte 相同、不證明 schema 正確 |
 | config | live manifest fresh download + repo parser | 41 tables／263 sheets／119,289 rows |
 | Mortal parity | fresh Debug／Release tests | 各 47 tests 通過；固定 fixtures obs／mask 零落差 |
@@ -138,7 +138,7 @@ iOS 實機。
 `show_recommendations` / `hide_highlight` 直接移除（呼叫回 `Unknown tool`）。
 它們的參數契約源自 Laya 牌物件、從未接到 `__nakiHighlight`，且有明確替代面
 （`bot_status` / `game_hand` 讀推薦；內建高亮當時由 `syncGameHighlight()` 驅動，現已移交插件、該函式不存在）。
-靜態註冊數 44 → 38（2026-08-02 當時；現為 43，見「已驗證」表）。**live `tools/list` 未複查**。
+靜態註冊數 44 → 38（2026-08-02 當時；現為 40，見「已驗證」表）。**live `tools/list` 未複查**。
 
 ### 已處理：無效 UI 控制已移除
 
@@ -205,7 +205,7 @@ iOS 實機。
 
 | 項目 | 證據 |
 |------|------|
-| `matchGame` 已失效 | match_mode 1／2／3 各送一次，全回 error 1306 |
+| `matchGame` 已失效 | match_mode 1／2／3 各送一次，全回 error 1306（2026-10-13 再次實測；`lobby_start_match` 等三個工具已於同日移除） |
 | `startUnifiedMatch` 可用 | `lobby_start_unified_match` 不帶參數 → `serverAccepted: true`，隨後 `NotifyMatchGameStart` |
 | `match_sid` 攔截 | 玩家點入口 → 攔到 `"1:2"` ＋ `"WebGL_2022-0.16.257"` |
 | 自送不污染 | 送 `self-pollution-probe` 後觀察表仍為 0 筆 |
@@ -492,7 +492,7 @@ const conn = pick.length > 0 ? pick[pick.length - 1] : conns[0];
 
 ### 16.4 `match_mode` 對照表整組是錯的
 
-`lobby_match_modes` 的數值來自 Laya 時代的觀察，從未以真實封包驗證。實際攔到遊戲自己送的 `.lq.Lobby.fetchCurrentMatchInfo`，銅之間畫面輪詢的是 `[2, 3, 17, 18]`：
+`lobby_match_modes`（已於 2026-10-13 移除，live 1306 證據）的數值來自 Laya 時代的觀察，從未以真實封包驗證。實際攔到遊戲自己送的 `.lq.Lobby.fetchCurrentMatchInfo`，銅之間畫面輪詢的是 `[2, 3, 17, 18]`：
 
 | 入口 | 真實值 | 舊表 |
 |------|-------|------|

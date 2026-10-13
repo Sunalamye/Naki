@@ -212,8 +212,6 @@ enum NakiToolOutputSchemas {
         for name in ["lobby_status", "lobby_server_time", "lobby_heartbeat", "lobby_login_beat"] {
             table[name] = liqiSend()
         }
-        table["lobby_start_match"] = liqiSend(extra: ["match_mode": integer("送出的 match_mode")])
-        table["lobby_cancel_match"] = liqiSend(extra: ["match_mode": integer("取消的 match_mode")])
         table["lobby_start_unified_match"] = liqiSend(extra: [
             "match_sid": string("送出的 match_sid"),
             "client_version_string": string("送出的 client_version_string"),
@@ -227,14 +225,6 @@ enum NakiToolOutputSchemas {
             "accountIdSource": string("naki-login-capture 或 argument"),
             "hint": string("缺 account_id 時的補救方式")
         ])
-
-        table["lobby_match_modes"] = object(
-            "從遊戲流量觀察到的 match_mode（不是靜態對照表）",
-            properties: [
-                "source": string("資料來源說明"),
-                "knownErrorForBadMode": string("1306 = match_mode 不存在")
-            ],
-            required: ["source"])
 
         table["lobby_match_sids"] = object(
             "從遊戲流量觀察到的 match_sid（統一匹配用；沒有靜態表可查）",

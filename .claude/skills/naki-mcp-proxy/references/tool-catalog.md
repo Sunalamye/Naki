@@ -4,7 +4,7 @@
 
 **Default endpoint:** `http://127.0.0.1:8765/mcp`
 
-**Snapshot count:** 42 tools at the 2026-08-01 live check. Six highlight stubs were removed on 2026-08-02, so the current static registration count is 38 — always trust live `tools/list` over either number.
+**Snapshot count:** 42 tools at the 2026-08-01 live check. Six highlight stubs were removed on 2026-08-02 and three obsolete match tools on 2026-10-13, so the current static registration count is 40 — always trust live `tools/list` over either number.
 
 This file is a routing snapshot, not a data source. For every Naki request, connect to the running Naki process, call live `tools/list`, and use the name and `inputSchema` returned by that call. If live Naki is unavailable, report the query as unverified; do not answer from this catalog.
 
@@ -66,15 +66,15 @@ To receive a value, the function body must contain `return`; objects should be w
 | Tool | Parameters | Source / side effect |
 |---|---|---|
 | `lobby_status` | `awaitResponseMs?` | Sends `fetchGamingInfo`; server query |
-| `lobby_match_modes` | none | Returns the running Naki build's mode table; read-only |
-| `lobby_start_match` | `match_mode` required; `client_version_string?`, `awaitResponseMs?` | Joins a server queue |
-| `lobby_cancel_match` | `match_mode` required; `awaitResponseMs?` | Leaves a server queue |
+| `lobby_match_sids` | none | Lists `match_sid` values observed from the game's own traffic; read-only |
+| `lobby_start_unified_match` | `match_sid?`, `client_version_string?`, `awaitResponseMs?` | Joins a server queue |
+| `lobby_cancel_unified_match` | `match_sid?`, `awaitResponseMs?` | Leaves a server queue |
 | `lobby_account_info` | `account_id?`, `awaitResponseMs?` | Sends `fetchAccountInfo`; server query |
 | `lobby_server_time` | `awaitResponseMs?` | Low-risk server-time request |
 | `lobby_heartbeat` | `no_operation_counter?`, `awaitResponseMs?` | Sends lobby heartbeat |
 | `lobby_login_beat` | `contract?`, `awaitResponseMs?` | Sends login beat |
 
-Do not hard-code match-mode IDs from an old document. Query live `lobby_match_modes`, then use the returned value.
+`lobby_start_match`, `lobby_cancel_match` and `lobby_match_modes` were removed on 2026-10-13 (live error 1306 evidence). Do not hard-code `match_sid` values from an old document; query live `lobby_match_sids`.
 
 ## Anti-idle (1)
 

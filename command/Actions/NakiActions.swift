@@ -255,75 +255,6 @@ struct SendActionAction {
   }
 }
 
-// MARK: - StartMatchAction / CancelMatchAction
-
-/// 段位場排隊（`.lq.Lobby.matchGame`）。
-///
-/// ⚠️ 真的會排進伺服器隊列，只在測試帳號使用。
-@MainActor
-struct StartMatchAction {
-
-  private let perform: (UInt32, String, Int) async -> LiqiActionResult
-
-  private init(perform: @escaping (UInt32, String, Int) async -> LiqiActionResult) {
-    self.perform = perform
-  }
-
-  /// 真實實作：組 spec + 送出（spec 的欄位編號查 docs/protocol/liqi.json）
-  init(send: SendActionAction) {
-    self.init(perform: { matchMode, clientVersionString, awaitMs in
-      let spec = LiqiRequestBuilder.matchGame(
-        matchMode: matchMode, clientVersionString: clientVersionString)
-      return LiqiActionResult(spec: spec, outcome: await send(spec, awaitResponseMs: awaitMs))
-    })
-  }
-
-  #if DEBUG
-    init(stub: @escaping (UInt32, String, Int) async -> LiqiActionResult) {
-      self.init(perform: stub)
-    }
-  #endif
-
-  func callAsFunction(
-    matchMode: UInt32,
-    clientVersionString: String = "",
-    awaitResponseMs: Int
-  ) async -> LiqiActionResult {
-    await perform(matchMode, clientVersionString, awaitResponseMs)
-  }
-}
-
-/// 取消段位場排隊（`.lq.Lobby.cancelMatch`）。
-///
-/// `match_mode` 是必填：伺服器要知道取消哪一條隊列。
-@MainActor
-struct CancelMatchAction {
-
-  private let perform: (UInt32, Int) async -> LiqiActionResult
-
-  private init(perform: @escaping (UInt32, Int) async -> LiqiActionResult) {
-    self.perform = perform
-  }
-
-  /// 真實實作
-  init(send: SendActionAction) {
-    self.init(perform: { matchMode, awaitMs in
-      let spec = LiqiRequestBuilder.cancelMatch(matchMode: matchMode)
-      return LiqiActionResult(spec: spec, outcome: await send(spec, awaitResponseMs: awaitMs))
-    })
-  }
-
-  #if DEBUG
-    init(stub: @escaping (UInt32, Int) async -> LiqiActionResult) {
-      self.init(perform: stub)
-    }
-  #endif
-
-  func callAsFunction(matchMode: UInt32, awaitResponseMs: Int) async -> LiqiActionResult {
-    await perform(matchMode, awaitResponseMs)
-  }
-}
-
 // MARK: - StartUnifiedMatchAction / CancelUnifiedMatchAction
 
 /// 統一匹配排隊（`.lq.Lobby.startUnifiedMatch`）——**現行**的段位場入口。
@@ -366,7 +297,7 @@ struct StartUnifiedMatchAction {
 
 /// 取消統一匹配（`.lq.Lobby.cancelUnifiedMatch`）。
 ///
-/// `match_sid` 必填：伺服器要知道取消哪一條隊列（與 `cancelMatch` 同樣語意）。
+/// `match_sid` 必填：伺服器要知道取消哪一條隊列。
 @MainActor
 struct CancelUnifiedMatchAction {
 

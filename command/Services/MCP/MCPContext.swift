@@ -35,15 +35,7 @@ protocol NakiMCPContext: MCPContext {
     /// - Parameter awaitResponseMs: 等待毫秒；<= 0 表示射後不理
     func sendLiqi(_ spec: LiqiRequestSpec, awaitResponseMs: Int) async -> LiqiToolSendOutcome
 
-    /// 段位場排隊（spec 由 Action 組，呼叫端不必自己拼欄位）
-    func startMatch(matchMode: UInt32,
-                    clientVersionString: String,
-                    awaitResponseMs: Int) async -> LiqiActionResult
-
-    /// 取消段位場排隊
-    func cancelMatch(matchMode: UInt32, awaitResponseMs: Int) async -> LiqiActionResult
-
-    /// 統一匹配排隊（現行段位場入口；`match_sid` 是字串，不是舊的 uint32 match_mode）
+    /// 統一匹配排隊（現行段位場入口；`match_sid` 是字串）
     func startUnifiedMatch(matchSid: String,
                            clientVersionString: String,
                            awaitResponseMs: Int) async -> LiqiActionResult
@@ -168,18 +160,7 @@ final class DefaultNakiMCPContext: NakiMCPContext {
         await dependencies.sendAction(spec, awaitResponseMs: awaitResponseMs)
     }
 
-    func startMatch(matchMode: UInt32,
-                    clientVersionString: String,
-                    awaitResponseMs: Int) async -> LiqiActionResult {
-        await dependencies.startMatch(matchMode: matchMode,
-                                      clientVersionString: clientVersionString,
-                                      awaitResponseMs: awaitResponseMs)
-    }
-
-    func cancelMatch(matchMode: UInt32, awaitResponseMs: Int) async -> LiqiActionResult {
-        await dependencies.cancelMatch(matchMode: matchMode, awaitResponseMs: awaitResponseMs)
-    }
-
+    /// 統一匹配排隊（現行段位場入口；`match_sid` 是字串）
     func startUnifiedMatch(matchSid: String,
                            clientVersionString: String,
                            awaitResponseMs: Int) async -> LiqiActionResult {

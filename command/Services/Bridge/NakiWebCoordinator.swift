@@ -194,7 +194,7 @@ final class NakiWebCoordinator {
 
             // 把「剛才那個 match_sid 開出來的是幾人麻將」記回去。
             // 全自動續局挑 sid 就是靠這個實證結果，不靠寫死的 mode 對照表
-            //（那正是 ObservedMatchModes 踩過的坑）。沒有待回填的 sid 時它自己 no-op，
+            //（舊 match_mode 表整組偏移一格就是這樣踩坑）。沒有待回填的 sid 時它自己 no-op，
             // 所以友人房／重連的 start_game 不會污染段位場的紀錄。
             ObservedMatchSids.shared.gameDidStart(is3P: is3P)
 

@@ -53,8 +53,6 @@ final class NakiActionLayerTests: XCTestCase {
             executeJavaScript: executeJavaScript ?? .unavailable,
             captureScreenshot: captureScreenshot ?? .unavailable,
             sendAction: send,
-            startMatch: StartMatchAction(send: send),
-            cancelMatch: CancelMatchAction(send: send),
             startUnifiedMatch: StartUnifiedMatchAction(send: send),
             cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),
             triggerAutoPlay: triggerAutoPlay ?? .unavailable,
@@ -193,23 +191,6 @@ final class NakiActionLayerTests: XCTestCase {
         XCTAssertNil(outcome.sent)
     }
 
-    /// 匹配 Action 自己組 spec（工具端不再拼一次），並把等待時間原樣傳下去
-    func testStartMatchActionBuildsSpecAndForwardsTimeout() async {
-        var seenAwaitMs: Int?
-        var seenMethod: String?
-        let action = StartMatchAction(send: SendActionAction(stub: { spec, awaitMs in
-            seenMethod = spec.method
-            seenAwaitMs = awaitMs
-            return .unavailable("stubbed")
-        }))
-
-        let result = await action(matchMode: 8, clientVersionString: "", awaitResponseMs: 1500)
-
-        XCTAssertEqual(seenMethod, LiqiRequestBuilder.matchGameMethod)
-        XCTAssertEqual(result.spec.method, LiqiRequestBuilder.matchGameMethod)
-        XCTAssertEqual(seenAwaitMs, 1500)
-    }
-
     /// 統一匹配走的是 startUnifiedMatch，不是 matchGame——後者實測回 error 1306
     func testStartUnifiedMatchActionBuildsSpecAndForwardsTimeout() async {
         var seenAwaitMs: Int?
@@ -235,14 +216,6 @@ final class NakiActionLayerTests: XCTestCase {
         let result = await action(matchSid: "sid-abc", awaitResponseMs: 0)
 
         XCTAssertEqual(result.spec.method, LiqiRequestBuilder.cancelUnifiedMatchMethod)
-    }
-
-    func testCancelMatchActionBuildsSpec() async {
-        let action = CancelMatchAction(send: SendActionAction(stub: { _, _ in .unavailable("s") }))
-
-        let result = await action(matchMode: 8, awaitResponseMs: 0)
-
-        XCTAssertEqual(result.spec.method, LiqiRequestBuilder.cancelMatchMethod)
     }
 
     /// 心跳不可用時要回 nil：工具靠這個 nil 回報 `anti_idle_not_configured`，

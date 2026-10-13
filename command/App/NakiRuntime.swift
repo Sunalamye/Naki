@@ -341,8 +341,6 @@ final class NakiRuntime {
             executeJavaScript: javaScript,
             captureScreenshot: CaptureScreenshotAction(),
             sendAction: send,
-            startMatch: StartMatchAction(send: send),
-            cancelMatch: CancelMatchAction(send: send),
             startUnifiedMatch: StartUnifiedMatchAction(send: send),
             cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),
             // 統一走主自動打牌路徑：推薦 → gate → resolver → LiqiActionSender，

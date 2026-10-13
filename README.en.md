@@ -306,14 +306,14 @@ The built-in [Model Context Protocol](https://modelcontextprotocol.io/) server s
 claude mcp add --transport http naki http://localhost:8765/mcp
 ```
 
-Discover the current tool inventory with `tools/list` or inspect `get_status.toolsCount`; a static count can become outdated as tools change (2026-10-13: 43 tools registered statically; six obsolete highlight stubs have since been removed).
+Discover the current tool inventory with `tools/list` or inspect `get_status.toolsCount`; a static count can become outdated as tools change (2026-10-13: 40 tools registered statically; six obsolete highlight stubs and, on 2026-10-13, three obsolete match tools whose server calls always failed have since been removed).
 
 | Area | Count | Example tools |
 |---|:---:|---|
 | System | 6 | `get_status`, `get_logs`, `replay_game` |
 | Bot control | 7 | `bot_status`, `bot_ops`, `bot_trigger` |
 | Game state and actions | 8 | `game_state`, `game_action`, `game_confirm_new_round` |
-| Lobby | 11 | `lobby_start_unified_match`, `lobby_account_info` |
+| Lobby | 8 | `lobby_start_unified_match`, `lobby_account_info` |
 | Friendly rooms | 7 | `room_create`, `room_add_robot`, `room_quick_test` |
 | Emotes | 2 | `game_emoji`, `game_emoji_listen` |
 | Utilities | 2 | `execute_js`, `lobby_anti_idle` |

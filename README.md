@@ -342,7 +342,7 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 與 Debug API 共用同一個 port。協定升級到 **2026-07-28（stateless）**，同時相容舊的
 `initialize` handshake：工具結果走 `structuredContent`（不再是「JSON 包在 JSON 字串裡」），
 非 loopback Origin 回 403。工具數請以 `tools/list` 或 `get_status.toolsCount` 現查
-（2026-10-13 靜態註冊 43 個；6 個舊高亮失敗樁已移除）。
+（2026-10-13 靜態註冊 40 個；6 個舊高亮失敗樁與 3 個伺服器恆回錯誤的舊匹配工具已移除）。
 
 ```bash
 claude mcp add --transport http naki http://localhost:8765/mcp
@@ -353,7 +353,7 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 | 系統 | 6 | `get_status` · `get_logs` · `replay_game` |
 | Bot 控制 | 7 | `bot_status` · `bot_ops` · `bot_trigger` |
 | 遊戲狀態與動作 | 8 | `game_state` · `game_action` · `game_confirm_new_round` |
-| 大廳 | 11 | `lobby_start_unified_match` · `lobby_account_info` |
+| 大廳 | 8 | `lobby_start_unified_match` · `lobby_account_info` |
 | 友人房 | 7 | `room_create` · `room_add_robot` · `room_quick_test` |
 | 表情 | 2 | `game_emoji` · `game_emoji_listen` |
 | 其他 | 2 | `execute_js` · `lobby_anti_idle` |

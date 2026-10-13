@@ -504,13 +504,22 @@ final class MCPProtocolSpecTests: XCTestCase {
         XCTAssertTrue(missing.isEmpty, "這些工具沒有 outputSchema：\(missing.sorted())")
     }
 
+    /// 工具移除後留下的 schema 條目會在這裡爆
+    @MainActor
+    func testNoOutputSchemaForUnregisteredTools() {
+        MCPToolRegistry.shared.registerBuiltInTools()
+        let orphans = NakiToolOutputSchemas.declaredToolNames.subtracting(MCPToolRegistry.shared.registeredToolNames)
+
+        XCTAssertTrue(orphans.isEmpty, "這些 schema 沒有對應工具：\(orphans.sorted())")
+    }
+
     @MainActor
     func testToolDefinitionsCarryOutputSchemaAndKeepOrder() {
         MCPToolRegistry.shared.registerBuiltInTools()
         let definitions = MCPToolRegistry.shared.allToolDefinitions()
 
         XCTAssertEqual(definitions.count, MCPToolRegistry.shared.registeredToolNames.count)
-        XCTAssertEqual(definitions.count, 43, "tools/list 的工具數；新增或移除工具時一併改這個數字")
+        XCTAssertEqual(definitions.count, 40, "tools/list 的工具數；新增或移除工具時一併改這個數字")
         for definition in definitions {
             let name = definition["name"] as? String ?? "?"
             let output = definition["outputSchema"] as? [String: Any]

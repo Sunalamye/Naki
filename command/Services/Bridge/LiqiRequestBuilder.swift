@@ -115,8 +115,6 @@ enum LiqiRequestBuilder {
     static let leaveRoomMethod = ".lq.Lobby.leaveRoom"
     /// `.lq.Lobby.fetchRoom`
     static let fetchRoomMethod = ".lq.Lobby.fetchRoom"
-    /// `.lq.Lobby.matchGame`
-    static let matchGameMethod = ".lq.Lobby.matchGame"
     /// `.lq.Lobby.cancelMatch`
     static let cancelMatchMethod = ".lq.Lobby.cancelMatch"
     /// `.lq.Lobby.startUnifiedMatch`（現行段位場入口；取代 `matchGame`）
@@ -322,16 +320,6 @@ enum LiqiRequestBuilder {
     //
     // 以下欄位編號全部取自 docs/protocol/liqi.json（已逐一查核），
     // server 是否接受仍須看每筆 RESPONSE；match mode 則由 current config 提供。
-
-    /// 段位場排隊（`ReqJoinMatchQueue`：match_mode=1, client_version_string=2）
-    static func matchGame(matchMode: UInt32, clientVersionString: String = "") -> LiqiRequestSpec {
-        var fields: [LiqiField] = []
-        if matchMode != 0 { fields.append(.varint(field: 1, value: UInt64(matchMode))) }
-        if !clientVersionString.isEmpty {
-            fields.append(.string(field: 2, value: clientVersionString))
-        }
-        return LiqiRequestSpec(method: matchGameMethod, fields: fields)
-    }
 
     /// 取消排隊（`ReqCancelMatchQueue`：match_mode=1）
     ///

@@ -63,7 +63,7 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 工具數以 live `tools/list`、`get_status.toolsCount` 或 `get_help.tools_count` 為準；
 `MCPToolRegistry.registerBuiltInTools()` 是程式端唯一真實來源，三個回報欄位都直接數 registry，
 所以文件與註解不再寫死數字（下表分組標題只是給人讀的索引，數字對不上時以 registry 為準）。
-2026-08-01 的 live snapshot 是 42，其中含 6 個已於 2026-08-02 移除的 highlight 失敗樁；2026-10-13 靜態註冊為 43 個（各分組合計相同）。
+2026-08-01 的 live snapshot 是 42，其中含 6 個已於 2026-08-02 移除的 highlight 失敗樁；2026-10-13 靜態註冊為 40 個（同日移除三個過時的匹配工具，原為 43 個；各分組合計相同）。
 
 ### 系統（6）
 
@@ -115,21 +115,20 @@ Repo agent 應先讀 `.claude/skills/naki-mcp-proxy/SKILL.md`，讓 proxy 先做
 |------|------|
 | `execute_js` | 在 WebView 執行 function body；取值必須 `return`。`timeout` 秒數（預設 30，上限 60），逾時回錯誤但頁面端 Promise 可能仍在背景執行 |
 
-### 大廳（11）
+### 大廳（8）
 
 | Tool | 作用 |
 |------|------|
 | `lobby_status` | Naki lobby／connection 狀態 |
-| `lobby_match_modes` | 從 current config 提供可用 match modes |
 | `lobby_match_sids` | 列出從遊戲流量觀察到的 `match_sid`（string，統一匹配用）；沒有靜態表，要先在遊戲裡自己點一次段位場入口才有資料 |
 | `lobby_start_unified_match` | 開始段位場匹配（現行入口，`.lq.Lobby.startUnifiedMatch`）；`match_sid` 不填則用最近觀察到的一組。會真的排進伺服器隊列 |
 | `lobby_cancel_unified_match` | 取消段位場匹配（`.lq.Lobby.cancelUnifiedMatch`） |
-| `lobby_start_match` | 舊匹配入口（`.lq.Lobby.matchGame`）；2026-08-09 實測一律回 error 1306，改用 `lobby_start_unified_match` |
-| `lobby_cancel_match` | 取消舊匹配入口的匹配 |
 | `lobby_account_info` | 查帳號資訊 |
 | `lobby_server_time` | 唯讀 server-time request／連線自檢 |
 | `lobby_heartbeat` | 送 lobby heartbeat |
 | `lobby_login_beat` | 送 login beat |
+
+`lobby_start_match`、`lobby_cancel_match`、`lobby_match_modes` 已於 2026-10-13 移除（live 1306 證據）。
 
 ### 防閒置（1）
 
@@ -193,7 +192,7 @@ game_emoji_auto_reply
 get_status, get_help, get_logs
 bot_status, bot_ops, bot_deep
 game_state, game_hand, game_ops
-lobby_status, lobby_match_modes, lobby_match_sids, lobby_account_info, lobby_server_time
+lobby_status, lobby_match_sids, lobby_account_info, lobby_server_time
 room_info, game_emoji_listen(clear=false)
 ```
 
@@ -214,7 +213,7 @@ game_emoji_listen(clear=true)
 bot_trigger
 bot_chi, bot_pon
 game_discard, game_action, game_action_verify, game_confirm_new_round, game_vote_game_end
-lobby_start_unified_match, lobby_cancel_unified_match, lobby_start_match, lobby_cancel_match, lobby_heartbeat, lobby_login_beat
+lobby_start_unified_match, lobby_cancel_unified_match, lobby_heartbeat, lobby_login_beat
 room_create, room_add_robot, room_start, room_join, room_leave, room_quick_test
 game_emoji
 ```

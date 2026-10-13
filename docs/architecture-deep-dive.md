@@ -174,7 +174,7 @@ p3-4 之後 Legacy path 走同一個引擎，只是模式永遠不是 `.auto`，
 
 `/js` 的 code 是 function body，要取得值必須顯式 `return`。遊戲動作、強制重連、建房、匹配與外觀變更都不是唯讀操作，只能在測試帳號與明確授權下執行。
 
-MCP registry 的靜態註冊是 43 個工具（2026-10-13 計數；2026-08-01 live 為 42，2026-08-02 移除 6 個高亮失敗樁後曾為 38）。live 數字請以 `tools/list` 或 `get_status.tools_count` 為準；工具表見 [mcp-server-guide.md](mcp-server-guide.md)。
+MCP registry 的靜態註冊是 40 個工具（2026-10-13 計數，當日移除三個過時匹配工具前為 43；2026-08-01 live 為 42，2026-08-02 移除 6 個高亮失敗樁後曾為 38）。live 數字請以 `tools/list` 或 `get_status.tools_count` 為準；工具表見 [mcp-server-guide.md](mcp-server-guide.md)。
 
 ## 測試分層
 

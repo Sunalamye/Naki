@@ -43,10 +43,6 @@ struct NakiMCPDependencies {
   /// 送出 Liqi REQUEST（動作類與大廳類工具的共同出口）
   let sendAction: SendActionAction
 
-  /// 段位場排隊 / 取消排隊（舊 `matchGame` 路徑）
-  let startMatch: StartMatchAction
-  let cancelMatch: CancelMatchAction
-
   /// 統一匹配排隊 / 取消（現行 `startUnifiedMatch` 路徑）
   let startUnifiedMatch: StartUnifiedMatchAction
   let cancelUnifiedMatch: CancelUnifiedMatchAction

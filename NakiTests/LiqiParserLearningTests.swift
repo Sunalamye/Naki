@@ -2,7 +2,7 @@
 //  LiqiParserLearningTests.swift
 //  NakiTests
 //
-//  LiqiParser 的 REQUEST 側副作用：取消匹配清待回填、mode_list 解碼、憑證類 trace 遮蔽。
+//  LiqiParser 的 REQUEST 側副作用：取消匹配清待回填、憑證類 trace 遮蔽。
 //
 
 import XCTest
@@ -30,11 +30,9 @@ final class LiqiParserLearningTests: XCTestCase {
         }
     }
 
-    /// 取消匹配與 mode_list 都在 `parse` 內同步生效（WP6 時序）：不 yield 直接斷言
-    func testCancelAndModeListTakeEffectWithoutYield() {
+    /// 取消匹配在 `parse` 內同步生效（WP6 時序）：不 yield 直接斷言
+    func testCancelTakesEffectWithoutYield() {
         isolateSharedObservedMatchSids(self)
-        ObservedMatchModes.shared.reset()
-        addTeardownBlock { @MainActor in ObservedMatchModes.shared.reset() }
         let parser = LiqiParser()
 
         ObservedMatchSids.shared.record(sid: "ranked", clientVersionString: "v1")
@@ -42,11 +40,6 @@ final class LiqiParserLearningTests: XCTestCase {
         _ = parser.parse(Data(LiqiEncoder.encodeRequest(method: cancel.method, payload: cancel.payload, msgId: 142)))
         ObservedMatchSids.shared.gameDidStart(is3P: true)
         XCTAssertNil(ObservedMatchSids.shared.observations[0].is3P)
-
-        _ = parser.parse(Data(LiqiEncoder.encodeRequest(
-            method: ".lq.Lobby.fetchCurrentMatchInfo",
-            payload: LiqiEncoder.encodeVarintField(field: 1, value: 3), msgId: 143)))
-        XCTAssertEqual(ObservedMatchModes.shared.knownModes, [3])
     }
 
     func testOtherRequestsKeepAwaitingGameKind() async {
@@ -55,25 +48,6 @@ final class LiqiParserLearningTests: XCTestCase {
         await parseRequest(".lq.Lobby.fetchServerTime", payload: [])
         ObservedMatchSids.shared.gameDidStart(is3P: true)
         XCTAssertEqual(ObservedMatchSids.shared.observations[0].is3P, true)
-    }
-
-    // MARK: mode_list
-
-    func testModeListDecodesUnpackedAndPackedIgnoringOtherFieldsAndWireTypes() async {
-        let method = ".lq.Lobby.fetchCurrentMatchInfo"
-        ObservedMatchModes.shared.reset()
-        addTeardownBlock { @MainActor in ObservedMatchModes.shared.reset() }
-
-        await parseRequest(method, payload:
-            LiqiEncoder.encodeVarintField(field: 1, value: 3)
-            + LiqiEncoder.encodeVarintField(field: 2, value: 99)
-            + [0x0D, 8, 0, 0, 0]
-            + LiqiEncoder.encodeVarintField(field: 1, value: 5))
-        XCTAssertEqual(ObservedMatchModes.shared.knownModes, [3, 5])
-
-        ObservedMatchModes.shared.reset()
-        await parseRequest(method, payload: LiqiEncoder.encodeLengthDelimited(field: 1, bytes: [7, 9]))
-        XCTAssertEqual(ObservedMatchModes.shared.knownModes, [7, 9])
     }
 
     // MARK: trace 遮蔽
