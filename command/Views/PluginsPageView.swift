@@ -17,6 +17,7 @@ import SwiftUI
 struct PluginsPageView: View {
     @Environment(\.naki) private var naki
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // 從 URL 匯入（§6.5）的狀態。importPreview 是**一批**（GitHub repo 可多個）。
     @State private var importURL = ""
@@ -29,8 +30,7 @@ struct PluginsPageView: View {
     @State private var confirmingOutbound = false            // L3 總開關由關轉開的確認
     @State private var selectedImports: Set<String> = []   // 預覽中勾選要引入的 id
 
-    // 移除插件的確認
-    @State private var pendingRemoval: String?
+    @State private var removal = RemovalConfirm()
     @State private var diagnostics: PluginDiagnostics?
     @State private var checkingDiagnostics = false
     @State private var tab: PluginTab = .plugins
@@ -70,8 +70,6 @@ struct PluginsPageView: View {
             tabBody
         }
         .frame(width: 900, height: 660)
-        .confirmationDialog(removeDialogTitle, item: $pendingRemoval,
-                            actions: removeDialogActions, message: removeDialogMessage)
         #else
         NavigationStack {
             VStack(spacing: 0) {
@@ -86,28 +84,61 @@ struct PluginsPageView: View {
                         .accessibilityIdentifier("plugins-done-button")
                 }
             }
-            .confirmationDialog(removeDialogTitle, item: $pendingRemoval,
-                                actions: removeDialogActions, message: removeDialogMessage)
         }
         #endif
     }
 
-    // 移除確認對話（抽成可重用的片段，兩個平台共用）
-    private var removeDialogTitle: LocalizedStringKey { "移除插件？" }
-    @ViewBuilder private func removeDialogActions(_ id: String) -> some View {
-        Button("移除「\(id)」", role: .destructive) {
-            naki.actions.removePlugin(id)
-            if selectedPluginId == id { selectedPluginId = nil }
+    /// 「移除」原地變成確認列；有效與無效插件共用。
+    private func removeControl(_ id: String) -> some View {
+        let armed = removal.pending == id
+        return VStack(alignment: .trailing, spacing: PanelLayout.Spacing.s4) {
+            HStack(spacing: PanelLayout.Spacing.s8) {
+                if armed {
+                    Button("取消", role: .cancel) { removal.cancel() }
+                        .keyboardShortcut(.cancelAction)
+                        .accessibilityIdentifier("plugin-remove-cancel-\(id)")
+                    Button("移除「\(id)」", role: .destructive) { confirmRemoval(id) }
+                        .accessibilityIdentifier("plugin-remove-confirm-\(id)")
+                } else {
+                    Button(role: .destructive) { removal.arm(id, now: .now) } label: {
+                        Label("移除", systemImage: "trash")
+                    }
+                    .accessibilityIdentifier("plugin-remove-\(id)")
+                }
+            }
+            if armed {
+                Text("會刪掉 \(id) 的整個插件目錄。可重新匯入或放檔案救回。")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        Button("取消", role: .cancel) {}
+        .animation(PanelLayout.animation(armed ? PanelLayout.valueChange : PanelLayout.exit,
+                                         reduceMotion: reduceMotion), value: armed)
     }
-    private func removeDialogMessage(_ id: String) -> some View {
-        Text("會刪掉 \(id) 的整個插件目錄。可重新匯入或放檔案救回。")
+
+    private func confirmRemoval(_ id: String) {
+        guard removal.confirm(id, now: .now) else { return }
+        withAnimation(PanelLayout.animation(PanelLayout.valueChange, reduceMotion: reduceMotion)) {
+            naki.actions.removePlugin(id)
+        }
+        if selectedPluginId == id { selectedPluginId = nil }
     }
 
     /// 分頁主體：macOS 用雙欄管理；iOS 改成單欄，避免橫向 iPhone 把 split view 收成空白。
-    @ViewBuilder
+    /// 移除確認面在這裡逾時退回、換插件或換分頁即收起；離開頁面時 @State 隨 sheet 消失。
     private var tabBody: some View {
+        Group { tabContent }
+            .task(id: removal) {
+                guard let id = removal.pending else { return }
+                do { try await Task.sleep(for: RemovalConfirm.timeout) } catch { return }
+                removal.expire(id)
+            }
+            .onChange(of: selectedPluginId) { _, id in removal.switchTarget(id) }
+            .onChange(of: tab) { removal.cancel() }
+    }
+
+    @ViewBuilder
+    private var tabContent: some View {
         switch tab {
         case .plugins:
 #if os(macOS)
@@ -293,10 +324,7 @@ struct PluginsPageView: View {
                     .toggleStyle(.switch)
                     .accessibilityIdentifier("plugin-toggle-\(d.id)")
                     Spacer()
-                    Button(role: .destructive) { pendingRemoval = d.id } label: {
-                        Label("移除", systemImage: "trash")
-                    }
-                    .accessibilityIdentifier("plugin-remove-\(d.id)")
+                    removeControl(d.id)
                 }
 
                 if let schema = m.settings, !schema.isEmpty {
@@ -334,9 +362,7 @@ struct PluginsPageView: View {
                 (d.failure.map { Text(verbatim: $0.text) } ?? Text("無效插件"))
                     .foregroundStyle(PanelLayout.danger)
                     .fixedSize(horizontal: false, vertical: true)
-                Button(role: .destructive) { pendingRemoval = d.id } label: {
-                    Label("移除", systemImage: "trash")
-                }
+                removeControl(d.id)
             }
         }
     }
@@ -701,5 +727,39 @@ private struct PluginStringSettingField: View {
 
     private func apply() {
         if text != current { commit(text) }
+    }
+}
+
+/// 移除確認面只屬於一個插件 id；出現後 `guardInterval` 內的確認不算數（防雙擊）。
+nonisolated struct RemovalConfirm: Equatable {
+    static let guardInterval: TimeInterval = 0.28
+    static let timeout: Duration = .seconds(4)
+
+    private(set) var pending: String?
+    private var armedAt: Date?
+
+    mutating func arm(_ id: String, now: Date) {
+        pending = id
+        armedAt = now
+    }
+
+    /// 回 true 才可刪，同時收起確認面。
+    mutating func confirm(_ id: String, now: Date) -> Bool {
+        guard pending == id, let armedAt, now.timeIntervalSince(armedAt) >= Self.guardInterval else { return false }
+        cancel()
+        return true
+    }
+
+    mutating func cancel() {
+        pending = nil
+        armedAt = nil
+    }
+
+    mutating func expire(_ id: String) {
+        if pending == id { cancel() }
+    }
+
+    mutating func switchTarget(_ id: String?) {
+        if pending != id { cancel() }
     }
 }
