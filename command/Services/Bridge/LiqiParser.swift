@@ -197,14 +197,6 @@ class LiqiParser {
         // 記錄請求以便匹配響應
         pendingRequests[msgId] = method
 
-        // 從遊戲自己的流量學 match_mode。寫死的對照表是錯的（見 ObservedMatchModes）。
-        if method == ".lq.Lobby.fetchCurrentMatchInfo" {
-            let modes = parseRepeatedVarint(payload, field: 1)
-            if !modes.isEmpty {
-                ObservedMatchModes.shared.record(modes: modes)
-            }
-        }
-
         // 從遊戲自己的流量學 match_sid。段位場入口已換成 startUnifiedMatch，而
         // match_sid 是字串且 liqi.json 裡沒有任何訊息會產生它（見 ObservedMatchSids）。
         //
@@ -275,22 +267,6 @@ class LiqiParser {
         return result
     }
 
-    /// 解析內部消息（根據方法名）
-    /// 取出某個 field 的所有 varint 值（repeated uint32 用）
-    ///
-    /// protobuf 的 repeated 標量可能是 packed 也可能逐筆出現；
-    /// `mode_list` 實測是逐筆（每個值一個 field 1 block），packed 也接。
-    private func parseRepeatedVarint(_ data: Data, field: Int) -> [Int] {
-        parseProtobufBlocks(data)
-            .filter { $0.fieldId == field }
-            .flatMap { block -> [Int] in
-                if block.wireType == 0 {
-                    return parseVarint(block.data, offset: 0).map { [$0.value] } ?? []
-                }
-                return block.wireType == 2 ? parsePackedVarints(block.data, decode: LiqiWire.decodeVarint) ?? [] : []
-            }
-    }
-
     /// 取出某個 field 的字串值（proto3 `string` 是 wire type 2）
     ///
     /// 只取第一個符合的 block：`match_sid`／`client_version_string` 都是 singular，
@@ -301,6 +277,7 @@ class LiqiParser {
             .stringValue
     }
 
+    /// 解析內部消息（根據方法名）
     private func parseInnerMessage(methodName: String, data: Data, isResponse: Bool = false) -> [String: Any]? {
         // 調試：顯示內部消息原始數據
         liqiLog("[LiqiParser] parseInnerMessage: method=\(methodName), dataSize=\(data.count)")

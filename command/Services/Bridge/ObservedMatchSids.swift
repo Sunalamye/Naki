@@ -21,7 +21,7 @@ import Foundation
 /// `ReqStartUnifiedMatch.match_sid`／`ReqCancelUnifiedMatch.match_sid` 兩處，
 /// **沒有任何 response 或 config 訊息會產生這個字串**（那份 descriptor 是 Laya
 /// 時代的遺留檔，見 CLAUDE.md）。而 `fetchCurrentMatchInfo` 的 `mode_list`
-/// （`ObservedMatchModes` 記的那組 `[2, 3, 17, 18]`）是 **request** 欄位、是舊的
+/// （舊 `ReqJoinMatchQueue` 的 `match_mode`，曾觀察到 `[2, 3, 17, 18]`）是 **request** 欄位、是舊的
 /// uint32 mode 命名空間，跟 `match_sid` 不是同一組東西——不能拿來當 sid。
 ///
 /// 真值一樣在眼前：玩家自己點段位場入口時，客戶端就會送一次
@@ -34,7 +34,7 @@ import Foundation
 final class ObservedMatchSids {
 
     /// `@MainActor` 隔離的 class 在 NakiTests host 釋放會 SIGABRT
-    /// （見 CLAUDE.md「專案結構的坑」），比照 `ObservedMatchModes` 補上。
+    /// （見 CLAUDE.md「專案結構的坑」）。
     nonisolated deinit { }
 
     static let shared = ObservedMatchSids()
@@ -54,7 +54,7 @@ final class ObservedMatchSids {
         /// 這個 sid 開出來的是不是三麻。`nil` = 還不知道（尚未打過）。
         ///
         /// **實證而不是查表**：`match_sid` 裡雖然有 mode id，但把「哪些 id 是三麻」
-        /// 寫死成對照表正是 `ObservedMatchModes` 踩過的坑（舊表整組偏移一格）。
+        /// 寫死成對照表正是舊 `match_mode` 表踩過的坑（整組偏移一格）。
         /// 這裡改成送出後看**實際開出來的對局**是什麼（`start_game` 的 `is3P`），
         /// 打過一次就確定，沒打過就誠實地是 `nil`。
         var is3P: Bool?

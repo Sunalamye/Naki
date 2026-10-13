@@ -104,7 +104,7 @@ nonisolated struct LiqiResponseRecord {
         1004: "該 socket 未完成登入（送到沒做過 oauth2Login 的那條 /gateway），或已在對局中",
         1023: "對局進行中，不能建房／離房",
         1105: "已在友人房中，不能再建房",
-        1306: "match_mode 不存在（對照表偏移，見 lobby_match_modes 的 warning）"
+        1306: "match_mode 不存在（舊 matchGame 對任何 mode 實測都回此碼，已改走 startUnifiedMatch）"
     ]
 
     /// 人看得懂的錯誤描述

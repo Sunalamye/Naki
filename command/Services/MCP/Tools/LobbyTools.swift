@@ -10,8 +10,7 @@
 //  Unity WebGL 客戶端下 `GameMgr` **實測不存在**，這些工具是靜默失敗。
 //
 //  新做法：直接送 `.lq.Lobby.*` REQUEST。所有欄位編號都查過
-//  docs/protocol/liqi.json（見各工具註解），但**伺服器是否接受、match_mode 的
-//  數值語意**仍需真實登入驗證。
+//  docs/protocol/liqi.json（見各工具註解），但**伺服器是否接受**仍需真實登入驗證。
 //
 //  移除的工具：
 //  - `lobby_match_status`：協定沒有「查詢自己排隊狀態」的方法（客戶端自己記），
@@ -19,6 +18,8 @@
 //  - `lobby_navigate`：純 UI 換頁，Unity 下沒有可操作的 UI 層，也沒有協定等價物。
 //  - `lobby_idle_status`：讀 `GameMgr.Inst._last_heatbeat_time`；改由 `lobby_anti_idle`
 //    回報 Naki 自己送出的心跳狀態。
+//  - 舊段位場入口的 start／cancel／match_modes 三個工具：2026-10-13 移除。
+//    `.lq.Lobby.matchGame` 對 match_mode 1／2／3 一律回 error 1306，現行入口是 `startUnifiedMatch`。
 //
 
 import Foundation
@@ -56,125 +57,6 @@ struct LobbyStatusTool: MCPTool {
     }
 }
 
-// MARK: - Match Mode List Tool
-
-/// 段位場 match_mode：**從遊戲流量觀察**，不是寫死的表
-///
-/// 舊版回一張 Laya 時代觀察來的靜態表，整組偏移一格（銅之間四人東實際是 2，
-/// 表上寫 1），送出去伺服器回 error 1306。`liqi.json` 幫不上忙——`match_mode`
-/// 是 uint32，沒有 enum 定義。
-///
-/// 真值一直在流量裡：玩家點進場次畫面時，客戶端持續送 `fetchCurrentMatchInfo`，
-/// 其 `mode_list` 就是該畫面所有入口的 match_mode。
-struct MatchModeListTool: MCPTool {
-    static let name = "lobby_match_modes"
-    static let description = """
-        列出從遊戲流量觀察到的 match_mode。⚠️ 不是靜態對照表——舊表整組偏移一格且已移除。\
-        要有資料，請先在遊戲裡點進段位場的場次畫面（客戶端會開始輪詢 fetchCurrentMatchInfo）。
-        """
-    static let inputSchema = MCPInputSchema.empty
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        var result = ObservedMatchModes.shared.dictionary
-        result["source"] = "遊戲自己送的 .lq.Lobby.fetchCurrentMatchInfo（mode_list）"
-        result["knownErrorForBadMode"] = "1306 = match_mode 不存在"
-        return result
-    }
-}
-
-// MARK: - Start Match Tool
-
-/// 開始段位場匹配
-struct StartMatchTool: MCPTool {
-    static let name = "lobby_start_match"
-    static let description = """
-        ⚠️ **已過時，請改用 lobby_start_unified_match**。送出 .lq.Lobby.matchGame\
-        （ReqJoinMatchQueue：match_mode=1, client_version_string=2）——2026-08-09 實測\
-        match_mode 1／2／3 一律回 error 1306，同一時間客戶端自己送的是 startUnifiedMatch。\
-        保留這個工具只為了驗證舊路徑是否復活；正常開局請走 lobby_start_unified_match。
-        """
-    static let inputSchema = MCPInputSchema(
-        properties: [
-            "match_mode": .integer("匹配模式 ID（uint32）。⚠️ 沒有可信的靜態對照表——舊表整組偏移一格已移除，且 lobby_match_modes 觀察到的值屬於 fetchCurrentMatchInfo 的命名空間，實測送進 matchGame 會回 1306"),
-            "client_version_string": .string("客戶端版本字串（可選，空字串則不送此欄位）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
-        ],
-        required: ["match_mode"]
-    )
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        guard let matchMode = arguments["match_mode"] as? Int else {
-            throw MCPToolError.missingParameter("match_mode")
-        }
-        // 不再用白名單擋：舊白名單本身就是錯的（見 lobby_match_modes 的 warning），
-        // 擋掉正確值反而更糟。只做基本範圍檢查，合法性交給伺服器判斷。
-        guard matchMode > 0, matchMode < 100 else {
-            throw MCPToolError.invalidParameter("match_mode", expected: "1–99（正確值請攔 fetchCurrentMatchInfo）")
-        }
-        let nakiContext = try context.naki()
-
-        // spec 的組裝在 `StartMatchAction`：工具只負責參數驗證與輸出格式，
-        // 不再自己拼 protobuf 欄位——那是「同一個請求兩個地方組」的漂移來源。
-        let result = await nakiContext.startMatch(
-            matchMode: UInt32(matchMode),
-            clientVersionString: arguments["client_version_string"] as? String ?? "",
-            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
-        context.log("🎮 lobby_start_match match_mode=\(matchMode)")
-        return LiqiToolResult.dictionaryLoggingRejection(result.outcome, spec: result.spec,
-                                                         extra: ["match_mode": matchMode])
-    }
-}
-
-// MARK: - Cancel Match Tool
-
-/// 取消匹配
-struct CancelMatchTool: MCPTool {
-    static let name = "lobby_cancel_match"
-    static let description = """
-        取消段位場匹配。送出 .lq.Lobby.cancelMatch（ReqCancelMatchQueue：match_mode=1）。\
-        ⚠️ match_mode 為必填：伺服器要知道取消哪一條隊列（與舊版無參數的行為不同）。
-        """
-    static let inputSchema = MCPInputSchema(
-        properties: [
-            "match_mode": .integer("要取消的匹配模式 ID（與 lobby_start_match 相同）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
-        ],
-        required: ["match_mode"]
-    )
-
-    private let context: MCPContext
-
-    init(context: MCPContext) {
-        self.context = context
-    }
-
-    func execute(arguments: [String: Any]) async throws -> Any {
-        guard let matchMode = arguments["match_mode"] as? Int else {
-            throw MCPToolError.missingParameter("match_mode")
-        }
-        let nakiContext = try context.naki()
-
-        let result = await nakiContext.cancelMatch(
-            matchMode: try MCPArguments.uint32(matchMode, "match_mode"),
-            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
-        context.log("⏹️ lobby_cancel_match match_mode=\(matchMode)")
-        return LiqiToolResult.dictionaryLoggingRejection(result.outcome, spec: result.spec,
-                                                         extra: ["match_mode": matchMode])
-    }
-}
-
 // MARK: - Unified Match Tools
 
 /// 統一匹配 `match_sid`：**從遊戲流量觀察**，因為沒有任何地方可以查
@@ -187,8 +69,7 @@ struct MatchSidListTool: MCPTool {
     static let description = """
         列出從遊戲流量觀察到的 match_sid（統一匹配用）。⚠️ 沒有靜態表可查——\
         liqi.json 裡沒有任何訊息會產生 match_sid。要有資料，請先在遊戲裡自己點一次\
-        段位場的場次入口，客戶端會送 .lq.Lobby.startUnifiedMatch，Naki 就攔得到。\
-        注意 match_sid（string）與 lobby_match_modes 的 match_mode（uint32）不是同一組東西。
+        段位場的場次入口，客戶端會送 .lq.Lobby.startUnifiedMatch，Naki 就攔得到。
         """
     static let inputSchema = MCPInputSchema.empty
 
@@ -210,8 +91,7 @@ struct StartUnifiedMatchTool: MCPTool {
         開始段位場匹配（現行入口）。送出 .lq.Lobby.startUnifiedMatch\
         （ReqStartUnifiedMatch：match_sid=1, client_version_string=2）。\
         match_sid 是**字串**，用 lobby_match_sids 查（從流量觀察）；不填則用最近一次\
-        觀察到的那一組。⚠️ 真的會排進伺服器隊列，請只在測試帳號使用。\
-        舊的 lobby_start_match（.lq.Lobby.matchGame）2026-08-09 實測一律回 error 1306。
+        觀察到的那一組。⚠️ 真的會排進伺服器隊列，請只在測試帳號使用。
         """
     static let inputSchema = MCPInputSchema(
         properties: [
