@@ -25,6 +25,9 @@ enum PanelLayout {
         !(horizontal == .compact && vertical == .regular)
     }
 
+    /// 數值改變（點數）：不回彈，數字不會短暫顯示一個不存在的值。
+    static let valueChange: Animation = .smooth(duration: 0.4)
+
     /// 開啟「減少動態效果」時不做動畫。
     static func animation(_ base: Animation = .easeInOut(duration: 0.2),
                           reduceMotion: Bool) -> Animation? {

@@ -176,6 +176,8 @@ struct GameSummaryDisclosure: View {
                         if !compact {
                             Spacer(minLength: 4)
                             Text(myScore).monospacedDigit()
+                                .contentTransition(.numericText(value: Double(myScoreValue ?? 0)))
+                                .animation(PanelLayout.animation(PanelLayout.valueChange, reduceMotion: reduceMotion), value: myScoreValue)
                             Spacer(minLength: 4)
                             Text(botStatus.modelDisplayKey)
                         }
@@ -236,11 +238,13 @@ struct GameSummaryDisclosure: View {
         }
     }
 
-    private var myScore: String {
+    private var myScoreValue: Int? {
         let id = gameState.playerId
-        guard id >= 0, id < gameState.scores.count else { return "—" }
-        return gameState.scores[id].formatted(.number)
+        guard id >= 0, id < gameState.scores.count else { return nil }
+        return gameState.scores[id]
     }
+
+    private var myScore: String { myScoreValue?.formatted(.number) ?? "—" }
 }
 
 // MARK: - Details Panel
