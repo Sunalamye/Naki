@@ -2,7 +2,7 @@
 //  SettingsStoreTests.swift
 //  NakiTests
 //
-//  `SettingsStore(defaults:)` 的注入縫：實例的每一次讀寫都落在注入的 suite，不碰 `.standard`。
+//  `SettingsStore(defaults:)` 的注入縫：實例的每一次讀寫都落在注入的 suite，不碰預設落點 `SettingsStore.standard`。
 //
 
 import XCTest
@@ -44,10 +44,10 @@ final class SettingsStoreInjectionTests: XCTestCase {
     ]
 
     private func standardSnapshot() -> [String] {
-        Self.allKeys.map { String(describing: UserDefaults.standard.object(forKey: $0)) }
+        Self.allKeys.map { String(describing: SettingsStore.standard.object(forKey: $0)) }
     }
 
-    /// 每個持久化屬性都改成「與預設不同」的值，寫入必須全落在注入的 suite，`.standard` 一個 key 都不變。
+    /// 每個持久化屬性都改成「與預設不同」的值，寫入必須全落在注入的 suite，預設落點一個 key 都不變。
     func testInstanceUsesInjectedSuite() {
         let before = standardSnapshot()
         let store = SettingsStore(defaults: defaults)
@@ -94,7 +94,7 @@ final class SettingsStoreInjectionTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: SettingsStore.cloudBaseURLKey), "https://example.invalid")
         XCTAssertEqual(defaults.string(forKey: SettingsStore.cloudModel4PKey), "m4")
         XCTAssertEqual(defaults.string(forKey: SettingsStore.cloudModel3PKey), "m3")
-        XCTAssertEqual(standardSnapshot(), before, "寫入不得外漏到 .standard")
+        XCTAssertEqual(standardSnapshot(), before, "寫入不得外漏到預設落點")
     }
 
     /// 初始值只讀注入的 suite：suite 有值就讀到，空 suite 回各自的預設。

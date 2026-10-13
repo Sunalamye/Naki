@@ -75,8 +75,13 @@ enum MajsoulServer: String, CaseIterable, Identifiable, Sendable {
 @MainActor
 final class SettingsStore {
 
-    /// `.standard` 的唯一出入口：inline 初值（`init()` 路徑）、`defaults`，以及所有 `load…(from:)`／`save…(to:)` 的預設參數都從這裡取。
-    private nonisolated static var standard: UserDefaults { UserDefaults.standard }
+    /// test host 就是 App 本體，`NakiRuntime()` 在任何 `setUp` 之前就建構。
+    nonisolated static let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
+    /// 預設落點的唯一出入口（inline 初值（`init()` 路徑）、`defaults`、`AutoPlayModeStore.defaults`、所有 `load…(from:)`／`save…(to:)` 的預設參數）；
+    /// test host 改落 `naki.tests.host`，不碰真實設定檔。
+    nonisolated static let standard: UserDefaults =
+        isTestHost ? UserDefaults(suiteName: "naki.tests.host")! : .standard
 
     /// 所有寫入與 plugin 設定讀取的落點；正式碼是 `standard`，測試用 `init(defaults:)` 換成獨立 suite。
     @ObservationIgnored private var defaults = SettingsStore.standard

@@ -146,8 +146,8 @@ nonisolated enum AutoPlayModeStore {
     /// 被合併掉的舊 key（ContentView 舊版 `@AppStorage("AutoPlayMode")`）
     static let legacyKey = "AutoPlayMode"
 
-    /// 預設的存檔位置；正式碼是 `.standard`，測試換成獨立 suite，不碰真實設定檔。
-    nonisolated(unsafe) static var defaults: UserDefaults = .standard
+    /// 預設的存檔位置；與 `SettingsStore.standard` 同源（test host 不落真實設定檔），個別測試再換成獨立 suite。
+    nonisolated(unsafe) static var defaults: UserDefaults = SettingsStore.standard
 
     /// 沒有任何存檔時的預設模式
     static let defaultMode: AutoPlayMode = .auto

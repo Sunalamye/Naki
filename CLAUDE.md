@@ -200,7 +200,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## 2026-09-30 審查修正後的行為
 
-以下都有單測（NakiTests 1003 個、0 failures，2026-10-13 主線整合閘數字，`.swfd/logs/merge-main/test-5f78080.log`），**除非註明否則沒有 live 驗證**。
+以下都有單測（NakiTests 996 個、0 failures（2026-10-13，`.swfd/logs/wp-0p/verify-test-full.log`）；基底 15cea92 為 994，本包加 2），**除非註明否則沒有 live 驗證**。
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。
@@ -240,7 +240,7 @@ app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，`NakiTests` targ
 **測試會碰到用戶的真實設定檔。** `NakiTests` 的 test host 就是 App 本體，與 Naki app 共用 `UserDefaults.standard`，也就是 `~/Library/Preferences/org.39c154f25912233a.akagi.plist`。`TEST_RUNNER_CFFIXED_USER_HOME` 隔離不了它。後果與規則：
 
 - 測試必須用隔離 suite，走現有的注入點：`L10n.defaults`、`SettingsStore(defaults:)`、`AutoPlayModeStore.defaults`（WP9c 加入，合併於 `5f78080`；本分支合併前的程式碼沒有它）。測試用 `.standard` 備份還原寫法仍是汙染來源。
-- test host 一啟動，`NakiApp` 的 `@State runtime = NakiRuntime()` 就在任何 `setUp` 之前建構，`adoptStoredAutoPlayMode` 會對 `.standard` 做同值寫入。沒有 `naki.autoPlayMode` key 的乾淨機器上，任何一次測試執行都會新建此 key（基底即有，尚未處理）。
+- test host 一啟動，`NakiApp` 的 `@State runtime = NakiRuntime()` 就在任何 `setUp` 之前建構，之後 ContentView 的自動檢查更新也會寫 `lastUpdateCheck`。所以 test host 的預設落點整體改成 `naki.tests.host` suite：`SettingsStore.standard` 依 `SettingsStore.isTestHost` 選擇，`AutoPlayModeStore.defaults` 取同一個值（WP-0p，`TestHostDefaultsTests` 鎖住）。本專案程式碼中仍落在 `.standard` 的只剩 `L10n.defaults`（只讀）、`ObservedMatchSids.shared`（測試以 `redirect` 隔離）、ContentView 的 `@AppStorage`（只讀）；AppKit 視窗 frame autosave 等框架自己的寫入不在此列。test host 中 `L10n` 與 `@AppStorage` 讀 `.standard`，`SettingsStore` 寫 host suite，讀寫分家。
 - `defaults read org.39c154f25912233a.akagi` 對此 app 會回 `Domain ... not found`（它解析到 `~/Library/Containers/org.39c154f25912233a.akagi/` 這個殘留目錄；App 本身不是 sandbox，實際檔案在 `~/Library/Preferences`）。查設定值要用 `plutil -p ~/Library/Preferences/org.39c154f25912233a.akagi.plist`。
 - 隔離 suite 結束時用 `removePersistentDomain`，但它**不刪檔**：`~/Library/Preferences` 會累積 `naki.tests.*` 空殼 plist（2026-10-13 約一萬個）。需要清理由用戶決定，不要在腳本裡自動刪。
 

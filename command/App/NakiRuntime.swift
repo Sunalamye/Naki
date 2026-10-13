@@ -97,7 +97,7 @@ final class NakiRuntime {
         configureLiqiSender()
         adoptStoredAutoPlayMode()
         // test host 就是 App 本體：不跳過的話每次跑測試都會綁 8765 並啟動引擎
-        let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let isTestHost = SettingsStore.isTestHost
         if !isTestHost { startAutoPlayEngine() }
 
         actions = makeActions()
