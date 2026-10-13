@@ -895,3 +895,8 @@
 - 後續項（非阻擋）：`cancelMatch` builder 死碼與兩條用它的測試；`tool-catalog.md` 分組標題合計 36 與檔頭 40 矛盾（基準既有）；`webui-tester/SKILL.md:211`「42-tool」（基準既有）；`get_help` 文字無測試鎖；每跑一次全套測試 `~/Library/Preferences` 多約 56 個 `naki.tests.*` 空 plist（`removePersistentDomain` 不刪檔，B 塊）。
 - 未驗證：live `tools/list` 是否 40（主線以合併態 Release build 重啟 app 後補查，見下一條）。
 - live 補查：以合併態 `1e1489d` 的 Release build 重裝 `/Applications/Naki.app` 並重啟（未登入），`tools/list` 回 40、`get_status.toolsCount` 40、三個 match 工具不在、unified 三個在（`.swfd/logs/wp7d-verify/live-tools-list-1e1489d.txt`）。
+- **三麻 live（2026-10-13 第二局，用戶授權重登）**：`room_quick_test` 三人東（PC ×2），自家座位 0，`AkagiSanmaBot` 本地引擎，全局自動完成 1 位 42800（流局 1、和 2；打牌 31、拔北 3、過 8、和 2；拒絕 0、fault 仍只有 `ActionMJStart` 1 筆）。證據 `.swfd/logs/live-20261013-3p/`。
+  - **強制重連量測**（東 2 局中 `forceReconnect`）：重放 125 個歷史事件，bridge「回應配不到」**0 筆**；`AkagiSanmaBot`「授權序號與事件不一致」**41 行**，全部落在重連後 3 秒的重放視窗（19／10／12），視窗外 0 行；重連後 bot 續送 10 次、無拒絕。結論：WP1 預測的「每次重連數十行」成立但只在重放期間，屬可降級雜訊 → **下一輪**：重放期間把該行降 `.trace` 或抑制（`reconnect-measure.txt`）。
+  - 座位 0 在三麻同樣明送（`.absent` 0 筆），U2 補 0 路徑三麻也未觸發。
+  - 槓：只有對手一次暗槓，仍無自家槓樣本。
+  - 副作用發現（後續項）：強制重連會讓錄影丟棄重連前的 125 個事件（「沒有 end_game」）並從重連點重錄，`replay-check` 只能重跑後半（102 事件 17 決策 0 錯誤，指紋 `8a8b56a40ce608df`）；`skip:sanmaUnsupported` 這個理由標籤在三麻局間／重連無 oplist 時出現 3 次，標籤誤導，實際是沒有 oplist。
