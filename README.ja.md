@@ -337,7 +337,7 @@ curl -X POST http://localhost:8765/js -d 'return window.location.href'
 Debug API と同じ port を共有します。プロトコルは **2026-07-28（stateless）** に更新され、従来の
 `initialize` handshake とも互換です：ツールの結果は `structuredContent` で返り（「JSON を JSON 文字列に包む」形式ではなくなりました）、
 loopback 以外の Origin には 403 を返します。ツール数は `tools/list` または `get_status.toolsCount` でその都度確認してください
-（2026-10-13 時点で静的に 43 個を登録。旧ハイライトの失敗スタブ 6 個は削除済み）。
+（2026-10-13 時点で静的に 40 個を登録。旧ハイライトの失敗スタブ 6 個と、サーバーが常にエラーを返す旧マッチ系ツール 3 個は削除済み）。
 
 ```bash
 claude mcp add --transport http naki http://localhost:8765/mcp
@@ -348,7 +348,7 @@ claude mcp add --transport http naki http://localhost:8765/mcp
 | システム | 6 | `get_status` · `get_logs` · `replay_game` |
 | Bot 制御 | 7 | `bot_status` · `bot_ops` · `bot_trigger` |
 | ゲーム状態とアクション | 8 | `game_state` · `game_action` · `game_confirm_new_round` |
-| ロビー | 11 | `lobby_start_unified_match` · `lobby_account_info` |
+| ロビー | 8 | `lobby_start_unified_match` · `lobby_account_info` |
 | 友人戦 | 7 | `room_create` · `room_add_robot` · `room_quick_test` |
 | スタンプ | 2 | `game_emoji` · `game_emoji_listen` |
 | その他 | 2 | `execute_js` · `lobby_anti_idle` |

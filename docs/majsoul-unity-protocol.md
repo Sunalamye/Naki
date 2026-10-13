@@ -27,7 +27,7 @@
 | 三麻 | 本地引擎是 Akagi 三麻（`AkagiSanmaBot`，default strength：模仿天鳳人類，非 Mortal 等級；2026-10-09 D23），雲端啟用時雲端優先；不會退回四麻模型。自動打牌在三麻 fail-closed（推薦須來自雲端 3p 或本地 Akagi 三麻），伺服器授權的和牌照送（2026-09-30）；三麻 live 已驗（2026-10-09 三局，`.swfd/logs/s3-live-{4,5,6}`） |
 | 自摸保護 | resolver 純邏輯與整合的兩個漏洞（漏觸發、錯誤完成）在 source 層已收斂，有單測與注入式 fixture；**live 對局未驗證** |
 | 遊戲內高亮 | 現行 WebGL hook 會執行；尚未證明每次都染到正確牌／按鈕 |
-| MCP | 靜態計數 43 個（`MCPToolRegistry` 的 `register(` 呼叫，2026-10-13；未 live 複查）。歷史：2026-08-01 live `tools/list` 為 42 個，2026-08-02 移除 6 個高亮失敗樁後為 38 |
+| MCP | 靜態計數 40 個（`MCPToolRegistry` 的 `register(` 呼叫，2026-10-13；未 live 複查）。歷史：2026-08-01 live `tools/list` 為 42 個，2026-08-02 移除 6 個高亮失敗樁後為 38，2026-10-13 移除三個過時匹配工具前為 43 |
 
 ## 現場唯讀查詢
 
@@ -39,7 +39,7 @@
 - loader、framework、wasm、data 都來自 `chs_t-WebGL-release-4.0.45(45)`。
 - `unityInstance` 是 script-scope 的裸識別字；`window.unityInstance` 不存在。
 - `window.__nakiWebSocket` 與 `window.__nakiHighlight` 存在；highlighter 的 `tinted` counter 持續增加。
-- 2026-08-01 live `POST /mcp` 的 `tools/list` 回傳 42 個工具；此後移除 6 個高亮失敗樁，後續又新增工具，2026-10-13 靜態註冊為 43 個（數字以下次 live 查詢為準）。
+- 2026-08-01 live `POST /mcp` 的 `tools/list` 回傳 42 個工具；此後移除 6 個高亮失敗樁，後續又新增工具，2026-10-13 靜態註冊為 43 個，同日移除三個過時匹配工具後為 40 個（數字以下次 live 查詢為準）。
 
 這些 probe 是讀取狀態，不會送遊戲動作。最後重查時，running Naki 的 `/help` 已回 version 3.1 與 42 tools；這只證明部署中的 help／registry 版本，因為架構段落本身是程式內的靜態字串。Unity 客戶端由 `/js` probe 證明，Liqi 動作由 source 與實際 trace 證明；任何一項都不能替尚未走到的自摸、失敗重試或視覺流程背書。running build 未附可識別 commit，因此 source help／Debug 首頁的未提交後續調整仍視為 working-tree candidate。
 
@@ -306,7 +306,7 @@ res/config/lqc.lqbin prefix     v0.11.252.w
 
 ## Debug／MCP 現況
 
-Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-10-13 靜態註冊 43 個工具（live 數字請現查 `tools/list`）：
+Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-10-13 靜態註冊 40 個工具（live 數字請現查 `tools/list`）：
 
 | 類別 | 數量 |
 |------|-----:|
@@ -314,7 +314,7 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-10-13 靜態
 | Bot | 7 |
 | 遊戲狀態／動作（含局間確認、投票結束） | 8 |
 | JavaScript | 1 |
-| 大廳（含統一匹配） | 11 |
+| 大廳（含統一匹配） | 8 |
 | 防閒置 | 1 |
 | 友人房 | 7 |
 | 表情 | 2 |

@@ -1,6 +1,6 @@
 ---
 name: naki-mcp-proxy
-description: Live-only router for Naki's MCP tools (static count 38; always confirm with live tools/list). Use for every Naki status, game, bot, lobby, room, Unity probe, or action request; discover the running registry first and never answer from a stale catalog.
+description: Live-only router for Naki's MCP tools (static count 40; always confirm with live tools/list). Use for every Naki status, game, bot, lobby, room, Unity probe, or action request; discover the running registry first and never answer from a stale catalog.
 allowed-tools:
   - Task
   - Read
@@ -20,7 +20,7 @@ Base directory: {baseDir}
 ## Current contract
 
 - Default endpoint: `http://127.0.0.1:8765/mcp`.
-- 2026-08-01 的 live registry 基準為 42 tools；2026-08-02 移除 6 個 highlight 失敗樁後靜態計數 38。數字、名稱與參數一律以每次 live `tools/list` 為準。
+- 2026-08-01 的 live registry 基準為 42 tools；2026-08-02 移除 6 個 highlight 失敗樁後靜態計數 38，其後新增工具至 43，2026-10-13 移除三個過時匹配工具後為 40。數字、名稱與參數一律以每次 live `tools/list` 為準。
 - 協定雙版本並存（2026-08-02 升級）：請求 `params._meta` 帶 `io.modelcontextprotocol/protocolVersion` 就走 **2026-07-28**（stateless、無 handshake）；不帶則走 `initialize` handshake 的 legacy 語意（2025-03-26 ～ 2025-11-25）。兩條路徑的工具集完全相同。
 - **工具結果讀 `result.structuredContent`**（真的 JSON 物件）。`content[0].text` 只是同一份 JSON 的字串化 fallback；不要再對回應做 `tr -d '\\'` 去跳脫。每個工具都有 `outputSchema`，但它只宣告程式碼保證的欄位（`additionalProperties: true`），不是完整欄位清單。
 - 走 2026-07-28 時：`server/discover` 可一次取得 `supportedVersions` / `capabilities` / serverInfo；result 帶 `resultType: "complete"` 與 `_meta['io.modelcontextprotocol/serverInfo']`；`tools/list` 帶 `ttlMs` + `cacheScope`；版本不支援回 `-32022`（HTTP 400）並列出支援版本。
@@ -48,7 +48,7 @@ Base directory: {baseDir}
 | Server／工具 | `get_status`, `get_help` | `clear_logs` 僅在明確要求時 |
 | Bot／AI | `bot_status`, `bot_ops`, `bot_deep` | `bot_trigger`, `bot_chi`, `bot_pon`, `bot_sync` |
 | 對局狀態 | `game_state`, `game_hand`, `game_ops` | `game_action_verify`；必要時 `game_discard`／`game_action` |
-| 大廳 | `lobby_status`, `lobby_match_modes`, `lobby_account_info`, `lobby_server_time` | `lobby_start_match`, `lobby_cancel_match`, heartbeat tools |
+| 大廳 | `lobby_status`, `lobby_match_sids`, `lobby_account_info`, `lobby_server_time` | `lobby_start_unified_match`, `lobby_cancel_unified_match`, heartbeat tools |
 | 友人房 | `room_info` | `room_create`, `room_add_robot`, `room_start`, `room_join`, `room_leave`, `room_quick_test` |
 | 表情 | `game_emoji_listen`（`clear=false`） | `game_emoji` 或 `clear=true` |
 | Unity 頁面 | `execute_js` 的唯讀 probe | 不用 JS 改遊戲狀態或模擬點擊 |
@@ -75,13 +75,13 @@ Connect to the configured Naki MCP server.
 - 優先用 `game_action_verify`。`sent.success=true` 只表示 bytes 已交給 WebSocket，不等於 server 接受；要看同 msgId RESPONSE、`verified`、oplist/snapshot 推進，以及終局時的權威 action。這些欄位都在 `structuredContent` 裡，直接讀，不要從 `content[0].text` 解字串。
 - 只有工具實際回傳的資料可標「已查到」。連線失敗、無對局或 snapshot 缺失都要標「未驗證」。
 
-## Current tool shape（靜態計數 38；live `tools/list` 才是真值）
+## Current tool shape（靜態計數 40；live `tools/list` 才是真值）
 
 | Category | Count | Notes |
 |---|---:|---|
 | System | 6 | status/help/logs/replay |
 | Bot | 7 | Swift state + Liqi actions |
-| Game | 6 | state/hand/ops/action |
+| Game | 8 | state/hand/ops/action/confirm/vote |
 | JavaScript | 1 | read-only Unity probe |
 | Lobby | 8 | `.lq.Lobby.*` |
 | Anti-idle | 1 | Swift heartbeat scheduler |
@@ -107,7 +107,7 @@ Do not replace them with `execute_js` that reads `DesktopMgr`, mutates the canva
 
 | Resource | Purpose |
 |---|---|
-| `{baseDir}/references/tool-catalog.md` | 2026-08-01 42-tool snapshot and safety classification; routing hint only |
+| `{baseDir}/references/tool-catalog.md` | 2026-08-01 42-tool snapshot (static count now 40) and safety classification; routing hint only |
 | `{baseDir}/references/usage-patterns.md` | Live-only workflows and verification rules |
 
 Static resources help choose what to query; they never replace a live Naki call.

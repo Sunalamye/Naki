@@ -76,7 +76,7 @@
 
 **Naki 現況**：`docs/protocol/liqi.json` 是靜態快照。CLAUDE.md 寫著「2026-08-01 repo snapshot 與 live CDN byte-identical」，但**沒有任何機制維持這件事為真**。
 
-**今天的代價**：`lobby_match_modes` 的對照表整組偏移一格（銅之間四人東實際是 2，表上寫 1），而且 `liqi.json` 幫不上忙——`match_mode` 沒有對應 enum。最後是攔遊戲自己送的 `fetchCurrentMatchInfo` 才解出 `[2, 3, 17, 18]`。
+**今天的代價**：`lobby_match_modes`（已於 2026-10-13 移除）的對照表整組偏移一格（銅之間四人東實際是 2，表上寫 1），而且 `liqi.json` 幫不上忙——`match_mode` 沒有對應 enum。最後是攔遊戲自己送的 `fetchCurrentMatchInfo` 才解出 `[2, 3, 17, 18]`。
 
 **建議**：
 

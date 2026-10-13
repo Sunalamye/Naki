@@ -96,12 +96,12 @@ For actual game state, follow with live `game_state`, `game_hand`, or `game_ops`
 live tools/list
   → lobby_status
   → lobby_account_info (only when account data is needed)
-  → lobby_match_modes (only when mode choices are needed)
+  → lobby_match_sids (only when match_sid choices are needed)
 ```
 
 `lobby_status` and `lobby_account_info` send live lobby requests. Do not replace them with a remembered status or old match-mode table.
 
-Starting or cancelling a match is not a query. Require an explicit user request, refresh live `lobby_match_modes`, then call `lobby_start_match` or `lobby_cancel_match` with its current schema.
+Starting or cancelling a match is not a query. Require an explicit user request, refresh live `lobby_match_sids`, then call `lobby_start_unified_match` or `lobby_cancel_unified_match` with its current schema.
 
 ## Pattern 6: Friend-room workflow
 

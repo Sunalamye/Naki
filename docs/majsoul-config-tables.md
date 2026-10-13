@@ -135,7 +135,7 @@ python3 tools/dump_sheet.py /path/to/lqc.lqbin item_definition.view 20
 | 25 / 26 | 王座間 | 三人東 / 三人南 | 20501 | 20720 |
 
 `mode` 欄：1 = 四人東、2 = 四人南、11 = 三人東、12 = 三人南（0 = 一局戰，未收）。
-這張表也是 `ObservedMatchModes` 註解裡那組 `[2, 3, 17, 18]` 的來歷——它正是銅之間
+這張表也是舊 `lobby_match_modes` 當年觀察到的那組 `[2, 3, 17, 18]` 的來歷（該工具已於 2026-10-13 移除）——它正是銅之間
 畫面上的四個入口，順序確實是四人東／四人南／三人東／三人南。
 
 **這張表只用來挑候選，不是授權。** 副本在 `command/Services/Bridge/MatchModeTable.swift`；
