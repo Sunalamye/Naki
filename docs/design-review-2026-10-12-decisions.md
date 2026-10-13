@@ -880,3 +880,10 @@
 - 新發現（延後表，非阻擋）：親家第一打在 `ActionNewRound` 動畫期間送出，700ms 內沒有權威回音被判「疑似丟單」重送一次（兩局各一次，msgId 60049→60050、60073→60074），伺服器只回一個 `ActionDiscardTile`、重送無錯誤碼；功能無損但視窗偏短，等更多樣本再決定是否只對新局首打放寬。另 `recommendations_stale` 1 次（立直後摸牌，預期）。
 - **U1 證據到手**：`.swfd/logs/wp7d/lobby_start_match-1306.json`（match_mode 1）與 `-mode2`／`-mode3`，三者皆 `errorCode 1306`、`serverAccepted false`，呼叫在大廳、用戶本人帳號（非測試帳號；因必回 1306 不會真的排隊，已預備 cancel 未用到）。證據時間 01:09:10Z 早於派工。
 - **WP7d 派工**：worktree `Naki-wt/wp7d`，分支 `wp7d-remove-matchgame`，基於 `20196bd`。範圍照 §12「U1 拆出 WP7b」：三個 MCP 工具、兩個 Action、`ObservedMatchModes` 及其在 parser／store／coordinator／runtime／dependencies／outputSchema／SystemTools 的接線與測試（`MatchModeTable` 仍被 `AutoRematchEngine` 使用，保留；只刪隨之成為死碼的部分）；文件工具數 43 → 40、大廳 11 → 8；release notes 草稿同步。arch S6 裁決：unified 一對**保留現狀不收斂**（只剩一對，再抽象沒有第二個使用者）。`lobby_match_sids`／`lobby_start_unified_match`／`lobby_cancel_unified_match` 與 `ObservedMatchSids` 不在範圍。
+- **已知限制逐條核對（用戶要求，2026-10-13，依同一局 log）**：
+  - U2「seat／type 缺席補 0」：整局 `liqiParseFaultTotal = 1`（只有 `ActionMJStart` 未處理），`*.absent` fault 0 筆，而座位 0 的 DealTile／Discard 事件解析了數十次 → 四麻伺服器**明送 seat=0**，補 0 路徑整局未觸發；前提在四麻成立，三麻未驗。
+  - 「吃牌組合恆兩張」：11 次 `parseChiPengGang` consumed 全為 2 張，2 次自家吃牌變體皆對應正確組合並被伺服器確認 → 四麻 live 成立。
+  - 槓：整局 0 次槓，「同類多組槓送第一組」與加槓 index／tile 仍無樣本。
+  - `isNaki` 256 筆 FIFO：程式在 `naki-websocket.js:349`，**無單元測試鎖住上限**（`JSContractTests` 無 256）；本局 Naki 送出 ~130 筆未達上限。實測溢出要連送 257 筆請求，不在本人帳號上做；留下一輪補 JS 契約測試。
+  - 繞過 `sendRaw` 的 `ws.send`：設計如此，不驗。
+  - 三麻重連「配不到」量級：需三麻一局＋強制重連。01:25:20Z 收到 `.lq.NotifyAnotherLogin` 被踢下線（帳號另一處登入），主線不再自行重登，等用戶指示。
