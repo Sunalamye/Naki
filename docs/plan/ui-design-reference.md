@@ -375,8 +375,9 @@ xcodebuild build -project Naki.xcodeproj -scheme Naki-M -configuration Release -
   2. 門檻：差異占比剛好 1.5% 通過，超過 1.5% 失敗。
   3. 尺寸不同失敗。
   4. baseline 不存在或讀圖失敗時失敗，不得當成通過。
-- 不覆蓋的區域：插件頁、`LogPanel`、工具列、設定頁、iOS 版面。這些區域不因 WP-0 通過而視為通過，各包改到時用人工截圖對照，並在報告列為「未經 pixel diff」。
-- 風險：fixture 要建構 `NakiEnvironment` 裡的物件。單測釋放 MainActor 隔離的 class 會 SIGABRT；目前只有 `GameStore`、`NativeBotController` 補了 `nonisolated deinit`。設定物件走隔離 suite（`SettingsStore(defaults:)`、`L10n.defaults`、`AutoPlayModeStore.defaults`）。
+- 實際覆蓋（2026-10-13 建立，`NakiTests/UISnapshotTests.swift`，baseline 28 張＝14 種畫面 × 淺／深色，macOS 27.0、scale 2、zh-Hant）：`DecisionSidebar` 寬版（380×600）與窄版（220×560，同一份對局中 fixture）；`DecisionCard` 打牌、吃（含牌組說明）、窄版赤五；`OptionList` 寬版與窄版（含「還有 N 個」）；`DecisionAlerts` 雲端退化、自動打牌停滯、三麻無推薦；`PageLoadFailureBanner`（`.bordered` 按鈕實測畫得完整）、`BotFailureBanner`、`JSInjectionFailureBanner`、`LiqiParseFailureBanner`。
+- 不覆蓋的區域：`UpdateAvailableBanner`（icon-only `.borderless` 關閉鈕被 `ImageRenderer` 畫成禁止符號佔位，圖證在主 repo `.swfd/logs/wp-0/excluded/`）、`StatusBar`、插件頁、`LogPanel`、工具列、設定頁、iOS 版面。這些區域不因 WP-0 通過而視為通過，各包改到時用人工截圖對照，並在報告列為「未經 pixel diff」。
+- 風險：fixture 要建構 `NakiEnvironment` 裡的物件。單測釋放 MainActor 隔離的 class 會 SIGABRT；`command/` 已有 33 處 `nonisolated deinit`（2026-10-13 grep），WP-0 fixture 用到的 `GameStore`、`SettingsStore`、`PluginStore`、`UIState`、`JSInjectionState`、`LiqiParseFaultState` 都已補。設定物件走隔離 suite（`SettingsStore(defaults:)`、`L10n.defaults`、`AutoPlayModeStore.defaults`）。
 - 檔案：新測試檔（`NakiTests` 是 synchronized group，不必改 pbxproj）、`docs/ui-reference/app-baseline/`。
 - 清理與強化：不可略過強化。
 
