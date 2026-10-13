@@ -887,3 +887,10 @@
   - `isNaki` 256 筆 FIFO：程式在 `naki-websocket.js:349`，**無單元測試鎖住上限**（`JSContractTests` 無 256）；本局 Naki 送出 ~130 筆未達上限。實測溢出要連送 257 筆請求，不在本人帳號上做；留下一輪補 JS 契約測試。
   - 繞過 `sendRaw` 的 `ws.send`：設計如此，不驗。
   - 三麻重連「配不到」量級：需三麻一局＋強制重連。01:25:20Z 收到 `.lq.NotifyAnotherLogin` 被踢下線（帳號另一處登入），主線不再自行重登，等用戶指示。
+
+### WP7d 結果（2026-10-13）
+- 合併到 main：merge commit `1e1489d`（6 個 commit `2a4685f`／`452cfc6`／`7c17e70`／`4342dd3`／`1fd2950`／`7864186`，基準 `20196bd`，39 檔 +130/−561）。復驗「可合併，無阻擋項」（`.swfd/logs/wp7d-verify/wp7d-verify-report.md`）：994/0、iOS build 成功、5 輪變異 4 紅（存活的是實作者已揭露的 `get_help` 文字無測試鎖）、文件閘 0 殘留、真實設定檔 sha／mtime 三次相同。合併態 main 全套 994/0（`.swfd/logs/merge-main/test-1e1489d.log`），node 兩腳本綠，靜態註冊 40。
+- 五項偏離裁決：`LiqiRequestBuilder.matchGame`／`matchGameMethod` 死碼補刪（`7864186`）；孤兒 schema 測試保留（它殺掉原本存活的 M3a 變異）；notes commit 保留、主 repo 未追蹤草稿先移開再合併；skill 分類表對齊 40 接受；`2a4685f` 單獨不可編譯接受，merge commit 註明與 `452cfc6` 成組 bisect。
+- 復驗員糾正：實作者「`cancelMatch` 仍被 LiqiParser 使用」不精確，parser 用的是常數 `cancelMatchMethod`（辨識遊戲自己送的取消），builder `cancelMatch(matchMode:)` 在 production 已無呼叫者 → 後續項。
+- 後續項（非阻擋）：`cancelMatch` builder 死碼與兩條用它的測試；`tool-catalog.md` 分組標題合計 36 與檔頭 40 矛盾（基準既有）；`webui-tester/SKILL.md:211`「42-tool」（基準既有）；`get_help` 文字無測試鎖；每跑一次全套測試 `~/Library/Preferences` 多約 56 個 `naki.tests.*` 空 plist（`removePersistentDomain` 不刪檔，B 塊）。
+- 未驗證：live `tools/list` 是否 40（主線以合併態 Release build 重啟 app 後補查，見下一條）。
