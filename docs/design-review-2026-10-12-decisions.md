@@ -894,3 +894,4 @@
 - 復驗員糾正：實作者「`cancelMatch` 仍被 LiqiParser 使用」不精確，parser 用的是常數 `cancelMatchMethod`（辨識遊戲自己送的取消），builder `cancelMatch(matchMode:)` 在 production 已無呼叫者 → 後續項。
 - 後續項（非阻擋）：`cancelMatch` builder 死碼與兩條用它的測試；`tool-catalog.md` 分組標題合計 36 與檔頭 40 矛盾（基準既有）；`webui-tester/SKILL.md:211`「42-tool」（基準既有）；`get_help` 文字無測試鎖；每跑一次全套測試 `~/Library/Preferences` 多約 56 個 `naki.tests.*` 空 plist（`removePersistentDomain` 不刪檔，B 塊）。
 - 未驗證：live `tools/list` 是否 40（主線以合併態 Release build 重啟 app 後補查，見下一條）。
+- live 補查：以合併態 `1e1489d` 的 Release build 重裝 `/Applications/Naki.app` 並重啟（未登入），`tools/list` 回 40、`get_status.toolsCount` 40、三個 match 工具不在、unified 三個在（`.swfd/logs/wp7d-verify/live-tools-list-1e1489d.txt`）。
