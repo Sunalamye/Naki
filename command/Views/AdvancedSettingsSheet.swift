@@ -161,13 +161,13 @@ struct AdvancedSettingsSheet: View {
         if missing.isEmpty {
             Label("雲端推論已生效——對局中會以雲端決策為準", systemImage: "checkmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.green)
+                .foregroundStyle(PanelLayout.success)
                 .accessibilityIdentifier("cloud-effective-state")
         } else {
             Label("雲端推論尚未生效，仍在用內建本地模型。還缺：\(missingList(missing))",
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(PanelLayout.warning)
                 .accessibilityIdentifier("cloud-effective-state")
         }
     }
@@ -216,7 +216,7 @@ struct AdvancedSettingsSheet: View {
     @ViewBuilder
     private var cloudKeyStatusCard: some View {
         if naki.settings.cloudInferenceEnabled {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
                 HStack {
                     Label("金鑰狀態", systemImage: "person.badge.key")
                         .font(.caption)
@@ -225,8 +225,8 @@ struct AdvancedSettingsSheet: View {
                     if cloudProbing {
                         ProgressView().controlSize(.small)
                     } else if cloudKeyStatus != nil {
-                        HStack(spacing: 4) {
-                            Circle().fill(Color.green).frame(width: 6, height: 6)
+                        HStack(spacing: PanelLayout.Spacing.s4) {
+                            Circle().fill(PanelLayout.success).frame(width: 6, height: 6)
                             Text("使用中").font(.caption2)
                         }
                     }
@@ -238,7 +238,7 @@ struct AdvancedSettingsSheet: View {
                         keyRow("到期時間", expiryText(s))
                         if let days = s.daysRemaining {
                             keyRow("剩餘", s.isExpired ? Text("已過期") : Text("\(days) 天"),
-                                   tint: s.isExpired ? .red : (days <= 3 ? .orange : nil))
+                                   tint: s.isExpired ? PanelLayout.danger : (days <= 3 ? PanelLayout.warning : nil))
                         }
                     }
                     if s.rpd > 0 {
@@ -246,7 +246,7 @@ struct AdvancedSettingsSheet: View {
                         if let f = s.usageFraction {
                             ProgressView(value: f)
                                 .progressViewStyle(.linear)
-                                .tint(f > 0.9 ? .red : (f > 0.7 ? .orange : .accentColor))
+                                .tint(f > 0.9 ? PanelLayout.danger : (f > 0.7 ? PanelLayout.warning : .accentColor))
                         }
                     } else if s.usageToday > 0 {
                         keyRow("今日用量", Text(verbatim: "\(s.usageToday)"))
@@ -259,7 +259,7 @@ struct AdvancedSettingsSheet: View {
                     // 而實際上多半是 key 打錯或伺服器連不上。
                     probeFailureText(failure)
                         .font(.caption2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(PanelLayout.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !cloudProbing {
                     Text("填入 API Key 後會自動查詢方案與今日用量。")
@@ -267,10 +267,10 @@ struct AdvancedSettingsSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(10)
+            .padding(PanelLayout.Spacing.s10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.contentBackground)
-            .clipShape(.rect(cornerRadius: 8))
+            .clipShape(.rect(cornerRadius: PanelLayout.Radius.row))
             .accessibilityIdentifier("cloud-key-status-card")
         }
     }
@@ -283,7 +283,7 @@ struct AdvancedSettingsSheet: View {
     private func keyRow(_ label: LocalizedStringKey, _ value: Text, tint: Color? = nil) -> some View {
         HStack {
             Text(label).font(.caption2).foregroundStyle(.secondary)
-            Spacer(minLength: 8)
+            Spacer(minLength: PanelLayout.Spacing.s8)
             value
                 .font(.system(.caption, design: .monospaced))
                 .fontWeight(.medium)
@@ -348,20 +348,20 @@ struct AdvancedSettingsSheet: View {
     /// iOS 維持單欄捲動：窄畫面放不下兩欄。
     private var settingsForm: some View {
 #if os(macOS)
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 16) {
+        HStack(alignment: .top, spacing: PanelLayout.Spacing.s16) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
                 operationalSettings
             }
             .frame(width: 300)
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
                 cloudSettings
             }
             .frame(maxWidth: .infinity)
         }
         .padding()
 #else
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s20) {
             operationalSettings
             cloudSettings
         }
@@ -399,7 +399,7 @@ struct AdvancedSettingsSheet: View {
         @Bindable var settings = naki.settings
 
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 Picker("伺服器", selection: majsoulServer) {
                     ForEach(MajsoulServer.allCases) { server in
                         Text("\(Text(server.displayNameKey))・\(Text(server.regionNameKey))").tag(server)
@@ -457,7 +457,7 @@ struct AdvancedSettingsSheet: View {
         @Bindable var settings = naki.settings
 
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 Toggle("視窗在背景時保持遊戲運作", isOn: keepAliveInBackground)
                     .accessibilityIdentifier("keep-alive-in-background-toggle")
 
@@ -496,7 +496,7 @@ struct AdvancedSettingsSheet: View {
         @Bindable var settings = naki.settings
 
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 Toggle("自動檢查更新", isOn: $settings.autoCheckUpdate)
                     .accessibilityIdentifier("auto-check-update-toggle")
 
@@ -521,7 +521,7 @@ struct AdvancedSettingsSheet: View {
 
     private var botManagementBox: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s12) {
                 Text("Bot 會在遊戲開始時自動創建，通常不需要手動管理。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -542,7 +542,7 @@ struct AdvancedSettingsSheet: View {
                     }
                     .buttonStyle(.bordered)
                     #if os(macOS)
-                    .tint(.red)
+                    .tint(PanelLayout.danger)
                     #endif
                     .accessibilityIdentifier("delete-bot-button")
                 }
@@ -557,11 +557,11 @@ struct AdvancedSettingsSheet: View {
     /// 控制項藏起來就變成「跑著卻看不到、關不掉」。
     private var mcpServerBox: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 HStack {
                     HStack {
                         Circle()
-                            .fill(naki.store.isDebugServerRunning ? Color.green : Color.gray)
+                            .fill(naki.store.isDebugServerRunning ? PanelLayout.success : PanelLayout.neutral)
                             .frame(width: 8, height: 8)
                         Text(naki.store.isDebugServerRunning ? "運行中" : "已停止")
                     }
@@ -576,12 +576,12 @@ struct AdvancedSettingsSheet: View {
                         naki.actions.toggleDebugServer()
                     }
                     .buttonStyle(.bordered)
-                    .tint(naki.store.isDebugServerRunning ? .red : .green)
+                    .tint(naki.store.isDebugServerRunning ? PanelLayout.danger : PanelLayout.success)
                     .accessibilityIdentifier("mcp-server-toggle-button")
                 }
 
                 if naki.store.isDebugServerRunning {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: PanelLayout.Spacing.s4) {
                         Text(verbatim: "http://localhost:\(naki.store.debugServerPort)")
                             .font(.system(.caption, design: .monospaced))
                             .textSelection(.enabled)
@@ -605,7 +605,7 @@ struct AdvancedSettingsSheet: View {
 
         // ☁️ 雲端推論（docs/cloud-inference-plan.md；key 在 Keychain）
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 Toggle("啟用雲端推論", isOn: $settings.cloudInferenceEnabled)
                     .accessibilityIdentifier("cloud-inference-toggle")
 
@@ -688,13 +688,13 @@ struct AdvancedSettingsSheet: View {
         @Bindable var settings = naki.settings
 
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 HStack {
                     Text("自動送出")
                     Spacer()
                     Text(naki.settings.supportsAutoPlay ? "可用" : "不可用")
                         .fontWeight(.semibold)
-                        .foregroundStyle(naki.settings.supportsAutoPlay ? Color.green : Color.secondary)
+                        .foregroundStyle(naki.settings.supportsAutoPlay ? PanelLayout.success : PanelLayout.neutral)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("autoplay-availability-row")
@@ -733,7 +733,7 @@ struct AdvancedSettingsSheet: View {
     private var autoPlayAvailabilityBox: some View {
         if !naki.settings.supportsAutoPlay {
             GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                     Text("自動送出：不可用")
                         .font(.callout)
                         .fontWeight(.semibold)

@@ -14,6 +14,27 @@ enum PanelLayout {
     /// Apple HIG 的最小可點區域。
     static let minTapTarget: CGFloat = 44
 
+    /// 間距只用這八檔（0 緊貼直接寫字面值）。
+    enum Spacing {
+        static let s2: CGFloat = 2, s4: CGFloat = 4, s6: CGFloat = 6, s8: CGFloat = 8
+        static let s10: CGFloat = 10, s12: CGFloat = 12, s16: CGFloat = 16, s20: CGFloat = 20
+    }
+
+    enum Radius {
+        static let badge: CGFloat = 4, control: CGFloat = 6, row: CGFloat = 8, card: CGFloat = 10
+    }
+
+    enum Opacity {
+        static let subtle = 0.10, tint = 0.16, neutral = 0.25, stroke = 0.45, textDim = 0.8
+    }
+
+    /// 狀態語意色。LogPanel 的分類識別色不是狀態，不在此列。
+    static let danger = Color.red
+    static let warning = Color.orange
+    static let success = Color.green
+    static let info = Color.blue
+    static let neutral = Color.secondary
+
     /// iPhone 橫向（compact）維持 220pt；regular 寬度（iPad、Max 機型橫向）有餘裕放寬。
     static func iOSPanelWidth(horizontal: UserInterfaceSizeClass?) -> CGFloat {
         horizontal == .regular ? 300 : 220
@@ -159,7 +180,7 @@ struct ContentView: View {
         // 會把 trailing-closure label 吃掉、只剩箭頭（實測畫面上「1.0s」不見了），
         // 所以改成 HStack 把值文字明確擺在箭頭左邊。
         @Bindable var settings = naki.settings
-        return HStack(spacing: 4) {
+        return HStack(spacing: PanelLayout.Spacing.s4) {
             delaySecondsText
                 .font(.system(.caption, design: .monospaced))
                 .monospacedDigit()
@@ -218,7 +239,7 @@ struct ContentView: View {
 
     private var cloudIconTint: Color {
         if cloudMissing.isEmpty { return .accentColor }
-        return naki.settings.cloudInferenceEnabled ? .orange : .secondary
+        return naki.settings.cloudInferenceEnabled ? PanelLayout.warning : PanelLayout.neutral
     }
 
     private var cloudToggleHelp: Text {
@@ -347,7 +368,7 @@ struct ContentView: View {
             ToolbarItem(placement: .navigation) {
                 actionDelayStepper
                     .fixedSize()
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, PanelLayout.Spacing.s4)
             }
         }
 
@@ -355,7 +376,7 @@ struct ContentView: View {
         ToolbarItem(placement: .navigation) {
             Button(action: { naki.actions.toggleDebugServer() }) {
                 ToolbarStatusPill(label: "MCP Server") {
-                    StatusDot(isOn: naki.store.isDebugServerRunning, onColor: .green, offColor: .gray)
+                    StatusDot(isOn: naki.store.isDebugServerRunning, onColor: PanelLayout.success, offColor: PanelLayout.neutral)
                 } value: {
                     Text(verbatim: String(naki.store.debugServerPort))
                         .font(.system(.caption, design: .monospaced))
@@ -508,10 +529,10 @@ struct ContentView: View {
                     withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { naki.ui.showGamePanel = true }
                 }
                 .labelStyle(.iconOnly)
-                .padding(10)
+                .padding(PanelLayout.Spacing.s10)
                 .background(.ultraThinMaterial, in: Circle())
                 .iOSTapTarget()
-                .padding(12)
+                .padding(PanelLayout.Spacing.s12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .accessibilityIdentifier("toolbar-game-panel-toggle")
                 .accessibilityValue("已隱藏")
@@ -584,7 +605,7 @@ struct ContentView: View {
     /// （重載／日誌／雲端／設定／收面板／插件），一局裡按不到幾次；模式與延遲是對局中真的會動的
     /// 東西，排在下面就離決策區更近。
     private var iOSPanelControls: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: PanelLayout.Spacing.s8) {
             ScrollView(.horizontal) {
                 HStack(spacing: 0) {
                     Button("重新載入", systemImage: "arrow.clockwise") { naki.actions.reloadPage() }
@@ -626,9 +647,9 @@ struct ContentView: View {
                 actionDelayStepper
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
+        .padding(.horizontal, PanelLayout.Spacing.s10)
+        .padding(.top, PanelLayout.Spacing.s10)
+        .padding(.bottom, PanelLayout.Spacing.s8)
     }
 
     /// 日誌 sheet。
@@ -752,7 +773,7 @@ struct ServerPickerView: View {
 
     private var content: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: 12)
+            Spacer(minLength: PanelLayout.Spacing.s12)
 
             Text("選擇雀魂伺服器")
                 .font(.title3)
@@ -762,10 +783,10 @@ struct ServerPickerView: View {
             Text("各服的帳號不互通")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .padding(.top, 3)
-                .padding(.bottom, 16)
+                .padding(.top, PanelLayout.Spacing.s4)
+                .padding(.bottom, PanelLayout.Spacing.s16)
 
-            VStack(spacing: 8) {
+            VStack(spacing: PanelLayout.Spacing.s8) {
                 ForEach(MajsoulServer.allCases) { server in
                     row(for: server)
                 }
@@ -775,14 +796,14 @@ struct ServerPickerView: View {
             Toggle("以後都用這個伺服器，不要再問", isOn: $pin)
                 .font(.callout)
                 .frame(maxWidth: 340)
-                .padding(.top, 16)
+                .padding(.top, PanelLayout.Spacing.s16)
                 .accessibilityIdentifier("server-picker-pin-toggle")
 
             Text("之後可以在進階設定裡改，或取消固定。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 340, alignment: .leading)
-                .padding(.top, 4)
+                .padding(.top, PanelLayout.Spacing.s4)
 
             Button {
                 onConfirm(selection, pin)
@@ -790,10 +811,10 @@ struct ServerPickerView: View {
                 Text("進入遊戲")
                     .fontWeight(.semibold)
                     .frame(maxWidth: 340)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, PanelLayout.Spacing.s4)
             }
             .buttonStyle(.borderedProminent)
-            .padding(.top, 18)
+            .padding(.top, PanelLayout.Spacing.s20)
 #if os(macOS)
             // Enter＝預設按鈕是 macOS 的慣例。iOS 上沒有這個慣例，而且它會讓任何
             // 送進來的 Return 直接確認選擇——這個畫面的誤觸代價是連錯服。
@@ -801,9 +822,9 @@ struct ServerPickerView: View {
 #endif
             .accessibilityIdentifier("server-picker-confirm")
 
-            Spacer(minLength: 12)
+            Spacer(minLength: PanelLayout.Spacing.s12)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, PanelLayout.Spacing.s20)
     }
 
     private func row(for server: MajsoulServer) -> some View {
@@ -811,12 +832,12 @@ struct ServerPickerView: View {
         return Button {
             selection = server
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: PanelLayout.Spacing.s10) {
                 Image(systemName: isOn ? "largecircle.fill.circle" : "circle")
                     .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
                     .imageScale(.large)
 
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                     Text("\(Text(server.displayNameKey))・\(Text(server.regionNameKey))")
                         .fontWeight(isOn ? .semibold : .regular)
                     // 網域是「我要連去哪」的唯一憑據——國服與國際服的招牌長得不像，
@@ -828,14 +849,14 @@ struct ServerPickerView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(isOn ? Color.accentColor.opacity(0.12) : Color.contentBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, PanelLayout.Spacing.s12)
+            .padding(.vertical, PanelLayout.Spacing.s10)
+            .background(isOn ? Color.accentColor.opacity(PanelLayout.Opacity.subtle) : Color.contentBackground)
+            .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.row))
             .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isOn ? Color.accentColor.opacity(0.55)
-                                       : Color.secondary.opacity(0.22),
+                RoundedRectangle(cornerRadius: PanelLayout.Radius.row)
+                    .strokeBorder(isOn ? Color.accentColor.opacity(PanelLayout.Opacity.stroke)
+                                       : Color.secondary.opacity(PanelLayout.Opacity.neutral),
                                   lineWidth: 1)
             }
             .contentShape(Rectangle())
@@ -863,7 +884,7 @@ private struct ToolbarStatusPill<Dot: View, Value: View>: View {
     @ViewBuilder let value: Value
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: PanelLayout.Spacing.s6) {
             dot
             VStack(alignment: .leading, spacing: 0) {
                 value
@@ -872,7 +893,7 @@ private struct ToolbarStatusPill<Dot: View, Value: View>: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, PanelLayout.Spacing.s8)
     }
 }
 
@@ -886,13 +907,13 @@ struct ConnectionIndicator: View {
     var body: some View {
         ToolbarStatusPill(label: "WebSocket") {
             Circle()
-                .fill(isConnected ? Color.green : Color.red)
+                .fill(isConnected ? PanelLayout.success : PanelLayout.danger)
                 .frame(width: 6, height: 6)
         } value: {
             Text(isConnected ? "已連接" : "未連接")
                 .font(.caption2)
         }
-        .padding(.top, 3) // 實測：補償 toolbar 擺放偏高，與 MCP 膠囊同一中心
+        .padding(.top, 3) // 實測對齊值：補償 toolbar 擺放偏高，與 MCP 膠囊同一中心
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("websocket-connection-indicator")
         .accessibilityLabel("WebSocket 連線狀態")
@@ -965,7 +986,7 @@ private struct FullAutoSetupSheet: View {
     }
 
     private var form: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
             Text("全自動")
                 .font(.headline)
             Text("對局結束後會自動排下一場，直到你切走模式。")
@@ -996,14 +1017,14 @@ private struct FullAutoSetupSheet: View {
                 Label("選了三麻但沒有三麻引擎，不排隊——排進去也不會出手。",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(PanelLayout.warning)
             }
 
             Text("只會排你自己點過、而且已經打過一場的場次；沒有的話會停下來並在紀錄裡說明。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
-        .padding(20)
+        .padding(PanelLayout.Spacing.s20)
     }
 
     private var buttons: some View {
@@ -1018,7 +1039,7 @@ private struct FullAutoSetupSheet: View {
                 // 選了會直接失敗的組合就不讓按，而不是按了才在 log 裡說不行
                 .disabled(sanmaBlocked)
         }
-        .padding(20)
+        .padding(PanelLayout.Spacing.s20)
         .background(.bar)
     }
 }

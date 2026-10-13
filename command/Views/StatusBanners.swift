@@ -20,11 +20,11 @@ struct PageLoadFailureBanner: View {
 
     var body: some View {
         if let reason = naki.store.pageLoadFailure {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: "wifi.exclamationmark")
                     .imageScale(.large)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                     Text("頁面載入失敗：Naki 讀不到牌局")
                         .fontWeight(.semibold)
                     Text(reason)
@@ -32,14 +32,14 @@ struct PageLoadFailureBanner: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: PanelLayout.Spacing.s8)
 
                 Button("重新載入") { naki.actions.reloadPage() }
                     .buttonStyle(.bordered)
             }
-            .padding(10)
+            .padding(PanelLayout.Spacing.s10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.15))
+            .background(PanelLayout.warning.opacity(PanelLayout.Opacity.tint))
             .accessibilityIdentifier("page-load-failure-banner")
         }
     }
@@ -53,13 +53,13 @@ struct UpdateAvailableBanner: View {
 
     var body: some View {
         if let update = naki.store.availableUpdate {
-            HStack(spacing: 8) {
+            HStack(spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: "arrow.down.circle")
                     .imageScale(.large)
                 Text("有新版本 \(update.version)")
                     .fontWeight(.semibold)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: PanelLayout.Spacing.s8)
 
                 Button("前往下載") { openURL(update.url) }
                     .buttonStyle(.borderedProminent)
@@ -69,9 +69,9 @@ struct UpdateAvailableBanner: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
             }
-            .padding(10)
+            .padding(PanelLayout.Spacing.s10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.blue.opacity(0.15))
+            .background(PanelLayout.info.opacity(PanelLayout.Opacity.tint))
             .accessibilityIdentifier("update-available-banner")
         }
     }
@@ -84,7 +84,7 @@ struct BotFailureBanner: View {
 
     var body: some View {
         if let reason = naki.store.botFailure {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .imageScale(.large)
                 Text(reason)
@@ -92,9 +92,9 @@ struct BotFailureBanner: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
-            .padding(10)
+            .padding(PanelLayout.Spacing.s10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.15))
+            .background(PanelLayout.warning.opacity(PanelLayout.Opacity.tint))
             .accessibilityIdentifier("bot-failure-banner")
         }
     }
@@ -117,11 +117,11 @@ struct JSInjectionFailureBanner: View {
 
     var body: some View {
         if let summary = naki.jsInjection.report.failureSummary {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: "exclamationmark.octagon.fill")
                     .imageScale(.large)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                     Text("JavaScript 注入失敗：Naki 讀不到牌局，也送不出任何動作")
                         .font(.headline)
                     Text(summary)
@@ -129,16 +129,16 @@ struct JSInjectionFailureBanner: View {
                         .textSelection(.enabled)
                     Text("這不是暫時性錯誤，重新載入頁面不會修好；請重新安裝／重新建置 App。")
                         .font(.caption)
-                        .opacity(0.9)
+                        .opacity(PanelLayout.Opacity.textDim)
                 }
 
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, PanelLayout.Spacing.s12)
+            .padding(.vertical, PanelLayout.Spacing.s8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.red)
+            .background(PanelLayout.danger)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("js-injection-failure-banner")
             .accessibilityLabel("JavaScript 注入失敗")
@@ -165,11 +165,11 @@ struct LiqiParseFailureBanner: View {
 
     var body: some View {
         if let summary = naki.parseFault.bannerSummary {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .imageScale(.large)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                     Text("牌局封包解析失敗：這一局 Naki 不會給推薦，也不會自動打牌")
                         .font(.headline)
                     Text(summary)
@@ -177,16 +177,16 @@ struct LiqiParseFailureBanner: View {
                         .textSelection(.enabled)
                     Text("下一局（或重連）解析成功就會自動消失；持續出現代表雀魂改了協定欄位。")
                         .font(.caption)
-                        .opacity(0.9)
+                        .opacity(PanelLayout.Opacity.textDim)
                 }
 
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, PanelLayout.Spacing.s12)
+            .padding(.vertical, PanelLayout.Spacing.s8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange)
+            .background(PanelLayout.warning)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("liqi-parse-failure-banner")
             .accessibilityLabel("牌局封包解析失敗")
@@ -204,7 +204,7 @@ struct StatusBar: View {
 
     var body: some View {
         if !message.isEmpty {
-            HStack(spacing: 8) {
+            HStack(spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: statusIcon)
                     .foregroundStyle(statusColor)
                 Text(message)
@@ -216,14 +216,14 @@ struct StatusBar: View {
                 if naki.store.recommendationCount > 0 {
                     Text("\(naki.store.recommendationCount) 推薦")
                         .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(Color.green.opacity(0.2), in: .rect(cornerRadius: 4))
+                        .padding(.horizontal, PanelLayout.Spacing.s8)
+                        .padding(.vertical, PanelLayout.Spacing.s2)
+                        .background(PanelLayout.success.opacity(PanelLayout.Opacity.tint), in: .rect(cornerRadius: PanelLayout.Radius.badge))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(statusColor.opacity(0.1))
+            .padding(.horizontal, PanelLayout.Spacing.s12)
+            .padding(.vertical, PanelLayout.Spacing.s6)
+            .background(statusColor.opacity(PanelLayout.Opacity.subtle))
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("status-bar")
         }
@@ -233,5 +233,5 @@ struct StatusBar: View {
         naki.hasFault ? "exclamationmark.triangle.fill" : "info.circle.fill"
     }
 
-    private var statusColor: Color { naki.hasFault ? .red : .blue }
+    private var statusColor: Color { naki.hasFault ? PanelLayout.danger : PanelLayout.info }
 }

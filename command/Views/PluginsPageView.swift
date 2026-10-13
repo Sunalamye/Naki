@@ -55,7 +55,7 @@ struct PluginsPageView: View {
     var body: some View {
         #if os(macOS)
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: PanelLayout.Spacing.s12) {
                 Label("插件", systemImage: "puzzlepiece.extension").font(.headline)
                 Spacer()
                 tabPicker.frame(maxWidth: 320)
@@ -117,7 +117,7 @@ struct PluginsPageView: View {
 #endif
         case .log:
             ScrollView {
-                VStack(spacing: 12) { diagnosticsSection; logSection }.padding()
+                VStack(spacing: PanelLayout.Spacing.s12) { diagnosticsSection; logSection }.padding()
             }
         case .trust:
             ScrollView { trustSection.padding() }
@@ -153,7 +153,7 @@ struct PluginsPageView: View {
             }
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 320)
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 6) {
+                VStack(spacing: PanelLayout.Spacing.s6) {
                     Divider()
                     Button { selectedPluginId = nil } label: {
                         Label("從來源加入…", systemImage: "plus.circle").frame(maxWidth: .infinity)
@@ -166,11 +166,11 @@ struct PluginsPageView: View {
                     .buttonStyle(.borderless)
                     .disabled(updateChecking)
                     if let msg = importMessage {
-                        Text(msg).font(.caption2).foregroundStyle(.green)
+                        Text(msg).font(.caption2).foregroundStyle(PanelLayout.success)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(8)
+                .padding(PanelLayout.Spacing.s8)
                 .background(.bar)
             }
         } detail: {
@@ -188,7 +188,7 @@ struct PluginsPageView: View {
     /// 功能與 macOS 的 master-detail 相同，但不依賴 NavigationSplitView 的欄位顯示狀態。
     private var iOSPluginsView: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
                 importSection
 
                 if naki.pluginDescriptors.isEmpty {
@@ -211,11 +211,11 @@ struct PluginsPageView: View {
                                     }
                                 )) {
                                     pluginDetail(d)
-                                        .padding(.top, 12)
+                                        .padding(.top, PanelLayout.Spacing.s12)
                                 } label: {
                                     sidebarRow(d)
                                 }
-                                .padding(.vertical, 8)
+                                .padding(.vertical, PanelLayout.Spacing.s8)
 
                                 if d.id != naki.pluginDescriptors.last?.id {
                                     Divider()
@@ -234,44 +234,44 @@ struct PluginsPageView: View {
 #endif
 
     private func status(_ d: PluginDescriptor) -> (symbol: String, color: Color, label: LocalizedStringKey) {
-        if !d.isValid { return ("exclamationmark.triangle.fill", .red, "無效插件") }
+        if !d.isValid { return ("exclamationmark.triangle.fill", PanelLayout.danger, "無效插件") }
         return naki.settings.enabledPluginIds.contains(d.id)
-            ? ("checkmark.circle.fill", .green, "已啟用")
+            ? ("checkmark.circle.fill", PanelLayout.success, "已啟用")
             : ("circle", .secondary, "未啟用")
     }
 
     /// 左欄一列：狀態點 + 名稱 + id（緊湊，好掃）。
     private func sidebarRow(_ d: PluginDescriptor) -> some View {
         let status = status(d)
-        return HStack(spacing: 8) {
+        return HStack(spacing: PanelLayout.Spacing.s8) {
             Image(systemName: status.symbol)
                 .foregroundStyle(status.color)
                 .imageScale(.small)
                 .accessibilityLabel(status.label)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                 Text(d.manifest?.name ?? d.id).font(.callout)
                 Text(d.id).font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, PanelLayout.Spacing.s2)
     }
 
     /// 右欄：選中插件的完整詳情（header + 操作 + 設定 + 原始碼）。
     @ViewBuilder
     private func pluginDetail(_ d: PluginDescriptor) -> some View {
         if let m = d.manifest {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s4) {
                     Text(m.name).font(.title3).bold()
                     Text("\(m.id) · v\(m.version)")
                         .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-                    HStack(spacing: 6) {
+                    HStack(spacing: PanelLayout.Spacing.s6) {
                         ForEach(m.capabilities, id: \.self) { cap in
                             Text(cap).font(.caption2)
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.15)).clipShape(Capsule())
+                                .padding(.horizontal, PanelLayout.Spacing.s6).padding(.vertical, PanelLayout.Spacing.s2)
+                                .background(Color.secondary.opacity(PanelLayout.Opacity.tint)).clipShape(Capsule())
                         }
                         if let lic = m.license {
                             Text(lic).font(.caption2).foregroundStyle(.secondary)
@@ -285,7 +285,7 @@ struct PluginsPageView: View {
 
                 Divider()
 
-                HStack(spacing: 16) {
+                HStack(spacing: PanelLayout.Spacing.s16) {
                     Toggle("啟用", isOn: Binding(
                         get: { naki.settings.enabledPluginIds.contains(d.id) },
                         set: { on in naki.actions.setPluginEnabled(d.id, on) }
@@ -323,16 +323,16 @@ struct PluginsPageView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(maxHeight: 220)
-                        .background(Color.secondary.opacity(0.08))
+                        .background(Color.secondary.opacity(PanelLayout.Opacity.subtle))
                     }
                     .font(.callout)
                 }
             }
         } else {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s10) {
                 Text(d.id).font(.title3).bold()
                 (d.failure.map { Text(verbatim: $0.text) } ?? Text("無效插件"))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(PanelLayout.danger)
                     .fixedSize(horizontal: false, vertical: true)
                 Button(role: .destructive) { pendingRemoval = d.id } label: {
                     Label("移除", systemImage: "trash")
@@ -346,7 +346,7 @@ struct PluginsPageView: View {
     @ViewBuilder
     private var importSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 Text("貼 **GitHub repo**（`owner/repo`，一次多個插件）、gist 連結、或任意 HTTPS 的 plugin.json。只抓一次、預覽確認後才落地。")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -365,11 +365,11 @@ struct PluginsPageView: View {
                 }
 
                 if let err = importError {
-                    Text("匯入失敗：\(err)").font(.caption).foregroundStyle(.red)
+                    Text("匯入失敗：\(err)").font(.caption).foregroundStyle(PanelLayout.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let msg = importMessage {
-                    Text(msg).font(.caption).foregroundStyle(.green)
+                    Text(msg).font(.caption).foregroundStyle(PanelLayout.success)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -378,18 +378,18 @@ struct PluginsPageView: View {
                     Text("有 \(pendingUpdates.count) 個插件可更新——確認後才會安裝並熱重載：")
                         .font(.caption).bold()
                     ForEach(pendingUpdates) { u in
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                             Text("\(u.id) · \(u.versionText)")
                                 .font(.system(.caption, design: .monospaced))
                             if let change = u.permissionChange {
-                                Text("權限變更：\(change)").font(.caption2).foregroundStyle(.red)
+                                Text("權限變更：\(change)").font(.caption2).foregroundStyle(PanelLayout.danger)
                             } else {
                                 Text("權限宣告未變").font(.caption2).foregroundStyle(.secondary)
                             }
                         }
                     }
                     Text("⚠️ 更新＝執行作者新寫的程式碼，等同重新信任。")
-                        .font(.caption2).foregroundStyle(.red)
+                        .font(.caption2).foregroundStyle(PanelLayout.danger)
                     HStack {
                         Button("更新這些（\(pendingUpdates.count)）") { confirmUpdates() }
                             .buttonStyle(.borderedProminent)
@@ -410,7 +410,7 @@ struct PluginsPageView: View {
                         .font(.caption)
                     }
                     ForEach(importPreview, id: \.id) { p in
-                        HStack(alignment: .top, spacing: 8) {
+                        HStack(alignment: .top, spacing: PanelLayout.Spacing.s8) {
                             Toggle(p.manifest.name, isOn: Binding(
                                 get: { selectedImports.contains(p.id) },
                                 set: { on in
@@ -420,7 +420,7 @@ struct PluginsPageView: View {
                             .labelsHidden()
                             .accessibilityIdentifier("import-select-\(p.id)")
 
-                            VStack(alignment: .leading, spacing: 3) {
+                            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s4) {
                                 Text(p.manifest.name).font(.caption).bold()
                                 Text("\(p.manifest.id) · v\(p.manifest.version) · \(p.manifest.capabilities.joined(separator: ", "))")
                                     .font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary)
@@ -435,7 +435,7 @@ struct PluginsPageView: View {
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .frame(maxHeight: 120)
-                                    .background(Color.secondary.opacity(0.08))
+                                    .background(Color.secondary.opacity(PanelLayout.Opacity.subtle))
                                 }
                                 .font(.caption2)
                             }
@@ -444,7 +444,7 @@ struct PluginsPageView: View {
                     }
 
                     Text("⚠️ 安裝＝信任作者。插件能用你的帳號送動作、讀頁面上任何資料，Naki 無法阻止。")
-                        .font(.caption2).foregroundStyle(.red)
+                        .font(.caption2).foregroundStyle(PanelLayout.danger)
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack {
@@ -504,7 +504,7 @@ struct PluginsPageView: View {
     @ViewBuilder
     private var trustSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s10) {
                 // L3 總開關（§8.1）：預設關。開啟＝允許插件用你的帳號送遊戲動作。
                 Toggle(isOn: Binding(
                     get: { naki.settings.pluginsMayModifyOutbound },
@@ -514,11 +514,11 @@ struct PluginsPageView: View {
                         else { naki.actions.setPluginsMayModifyOutbound(false) }
                     }
                 )) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                         Text("允許插件送出遊戲動作（L3）").font(.body).bold()
                         Text("開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request。預設關閉。只在測試帳號、且你信任插件時開。")
                             .font(.caption)
-                            .foregroundStyle(naki.settings.pluginsMayModifyOutbound ? Color.red : Color.secondary)
+                            .foregroundStyle(naki.settings.pluginsMayModifyOutbound ? PanelLayout.danger : PanelLayout.neutral)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -532,7 +532,7 @@ struct PluginsPageView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(PanelLayout.warning)
                 }
             }
         } label: {
@@ -606,7 +606,7 @@ struct PluginsPageView: View {
 
     private var diagnosticsSection: some View {
         GroupBox("目前頁面診斷") {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s10) {
                 Button("檢查 / 刷新狀態") { runDiagnostics(reinject: false) }
                     .disabled(checkingDiagnostics)
                 Button("重新注入已啟用插件並檢查") { runDiagnostics(reinject: true) }
@@ -649,7 +649,7 @@ struct PluginsPageView: View {
     private var logSection: some View {
         GroupBox {
             let entries = recentPluginLogs()
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
                 if entries.isEmpty {
                     Text("還沒有插件 log。啟用一個插件、進一局後，它經 ctx.log 送出的訊息會即時出現在這裡。")
                         .font(.caption)
@@ -657,7 +657,7 @@ struct PluginsPageView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                             ForEach(entries) { entry in
                                 Text(verbatim: "\(entry.formattedTime) \(entry.message)")
                                     .font(.system(.caption2, design: .monospaced))

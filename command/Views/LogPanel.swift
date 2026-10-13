@@ -19,7 +19,7 @@ struct LogPanel: View {
         let shown = naki.logManager.recentEntries(category: filterCategory, search: searchText, limit: .max)
         VStack(spacing: 0) {
             // 工具欄
-            HStack(spacing: 8) {
+            HStack(spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: "list.bullet.rectangle")
                 Text("Log")
                     .font(.headline)
@@ -58,8 +58,8 @@ struct LogPanel: View {
                 .help("清除日誌")
                 #endif
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.horizontal, PanelLayout.Spacing.s8)
+            .padding(.vertical, PanelLayout.Spacing.s6)
             .background(Color.contentBackground)
 
             Divider()
@@ -79,7 +79,7 @@ struct LogPanel: View {
                         .accessibilityIdentifier("log-clear-search-button")
                 }
             }
-            .padding(6)
+            .padding(PanelLayout.Spacing.s6)
             .background(Color.textFieldBackground)
 
             Divider()
@@ -87,14 +87,14 @@ struct LogPanel: View {
             // 日誌列表
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
+                    LazyVStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                         ForEach(shown) { entry in
                             LogEntryRow(entry: entry)
                                 .id(entry.id)
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, PanelLayout.Spacing.s8)
+                    .padding(.vertical, PanelLayout.Spacing.s4)
                 }
                 // 觀察最後一筆的 id 而非 count：滿 `maxEntries` 後 count 恆定，只有 last.id 會變
                 .onChange(of: shown.last?.id) { _, lastID in
@@ -115,7 +115,7 @@ struct LogEntryRow: View {
     let entry: LogEntry
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: PanelLayout.Spacing.s6) {
             // 時間戳
             Text(entry.formattedTime)
                 .font(.system(.caption2, design: .monospaced))
@@ -126,11 +126,11 @@ struct LogEntryRow: View {
             // 類別標籤
             Text(entry.category.rawValue)
                 .font(.system(.caption2, design: .monospaced))
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(categoryColor.opacity(0.2))
+                .padding(.horizontal, PanelLayout.Spacing.s4)
+                .padding(.vertical, PanelLayout.Spacing.s2)
+                .background(categoryColor.opacity(PanelLayout.Opacity.tint))
                 .foregroundStyle(categoryColor)
-                .clipShape(.rect(cornerRadius: 3))
+                .clipShape(.rect(cornerRadius: PanelLayout.Radius.badge))
                 .lineLimit(1)
                 .fixedSize()
 
@@ -143,7 +143,7 @@ struct LogEntryRow: View {
 
             Spacer()
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, PanelLayout.Spacing.s2)
         .accessibilityElement(children: .combine)
     }
 

@@ -25,7 +25,7 @@ struct MajsoulConnectionSettingsBox: View {
         @Bindable var settings = naki.settings
 
         GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 HStack {
                     TextField(text: $settings.majsoulUserAgent,
                               prompt: defaultUserAgent.map { Text(verbatim: $0) } ?? Text("預設（WebKit）")) {
@@ -77,7 +77,7 @@ struct MajsoulConnectionSettingsBox: View {
     }
 
     private func headerRow(_ row: Binding<HeaderRow>) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
             HStack {
                 TextField("Header 名稱", text: row.name)
                     .labelsHidden()
@@ -97,7 +97,7 @@ struct MajsoulConnectionSettingsBox: View {
             if let issue = issue(of: row.wrappedValue) {
                 issueText(issue)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(PanelLayout.danger)
             }
         }
     }

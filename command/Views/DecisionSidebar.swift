@@ -53,7 +53,7 @@ struct DecisionSidebar: View {
                 compact: compact,
                 isExpanded: $detailsExpanded
             )
-            .padding(.bottom, compact ? 8 : 12)
+            .padding(.bottom, compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s12)
 
             DecisionAlerts(botStatus: store.botStatus,
                            autoPlayStall: store.autoPlayStall,
@@ -85,7 +85,7 @@ struct DecisionSidebar: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(compact ? 10 : 16)
+        .padding(compact ? PanelLayout.Spacing.s10 : PanelLayout.Spacing.s16)
     }
 }
 
@@ -96,7 +96,7 @@ struct SidebarHeader: View {
     var compact: Bool = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: PanelLayout.Spacing.s6) {
             Text("即時決策")
                 .font(compact ? .subheadline : .title3)
                 .bold()
@@ -104,13 +104,13 @@ struct SidebarHeader: View {
             Spacer()
 
             Circle()
-                .fill(isActive ? Color.green : Color.gray)
+                .fill(isActive ? PanelLayout.success : PanelLayout.neutral)
                 .frame(width: 7, height: 7)
             (isActive ? Text("運行中") : Text("待機"))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
-        .padding(.bottom, compact ? 7 : 12)
+        .padding(.bottom, compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s12)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Bot 運行狀態")
         .accessibilityValue(isActive ? Text("運行中") : Text("待機"))
@@ -133,8 +133,8 @@ struct SectionLabel: View {
             .font(compact ? .caption2 : .caption)
             .bold()
             .foregroundStyle(.secondary)
-            .padding(.top, compact ? 8 : 12)
-            .padding(.bottom, compact ? 5 : 8)
+            .padding(.top, compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s12)
+            .padding(.bottom, compact ? PanelLayout.Spacing.s6 : PanelLayout.Spacing.s8)
     }
 }
 
@@ -164,39 +164,39 @@ struct GameSummaryDisclosure: View {
             Button {
                 withAnimation(PanelLayout.animation(.easeInOut(duration: 0.18), reduceMotion: reduceMotion)) { isExpanded.toggle() }
             } label: {
-                HStack(spacing: compact ? 10 : 6) {
+                HStack(spacing: compact ? PanelLayout.Spacing.s10 : PanelLayout.Spacing.s6) {
                     if inGame {
                         Text(gameState.kyokuDisplayKey)
                             .fontWeight(.semibold)
-                        Spacer(minLength: 4)
+                        Spacer(minLength: PanelLayout.Spacing.s4)
                         // `jikazeDisplay` 已經含「家」（「北家」），再加「自風」前綴會變成
                         // 「自風 北家」——實測畫面上讀起來是兩個詞疊在一起
                         Text(gameState.jikazeDisplayKey)
                         // 窄版只留局況與自風：190pt 塞四欄會讓每欄縮到讀不了
                         if !compact {
-                            Spacer(minLength: 4)
+                            Spacer(minLength: PanelLayout.Spacing.s4)
                             Text(myScore).monospacedDigit()
                                 .contentTransition(.numericText(value: Double(myScoreValue ?? 0)))
                                 .animation(PanelLayout.animation(PanelLayout.valueChange, reduceMotion: reduceMotion), value: myScoreValue)
-                            Spacer(minLength: 4)
+                            Spacer(minLength: PanelLayout.Spacing.s4)
                             Text(botStatus.modelDisplayKey)
                         }
                     } else {
                         Text("未在對局")
                             .foregroundStyle(.secondary)
-                        Spacer(minLength: 4)
+                        Spacer(minLength: PanelLayout.Spacing.s4)
                         Text(botStatus.modelDisplayKey)
                             .foregroundStyle(.secondary)
                     }
-                    Spacer(minLength: 4)
+                    Spacer(minLength: PanelLayout.Spacing.s4)
                     Image(systemName: "chevron.down")
                         .font(.caption2)
                         .rotationEffect(.degrees(isExpanded ? 180 : 0))
                         .foregroundStyle(.secondary)
                 }
                 .font(compact ? .caption2 : .caption)
-                .padding(.horizontal, 10)
-                .padding(.vertical, compact ? 6 : 9)
+                .padding(.horizontal, PanelLayout.Spacing.s10)
+                .padding(.vertical, compact ? PanelLayout.Spacing.s6 : PanelLayout.Spacing.s10)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -216,9 +216,9 @@ struct GameSummaryDisclosure: View {
             if inGame {
                 Divider()
                 AuthorizedActionsRow(botStatus: botStatus)
-                    .padding(.horizontal, 10)
-                    .padding(.top, compact ? 7 : 9)
-                    .padding(.bottom, compact ? 8 : 10)
+                    .padding(.horizontal, PanelLayout.Spacing.s10)
+                    .padding(.top, compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10)
+                    .padding(.bottom, compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10)
             }
 
             if isExpanded {
@@ -231,10 +231,10 @@ struct GameSummaryDisclosure: View {
             }
         }
         .background(Color.contentBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.row))
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.secondary.opacity(0.22), lineWidth: 1)
+            RoundedRectangle(cornerRadius: PanelLayout.Radius.row)
+                .strokeBorder(Color.secondary.opacity(PanelLayout.Opacity.neutral), lineWidth: 1)
         }
     }
 
@@ -257,7 +257,7 @@ struct GameDetailsPanel: View {
     var compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s10) {
             if !inGame {
                 Text("目前不在對局中，以下牌局欄位沒有實際資料。")
                     .font(.caption2)
@@ -274,7 +274,7 @@ struct GameDetailsPanel: View {
             ScoreRow(gameState: gameState)
 
             if !gameState.doraIndicators.isEmpty {
-                HStack(spacing: 6) {
+                HStack(spacing: PanelLayout.Spacing.s6) {
                     Text("寶牌指示牌")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -296,7 +296,7 @@ struct GameDetailsPanel: View {
                 pair("雲端狀態", Text(cloudState))
             }
         }
-        .padding(compact ? 10 : 12)
+        .padding(compact ? PanelLayout.Spacing.s10 : PanelLayout.Spacing.s12)
     }
 
     private var cloudState: LocalizedStringKey {
@@ -307,7 +307,7 @@ struct GameDetailsPanel: View {
 
     @ViewBuilder
     private func group(_ title: LocalizedStringKey, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
             Text(title)
                 .font(.caption2)
                 .bold()
@@ -319,7 +319,7 @@ struct GameDetailsPanel: View {
     private func pair(_ label: LocalizedStringKey, _ value: Text) -> some View {
         HStack {
             Text(label).foregroundStyle(.secondary)
-            Spacer(minLength: 8)
+            Spacer(minLength: PanelLayout.Spacing.s8)
             value.fontWeight(.medium)
         }
         .font(.caption)
@@ -333,9 +333,9 @@ struct ScoreRow: View {
     var gameState: GameState
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: PanelLayout.Spacing.s6) {
             ForEach(0..<min(gameState.scores.count, gameState.is3P ? 3 : 4), id: \.self) { i in
-                VStack(spacing: 1) {
+                VStack(spacing: PanelLayout.Spacing.s2) {
                     seatWind(i)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -345,9 +345,9 @@ struct ScoreRow: View {
                         .fontWeight(i == gameState.playerId ? .bold : .regular)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .background(i == gameState.playerId ? Color.accentColor.opacity(0.16) : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .padding(.vertical, PanelLayout.Spacing.s4)
+                .background(i == gameState.playerId ? Color.accentColor.opacity(PanelLayout.Opacity.tint) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.badge))
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(i == gameState.playerId ? Text("\(seatWind(i))（我）") : seatWind(i))
                 .accessibilityValue("\(gameState.scores[i]) 點")
@@ -407,7 +407,7 @@ struct AuthorizedActionsRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
             Text("伺服器目前授權動作")
                 .font(.caption2)
                 .bold()
@@ -425,7 +425,7 @@ struct AuthorizedActionsRow: View {
             ViewThatFits(in: .horizontal) {
                 badgeRow(items)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s4) {
                     let half = (items.count + 1) / 2
                     badgeRow(Array(items.prefix(half)))
                     badgeRow(Array(items.dropFirst(half)))
@@ -436,7 +436,7 @@ struct AuthorizedActionsRow: View {
     }
 
     private func badgeRow(_ row: [(LocalizedStringKey, Bool)]) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: PanelLayout.Spacing.s4) {
             ForEach(Array(row.enumerated()), id: \.offset) { _, item in
                 badge(name: item.0, available: item.1)
             }
@@ -451,11 +451,11 @@ struct AuthorizedActionsRow: View {
             // 寧可溢出也不要被壓縮。`ViewThatFits` 是靠「量得出真實寬度」來選版面的，
             // 少了這行，第一個候選永遠「擠得下」——擠的方式就是裁掉字形。
             .fixedSize()
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .foregroundStyle(available ? Color.green : Color.secondary)
-            .background(available ? Color.green.opacity(0.18) : Color.gray.opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .padding(.horizontal, PanelLayout.Spacing.s6)
+            .padding(.vertical, PanelLayout.Spacing.s4)
+            .foregroundStyle(available ? PanelLayout.success : PanelLayout.neutral)
+            .background(available ? PanelLayout.success.opacity(PanelLayout.Opacity.tint) : PanelLayout.neutral.opacity(PanelLayout.Opacity.subtle))
+            .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.badge))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(name)
             .accessibilityValue(available ? Text("可用") : Text("不可用"))
@@ -479,8 +479,8 @@ struct DecisionCard: View {
     private var showsTile: Bool { recommendation.actionType == .discard }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 7 : 10) {
-            HStack(spacing: compact ? 8 : 14) {
+        VStack(alignment: .leading, spacing: compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10) {
+            HStack(spacing: compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s16) {
                 if showsTile {
                     TileImage(mjai: recommendation.displayTile,
                               size: compact ? .medium : .large)
@@ -490,14 +490,14 @@ struct DecisionCard: View {
                     .font(compact ? .caption : .headline)
                     .bold()
                     .foregroundStyle(tone)
-                    .padding(.horizontal, compact ? 7 : 10)
-                    .padding(.vertical, compact ? 3 : 6)
+                    .padding(.horizontal, compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10)
+                    .padding(.vertical, compact ? PanelLayout.Spacing.s4 : PanelLayout.Spacing.s6)
                     .overlay {
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(tone.opacity(0.7), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: PanelLayout.Radius.control)
+                            .strokeBorder(tone.opacity(PanelLayout.Opacity.stroke), lineWidth: 1)
                     }
 
-                Spacer(minLength: 4)
+                Spacer(minLength: PanelLayout.Spacing.s4)
 
                 Text(recommendation.percentageString)
                     .font(.system(compact ? .title3 : .largeTitle, design: .monospaced))
@@ -516,13 +516,13 @@ struct DecisionCard: View {
 
             ProbabilityBar(value: recommendation.probability, tone: tone)
         }
-        .padding(compact ? 10 : 14)
+        .padding(compact ? PanelLayout.Spacing.s10 : PanelLayout.Spacing.s16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tone.opacity(0.09))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(tone.opacity(PanelLayout.Opacity.subtle))
+        .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.card))
         .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(tone.opacity(0.45), lineWidth: 1)
+            RoundedRectangle(cornerRadius: PanelLayout.Radius.card)
+                .strokeBorder(tone.opacity(PanelLayout.Opacity.stroke), lineWidth: 1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("decision-card")
@@ -541,7 +541,7 @@ struct ProbabilityBar: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.gray.opacity(0.25))
+                Capsule().fill(PanelLayout.neutral.opacity(PanelLayout.Opacity.neutral))
                 Capsule()
                     .fill(tone)
                     .frame(width: max(0, min(1, value)) * geo.size.width)
@@ -563,7 +563,7 @@ struct OptionList: View {
     private var hidden: Int { max(0, options.count - maxDisplay) }
 
     var body: some View {
-        VStack(spacing: compact ? 5 : 7) {
+        VStack(spacing: compact ? PanelLayout.Spacing.s6 : PanelLayout.Spacing.s8) {
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, rec in
                 OptionRow(recommendation: rec, rank: index + 2, compact: compact)
             }
@@ -587,7 +587,7 @@ struct OptionRow: View {
     private var tone: Color { recommendation.actionType.color }
 
     var body: some View {
-        HStack(spacing: compact ? 6 : 9) {
+        HStack(spacing: compact ? PanelLayout.Spacing.s6 : PanelLayout.Spacing.s10) {
             Text("#\(rank)")
                 .font(.caption2)
                 .monospacedDigit()
@@ -602,12 +602,12 @@ struct OptionRow: View {
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(tone)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(tone.opacity(0.16))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .padding(.horizontal, PanelLayout.Spacing.s6)
+                .padding(.vertical, PanelLayout.Spacing.s2)
+                .background(tone.opacity(PanelLayout.Opacity.tint))
+                .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.badge))
 
-            Spacer(minLength: 4)
+            Spacer(minLength: PanelLayout.Spacing.s4)
 
             Text(recommendation.percentageString)
                 .font(.system(.caption2, design: .monospaced))
@@ -619,10 +619,10 @@ struct OptionRow: View {
                     .frame(width: 44)
             }
         }
-        .padding(.horizontal, compact ? 7 : 10)
-        .padding(.vertical, compact ? 5 : 7)
+        .padding(.horizontal, compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10)
+        .padding(.vertical, compact ? PanelLayout.Spacing.s6 : PanelLayout.Spacing.s8)
         .background(Color.contentBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.row))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("option-row-\(rank)")
     }
@@ -640,41 +640,41 @@ struct DecisionAlerts: View {
     var compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
             if botStatus.cloudHost != nil,
                botStatus.cloudDegraded || botStatus.cloudFallbackStreak > 0 {
                 alert(icon: "icloud.slash.fill",
-                      tone: .red,
+                      tone: PanelLayout.danger,
                       text: botStatus.is3P
                         ? "雲端失敗——正在用本地 Akagi 三麻（連續 \(botStatus.cloudFallbackStreak) 手）"
                         : "雲端失敗——正在用本地模型（連續 \(botStatus.cloudFallbackStreak) 手）")
                     .accessibilityIdentifier("cloud-degraded-indicator")
             } else if let host = botStatus.cloudHost {
-                HStack(spacing: 4) {
+                HStack(spacing: PanelLayout.Spacing.s4) {
                     Image(systemName: "icloud.and.arrow.up").font(.caption2)
                     Text("對局資料送往 \(host)")
                         .font(.caption2)
                         .lineLimit(1)
                 }
-                .foregroundStyle(.orange)
+                .foregroundStyle(PanelLayout.warning)
                 .accessibilityIdentifier("cloud-inference-indicator")
             }
 
             if let stall = autoPlayStall {
                 alert(icon: "pause.circle.fill",
-                      tone: .red,
+                      tone: PanelLayout.danger,
                       text: "自動打牌停滯 \(stall.elapsedSeconds) 秒——伺服器已給機會但沒送出（\(stall.reason)）")
                     .accessibilityIdentifier("autoplay-stall-indicator")
             }
 
             if botStatus.is3P && !botStatus.isSanmaCapableDecision {
                 alert(icon: "exclamationmark.triangle.fill",
-                      tone: .orange,
+                      tone: PanelLayout.warning,
                       text: "三麻尚無推薦：本地 Akagi 三麻引擎在下一個決策點才會產出。")
                     .accessibilityIdentifier("sanma-unsupported-notice")
             }
         }
-        .padding(.bottom, hasAny ? (compact ? 7 : 10) : 0)
+        .padding(.bottom, hasAny ? (compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10) : 0)
     }
 
     private var hasAny: Bool {
@@ -683,7 +683,7 @@ struct DecisionAlerts: View {
     }
 
     private func alert(icon: String, tone: Color, text: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: 5) {
+        HStack(alignment: .top, spacing: PanelLayout.Spacing.s6) {
             Image(systemName: icon).font(.caption)
             Text(text)
                 .font(.caption)
@@ -691,10 +691,10 @@ struct DecisionAlerts: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .foregroundStyle(tone)
-        .padding(6)
+        .padding(PanelLayout.Spacing.s6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tone.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .background(tone.opacity(PanelLayout.Opacity.subtle))
+        .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.control))
         .accessibilityElement(children: .combine)
     }
 }
@@ -707,7 +707,7 @@ struct DecisionAlerts: View {
 
 struct EmptyRecommendationView: View {
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: PanelLayout.Spacing.s4) {
             Image(systemName: "questionmark.circle")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -716,7 +716,7 @@ struct EmptyRecommendationView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.vertical, PanelLayout.Spacing.s8)
     }
 }
 
@@ -726,7 +726,7 @@ struct EmptyRecommendationView: View {
 /// 用同一個畫面會讓「我關掉了」跟「Bot 還沒算出來」看不出差別。
 struct RecommendationsDisabledView: View {
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: PanelLayout.Spacing.s4) {
             Image(systemName: "eye.slash")
                 .font(.body)
                 .foregroundStyle(.secondary)
@@ -735,11 +735,11 @@ struct RecommendationsDisabledView: View {
                 .foregroundStyle(.secondary)
             Text("切換到「推薦」或「自動」可恢復")
                 .font(.caption2)
-                .foregroundStyle(Color.secondary.opacity(0.7))
+                .foregroundStyle(Color.secondary.opacity(PanelLayout.Opacity.textDim))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.vertical, PanelLayout.Spacing.s8)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("recommendation-disabled-state")
         .accessibilityLabel("AI 推薦")
@@ -755,7 +755,7 @@ struct RecommendationsDisabledView: View {
 }
 
 #Preview("DecisionCard") {
-    VStack(spacing: 12) {
+    VStack(spacing: PanelLayout.Spacing.s12) {
         DecisionCard(recommendation: Recommendation(tile: "8p", probability: 0.936,
                                                     actionType: .discard))
         DecisionCard(recommendation: Recommendation(actionType: .riichi, probability: 0.684,
