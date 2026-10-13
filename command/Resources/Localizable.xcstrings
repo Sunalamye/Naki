@@ -755,60 +755,31 @@
         }
       }
     },
-    "JavaScript 注入失敗": {
-      "comment": "a11y 標籤",
+    "App 元件載入失敗": {
+      "comment": "JS 注入失敗橫幅標題與 a11y label",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "JavaScript injection failed"
+            "value": "App component failed to load"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "JavaScript の注入に失敗"
+            "value": "App のコンポーネントの読み込みに失敗"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "JavaScript 주입 실패"
+            "value": "App 구성 요소 로드 실패"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "JavaScript 注入失败"
-          }
-        }
-      }
-    },
-    "JavaScript 注入失敗：Naki 讀不到牌局，也送不出任何動作": {
-      "comment": "JS 注入失敗橫幅",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "JavaScript injection failed: Naki cannot read the game or send any action"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "JavaScript の注入に失敗: Naki は対局を読み取れず、操作も送信できません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "JavaScript 주입 실패: Naki가 대국을 읽을 수 없고 어떤 동작도 보낼 수 없습니다"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "JavaScript 注入失败：Naki 读不到牌局，也发送不出任何动作"
+            "value": "App 组件加载失败"
           }
         }
       }
@@ -1016,31 +987,31 @@
         }
       }
     },
-    "WebSocket 連線狀態": {
+    "遊戲連線": {
       "comment": "連線指示 a11y",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "WebSocket connection status"
+            "value": "Game connection"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "WebSocket 接続状態"
+            "value": "ゲーム接続"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "WebSocket 연결 상태"
+            "value": "게임 연결"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "WebSocket 连接状态"
+            "value": "游戏连接"
           }
         }
       }
@@ -1885,60 +1856,60 @@
         }
       }
     },
-    "雲端失敗——正在用本地 Akagi 三麻（連續 %lld 手）": {
+    "雲端失敗，改用本機三麻（已 %lld 手）": {
       "comment": "側欄紅色警示：三麻雲端失敗改用本地（機器翻譯，未經母語校對）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cloud failed — using the local Akagi 3P engine (%lld in a row)"
+            "value": "Cloud failed, using 3P on this device (%lld moves so far)"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "クラウド失敗——ローカルの Akagi 三麻を使用中（%lld 手連続）"
+            "value": "クラウド失敗、このデバイスの三麻に切り替え（%lld 手連続）"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "클라우드 실패 — 로컬 Akagi 3인 마작 사용 중 (%lld수 연속)"
+            "value": "클라우드 실패, 이 기기의 3인 마작으로 전환 (%lld수 연속)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "云端失败——正在使用本地 Akagi 三麻（连续 %lld 手）"
+            "value": "云端失败，改用本机三麻（已 %lld 手）"
           }
         }
       }
     },
-    "三麻尚無推薦：本地 Akagi 三麻引擎在下一個決策點才會產出。": {
+    "三麻建議下一手才會出現": {
       "comment": "側欄提示：三麻還沒有推薦（機器翻譯，未經母語校對）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No 3P recommendation yet: the local Akagi 3P engine produces one at the next decision point."
+            "value": "3P recommendations appear from the next move"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻の推奨はまだありません：ローカルの Akagi 三麻エンジンは次の決定点で推奨を出します。"
+            "value": "三麻のおすすめは次の手から表示されます"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "3인 마작 추천이 아직 없습니다: 로컬 Akagi 3인 마작 엔진이 다음 결정 시점에 추천을 만듭니다."
+            "value": "3인 마작 추천은 다음 수부터 표시됩니다"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻暂无推荐：本地 Akagi 三麻引擎会在下一个决策点给出推荐。"
+            "value": "三麻建议下一手才会出现"
           }
         }
       }
@@ -2494,31 +2465,31 @@
         }
       }
     },
-    "以後都用這個伺服器，不要再問": {
+    "記住伺服器": {
       "comment": "伺服器選擇 Toggle",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Always use this server and don't ask again"
+            "value": "Remember server"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今後はこのサーバーを使い、再度確認しない"
+            "value": "サーバーを記憶"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "앞으로 이 서버를 사용하고 다시 묻지 않기"
+            "value": "서버 기억하기"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "以后都使用这个服务器，不再询问"
+            "value": "记住服务器"
           }
         }
       }
@@ -2703,30 +2674,31 @@
         }
       }
     },
-    "伺服器目前授權動作": {
+    "可用動作": {
+      "comment": "側欄可用動作標題",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Actions currently authorized by the server"
+            "value": "Available actions"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "サーバーが現在許可している操作"
+            "value": "使用できる操作"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "서버가 현재 허용한 동작"
+            "value": "가능한 동작"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "服务器当前授权的动作"
+            "value": "可用动作"
           }
         }
       }
@@ -2847,31 +2819,31 @@
         }
       }
     },
-    "信任": {
+    "權限": {
       "comment": "插件頁分頁名（PluginTab.title）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Trust"
+            "value": "Permissions"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "信頼"
+            "value": "権限"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "신뢰"
+            "value": "권한"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "信任"
+            "value": "权限"
           }
         }
       }
@@ -5251,35 +5223,6 @@
         }
       }
     },
-    "已連接": {
-      "comment": "連線狀態指示",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connected"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "接続済み"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결됨"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已连接"
-          }
-        }
-      }
-    },
     "已連線": {
       "comment": "雲端狀態",
       "localizations": {
@@ -5831,60 +5774,60 @@
         }
       }
     },
-    "抓取": {
-      "comment": "抓取按鈕",
+    "預覽": {
+      "comment": "插件匯入預覽按鈕",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fetch"
+            "value": "Preview"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "取得"
+            "value": "プレビュー"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "가져오기"
+            "value": "미리보기"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "抓取"
+            "value": "预览"
           }
         }
       }
     },
-    "抓取中…": {
-      "comment": "抓取按鈕（進行中）",
+    "預覽中…": {
+      "comment": "插件匯入預覽按鈕（進行中）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fetching…"
+            "value": "Loading preview…"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "取得中…"
+            "value": "プレビューを取得中…"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "가져오는 중…"
+            "value": "미리보기 불러오는 중…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "抓取中…"
+            "value": "预览中…"
           }
         }
       }
@@ -6003,31 +5946,31 @@
         }
       }
     },
-    "推論位置": {
+    "計算位置": {
       "comment": "詳情欄位",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inference location"
+            "value": "Computed on"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "推論の実行場所"
+            "value": "計算の実行場所"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "추론 위치"
+            "value": "계산 위치"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "推理位置"
+            "value": "计算位置"
           }
         }
       }
@@ -6699,7 +6642,7 @@
         }
       }
     },
-    "未連接": {
+    "未連線": {
       "comment": "連線狀態指示",
       "localizations": {
         "en": {
@@ -6786,31 +6729,31 @@
         }
       }
     },
-    "本機 Core ML": {
-      "comment": "推論位置值",
+    "本機": {
+      "comment": "計算位置值",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "On-device Core ML"
+            "value": "This device"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このデバイスの Core ML"
+            "value": "このデバイス"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이 기기의 Core ML"
+            "value": "이 기기"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本机 Core ML"
+            "value": "本机"
           }
         }
       }
@@ -7540,31 +7483,31 @@
         }
       }
     },
-    "決策來源": {
+    "建議來源": {
       "comment": "詳情欄位",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Decision source"
+            "value": "Recommendation source"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "判断の情報源"
+            "value": "おすすめの情報源"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "판단 출처"
+            "value": "추천 출처"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "决策来源"
+            "value": "建议来源"
           }
         }
       }
@@ -7801,89 +7744,60 @@
         }
       }
     },
-    "牌局封包解析失敗": {
-      "comment": "a11y 標籤",
+    "這局資料讀不懂：本局不給建議、不自動打": {
+      "comment": "封包解析失敗橫幅標題與 a11y label",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Game packet parsing failed"
+            "value": "Can't read this round's data: no recommendations or auto-play this round"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "対局パケットの解析に失敗"
+            "value": "この局のデータを読み取れません：この局ではおすすめも自動プレイもしません"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "대국 패킷 해석 실패"
+            "value": "이번 국 데이터를 읽을 수 없습니다: 이번 국은 추천도 자동 플레이도 하지 않습니다"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "牌局封包解析失败"
+            "value": "这局数据读不懂：本局不给建议、不自动打"
           }
         }
       }
     },
-    "牌局封包解析失敗：這一局 Naki 不會給推薦，也不會自動打牌": {
-      "comment": "封包解析失敗橫幅",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Game packet parsing failed: Naki will give no recommendations and will not auto-play this round"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "対局パケットの解析に失敗: この局では Naki はおすすめを出さず、自動プレイも行いません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "대국 패킷 해석 실패: 이번 국에서는 Naki가 추천을 하지 않고 자동 플레이도 하지 않습니다"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "牌局封包解析失败：这一局 Naki 不会给出推荐，也不会自动打牌"
-          }
-        }
-      }
-    },
-    "牌局與模型資訊": {
+    "牌局資訊": {
       "comment": "摘要條無障礙標籤",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Game and model info"
+            "value": "Game info"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "対局とモデルの情報"
+            "value": "対局情報"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "대국 및 모델 정보"
+            "value": "대국 정보"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "牌局与模型信息"
+            "value": "牌局信息"
           }
         }
       }
@@ -8323,35 +8237,6 @@
         }
       }
     },
-    "移除插件？": {
-      "comment": "確認對話標題",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove plugin?"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "プラグインを削除しますか？"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "플러그인을 제거할까요?"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "移除插件？"
-          }
-        }
-      }
-    },
     "立即檢查": {
       "comment": "設定頁按鈕",
       "localizations": {
@@ -8410,30 +8295,31 @@
         }
       }
     },
-    "等待遊戲數據...": {
+    "等待牌局資料…": {
+      "comment": "側欄空狀態",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Waiting for game data..."
+            "value": "Waiting for game data…"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ゲームデータを待機中..."
+            "value": "対局データを待機中…"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "게임 데이터 대기 중..."
+            "value": "대국 데이터 대기 중…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "等待游戏数据..."
+            "value": "等待牌局数据…"
           }
         }
       }
@@ -8582,30 +8468,30 @@
         }
       }
     },
-    "自動打牌停滯 %lld 秒——伺服器已給機會但沒送出（%@）": {
+    "自動打牌卡住 %lld 秒：該出手卻沒送出（%@）": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Auto-play stalled for %lld s — the server gave a turn but nothing was sent (%@)"
+            "value": "Auto-play stuck for %lld s: it should have acted but sent nothing (%@)"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "自動打牌が %lld 秒停滞——サーバーから操作権が与えられましたが送信されませんでした（%@）"
+            "value": "自動プレイが %lld 秒止まっています：出すべき操作を送信していません（%@）"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "자동 대국 %lld초 정체 — 서버가 기회를 주었으나 전송되지 않음 (%@)"
+            "value": "자동 플레이 %lld초 멈춤: 해야 할 동작을 보내지 않음 (%@)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自动打牌停滞 %lld 秒——服务器已给出机会但没有发送（%@）"
+            "value": "自动打牌卡住 %lld 秒：该出手却没发送（%@）"
           }
         }
       }
@@ -9333,31 +9219,31 @@
         }
       }
     },
-    "退化中": {
+    "改用本機": {
       "comment": "雲端狀態",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Degraded"
+            "value": "Fell back to this device"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "縮退中"
+            "value": "このデバイスに切替"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "성능 저하"
+            "value": "이 기기로 전환"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "降级中"
+            "value": "改用本机"
           }
         }
       }
@@ -10766,30 +10652,30 @@
         }
       }
     },
-    "雲端失敗——正在用本地模型（連續 %lld 手）": {
+    "雲端失敗，改用本機（已 %lld 手）": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cloud failed — using the local model (%lld in a row)"
+            "value": "Cloud failed, using this device (%lld moves so far)"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "クラウド失敗——ローカルモデルを使用中（%lld 手連続）"
+            "value": "クラウド失敗、このデバイスに切り替え（%lld 手連続）"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "클라우드 실패 — 로컬 모델 사용 중 (%lld수 연속)"
+            "value": "클라우드 실패, 이 기기로 전환 (%lld수 연속)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "云端失败——正在使用本地模型（连续 %lld 手）"
+            "value": "云端失败，改用本机（已 %lld 手）"
           }
         }
       }
@@ -11113,31 +10999,31 @@
         }
       }
     },
-    "頁面載入失敗：Naki 讀不到牌局": {
+    "頁面沒載入，讀不到牌局": {
       "comment": "頁面載入失敗橫幅",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Page failed to load: Naki cannot read the game"
+            "value": "Page didn't load; can't read the game"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ページの読み込みに失敗: Naki は対局を読み取れません"
+            "value": "ページが読み込まれず、対局を読み取れません"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "페이지 로드 실패: Naki가 대국을 읽을 수 없습니다"
+            "value": "페이지가 로드되지 않아 대국을 읽을 수 없습니다"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "页面加载失败：Naki 读不到牌局"
+            "value": "页面没加载，读不到牌局"
           }
         }
       }
@@ -11229,118 +11115,60 @@
         }
       }
     },
-    "顯示/隱藏日誌": {
-      "comment": "toolbar tooltip",
+    "紀錄": {
+      "comment": "日誌：工具列切換鈕、插件頁分頁、日誌面板標題",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show/Hide log"
+            "value": "Log"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ログの表示/非表示"
+            "value": "ログ"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "로그 표시/숨기기"
+            "value": "로그"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示/隐藏日志"
+            "value": "日志"
           }
         }
       }
     },
-    "顯示/隱藏遊戲面板": {
-      "comment": "toolbar tooltip",
+    "決策面板": {
+      "comment": "工具列按鈕 label 與 tooltip",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show/Hide game panel"
+            "value": "Decision panel"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ゲームパネルの表示/非表示"
+            "value": "判断パネル"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "게임 패널 표시/숨기기"
+            "value": "판단 패널"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "显示/隐藏游戏面板"
-          }
-        }
-      }
-    },
-    "顯示或隱藏日誌": {
-      "comment": "toolbar a11y",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show or hide log"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ログを表示または非表示"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "로그 표시 또는 숨기기"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示或隐藏日志"
-          }
-        }
-      }
-    },
-    "顯示或隱藏遊戲面板": {
-      "comment": "toolbar a11y",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show or hide game panel"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ゲームパネルを表示または非表示"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "게임 패널 표시 또는 숨기기"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示或隐藏游戏面板"
+            "value": "决策面板"
           }
         }
       }
@@ -11631,41 +11459,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在初始化..."
-          }
-        }
-      }
-    },
-    "Log": {
-      "comment": "桌面日誌面板標題（機器翻譯，未經母語校對）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Log"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ログ"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "로그"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "日志"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "日誌"
           }
         }
       }

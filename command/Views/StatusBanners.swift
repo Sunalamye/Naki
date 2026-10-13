@@ -25,7 +25,7 @@ struct PageLoadFailureBanner: View {
                     .imageScale(.large)
 
                 VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
-                    Text("頁面載入失敗：Naki 讀不到牌局")
+                    Text("頁面沒載入，讀不到牌局")
                         .fontWeight(.semibold)
                     Text(reason)
                         .font(.caption)
@@ -122,7 +122,7 @@ struct JSInjectionFailureBanner: View {
                     .imageScale(.large)
 
                 VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
-                    Text("JavaScript 注入失敗：Naki 讀不到牌局，也送不出任何動作")
+                    Text("App 元件載入失敗")
                         .font(.headline)
                     Text(summary)
                         .font(.system(.caption, design: .monospaced))
@@ -141,7 +141,7 @@ struct JSInjectionFailureBanner: View {
             .background(PanelLayout.danger)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("js-injection-failure-banner")
-            .accessibilityLabel("JavaScript 注入失敗")
+            .accessibilityLabel("App 元件載入失敗")
             .accessibilityValue(summary)
         }
     }
@@ -170,7 +170,7 @@ struct LiqiParseFailureBanner: View {
                     .imageScale(.large)
 
                 VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
-                    Text("牌局封包解析失敗：這一局 Naki 不會給推薦，也不會自動打牌")
+                    Text("這局資料讀不懂：本局不給建議、不自動打")
                         .font(.headline)
                     Text(summary)
                         .font(.system(.caption, design: .monospaced))
@@ -189,7 +189,7 @@ struct LiqiParseFailureBanner: View {
             .background(PanelLayout.warning)
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("liqi-parse-failure-banner")
-            .accessibilityLabel("牌局封包解析失敗")
+            .accessibilityLabel("這局資料讀不懂：本局不給建議、不自動打")
             .accessibilityValue(summary)
         }
     }

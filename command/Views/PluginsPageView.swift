@@ -36,11 +36,11 @@ struct PluginsPageView: View {
     @State private var tab: PluginTab = .plugins
     @State private var selectedPluginId: String?   // master-detail 選中的插件
 
-    /// 分頁：把 Log 與信任/L3 從主畫面分出去，插件管理不再和 log 擠一起。
+    /// 分頁：把紀錄與權限分出去，插件管理不再和 log 擠一起。
     enum PluginTab: String, CaseIterable, Identifiable {
         case plugins = "插件"
-        case log = "Log"
-        case trust = "信任"
+        case log = "紀錄"
+        case trust = "權限"
         var id: String { rawValue }
         var title: LocalizedStringKey { LocalizedStringKey(rawValue) }
         var icon: String {
@@ -383,7 +383,7 @@ struct PluginsPageView: View {
                         .font(.system(.caption, design: .monospaced))
                         .autocorrectionDisabled()
                         .accessibilityIdentifier("plugin-import-url")
-                    Button(importing ? "抓取中…" : "抓取") { Task { await fetchImport() } }
+                    Button(importing ? "預覽中…" : "預覽") { Task { await fetchImport() } }
                         .disabled(importing || importURL.trimmingCharacters(in: .whitespaces).isEmpty)
                     Button(updateChecking ? "檢查中…" : "檢查更新") { Task { await checkUpdates() } }
                         .disabled(updateChecking)

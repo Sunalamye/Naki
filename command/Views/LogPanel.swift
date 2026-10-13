@@ -21,7 +21,7 @@ struct LogPanel: View {
             // 工具欄
             HStack(spacing: PanelLayout.Spacing.s8) {
                 Image(systemName: "list.bullet.rectangle")
-                Text("Log")
+                Text("紀錄")
                     .font(.headline)
 
                 Spacer()

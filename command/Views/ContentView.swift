@@ -445,20 +445,20 @@ struct ContentView: View {
 
         // 右側：日誌切換
         ToolbarItem(placement: .primaryAction) {
-            Button("顯示或隱藏日誌", systemImage: naki.ui.showLog ? "terminal.fill" : "terminal") { naki.ui.showLog.toggle() }
+            Button("紀錄", systemImage: naki.ui.showLog ? "terminal.fill" : "terminal") { naki.ui.showLog.toggle() }
                 .labelStyle(.iconOnly)
-                .help("顯示/隱藏日誌")
+                .help("紀錄")
                 .accessibilityIdentifier("toolbar-log-toggle")
                 .accessibilityValue(naki.ui.showLog ? "已顯示" : "已隱藏")
         }
 
         // 遊戲面板切換
         ToolbarItem(placement: .primaryAction) {
-            Button("顯示或隱藏遊戲面板", systemImage: naki.ui.showGamePanel ? "sidebar.trailing" : "sidebar.right") {
+            Button("決策面板", systemImage: naki.ui.showGamePanel ? "sidebar.trailing" : "sidebar.right") {
                 withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { naki.ui.showGamePanel.toggle() }
             }
             .labelStyle(.iconOnly)
-            .help("顯示/隱藏遊戲面板")
+            .help("決策面板")
             .accessibilityIdentifier("toolbar-game-panel-toggle")
             .accessibilityValue(naki.ui.showGamePanel ? "已顯示" : "已隱藏")
         }
@@ -832,7 +832,7 @@ struct ServerPickerView: View {
             }
             .frame(maxWidth: 340)
 
-            Toggle("以後都用這個伺服器，不要再問", isOn: $pin)
+            Toggle("記住伺服器", isOn: $pin)
                 .font(.callout)
                 .frame(maxWidth: 340)
                 .padding(.top, PanelLayout.Spacing.s16)
@@ -949,14 +949,14 @@ struct ConnectionIndicator: View {
                 .fill(isConnected ? PanelLayout.success : PanelLayout.danger)
                 .frame(width: 6, height: 6)
         } value: {
-            Text(isConnected ? "已連接" : "未連接")
+            Text(isConnected ? "已連線" : "未連線")
                 .font(.caption2)
         }
         .padding(.top, 3) // 實測對齊值：補償 toolbar 擺放偏高，與 MCP 膠囊同一中心
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("websocket-connection-indicator")
-        .accessibilityLabel("WebSocket 連線狀態")
-        .accessibilityValue(isConnected ? "已連接" : "未連接")
+        .accessibilityLabel("遊戲連線")
+        .accessibilityValue(isConnected ? "已連線" : "未連線")
     }
 }
 

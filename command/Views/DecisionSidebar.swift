@@ -201,7 +201,7 @@ struct GameSummaryDisclosure: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("game-summary-disclosure")
-            .accessibilityLabel("牌局與模型資訊")
+            .accessibilityLabel("牌局資訊")
             .accessibilityValue(isExpanded ? Text("已展開") : Text("已收合"))
             .accessibilityHint("展開後顯示四家點數、寶牌與模型來源")
 
@@ -291,8 +291,8 @@ struct GameDetailsPanel: View {
             // 而展開層本來的用途就是收那些「不必每手都看」的東西。
             group("模型與資料來源") {
                 pair("模型", Text(botStatus.modelDisplayKey))
-                pair("決策來源", Text(verbatim: botStatus.decisionSource))
-                pair("推論位置", botStatus.cloudHost.map { Text(verbatim: $0) } ?? Text("本機 Core ML"))
+                pair("建議來源", Text(verbatim: botStatus.decisionSource))
+                pair("計算位置", botStatus.cloudHost.map { Text(verbatim: $0) } ?? Text("本機"))
                 pair("雲端狀態", Text(cloudState))
             }
         }
@@ -300,7 +300,7 @@ struct GameDetailsPanel: View {
     }
 
     private var cloudState: LocalizedStringKey {
-        if botStatus.cloudDegraded { return "退化中" }
+        if botStatus.cloudDegraded { return "改用本機" }
         if botStatus.cloudHost != nil { return "已連線" }
         return cloudConfigured ? "已設定・未使用" : "未啟用"
     }
@@ -411,7 +411,7 @@ struct AuthorizedActionsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
-            Text("伺服器目前授權動作")
+            Text("可用動作")
                 .font(.caption2)
                 .bold()
                 .foregroundStyle(.secondary)
@@ -649,8 +649,8 @@ struct DecisionAlerts: View {
                 alert(icon: "icloud.slash.fill",
                       tone: PanelLayout.danger,
                       text: botStatus.is3P
-                        ? "雲端失敗——正在用本地 Akagi 三麻（連續 \(botStatus.cloudFallbackStreak) 手）"
-                        : "雲端失敗——正在用本地模型（連續 \(botStatus.cloudFallbackStreak) 手）")
+                        ? "雲端失敗，改用本機三麻（已 \(botStatus.cloudFallbackStreak) 手）"
+                        : "雲端失敗，改用本機（已 \(botStatus.cloudFallbackStreak) 手）")
                     .accessibilityIdentifier("cloud-degraded-indicator")
                     .transition(.opacity.combined(with: .move(edge: .top)))
             } else if let host = botStatus.cloudHost {
@@ -668,7 +668,7 @@ struct DecisionAlerts: View {
             if let stall = autoPlayStall {
                 alert(icon: "pause.circle.fill",
                       tone: PanelLayout.danger,
-                      text: "自動打牌停滯 \(stall.elapsedSeconds) 秒——伺服器已給機會但沒送出（\(stall.reason)）")
+                      text: "自動打牌卡住 \(stall.elapsedSeconds) 秒：該出手卻沒送出（\(stall.reason)）")
                     .accessibilityIdentifier("autoplay-stall-indicator")
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -676,7 +676,7 @@ struct DecisionAlerts: View {
             if sanmaNotice {
                 alert(icon: "exclamationmark.triangle.fill",
                       tone: PanelLayout.warning,
-                      text: "三麻尚無推薦：本地 Akagi 三麻引擎在下一個決策點才會產出。")
+                      text: "三麻建議下一手才會出現")
                     .accessibilityIdentifier("sanma-unsupported-notice")
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -729,7 +729,7 @@ struct EmptyRecommendationView: View {
             Image(systemName: "questionmark.circle")
                 .font(.body)
                 .foregroundStyle(.secondary)
-            Text("等待遊戲數據...")
+            Text("等待牌局資料…")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
