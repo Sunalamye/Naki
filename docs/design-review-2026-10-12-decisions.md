@@ -900,3 +900,8 @@
   - 座位 0 在三麻同樣明送（`.absent` 0 筆），U2 補 0 路徑三麻也未觸發。
   - 槓：只有對手一次暗槓，仍無自家槓樣本。
   - 副作用發現（後續項）：強制重連會讓錄影丟棄重連前的 125 個事件（「沒有 end_game」）並從重連點重錄，`replay-check` 只能重跑後半（102 事件 17 決策 0 錯誤，指紋 `8a8b56a40ce608df`）；`skip:sanmaUnsupported` 這個理由標籤在三麻局間／重連無 oplist 時出現 3 次，標籤誤導，實際是沒有 oplist。
+
+### 2.17.0 發行（2026-10-13）
+- 用戶指示「push、驗證確定沒問題再發行」。流程：先掛 GitHub draft 預覽 notes（後刪除避免重複）→ 四麻、三麻各一局 live 驗證通過 → notes 依核對收斂（`f9be300`）→ 版號 bump 獨立 commit（`557567b`，含三語 README badge 與 docs 索引，因 release 腳本的 commit 沒有 why 與 Claude-Session 尾行）→ `release.sh 2.17.0 --yes --notes-file`：NakiTests 994/0、macOS Release 與 iOS archive 版號核對 2.17.0、打包三個資產、tag `v2.17.0`、push main 與 tag、`gh release create`。
+- 結果：https://github.com/Sunalamye/Naki/releases/tag/v2.17.0（Latest；`Naki.dmg` 27.5 MB、`Naki.zip` 26.9 MB、`Naki-M.ipa` 28.8 MB）。log：`.swfd/logs/release-2.17.0/release.log`。`/Applications/Naki.app` 已換成發行版。
+- 留給下一輪：`isNaki` 256 上限的 JS 契約測試；三麻重放期間「授權序號與事件不一致」降 `.trace`；強制重連錄影丟前半；`skip:sanmaUnsupported` 標籤；親家首打 700ms 回音視窗；`cancelMatch` builder 死碼；release 腳本的 commit 訊息格式與 README.en／ja badge 未納入腳本。
