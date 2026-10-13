@@ -99,11 +99,7 @@ struct LogPanel: View {
                 // 觀察最後一筆的 id 而非 count：滿 `maxEntries` 後 count 恆定，只有 last.id 會變
                 .onChange(of: shown.last?.id) { _, lastID in
                     guard autoScroll, let lastID else { return }
-                    if reduceMotion {
-                        proxy.scrollTo(lastID, anchor: .bottom)
-                    } else {
-                        withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
-                    }
+                    withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { proxy.scrollTo(lastID, anchor: .bottom) }
                 }
             }
         }

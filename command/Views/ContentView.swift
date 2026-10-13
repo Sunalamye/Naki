@@ -46,13 +46,95 @@ enum PanelLayout {
         !(horizontal == .compact && vertical == .regular)
     }
 
-    /// 數值改變（點數）：不回彈，數字不會短暫顯示一個不存在的值。
+    /// 回報狀態的變化（點數、延遲、異常列）：不回彈，數字不會短暫顯示一個不存在的值。
     static let valueChange: Animation = .smooth(duration: 0.4)
+    /// 退場比進場快。
+    static let exit: Animation = .smooth(duration: 0.18)
+    /// 面板開合、摘要條展開。
+    static let standard: Animation = .easeInOut(duration: 0.2)
 
-    /// 開啟「減少動態效果」時不做動畫。
-    static func animation(_ base: Animation = .easeInOut(duration: 0.2),
-                          reduceMotion: Bool) -> Animation? {
+    /// 所有動畫的唯一入口：開啟「減少動態效果」時不做動畫。
+    static func animation(_ base: Animation = standard, reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : base
+    }
+}
+
+/// 自動打牌基準延遲：數值、端點說明與 Stepper。工具列用 `compact`，設定頁用寬版。
+///
+/// 它是 `ActionDelayModel` 隨機分布的**縮放係數**（防偵測的分布保留）：1.0s＝現行行為，
+/// 向下更快、向上更慢；讀取端是 `AutoPlayEngine`。呼叫端只在 `supportsAutoPlay` 時放它，
+/// Legacy 路徑延遲永遠不生效，掛著就是假控制。
+///
+/// 數字自己畫，Stepper 只出上下箭頭（`.labelsHidden`）：macOS 的 `Stepper(value:) { label }`
+/// 在 toolbar 這種水平緊湊容器裡會把 label 吃掉、只剩箭頭（實測「1.0s」不見了）。
+struct ActionDelayStepper: View {
+    var compact = false
+    @Environment(\.naki) private var naki
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        @Bindable var settings = naki.settings
+        let stepper = Stepper(compact ? "自動打牌基準延遲" : "基準延遲",
+                              value: $settings.actionDelaySeconds,
+                              in: SettingsStore.actionDelayRange,
+                              step: SettingsStore.actionDelayStep)
+            .labelsHidden()
+        if compact {
+            HStack(spacing: PanelLayout.Spacing.s4) {
+                value.frame(minWidth: 40, alignment: .trailing)
+                stepper.controlSize(.small)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("autoplay-delay-stepper")
+            .accessibilityLabel("自動打牌基準延遲")
+            .accessibilityValue(accessibilityText)
+#if os(macOS)
+            // `.help` 只包 macOS：iOS 上 tooltip 只在有指標裝置時看得到。
+            .help("送出前的模擬人類延遲基準；1.0s 為預設，向上更慢、向下更快（隨機分布保留）")
+#endif
+        } else {
+            HStack {
+                Text("基準延遲")
+                Spacer()
+                value
+                stepper
+                    .accessibilityIdentifier("settings-delay-stepper")
+                    .accessibilityValue(accessibilityText)
+            }
+        }
+    }
+
+    /// 延遲到達範圍端點時的說明（延遲越小越快）；Stepper 的值是步進累加，用半步容差比。
+    static func delayBoundLabel(_ seconds: Double) -> String? {
+        let range = SettingsStore.actionDelayRange, tolerance = SettingsStore.actionDelayStep / 2
+        if abs(seconds - range.lowerBound) < tolerance { return "最快" }
+        if abs(seconds - range.upperBound) < tolerance { return "最慢" }
+        return nil
+    }
+
+    private var seconds: Double { naki.settings.actionDelaySeconds }
+    private var bound: LocalizedStringKey? { Self.delayBoundLabel(seconds).map { LocalizedStringKey($0) } }
+
+    private var value: some View {
+        HStack(spacing: PanelLayout.Spacing.s4) {
+            if let bound {
+                Text(bound).foregroundStyle(.secondary)
+            }
+            secondsText
+                .monospacedDigit()
+                .contentTransition(.numericText(value: seconds))
+                .animation(PanelLayout.animation(PanelLayout.valueChange, reduceMotion: reduceMotion), value: seconds)
+        }
+        .font(.system(compact ? .caption : .body, design: .monospaced))
+    }
+
+    private var accessibilityText: Text {
+        guard let bound else { return secondsText }
+        return Text("\(secondsText) \(Text(bound))")
+    }
+
+    private var secondsText: Text {
+        Text("\(seconds, format: .number.precision(.fractionLength(1))) 秒")
     }
 }
 
@@ -162,49 +244,6 @@ struct ContentView: View {
         .accessibilityLabel("自動打牌模式")
         .accessibilityHint(naki.settings.supportsAutoPlay
                            ? "" : AutoPlayAvailability.autoUnavailableReasonKey)
-    }
-
-    /// 自動打牌基準延遲 stepper：`[ 1.0s ⌃⌄ ]`。
-    ///
-    /// 它不取代 `ActionDelayModel` 的隨機分布（那是防偵測的刻意設計），而是當它的
-    /// **縮放係數**：1.0s＝現行行為，向下更快、向上更慢。
-    /// 值寫進 `SettingsStore`（重啟保留），讀取端是 `AutoPlayEngine`。
-    ///
-    /// **只在這條 path 真的會自動送出時才出現**（`supportsAutoPlay`）：Legacy 路徑
-    /// 不提供自動送出，延遲永遠不會生效，掛在那裡就又是一個假控制（見 picker 的同款判斷）。
-    /// 在支援的 path 上不隨當前模式隱藏——它是「未來切到自動時」的設定，不是即時動作，
-    /// 跟著模式閃現反而干擾。
-    private var actionDelayStepper: some View {
-        // 數字自己畫，Stepper 只出上下箭頭（`.labelsHidden`）。
-        // macOS 的 `Stepper(value:) { label }` 在 toolbar 這種水平緊湊容器裡
-        // 會把 trailing-closure label 吃掉、只剩箭頭（實測畫面上「1.0s」不見了），
-        // 所以改成 HStack 把值文字明確擺在箭頭左邊。
-        @Bindable var settings = naki.settings
-        return HStack(spacing: PanelLayout.Spacing.s4) {
-            delaySecondsText
-                .font(.system(.caption, design: .monospaced))
-                .monospacedDigit()
-                .frame(minWidth: 40, alignment: .trailing)
-            Stepper("自動打牌基準延遲",
-                    value: $settings.actionDelaySeconds,
-                    in: SettingsStore.actionDelayRange,
-                    step: SettingsStore.actionDelayStep)
-                .labelsHidden()
-                .controlSize(.small)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("autoplay-delay-stepper")
-        .accessibilityLabel("自動打牌基準延遲")
-        .accessibilityValue(delaySecondsText)
-#if os(macOS)
-        // `.help` 只包 macOS：iOS 上 tooltip 只在有指標裝置時看得到，對 iPhone 是
-        // 多餘的 pointer 互動註冊。專案既有慣例就是這樣（見 `LogPanel` 的兩個 `.help`）。
-        .help("送出前的模擬人類延遲基準；1.0s 為預設，向上更慢、向下更快（隨機分布保留）")
-#endif
-    }
-
-    private var delaySecondsText: Text {
-        Text("\(naki.settings.actionDelaySeconds, format: .number.precision(.fractionLength(1))) 秒")
     }
 
     /// 雲端推論快速開關。
@@ -317,7 +356,7 @@ struct ContentView: View {
         .safeAreaInset(edge: .bottom) {
             StatusBar()
         }
-        .animation(PanelLayout.animation(reduceMotion: reduceMotion), value: naki.ui.showGamePanel)
+        // 不放 `.animation(_:value:)`：子樹含 WebView。面板開合由工具列切換處的 `withAnimation` 驅動。
         .sheet(isPresented: Bindable(naki.ui).showAdvancedSettings) {
             AdvancedSettingsSheet().appLocale()
         }
@@ -366,7 +405,7 @@ struct ContentView: View {
         // 掛著就是個假控制。
         if naki.settings.supportsAutoPlay {
             ToolbarItem(placement: .navigation) {
-                actionDelayStepper
+                ActionDelayStepper(compact: true)
                     .fixedSize()
                     .padding(.horizontal, PanelLayout.Spacing.s4)
             }
@@ -416,7 +455,7 @@ struct ContentView: View {
         // 遊戲面板切換
         ToolbarItem(placement: .primaryAction) {
             Button("顯示或隱藏遊戲面板", systemImage: naki.ui.showGamePanel ? "sidebar.trailing" : "sidebar.right") {
-                naki.ui.showGamePanel.toggle()
+                withAnimation(PanelLayout.animation(reduceMotion: reduceMotion)) { naki.ui.showGamePanel.toggle() }
             }
             .labelStyle(.iconOnly)
             .help("顯示/隱藏遊戲面板")
@@ -514,7 +553,7 @@ struct ContentView: View {
             if naki.ui.showGamePanel {
                 iOSSidePanel
                     .frame(width: iOSPanelWidth)
-                    .transition(reduceMotion ? .opacity : .move(edge: .trailing))
+                    .transition(.move(edge: .trailing))
             }
 
             // 面板收起來之後唯一叫得回來的入口。
@@ -644,7 +683,7 @@ struct ContentView: View {
 
             // 只在這條 path 真的會自動送出時才出現（與 macOS 同一個判斷）
             if naki.settings.supportsAutoPlay {
-                actionDelayStepper
+                ActionDelayStepper(compact: true)
             }
         }
         .padding(.horizontal, PanelLayout.Spacing.s10)

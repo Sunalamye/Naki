@@ -110,6 +110,16 @@ final class UISnapshotTests: XCTestCase {
                        name: "LiqiParseFailureBanner", size: size)
     }
 
+    /// 延遲到達端點：設定頁寬版顯示「最快」、工具列窄版顯示「最慢」（新圖，WP-B）。
+    func testActionDelayBounds() {
+        let lower = environment()
+        lower.settings.actionDelaySeconds = SettingsStore.actionDelayRange.lowerBound
+        assertSnapshot(ActionDelayStepper(), env: lower, name: "ActionDelayStepper_settings-fastest", size: CGSize(width: 420, height: 32))
+        let upper = environment()
+        upper.settings.actionDelaySeconds = SettingsStore.actionDelayRange.upperBound
+        assertSnapshot(ActionDelayStepper(compact: true), env: upper, name: "ActionDelayStepper_toolbar-slowest", size: CGSize(width: 200, height: 32))
+    }
+
     // MARK: - 渲染性質
 
     /// 同一 fixture 連續渲染兩次必須逐像素相同，否則 baseline 比對沒有意義。

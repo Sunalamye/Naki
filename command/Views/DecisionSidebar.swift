@@ -162,7 +162,7 @@ struct GameSummaryDisclosure: View {
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(PanelLayout.animation(.easeInOut(duration: 0.18), reduceMotion: reduceMotion)) { isExpanded.toggle() }
+                withAnimation(PanelLayout.animation(PanelLayout.standard, reduceMotion: reduceMotion)) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: compact ? PanelLayout.Spacing.s10 : PanelLayout.Spacing.s6) {
                     if inGame {
@@ -331,6 +331,7 @@ struct GameDetailsPanel: View {
 
 struct ScoreRow: View {
     var gameState: GameState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: PanelLayout.Spacing.s6) {
@@ -342,6 +343,8 @@ struct ScoreRow: View {
                     Text(gameState.scores[i].formatted(.number))
                         .font(.caption2)
                         .monospacedDigit()
+                        .contentTransition(.numericText(value: Double(gameState.scores[i])))
+                        .animation(PanelLayout.animation(PanelLayout.valueChange, reduceMotion: reduceMotion), value: gameState.scores[i])
                         .fontWeight(i == gameState.playerId ? .bold : .regular)
                 }
                 .frame(maxWidth: .infinity)
@@ -638,17 +641,18 @@ struct DecisionAlerts: View {
     var botStatus: BotStatus
     var autoPlayStall: AutoPlayStall?
     var compact: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
-            if botStatus.cloudHost != nil,
-               botStatus.cloudDegraded || botStatus.cloudFallbackStreak > 0 {
+            if cloudDegraded {
                 alert(icon: "icloud.slash.fill",
                       tone: PanelLayout.danger,
                       text: botStatus.is3P
                         ? "雲端失敗——正在用本地 Akagi 三麻（連續 \(botStatus.cloudFallbackStreak) 手）"
                         : "雲端失敗——正在用本地模型（連續 \(botStatus.cloudFallbackStreak) 手）")
                     .accessibilityIdentifier("cloud-degraded-indicator")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             } else if let host = botStatus.cloudHost {
                 HStack(spacing: PanelLayout.Spacing.s4) {
                     Image(systemName: "icloud.and.arrow.up").font(.caption2)
@@ -658,6 +662,7 @@ struct DecisionAlerts: View {
                 }
                 .foregroundStyle(PanelLayout.warning)
                 .accessibilityIdentifier("cloud-inference-indicator")
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             if let stall = autoPlayStall {
@@ -665,21 +670,34 @@ struct DecisionAlerts: View {
                       tone: PanelLayout.danger,
                       text: "自動打牌停滯 \(stall.elapsedSeconds) 秒——伺服器已給機會但沒送出（\(stall.reason)）")
                     .accessibilityIdentifier("autoplay-stall-indicator")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
-            if botStatus.is3P && !botStatus.isSanmaCapableDecision {
+            if sanmaNotice {
                 alert(icon: "exclamationmark.triangle.fill",
                       tone: PanelLayout.warning,
                       text: "三麻尚無推薦：本地 Akagi 三麻引擎在下一個決策點才會產出。")
                     .accessibilityIdentifier("sanma-unsupported-notice")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.bottom, hasAny ? (compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10) : 0)
+        .animation(PanelLayout.animation(PanelLayout.valueChange, reduceMotion: reduceMotion), value: shown)
     }
 
+    /// 哪幾列在畫面上；只看有無，停滯秒數每秒變動不該觸發動畫。
+    private var shown: [Bool] {
+        [cloudDegraded, botStatus.cloudHost != nil, autoPlayStall != nil, sanmaNotice]
+    }
+
+    private var cloudDegraded: Bool {
+        botStatus.cloudHost != nil && (botStatus.cloudDegraded || botStatus.cloudFallbackStreak > 0)
+    }
+
+    private var sanmaNotice: Bool { botStatus.is3P && !botStatus.isSanmaCapableDecision }
+
     private var hasAny: Bool {
-        botStatus.cloudHost != nil || autoPlayStall != nil
-            || (botStatus.is3P && !botStatus.isSanmaCapableDecision)
+        botStatus.cloudHost != nil || autoPlayStall != nil || sanmaNotice
     }
 
     private func alert(icon: String, tone: Color, text: LocalizedStringKey) -> some View {

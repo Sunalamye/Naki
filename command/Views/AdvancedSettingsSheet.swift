@@ -685,8 +685,6 @@ struct AdvancedSettingsSheet: View {
     /// toolbar 那顆只有數字，講不出合法範圍，也講不出隨機分布仍然會套用。
     @ViewBuilder
     private var autoPlaySettingsBox: some View {
-        @Bindable var settings = naki.settings
-
         GroupBox {
             VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 HStack {
@@ -701,19 +699,7 @@ struct AdvancedSettingsSheet: View {
 
                 if naki.settings.supportsAutoPlay {
                     Divider()
-                    HStack {
-                        Text("基準延遲")
-                        Spacer()
-                        Text("\(naki.settings.actionDelaySeconds, format: .number.precision(.fractionLength(1))) 秒")
-                            .font(.system(.body, design: .monospaced))
-                            .monospacedDigit()
-                        Stepper("基準延遲",
-                                value: $settings.actionDelaySeconds,
-                                in: SettingsStore.actionDelayRange,
-                                step: SettingsStore.actionDelayStep)
-                            .labelsHidden()
-                            .accessibilityIdentifier("settings-delay-stepper")
-                    }
+                    ActionDelayStepper()
                     Text("這是縮放係數，不是固定值：實際送出仍會套用 ActionDelayModel 的隨機分布。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
