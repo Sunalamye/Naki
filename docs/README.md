@@ -80,7 +80,7 @@ Repo 根目錄另有：
 
 ## 其他資源
 
-- release-notes：各版本發行說明（[v2.9.0](release-notes/v2.9.0.md)、[v2.10.0](release-notes/v2.10.0.md)、[v2.15.0](release-notes/v2.15.0.md)、[v2.16.0](release-notes/v2.16.0.md)）。
+- release-notes：各版本發行說明（[v2.9.0](release-notes/v2.9.0.md)、[v2.10.0](release-notes/v2.10.0.md)、[v2.15.0](release-notes/v2.15.0.md)、[v2.16.0](release-notes/v2.16.0.md)、[v2.17.0](release-notes/v2.17.0.md)）。
 - [third-party/riichi-mahjong-tiles.md](third-party/riichi-mahjong-tiles.md)：牌面素材來源與授權（CC0）。
 - [replay-baseline.txt](replay-baseline.txt)：錄影決策指紋清單（每行：錄影檔名、數個統計欄位、指紋；2026-08-01 起）。與 `scripts/replay-check.sh --baseline` 的格式是否一致，未驗證。
 - [images/](images/)：README 使用的截圖。

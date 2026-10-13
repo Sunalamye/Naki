@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/badge/version-2.16.0-green" alt="Version 2.16.0"></a>
+  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/badge/version-2.17.0-green" alt="Version 2.17.0"></a>
   <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
   <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-required-red" alt="Architecture">
