@@ -200,7 +200,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## 2026-09-30 審查修正後的行為
 
-以下都有單測（NakiTests 996 個、0 failures（2026-10-13，`.swfd/logs/wp-0p/verify-test-full.log`）；基底 15cea92 為 994，本包加 2），**除非註明否則沒有 live 驗證**。
+以下都有單測（NakiTests 1010 個、0 failures（2026-10-13，main 8b51848，`.swfd/logs/merge-main/test-8b51848.log`）；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。
