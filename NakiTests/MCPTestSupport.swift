@@ -15,8 +15,7 @@ func makeTestDependencies(store: GameStore,
     let send: SendActionAction = .unavailable("test_not_wired")
     return NakiMCPDependencies(
         store: store, ui: UIState(), settings: SettingsStore(), executeJavaScript: executeJavaScript, captureScreenshot: .unavailable,
-        sendAction: send, startMatch: StartMatchAction(send: send),
-        cancelMatch: CancelMatchAction(send: send),
+        sendAction: send,
         startUnifiedMatch: StartUnifiedMatchAction(send: send),
         cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),
         triggerAutoPlay: .unavailable, setAntiIdle: .unavailable,

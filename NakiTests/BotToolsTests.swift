@@ -33,8 +33,7 @@ final class BotToolsTests: XCTestCase {
         let context = DefaultNakiMCPContext(dependencies: NakiMCPDependencies(
             store: store, ui: UIState(), settings: settings,
             executeJavaScript: .unavailable, captureScreenshot: .unavailable,
-            sendAction: send, startMatch: StartMatchAction(send: send),
-            cancelMatch: CancelMatchAction(send: send),
+            sendAction: send,
             startUnifiedMatch: StartUnifiedMatchAction(send: send),
             cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),
             triggerAutoPlay: TriggerAutoPlayAction(stub: { triggered += 1 }),
