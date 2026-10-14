@@ -143,6 +143,13 @@ nonisolated enum PluginImportSource {
         do { files[manifest.entry] = try await get(entryURL, max: bundleMax) }
         catch let e as PluginImportError { return .failure(e) }
         catch { return .failure(.network("entry: \(error.localizedDescription)")) }
+        if let page = manifest.settingsUI {
+            let pageURL = base.appendingPathComponent(page)
+            guard pageURL.host == url.host, pageURL.scheme == url.scheme else { return .failure(.crossOrigin(page)) }
+            do { files[page] = try await get(pageURL, max: bundleMax) }
+            catch let e as PluginImportError { return .failure(e) }
+            catch { return .failure(.network("settingsUI: \(error.localizedDescription)")) }
+        }
 
         return finalize(files: files, sourceURL: url.absoluteString, revision: nil,
                         updateSource: url.absoluteString)
@@ -223,6 +230,10 @@ nonisolated enum PluginImportSource {
                let eData = try? await get(eURL, max: bundleMax) {
                 files[manifest.entry] = eData
             }
+            if let page = manifest.settingsUI, let pURL = URL(string: "\(base)/\(page)"),
+               let pData = try? await get(pURL, max: bundleMax) {
+                files[page] = pData
+            }
             if case .success(let p) = finalize(files: files, sourceURL: "\(base)/plugin.json", revision: revision, updateSource: "\(owner)/\(repo)") {
                 out.append(p)
             }
@@ -247,6 +258,10 @@ nonisolated enum PluginImportSource {
         }
         guard files[manifest.entry] != nil else {
             return .failure(.invalidManifest(L10n.text("找不到 entry：\(manifest.entry)")))
+        }
+        // 缺設定頁的包不得進 install：否則更新會先替換掉可用的舊版，Registry 載入時才拒絕
+        if let page = manifest.settingsUI, files[page] == nil {
+            return .failure(.invalidManifest(L10n.text("找不到 settingsUI：\(page)")))
         }
         let total = files.values.reduce(0) { $0 + $1.count }
         guard total <= bundleMax else { return .failure(.tooLarge(L10n.text("整包 \(total) bytes"))) }

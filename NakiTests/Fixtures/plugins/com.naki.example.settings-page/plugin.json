@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "id": "com.naki.example.settings-page",
+  "name": "設定頁範例",
+  "version": "0.1.0",
+  "entry": "plugin.js",
+  "settingsUI": "settings.html",
+  "capabilities": ["observe"],
+  "methods": [".lq.Lobby.fetchAccountInfo"],
+  "settings": {
+    "note":    { "type": "string",  "default": "hello", "description": "寫進 log 的備註" },
+    "repeat":  { "type": "number",  "default": 1,       "description": "每次寫幾行" },
+    "enabled": { "type": "boolean", "default": true,    "description": "啟用" }
+  },
+  "license": "CC0-1.0",
+  "description": "Naki 自寫的原創範例：示範 settingsUI 與 window.naki.get/set。只看不改。"
+}

@@ -12,6 +12,7 @@
 //    window.__nakiPlugins.register({ id, onReceive, ... });   // 插件自己呼叫
 //
 //  observe 唯讀；rewriteReceive → ctx.replace（等長就地改寫，isNaki 流量不給）、
+//  rewriteSend → send 方向的 ctx.replace（可改長度與 method，受 L3 總開關把關；v2 草案，docs/plan/plugin-v2.md §B）、
 //  injectSend → ctx.sendRequest（受 L3 總開關把關）。沒有 drop。
 //
 (function () {
@@ -200,6 +201,31 @@
             };
         }
 
+        // L3：rewriteSend → send 方向的 ctx.replace。整包換掉遊戲要送的 REQUEST（可改長度、可換 method），
+        // 換上的 bytes 由 dispatch 交回 ws.send 包裝送出，Swift 也收到換後的（與伺服器看到的一致）。
+        // type 與 msgId 不得變（遊戲在等這個 msgId 的回應）；改前改後的 method 都要過 isSendForbidden。
+        if (raw.direction === 'send'
+            && !isNaki
+            && raw.mutable !== false
+            && caps.indexOf('rewriteSend') !== -1
+            && !isSendForbidden(method)) {
+            ctx.replace = function (newBytes) {
+                if (!window.__nakiPluginsMayModifyOutbound) return false;
+                if (!newBytes || typeof newBytes.length !== 'number') return false;
+                var next = new Uint8Array(newBytes);
+                var after = parseEnvelope(next);
+                if (!after || !isWellFormed(next) || after.type !== TYPE_REQUEST
+                    || after.msgId !== env.msgId || isSendForbidden(after.method)) {
+                    noteFailure(grant.__id, 'replace', new Error('rewriteSend 不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已放棄'));
+                    return false;
+                }
+                raw.bytes = next;
+                noteSuccess(grant.__id, 'replace');
+                pluginLog(grant.__id, 'rewriteSend ' + method + ' → ' + after.method + '（' + next.length + ' bytes）');
+                return true;
+            };
+        }
+
         // L3：injectSend → ctx.sendRequest（送一筆 REQUEST）。受總開關把關。
         if (caps.indexOf('injectSend') !== -1) {
             ctx.sendRequest = function (method, payloadBytes) {
@@ -253,6 +279,55 @@
         '.lq.FastTest.syncGame',
         '.lq.NotifyGameEndResult'
     ];
+    // 送出禁改名單只保障兩件事：Swift 從遊戲自己的送出學東西的來源（對局 .lq.FastTest.* 全部、authGame、
+    // startUnifiedMatch／matchGame 的 sid），與帳號登入／session／憑證／付費操作（依 docs/protocol/liqi.json 的
+    // Lobby 方法盤點）。其餘大廳寫入不在保障內，只靠 L3 總開關與測試帳號。改前改後兩側都查，rewriteAllow 解不開。
+    var SEND_FORBIDDEN_METHODS = [
+        'login', 'oauth2Login', 'emailLogin', 'fastLogin', 'prepareLogin', 'dmmPreLogin', 'loginSuccess', 'logout',
+        'oauth2Auth', 'oauth2Check', 'oauth2Signup', 'signup', 'fetchOauth2Info',
+        'bindAccount', 'bindEmail', 'bindOauth2', 'bindPhoneNumber', 'unbindPhoneNumber', 'createPhoneLoginBind',
+        'fetchPhoneLoginBind', 'createEmailVerifyCode', 'createPhoneVerifyCode', 'modifyPassword',
+        'deleteAccount', 'cancelDeleteAccount', 'yostarDeleteAccount',
+        'fetchOBToken', 'generateAnnualReportToken', 'generateContestManagerLoginCode', 'gameMasterCommand',
+        'verifyMyCardOrder', 'verifySteamOrder', 'cancelGooglePlayOrder',
+        'startUnifiedMatch', 'matchGame'
+    ].map(function (m) { return '.lq.Lobby.' + m; });
+    function isSendForbidden(method) {
+        return typeof method !== 'string' || method.indexOf('.lq.Lobby.') !== 0
+            || SEND_FORBIDDEN_METHODS.indexOf(method) !== -1;
+    }
+
+    // envelope 逐欄位走到結尾、沒有越界、field 1（method）非空。parseEnvelope 對截斷的 fixed32／fixed64
+    // 會回 complete:true（naki-core 的既有行為），整包替換不能只靠它。
+    function isWellFormed(b) {
+        var i = b[0] === 1 ? 1 : 3, method = false;
+        while (i < b.length) {
+            var tag = readVarint(b, i);
+            if (!tag) return false;
+            var wire = tag[0] & 7;
+            i = tag[1];
+            if (wire === 0) { var v = readVarint(b, i); if (!v) return false; i = v[1]; }
+            else if (wire === 2) {
+                var len = readVarint(b, i);
+                if (!len || len[1] + len[0] > b.length) return false;
+                if (tag[0] >>> 3 === 1) method = len[0] > 0;
+                i = len[1] + len[0];
+            }
+            else if (wire === 5) { if (i + 4 > b.length) return false; i += 4; }
+            else if (wire === 1) { if (i + 8 > b.length) return false; i += 8; }
+            else return false;
+        }
+        return method;
+    }
+    function readVarint(b, i) {
+        var n = 0, shift = 0;
+        for (; i < b.length && shift < 35; shift += 7) {
+            var x = b[i++];
+            n += (x & 0x7f) * Math.pow(2, shift);
+            if (!(x & 0x80)) return [n, i];
+        }
+        return null;
+    }
     function isForbiddenMethod(method, grant) {
         if (method == null) return true;
         if (FORBIDDEN_METHODS.indexOf(method) === -1) return false;
@@ -298,6 +373,7 @@
 
         // naki-websocket.js 的 handleMessage 在中段呼叫。
         // raw = { direction:'send'|'receive', wsId:Number, url:String, bytes:Uint8Array }
+        // 回傳：send 方向被 rewriteSend 換掉時回新的 Uint8Array（呼叫端改送它），其餘一律 undefined。
         dispatch: function (raw) {
             diagnostics.dispatches++;
             if (registry.size === 0 || !raw || !raw.bytes) return;
@@ -352,20 +428,35 @@
                 return a.spec.id < b.spec.id ? -1 : (a.spec.id > b.spec.id ? 1 : 0);
             });
 
+            var original = raw.bytes;
             for (var k = 0; k < chain.length; k++) {
                 var entry = chain[k];
                 var hook = raw.direction === 'receive' ? 'onReceive' : 'onSend';
                 var fn = entry.spec[hook];
                 if (typeof fn !== 'function') continue;
                 var ctx = makeCtx(raw, env, method, isNaki, entry.grant);
+                var before = raw.bytes;
+                var snapshot = raw.mutable === false ? null : before.slice();
                 try {
                     diagnostics.hooks++;
                     fn(ctx);   // 回傳值忽略；改寫只能經 ctx.replace（見 makeCtx）
                     noteSuccess(entry.spec.id, hook);
                 } catch (e) {
+                    // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）
+                    raw.bytes = before;
+                    if (snapshot) before.set(snapshot);
                     noteFailure(entry.spec.id, hook, e);
                 }
+                if (raw.bytes !== before) {
+                    // 換 buffer：後續插件看新 bytes。method 換了就停——後面的插件是照舊 method 的白名單選進鏈的
+                    env = parseEnvelope(raw.bytes);
+                    if (env.method !== method) break;
+                }
             }
+            if (raw.direction !== 'send' || raw.bytes === original) return undefined;
+            // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致
+            if (env && env.method) pendingMethods.set(env.msgId, env.method);
+            return raw.bytes;
         },
 
         // 推薦不是 WebSocket hook 的副產品：它要等 Swift / Mortal 推論完成才存在。

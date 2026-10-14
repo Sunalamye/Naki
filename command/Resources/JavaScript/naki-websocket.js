@@ -147,8 +147,8 @@
         // 攔截 send 方法
         const originalSend = ws.send.bind(ws);
         ws.send = function(data) {
-            handleMessage(ws, wsId, data, 'send', isMajsoul);
-            return originalSend(data);
+            // rewriteSend（L3）換掉時改送新 bytes；沒換就是原物件，Naki 自送（isNaki）永遠沒換
+            return originalSend(handleMessage(ws, wsId, data, 'send', isMajsoul) || data);
         };
 
         return ws;
@@ -383,16 +383,19 @@
     // ——這樣 Phase 2 的等長 rewriteReceive 就地改 bytes 後，Swift 收到的是改後的。
     // 插件層自己做解析、白名單、鏈式與錯誤隔離；這裡再包一層 try/catch，
     // 保證「插件出錯絕不影響封包本身」（fail-open）。
+    //
+    // 回傳：send 方向被 rewriteSend 換掉時的新 Uint8Array，其餘 undefined。
     function dispatchToPlugins(direction, wsId, info, bytes, mutable) {
         if (!window.__nakiPlugins || typeof window.__nakiPlugins.dispatch !== 'function') return;
         try {
-            window.__nakiPlugins.dispatch({
+            const out = window.__nakiPlugins.dispatch({
                 direction: direction,
                 wsId: wsId,
                 url: info ? info.url : '',
                 bytes: bytes,
                 mutable: mutable !== false
             });
+            return direction === 'send' && out instanceof Uint8Array ? out : undefined;
         } catch (e) {
             console.error('[Naki WS] 插件 dispatch 錯誤:', e);
         }
@@ -428,30 +431,34 @@
             if (data instanceof ArrayBuffer) {
                 const pluginBytes = new Uint8Array(data);
                 nakiNicknameMask.observe(pluginBytes, direction);
-                dispatchToPlugins(direction, wsId, info, pluginBytes);
-                // ArrayBuffer：轉成 Base64（pluginBytes 是 data 的 view，插件若就地改過這裡編碼的是改後的）
-                const base64 = arrayBufferToBase64(data);
+                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes);
+                // ArrayBuffer：轉成 Base64（pluginBytes 是 data 的 view，插件若就地改過這裡編碼的是改後的；
+                // rewriteSend 整包換掉時編碼新 bytes，Swift 與伺服器看到同一份）
+                const sent = rewritten || data;
                 sendToSwift('websocket_message', {
                     socketId: wsId,
                     direction: direction,
-                    data: base64,
+                    data: arrayBufferToBase64(sent),
                     type: 'binary',
-                    size: data.byteLength
+                    size: sent.byteLength
                 });
+                return rewritten;
             } else if (ArrayBuffer.isView(data)) {
                 // TypedArray / DataView：Unity WebGL 送出的封包走這條
                 // （Laya 時代送 ArrayBuffer，只判 instanceof ArrayBuffer 會整批漏掉送出面，
                 //  連帶讓 LiqiParser 收不到 REQUEST、無法配對 RESPONSE）
                 const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
                 nakiNicknameMask.observe(view, direction);
-                dispatchToPlugins(direction, wsId, info, view);
+                const rewritten = dispatchToPlugins(direction, wsId, info, view);
+                const sent = rewritten || view;
                 sendToSwift('websocket_message', {
                     socketId: wsId,
                     direction: direction,
-                    data: arrayBufferToBase64(view),
+                    data: arrayBufferToBase64(sent),
                     type: 'binary',
-                    size: view.byteLength
+                    size: sent.byteLength
                 });
+                return rewritten;
             } else if (data instanceof Blob) {
                 // WebKit 的 WebSocket.binaryType 預設可能是 Blob。Swift 原本能收到這條，
                 // 但插件只吃 ArrayBuffer / TypedArray，於是 iOS 會出現「插件已啟用卻沒事件」。

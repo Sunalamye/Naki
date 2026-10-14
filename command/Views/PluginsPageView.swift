@@ -327,7 +327,19 @@ struct PluginsPageView: View {
                     removeControl(d.id)
                 }
 
-                if let schema = m.settings, !schema.isEmpty {
+                if let schema = m.settings, let page = d.settingsPageURL {
+                    Divider()
+                    Text("設定").font(.headline)
+                    PluginSettingsWebView(pageURL: page, directory: d.directory) { body in
+                        PluginSettingsBridge.reply(
+                            to: body, schema: schema,
+                            read: { naki.settings.pluginSettingValue(pluginId: d.id, key: $0) },
+                            write: { naki.actions.setPluginSetting(d.id, $0, $1) })
+                    }
+                    .id(d.settingsPageIdentity)
+                    .frame(height: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: PanelLayout.Radius.control))
+                } else if let schema = m.settings, !schema.isEmpty {
                     Divider()
                     Text("設定").font(.headline)
                     ForEach(schema.keys.sorted(), id: \.self) { key in

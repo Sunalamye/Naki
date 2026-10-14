@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<style>
+  :root { color-scheme: light dark; font: 13px -apple-system, sans-serif; }
+  label { display: flex; justify-content: space-between; margin: 8px 0; }
+  #status { color: GrayText; }
+</style>
+<label>備註 <input id="note"></label>
+<label>行數 <input id="repeat" type="number" min="0" max="5"></label>
+<label>啟用 <input id="enabled" type="checkbox"></label>
+<p id="status"></p>
+<script>
+  const status = text => { document.getElementById('status').textContent = text; };
+  const save = (key, value) => window.naki.set(key, value).then(() => status('已存：' + key), e => status('失敗：' + e));
+  window.naki.get().then(v => {
+    note.value = v.note; repeat.value = v.repeat; enabled.checked = v.enabled;
+    note.onchange = () => save('note', note.value);
+    repeat.onchange = () => save('repeat', Number(repeat.value));
+    enabled.onchange = () => save('enabled', enabled.checked);
+  }, e => status('讀取失敗：' + e));
+</script>

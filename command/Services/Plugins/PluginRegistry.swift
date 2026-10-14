@@ -41,6 +41,9 @@ nonisolated struct PluginManifest: Decodable, Sendable, Equatable {
     let settings: [String: PluginSettingField]?
     /// 禁改名單解除（§8.2/§11 #5）：列出的 method 即使在禁改名單也放行 rewrite。
     let rewriteAllow: [String]?
+    /// 插件自帶的設定頁（v2 草案，docs/plan/plugin-v2.md §A）：插件目錄內單一 `.html` 檔名。
+    /// 只讀寫 `settings` schema 宣告過的 key，所以宣告它就必須同時宣告 `settings`。
+    let settingsUI: String?
 }
 
 /// 設定 schema 的單一欄位（§7.10a）。`default` 型別依 `type` 而定。
@@ -50,6 +53,21 @@ nonisolated struct PluginSettingField: Decodable, Sendable, Equatable {
     let defaultValue: PluginSettingValue
 
     enum CodingKeys: String, CodingKey { case type, description, defaultValue = "default" }
+
+    /// 值與 schema 相符才收（回正規化後的值），否則 nil ⇒ 呼叫端退回 default。grant 與設定頁 bridge 共用。
+    /// JS 的 boolean 與 number 到 Swift 都是 NSNumber，靠 CFBoolean 分辨；number 必須是有限值。
+    func accept(_ value: Any?) -> Any? {
+        switch (type, value) {
+        case ("string", let s as String):
+            return s
+        case ("boolean", let n as NSNumber) where CFGetTypeID(n) == CFBooleanGetTypeID():
+            return n.boolValue
+        case ("number", let n as NSNumber) where CFGetTypeID(n) != CFBooleanGetTypeID() && n.doubleValue.isFinite:
+            return n.doubleValue
+        default:
+            return nil
+        }
+    }
 
     /// schema 有效性：型別是三種之一，且 default 與 type 相符。
     var isValid: Bool {
@@ -146,6 +164,14 @@ extension PluginManifest {
         for (key, field) in settings ?? [:] where !field.isValid {
             return .manifestInvalid(L10n.text("settings.\(key) schema 無效（type 或 default 不合）"))
         }
+        if let settingsUI {
+            guard PluginRegistry.isSafeName(settingsUI), settingsUI.hasSuffix(".html") else {
+                return .manifestInvalid(L10n.text("settingsUI 必須是單一 .html 檔名（字元集同 id）"))
+            }
+            guard settings?.isEmpty == false else {
+                return .manifestInvalid(L10n.text("宣告 settingsUI 必須同時宣告 settings"))
+            }
+        }
         return nil
     }
 }
@@ -163,6 +189,20 @@ nonisolated struct PluginDescriptor: Sendable {
     let failure: PluginLoadFailure?
 
     var isValid: Bool { manifest != nil && failure == nil }
+
+    var settingsPageURL: URL? {
+        manifest?.settingsUI.map { directory.appendingPathComponent($0) }
+    }
+
+    /// 設定頁的身分：版本、頁面檔（修改時間與大小）或 schema 任一變了就不同，View 以它重建 WebView，
+    /// 避免更新後舊頁面繼續對新 schema 寫入。
+    var settingsPageIdentity: String? {
+        guard let manifest, let page = settingsPageURL else { return nil }
+        let file = try? page.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let schema = (manifest.settings ?? [:]).sorted { $0.key < $1.key }.map { "\($0.key):\($0.value.type)" }
+        return [manifest.id, manifest.version, "\(file?.contentModificationDate?.timeIntervalSince1970 ?? 0)",
+                "\(file?.fileSize ?? 0)", schema.joined(separator: ",")].joined(separator: "|")
+    }
 }
 
 // MARK: - Registry
@@ -250,8 +290,22 @@ nonisolated enum PluginRegistry {
                                     failure: .entryUnreadable(manifest.entry))
         }
 
+        if let page = manifest.settingsUI, !isRegularFile(page, in: directory) {
+            return PluginDescriptor(id: manifest.id, directory: directory, manifest: nil,
+                                    entrySource: nil,
+                                    failure: .manifestInvalid(L10n.text("settingsUI 檔案不存在或不在插件目錄內：\(page)")))
+        }
+
         return PluginDescriptor(id: manifest.id, directory: directory,
                                 manifest: manifest, entrySource: source, failure: nil)
+    }
+
+    /// 檔名解析掉 symlink 後仍是 `directory` 的直接子項、且是一般檔案。
+    static func isRegularFile(_ name: String, in directory: URL) -> Bool {
+        let root = directory.resolvingSymlinksInPath().standardizedFileURL
+        let file = directory.appendingPathComponent(name).resolvingSymlinksInPath().standardizedFileURL
+        let values = try? file.resourceValues(forKeys: [.isRegularFileKey])
+        return file.deletingLastPathComponent().path == root.path && values?.isRegularFile == true
     }
 
     /// 產出「第二個 WKUserScript」的內容：先設 grants，再串接各啟用插件的原始碼。
@@ -310,12 +364,8 @@ nonisolated enum PluginRegistry {
             // settings 值 = 使用者覆寫 ?? default（§7.10a）
             var resolved: [String: Any] = [:]
             for (key, field) in schema {
-                // 舊版存進 UserDefaults 的 NaN／Inf 會讓 JSONSerialization 丟 ObjC 例外，丟掉改用 default
-                if let o = overrides[key], (o as? Double)?.isFinite != false {
-                    resolved[key] = o
-                } else {
-                    resolved[key] = field.defaultValue.jsonValue
-                }
+                // 型別不符（含舊版存進的 NaN／Inf，會讓 JSONSerialization 丟 ObjC 例外）一律退回 default
+                resolved[key] = field.accept(overrides[key]) ?? field.defaultValue.jsonValue
             }
             grant["settings"] = resolved
         }
