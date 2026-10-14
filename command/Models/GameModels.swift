@@ -84,12 +84,6 @@ struct GameState: Equatable {
     var bakazeString: String { bakaze.rawValue }
     /// 自風（MJAI 字串格式）
     var jikazeString: String { jikaze.rawValue }
-
-    /// 供託（別名，保持兼容性）
-    var riichiBou: Int {
-        get { kyotaku }
-        set { kyotaku = newValue }
-    }
 }
 
 // MARK: - Available Actions
@@ -101,7 +95,7 @@ struct GameState: Equatable {
 /// `LiqiActionSender`）本來就只認 oplist；UI 與 `/bot/status` 跟著同一個來源，
 /// 才不會出現「徽章亮著但送不出去」或反過來的分歧。
 ///
-/// 純值型別、不碰任何 singleton，因此可以對「這批 oplist → 這六個旗標」直接單測。
+/// 純值型別、不碰任何 singleton，因此可以對「這批 oplist → 這七個旗標」直接單測。
 nonisolated struct BotAvailableActions: Equatable {
     var canDiscard: Bool = false
     var canRiichi: Bool = false
@@ -145,7 +139,7 @@ struct BotStatus: Equatable {
     /// Bot 是否運行中
     var isActive: Bool = false
     /// 模型名稱
-    var modelName: String = "mortal"
+    var modelName: String = Self.bundledModelName
     /// 玩家座位
     var playerId: Int = 0
     /// 是否為三麻
@@ -170,7 +164,7 @@ struct BotStatus: Equatable {
 
     // MARK: - Available Actions
     //
-    // 這六個欄位的唯一真實來源是協定層 oplist（見 `BotAvailableActions`）。
+    // 這七個欄位的唯一真實來源是協定層 oplist（見 `BotAvailableActions`）。
     // 不要從別的地方寫進來：多一個沒被呼叫到的寫入點，UI 徽章與 `/bot/status`
     // 就會恆為 false，而且不會有任何錯誤訊息。
 
@@ -200,28 +194,28 @@ struct BotStatus: Equatable {
         isCloudDecision || decisionSource == DecisionSource.akagiSanma
     }
 
+    /// `modelName` 的三個已知值，必須與產生端一致：四麻是 `NativeBotController.botState`
+    /// 的內建 Mortal；三麻是 `AkagiSanmaBot.identity.name`（雲端包它時前綴 `cloud+`）與
+    /// 沒有本地 bot 時 `CloudBot` 的名稱。`ModelNameProducerTests` 鎖住一致性。
+    static let bundledModelName = "mortal"
+    static let akagiSanmaModelName = "akagi-sanma-bc"
+    static let cloudOnlyModelName = "cloud-only"
+
     /// 模型顯示名稱
     ///
-    /// 三麻對局要明講「用的是四麻模型」。三麻的牌山、規則與 observation 佈局
-    /// 都跟四麻不同（沒有 2m-8m、北是拔北寶牌、只有三家的分數與河），
-    /// 拿四麻模型去推三麻，輸出不是「稍微偏差」而是**結構上無效**。
-    /// 標成 "Mortal (3P)" 會讓人誤以為有專用模型。
+    /// 三麻本地引擎是 Akagi 三麻（雲端優先、本地接手）；bundled 四麻模型不推三麻
+    /// （obs 1012×34 對三麻結構性無效），所以三麻若仍落到四麻名稱要標警告。
     var modelDisplayKey: LocalizedStringKey {
-        if is3P && modelName.hasSuffix("akagi-sanma-bc") {
+        if is3P && modelName.hasSuffix(Self.akagiSanmaModelName) {
             // 雲端啟用時，雲端算的那一手標雲端 3p；其餘是本地 Akagi 三麻（強度如實標示）
             return isCloudDecision ? "雲端推論 (3P)" : "Akagi 三麻・default strength"
         }
-        if is3P && modelName == "cloud-only" {
+        if is3P && modelName == Self.cloudOnlyModelName {
             return isCloudDecision ? "雲端推論 (3P)" : "雲端推論 (3P) ⚠️ 未生效，無推論"
         }
         let warn = is3P && !isSanmaCapableDecision
-        let base = modelName == "mortal" ? "Mortal (4P)" : modelName == "mortal3p" ? "Mortal (3P)" : modelName
+        let base = modelName == Self.bundledModelName ? "Mortal (4P)" : modelName
         return warn ? "\(base) ⚠️ 三麻無專用模型" : LocalizedStringKey(base)
-    }
-
-    /// 是否有任何可用動作
-    var hasAvailableAction: Bool {
-        canDiscard || canRiichi || canChi || canPon || canKan || canAgari || canKita
     }
 
     // MARK: - Mutators
@@ -277,8 +271,8 @@ struct Recommendation: Identifiable, Equatable {
         /// 九種九牌（配牌時么九牌 ≥ 9 種可宣告流局）。
         ///
         /// rawValue 取 `ryukyoku` 對齊雲端 API 與 MJAI 的動作名；送到雀魂時是
-        /// `ReqSelfOperation type=10`（liqi 叫 kyushu）。與 `.kita` 同一個形狀：
-        /// 四麻 action space 46 沒有這個槽位，只有三麻引擎會產出。
+        /// `ReqSelfOperation type=10`（liqi 叫 kyushu）。四麻 Mortal（MortalSwift da7238c）
+        /// 的 action index 44 就是 ryukyoku，三麻引擎也會產出。
         case ryukyoku = "ryukyoku"
         case none = "none"
         case unknown = "unknown"
@@ -441,11 +435,6 @@ struct Recommendation: Identifiable, Equatable {
     var actionName: String { actionType == .discard ? actionType.displayName : displayLabel }
 
     var actionNameKey: LocalizedStringKey { LocalizedStringKey(actionName) }
-
-    /// 是否為紅寶牌
-    var isRed: Bool {
-        tile?.isRed ?? label.hasSuffix("r")
-    }
 }
 
 // MARK: - MahjongTile
@@ -496,7 +485,6 @@ struct MahjongTile: Identifiable, Equatable, Hashable {
 
     /// 無障礙可讀名稱（VoiceOver 用）
     /// 數牌「一萬…九萬 / 一筒…九筒 / 一索…九索」、字牌「東南西北白發中」、紅寶牌加「紅」前綴（如「紅五萬」）。
-    /// 供 BotStatusView 與 RecommendationView 共用，避免各寫一份牌名轉換。
     var accessibleName: String { L10n.text(.init(displayName)) }
 }
 

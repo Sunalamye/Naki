@@ -66,7 +66,7 @@ final class GameStoreTests: XCTestCase {
         XCTAssertFalse(store.isInGame, "沒有 bot、kyoku 也還是 0，不可能在對局中")
     }
 
-    /// `botStatus` 的六個可用動作旗標來自協定層 oplist（`/bot/status` 的 canXxx 資料面）
+    /// `botStatus` 的可用動作旗標（最多七個）來自協定層 oplist（`/bot/status` 的 canXxx 資料面）
     func testApplyCarriesAvailableActionFlags() {
         let opStore = LiqiOperationStore.shared
         opStore.reset()

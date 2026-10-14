@@ -172,7 +172,6 @@ final class ToolAndModelGapTests: XCTestCase {
 
     func testModelDisplayNamesForFourPlayer() {
         XCTAssertEqual(key(status("mortal").modelDisplayKey), "Mortal (4P)")
-        XCTAssertEqual(key(status("mortal3p").modelDisplayKey), "Mortal (3P)")
         XCTAssertEqual(key(status("custom-x").modelDisplayKey), "custom-x")
         XCTAssertEqual(key(status("cloud-only").modelDisplayKey), "cloud-only", "四麻沒有三麻專用名稱")
     }

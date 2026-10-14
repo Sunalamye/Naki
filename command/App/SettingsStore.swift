@@ -170,13 +170,21 @@ final class SettingsStore {
         }
     }
 
+    nonisolated static func loadLastUpdateCheck(from defaults: UserDefaults = SettingsStore.standard) -> Date? {
+        defaults.object(forKey: lastUpdateCheckKey) as? Date
+    }
+
+    nonisolated static func loadSkippedUpdateVersion(from defaults: UserDefaults = SettingsStore.standard) -> String? {
+        defaults.string(forKey: skippedUpdateVersionKey)
+    }
+
     /// 上次成功取得回應的時間（離線失敗不算，才不會吃掉 24 小時視窗）。
-    var lastUpdateCheck: Date? = SettingsStore.standard.object(forKey: SettingsStore.lastUpdateCheckKey) as? Date {
+    var lastUpdateCheck: Date? = SettingsStore.loadLastUpdateCheck() {
         didSet { defaults.set(lastUpdateCheck, forKey: Self.lastUpdateCheckKey) }
     }
 
     /// 使用者按「略過此版本」的版號；自動檢查遇到同一版不再提示。
-    var skippedUpdateVersion: String? = SettingsStore.standard.string(forKey: SettingsStore.skippedUpdateVersionKey) {
+    var skippedUpdateVersion: String? = SettingsStore.loadSkippedUpdateVersion() {
         didSet { defaults.set(skippedUpdateVersion, forKey: Self.skippedUpdateVersionKey) }
     }
 
@@ -184,11 +192,14 @@ final class SettingsStore {
 
     nonisolated static let enabledPluginIdsKey = "naki.plugins.enabledIds"
 
+    nonisolated static func loadEnabledPluginIds(from defaults: UserDefaults = SettingsStore.standard) -> Set<String> {
+        Set(defaults.stringArray(forKey: enabledPluginIdsKey) ?? [])
+    }
+
     /// 已啟用插件的 id 集合。**預設空集合——所有插件預設關閉**（§6.4）。
     /// 改變**立即生效**：`NakiRuntime.setPluginEnabled` 走熱插拔（`hotApplyPlugin` 呼叫 enable/disable JS，不必重載頁面）；
     /// 頁面重載時，第二個 WKUserScript 在 document start 依這個集合注入。
-    var enabledPluginIds: Set<String> =
-        Set(SettingsStore.standard.stringArray(forKey: SettingsStore.enabledPluginIdsKey) ?? []) {
+    var enabledPluginIds: Set<String> = SettingsStore.loadEnabledPluginIds() {
         didSet {
             guard enabledPluginIds != oldValue else { return }
             defaults.set(Array(enabledPluginIds).sorted(),
@@ -198,11 +209,14 @@ final class SettingsStore {
 
     nonisolated static let pluginsMayModifyOutboundKey = "naki.plugins.mayModifyOutbound"
 
+    nonisolated static func loadPluginsMayModifyOutbound(from defaults: UserDefaults = SettingsStore.standard) -> Bool {
+        defaults.bool(forKey: pluginsMayModifyOutboundKey)
+    }
+
     /// L3 總開關（§8.1）：插件能不能送出／改寫 Liqi request（用你的帳號送遊戲動作）。
     /// **預設 false**——即使插件有 injectSend capability（規格中的 rewriteSend 尚未實作），總開關關著就一律拒絕。
     /// 這對應 CLAUDE.md「送 Liqi request 前先確認」；開啟前 UI 要一次性確認。
-    var pluginsMayModifyOutbound: Bool = SettingsStore.standard
-        .bool(forKey: SettingsStore.pluginsMayModifyOutboundKey) {
+    var pluginsMayModifyOutbound: Bool = SettingsStore.loadPluginsMayModifyOutbound() {
         didSet {
             guard pluginsMayModifyOutbound != oldValue else { return }
             defaults.set(pluginsMayModifyOutbound, forKey: Self.pluginsMayModifyOutboundKey)
@@ -239,13 +253,14 @@ final class SettingsStore {
     nonisolated static let majsoulServerKey = "MajsoulServer"
     nonisolated static let pinMajsoulServerKey = "PinMajsoulServer"
 
+    nonisolated static func loadMajsoulServer(from defaults: UserDefaults = SettingsStore.standard) -> MajsoulServer {
+        MajsoulServer(rawValue: defaults.string(forKey: majsoulServerKey) ?? "") ?? .cn
+    }
+
     /// 要連哪個區服。預設國服＝這個功能出現之前的寫死行為，升級不會換掉任何人的服。
     ///
     /// 存 `rawValue` 而不是 index：日後在中間插一個新區服，index 會讓所有人默默換服。
-    var majsoulServer: MajsoulServer =
-        MajsoulServer(rawValue: SettingsStore.standard
-            .string(forKey: SettingsStore.majsoulServerKey) ?? "") ?? .cn
-    {
+    var majsoulServer: MajsoulServer = SettingsStore.loadMajsoulServer() {
         didSet {
             guard majsoulServer != oldValue else { return }
             defaults.set(majsoulServer.rawValue, forKey: Self.majsoulServerKey)
@@ -263,10 +278,12 @@ final class SettingsStore {
         defaults.set(headers, forKey: majsoulExtraHeadersKey)
     }
 
+    nonisolated static func loadMajsoulUserAgent(from defaults: UserDefaults = SettingsStore.standard) -> String {
+        defaults.string(forKey: majsoulUserAgentKey) ?? ""
+    }
+
     /// 載入雀魂時的 User-Agent；空字串＝用 WebKit 預設。套用到全部請求（含 WebSocket 握手）。
-    var majsoulUserAgent: String = SettingsStore.standard
-        .string(forKey: SettingsStore.majsoulUserAgentKey) ?? ""
-    {
+    var majsoulUserAgent: String = SettingsStore.loadMajsoulUserAgent() {
         didSet {
             guard majsoulUserAgent != oldValue else { return }
             defaults.set(majsoulUserAgent, forKey: Self.majsoulUserAgentKey)
@@ -282,6 +299,10 @@ final class SettingsStore {
         }
     }
 
+    nonisolated static func loadPinMajsoulServer(from defaults: UserDefaults = SettingsStore.standard) -> Bool {
+        defaults.bool(forKey: pinMajsoulServerKey)
+    }
+
     /// 啟動時是否**跳過**詢問，直接用 `majsoulServer`。
     ///
     /// 預設 false＝每次啟動都問。選擇畫面上那個「以後都用這個」勾選就是寫這個值，
@@ -289,9 +310,7 @@ final class SettingsStore {
     ///
     /// 預設值剛好等於 `UserDefaults.bool` 對未設定 key 的回傳（false），所以不必
     /// `register(defaults:)`——與 `showStatusBar` 同一個理由，哪天要改預設就得補註冊。
-    var pinMajsoulServer: Bool = SettingsStore.standard
-        .bool(forKey: SettingsStore.pinMajsoulServerKey)
-    {
+    var pinMajsoulServer: Bool = SettingsStore.loadPinMajsoulServer() {
         didSet {
             guard pinMajsoulServer != oldValue else { return }
             defaults.set(pinMajsoulServer, forKey: Self.pinMajsoulServerKey)
@@ -300,6 +319,10 @@ final class SettingsStore {
 
     /// 狀態訊息浮層的持久化 key。
     nonisolated static let showStatusBarKey = "ShowStatusBar"
+
+    nonisolated static func loadShowStatusBar(from defaults: UserDefaults = SettingsStore.standard) -> Bool {
+        defaults.bool(forKey: showStatusBarKey)
+    }
 
     /// 牌桌底部那條狀態訊息浮層要不要顯示（**只有 iOS 讀**）。
     ///
@@ -314,9 +337,7 @@ final class SettingsStore {
     ///
     /// macOS 不讀它：那邊的狀態列是 `safeAreaInset` 排版的一列，不疊在任何東西上，
     /// 沒有這個開關要解決的問題。
-    var showStatusBar: Bool = SettingsStore.standard
-        .bool(forKey: SettingsStore.showStatusBarKey)
-    {
+    var showStatusBar: Bool = SettingsStore.loadShowStatusBar() {
         didSet {
             guard showStatusBar != oldValue else { return }
             defaults.set(showStatusBar, forKey: Self.showStatusBarKey)
@@ -453,10 +474,24 @@ final class SettingsStore {
     /// 預填省得使用者打字；沒貼 key 之前 `isActive` 恆為 false，不會連線。
     nonisolated static let defaultCloudBaseURL = "https://mjapi.shinkuan.me"
 
+    nonisolated static func loadCloudInferenceEnabled(from defaults: UserDefaults = SettingsStore.standard) -> Bool {
+        defaults.bool(forKey: cloudEnabledKey)
+    }
+
+    nonisolated static func loadCloudServerURL(from defaults: UserDefaults = SettingsStore.standard) -> String {
+        defaults.string(forKey: cloudBaseURLKey) ?? defaultCloudBaseURL
+    }
+
+    nonisolated static func loadCloudModel4P(from defaults: UserDefaults = SettingsStore.standard) -> String {
+        defaults.string(forKey: cloudModel4PKey) ?? ""
+    }
+
+    nonisolated static func loadCloudModel3P(from defaults: UserDefaults = SettingsStore.standard) -> String {
+        defaults.string(forKey: cloudModel3PKey) ?? ""
+    }
+
     /// 啟用雲端推論。開著但 URL/key 缺任一 ⇒ 實際仍是本地（`CloudInferenceConfig.isActive`）。
-    var cloudInferenceEnabled: Bool = SettingsStore.standard
-        .bool(forKey: SettingsStore.cloudEnabledKey)
-    {
+    var cloudInferenceEnabled: Bool = SettingsStore.loadCloudInferenceEnabled() {
         didSet {
             guard cloudInferenceEnabled != oldValue else { return }
             defaults.set(cloudInferenceEnabled, forKey: Self.cloudEnabledKey)
@@ -464,9 +499,7 @@ final class SettingsStore {
     }
 
     /// 推論伺服器 base URL。
-    var cloudServerURL: String = SettingsStore.standard
-        .string(forKey: SettingsStore.cloudBaseURLKey) ?? SettingsStore.defaultCloudBaseURL
-    {
+    var cloudServerURL: String = SettingsStore.loadCloudServerURL() {
         didSet {
             guard cloudServerURL != oldValue else { return }
             defaults.set(cloudServerURL, forKey: Self.cloudBaseURLKey)
@@ -482,9 +515,7 @@ final class SettingsStore {
     }
 
     /// 四麻模型 id；空字串 ⇒ 伺服器預設。
-    var cloudModel4P: String = SettingsStore.standard
-        .string(forKey: SettingsStore.cloudModel4PKey) ?? ""
-    {
+    var cloudModel4P: String = SettingsStore.loadCloudModel4P() {
         didSet {
             guard cloudModel4P != oldValue else { return }
             defaults.set(cloudModel4P, forKey: Self.cloudModel4PKey)
@@ -494,9 +525,7 @@ final class SettingsStore {
     /// 三麻模型 id；空字串 ⇒ 伺服器預設。
     /// 雲端優先、本地接手：三麻局雲端失敗或未啟用時，由本地 `AkagiSanmaBot`（Akagi v3 三麻，
     /// 非 Mortal 等級）決策，`decisionSource` 如實顯示來源。
-    var cloudModel3P: String = SettingsStore.standard
-        .string(forKey: SettingsStore.cloudModel3PKey) ?? ""
-    {
+    var cloudModel3P: String = SettingsStore.loadCloudModel3P() {
         didSet {
             guard cloudModel3P != oldValue else { return }
             defaults.set(cloudModel3P, forKey: Self.cloudModel3PKey)
@@ -537,22 +566,22 @@ final class SettingsStore {
         _appLanguage = Self.loadAppLanguage(from: defaults)
         _keepAliveInBackground = Self.loadKeepAliveInBackground(from: defaults)
         _autoCheckUpdate = Self.loadAutoCheckUpdate(from: defaults)
-        _lastUpdateCheck = defaults.object(forKey: Self.lastUpdateCheckKey) as? Date
-        _skippedUpdateVersion = defaults.string(forKey: Self.skippedUpdateVersionKey)
-        _enabledPluginIds = Set(defaults.stringArray(forKey: Self.enabledPluginIdsKey) ?? [])
-        _pluginsMayModifyOutbound = defaults.bool(forKey: Self.pluginsMayModifyOutboundKey)
-        _majsoulServer = MajsoulServer(rawValue: defaults.string(forKey: Self.majsoulServerKey) ?? "") ?? .cn
-        _majsoulUserAgent = defaults.string(forKey: Self.majsoulUserAgentKey) ?? ""
+        _lastUpdateCheck = Self.loadLastUpdateCheck(from: defaults)
+        _skippedUpdateVersion = Self.loadSkippedUpdateVersion(from: defaults)
+        _enabledPluginIds = Self.loadEnabledPluginIds(from: defaults)
+        _pluginsMayModifyOutbound = Self.loadPluginsMayModifyOutbound(from: defaults)
+        _majsoulServer = Self.loadMajsoulServer(from: defaults)
+        _majsoulUserAgent = Self.loadMajsoulUserAgent(from: defaults)
         _majsoulExtraHeaders = Self.loadExtraHeaders(from: defaults)
-        _pinMajsoulServer = defaults.bool(forKey: Self.pinMajsoulServerKey)
-        _showStatusBar = defaults.bool(forKey: Self.showStatusBarKey)
+        _pinMajsoulServer = Self.loadPinMajsoulServer(from: defaults)
+        _showStatusBar = Self.loadShowStatusBar(from: defaults)
         _actionDelaySeconds = Self.loadActionDelaySeconds(defaults)
         _fullAutoPrefersSanma = Self.loadFullAutoPrefersSanma(from: defaults)
         _fullAutoRoomPreference = Self.loadFullAutoRoomPreference(from: defaults)
-        _cloudInferenceEnabled = defaults.bool(forKey: Self.cloudEnabledKey)
-        _cloudServerURL = defaults.string(forKey: Self.cloudBaseURLKey) ?? Self.defaultCloudBaseURL
-        _cloudModel4P = defaults.string(forKey: Self.cloudModel4PKey) ?? ""
-        _cloudModel3P = defaults.string(forKey: Self.cloudModel3PKey) ?? ""
+        _cloudInferenceEnabled = Self.loadCloudInferenceEnabled(from: defaults)
+        _cloudServerURL = Self.loadCloudServerURL(from: defaults)
+        _cloudModel4P = Self.loadCloudModel4P(from: defaults)
+        _cloudModel3P = Self.loadCloudModel3P(from: defaults)
     }
 
     /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）

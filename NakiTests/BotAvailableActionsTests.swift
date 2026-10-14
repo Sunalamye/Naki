@@ -2,12 +2,12 @@
 //  BotAvailableActionsTests.swift
 //  NakiTests
 //
-//  p1-4 回歸鎖：「可用動作」六個欄位必須是真值。
+//  p1-4 回歸鎖：「可用動作」最多七個欄位（三麻含拔北）必須是真值。
 //
 //  舊行為：`canDiscard/canRiichi/canChi/canPon/canKan/canAgari` 的唯一寫入點是
 //  `NativeBotController.updateAvailableActions()`，而那個 private 方法**零呼叫**
 //  （`updateInternalState` 尾巴只留了「移到 react() 後處理」的註解）。
-//  於是 `BotStatusView` 的六個徽章與 `/bot/status` 的六個欄位永遠是 false——
+//  於是 `BotStatusView` 的徽章與 `/bot/status` 的 canXxx 欄位永遠是 false——
 //  介面上有東西、背後沒有任何資料，正是 AUDIT §13 要防的假功能。
 //
 //  現在它們是協定層 oplist 的投影。這批測試鎖住那個對應關係：
@@ -101,24 +101,33 @@ final class BotAvailableActionsTests: XCTestCase {
 
     // MARK: - BotStatus 套用
 
-    func testApplyAvailableActionsWritesAllSixFields() {
+    func testApplyAvailableActionsWritesAllSevenFields() {
         var status = BotStatus()
-        XCTAssertFalse(status.hasAvailableAction)
+        XCTAssertFalse(status.canDiscard)
 
         status.applyAvailableActions(BotAvailableActions(snapshot: snapshot([.discard, .ron])))
 
         XCTAssertTrue(status.canDiscard)
         XCTAssertTrue(status.canAgari)
-        XCTAssertTrue(status.hasAvailableAction)
+        XCTAssertFalse(status.canRiichi || status.canChi || status.canPon || status.canKan || status.canKita)
+
+        status.applyAvailableActions(BotAvailableActions(snapshot: snapshot([.riichi, .chi, .pon, .ankan, .babei])))
+        XCTAssertTrue(status.canRiichi)
+        XCTAssertTrue(status.canChi)
+        XCTAssertTrue(status.canPon)
+        XCTAssertTrue(status.canKan)
+        XCTAssertTrue(status.canKita)
+        XCTAssertFalse(status.canDiscard || status.canAgari)
 
         // 再套一次空的必須把旗標關掉（不能只會點亮、不會熄滅）
         status.applyAvailableActions(.none)
-        XCTAssertFalse(status.hasAvailableAction)
+        XCTAssertFalse(status.canDiscard || status.canRiichi || status.canChi || status.canPon
+                       || status.canKan || status.canAgari || status.canKita)
     }
 
     // MARK: - Controller 端（`/bot/status` 與側欄徽章的實際來源）
 
-    /// `NativeBotController` 的六個 canXxx 必須跟著 store 的 `pending` 走。
+    /// `NativeBotController` 的 canXxx（最多七個） 必須跟著 store 的 `pending` 走。
     ///
     /// 這條在修好之前一定紅：舊實作永遠回 false。
     @MainActor

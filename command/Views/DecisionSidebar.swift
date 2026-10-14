@@ -211,7 +211,7 @@ struct GameSummaryDisclosure: View {
             // 就等於每一手都要多一次互動。放進同一張卡片（而不是卡片外另起一塊）是因為
             // 兩者是同一個資訊塊，多一圈邊框只會多吃 iOS 右側欄稀缺的垂直空間。
             //
-            // `inGame` 是必要的：不在對局時六個 badge 全灰、永遠不會亮，常駐顯示只是
+            // `inGame` 是必要的：不在對局時所有 badge 全灰、永遠不會亮，常駐顯示只是
             // 噪音——與「拔北只在三麻出現」同一個判斷。
             if inGame {
                 Divider()
@@ -266,7 +266,7 @@ struct GameDetailsPanel: View {
             }
             group("牌局") {
                 pair("局況", Text("\(Text(gameState.kyokuDisplayKey))・\(gameState.honba) 本場"))
-                pair("供託", Text("\(gameState.riichiBou) 本"))
+                pair("供託", Text("\(gameState.kyotaku) 本"))
                 pair("我的座位", Text("Player \(gameState.playerId)・\(Text(gameState.jikazeDisplayKey))"))
                 pair("規則", gameState.is3P ? Text("三人麻將") : Text("四人麻將"))
             }
@@ -645,7 +645,7 @@ struct DecisionAlerts: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
-            if cloudDegraded {
+            if showsCloudFallback {
                 alert(icon: "icloud.slash.fill",
                       tone: PanelLayout.danger,
                       text: botStatus.is3P
@@ -681,24 +681,20 @@ struct DecisionAlerts: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.bottom, hasAny ? (compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10) : 0)
+        .padding(.bottom, shown.contains(true) ? (compact ? PanelLayout.Spacing.s8 : PanelLayout.Spacing.s10) : 0)
         .animation(PanelLayout.animation(PanelLayout.valueChange, reduceMotion: reduceMotion), value: shown)
     }
 
     /// 哪幾列在畫面上；只看有無，停滯秒數每秒變動不該觸發動畫。
     private var shown: [Bool] {
-        [cloudDegraded, botStatus.cloudHost != nil, autoPlayStall != nil, sanmaNotice]
+        [showsCloudFallback, botStatus.cloudHost != nil, autoPlayStall != nil, sanmaNotice]
     }
 
-    private var cloudDegraded: Bool {
+    private var showsCloudFallback: Bool {
         botStatus.cloudHost != nil && (botStatus.cloudDegraded || botStatus.cloudFallbackStreak > 0)
     }
 
     private var sanmaNotice: Bool { botStatus.is3P && !botStatus.isSanmaCapableDecision }
-
-    private var hasAny: Bool {
-        botStatus.cloudHost != nil || autoPlayStall != nil || sanmaNotice
-    }
 
     private func alert(icon: String, tone: Color, text: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: PanelLayout.Spacing.s6) {

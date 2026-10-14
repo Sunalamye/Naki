@@ -158,7 +158,7 @@ extension TileImage {
         self.init(tile: MahjongTile(mjai: mjai), size: size)
     }
 
-    /// 牌背。副露展示裡的暗槓蓋牌用。
+    /// 牌背。目前只有 Preview 用。
     static func back(size: Size = .medium) -> TileImage {
         TileImage(mjai: "back", size: size)
     }

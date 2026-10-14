@@ -32,7 +32,7 @@ enum UpdateCheckOutcome: Equatable, Sendable {
 /// ## 邊界
 ///
 /// - 可用操作（oplist）的權威仍是 `LiqiOperationStore`，**不複製到這裡**
-///   （`botStatus` 的六個 canXxx 旗標是 `NativeBotController.availableActions` 的導出值，
+///   （`botStatus` 的七個 canXxx 旗標是 `NativeBotController.availableActions` 的導出值，
 ///   而那個 computed property 每次都現讀 store，不是快取）。
 /// - Bot 的完整內部狀態仍在 `NativeBotController`；這裡只放「要被顯示／被查詢」的快照。
 /// - 自動打牌模式的**持久化**權威仍是 `AutoPlayModeStore`（UserDefaults）、收斂權威仍是
@@ -48,7 +48,7 @@ final class GameStore {
     /// 局況（局數／本場／供託／點數／座位／寶牌）
     var gameState = GameState()
 
-    /// Bot 狀態（是否活著、模型、座位、六個可用動作旗標）
+    /// Bot 狀態（是否活著、模型、座位、七個可用動作旗標）
     var botStatus = BotStatus()
 
     /// AI 推薦（機率由高到低）
@@ -161,11 +161,13 @@ final class GameStore {
     /// `@MainActor` class 在 NakiTests host 釋放會 SIGABRT（見 CLAUDE.md「專案結構的坑」）
     nonisolated deinit { }
 
-    // MARK: - 寫入（唯一入口）
+    // MARK: - 寫入
 
     /// 從 `NativeBotController` 取一份完整快照。
     ///
-    /// **這是牌局資料唯一的寫入點**。
+    /// 正式路徑的牌局資料寫入點：這裡與 `clearAfterBotDeleted()`；另外
+    /// `NakiWebCoordinator.createBot` 建好 Bot 時先寫一次 `botStatus`，
+    /// DEBUG 的 `/debug/ui` 直接寫 `recommendations`／`botStatus`／`tehaiTiles` 當 fixture。
     ///
     /// 全部同步賦值、沒有 `DispatchQueue.main.async`：呼叫端（`@MainActor`）return 後，
     /// SwiftUI 與 `/bot/status`、`/game/state` 立刻讀得到同一組新值。改成非同步派發
