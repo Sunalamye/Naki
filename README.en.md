@@ -137,7 +137,7 @@ Expand the summary row to inspect server-authorized actions, player scores, dora
 
 Naki supports the **Chinese, Japanese, and International** servers. By default, it asks which server to use at each launch. Accounts are separate across regions, so selecting the correct server matters for signing in.
 
-Select the option to always use the chosen server to skip the prompt. You can change servers or restore the launch prompt in Advanced Settings.
+Select the option to always use the chosen server to skip the prompt. You can change servers or restore the launch prompt on the Connection page of Settings.
 
 <sub>Observation: all three servers run the same client (<code>version.json</code> reports <code>0.11.252.w</code> on each), so the protocol is identical and Naki needs no per-server parsing.</sub>
 
@@ -175,7 +175,7 @@ The puzzle-piece icon in the toolbar opens the **Plugins page**. Toggling a plug
 
 ### In-app language (macOS)
 
-Advanced Settings → **Language**: follow the system, or choose one of **Traditional Chinese, Simplified Chinese, English, Japanese, or Korean**. The interface and status messages switch to that language immediately. iOS has no in-app menu; it uses the app language set in system Settings (the same five).
+Settings → General page → **Language**: follow the system, or choose one of **Traditional Chinese, Simplified Chinese, English, Japanese, or Korean**. The interface and status messages switch to that language immediately. iOS has no in-app menu; it uses the app language set in system Settings (the same five).
 
 ### Other tools
 
@@ -188,7 +188,7 @@ Advanced Settings → **Language**: follow the system, or choose one of **Tradit
 
 ## Optional cloud inference
 
-Open **Advanced Settings → Cloud Inference** and supply your own API key. The default endpoint is Akagi's `mjapi.shinkuan.me`; an Akagi-compatible self-hosted endpoint can also be configured.
+Open **Settings → AI page → Cloud Inference** and supply your own API key. The default endpoint is Akagi's `mjapi.shinkuan.me`; an Akagi-compatible self-hosted endpoint can also be configured.
 
 > [!IMPORTANT]
 > **Enabling cloud inference sends the current round's accumulated game events, including your own hand, to the configured inference server at decision points.** It is not a local-only mode. The sidebar keeps the destination host visible while cloud inference is active.
@@ -207,14 +207,14 @@ Open **Advanced Settings → Cloud Inference** and supply your own API key. The 
 ### Settings on Mac and iPhone
 
 <p align="center">
-  <img src="docs/images/settings.png" width="760" alt="Illustration of the two-column Advanced Settings layout on macOS">
+  <img src="docs/images/settings.png" width="760" alt="Pre-redesign two-column settings mock-up on macOS (to be replaced with tabbed screenshots)">
 </p>
 
-Mac settings use two columns: device and automation settings on the left, cloud inference on the right. Key status appears after a key is entered, without requiring Test Connection.
+Mac settings open in their own window with four tabs: **General** (language, display, updates), **Connection** (Mahjong Soul server, custom User-Agent and headers), **AI** (automation, cloud inference), and **Developer** (cloud API, Bot management, MCP Server). Key status appears after a key is entered, without requiring Test Connection.
 
-<sub>The macOS settings image is a design reference from <code>docs/ui-reference/</code>, not a screenshot of a fully rendered live settings sheet. The in-app screenshot API has limitations when capturing sheets; see the comments on <code>CaptureScreenshotAction.windowScreenshot</code>.</sub>
+<sub>The image above is the pre-redesign two-column mock-up from <code>docs/ui-reference/</code>; tabbed screenshots are still to be added.</sub>
 
-On iPhone, the same form uses a single-column layout:
+On iPhone, the same settings are a single scrolling page with four sections (Developer is collapsed by default); the two images below predate the redesign and are to be retaken:
 
 <table>
 <tr>

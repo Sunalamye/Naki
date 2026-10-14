@@ -65,7 +65,7 @@
 2. **真實 log 被輪替**：兩次手動啟動讓 `LogManager` 刪掉 170 個 session 目錄，另有 2 個只剩 `games/`（L 的 `naki-logs-diff.txt`、`naki-logs-trimmed.txt`）。啟動前整份備份在 L 的 `logs-backup/Naki/`，共 62M，可以還原。這是 F1 已記的風險。
 3. 開發者頁的生效狀態列寫「還缺：上方的「啟用雲端推論」開關」，但開關在 AI 頁。字串在 `CloudInferenceConfig`，不在本包可改清單。
 4. 不帶參數的 `/screenshot` 在設定視窗開在前景時會截到設定視窗。依派工不改。
-5. `?window=settings` 的 PNG 經 `cacheDisplay`，只畫得出勾選框，不能拿來驗內容。
+5. `?window=settings` 的 PNG 經 `cacheDisplay`：內容完整，背景透明、深色模式文字為白色，疊深色底可見（`.swfd/logs/wp-f2-takeover/verify/http-settings-on-dark.png`）。原記載「只畫得出勾選框」有誤，已由復驗更正。
 
 ## Deviations
 - 「基準延遲 → 出手延遲」沒有改：

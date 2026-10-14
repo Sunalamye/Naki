@@ -314,7 +314,7 @@ macOS UI 測試因 Automation Mode 需要用戶驗證而無法執行（`automati
 | 背景時 `openSettings()` | 視窗照樣開出，App 不取得前景；`GET /debug/ui` 與實際視窗一致（`smoke-4.log`） |
 | 唯一性 | 選單連按兩次、`POST settings` 連送兩次，設定視窗都只有一個（`ax-http-integration.log`） |
 | 不帶參數的 `/screenshot` | 設定視窗在前景時截到設定視窗，不是插件 sheet（`smoke-3.log`） |
-| `?window=settings` 的影像 | `cacheDisplay` 畫不出多數 SwiftUI 內容（只剩勾選框）；GroupBox 歸屬改以 `screencapture -l` 對照 |
+| `?window=settings` 的影像 | `cacheDisplay` 的 PNG 內容完整，背景透明、深色模式文字為白色，疊深色底可見（`.swfd/logs/wp-f2-takeover/verify/http-settings-on-dark.png`）（原記載「畫不出多數 SwiftUI 內容」已更正）；GroupBox 歸屬改以 `screencapture -l` 對照 |
 | 框架寫入真實偏好檔 | `NSWindow Frame com_apple_SwiftUI_Settings_window` 與 `com_apple_SwiftUI_Settings_selectedTabIndex` 都寫進 `.standard`，不經 `SettingsStore.standard`，隔離鉤子管不到 |
 
 ---

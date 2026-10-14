@@ -101,7 +101,7 @@ Bridge 復驗結論「要修正（小幅）」。fixture 等價性已獨立證�
 - **還原（無證據的行為改變）**：SV-27(1) 輪替判斷（改成 DateFormatter 解析後雙向改變，含 DST 缺口讓真實 session 永遠不刪）、SV-21 `reconnect_hint`（舊提示可用）、SV-24 Legacy domain 檢查（只影響不可達輸入，比照 BR-24）。
 - **改歸 Bug 並補修前紅測試**：SV-19（來源標記與實際採用值矛盾）、SV-16（`logFileNote` 與保留規則不符）。
 - **SV-23 收下為文件修正**：舊描述指的「回調未設定」狀態已不存在；與錯誤碼名詞不一致併入需要決策。
-- **SV-05 接線列 WP-F2 合併後待辦**：`DebugServer.handleRequest` 傳 `boundPort: actualPort`，同時改 `testDebugServerCallsRequestGuardBeforeRouting` 的原始碼字串搜尋。
+- **SV-05 接線列 WP-F2 合併後待辦**：`DebugServer.handleRequest` 傳 `boundPort: actualPort`，同時改 `testDebugServerCallsRequestGuardBeforeRouting` 的原始碼字串搜尋。**狀態：已於 WP-F2 合併時接線**，live 證據 `.swfd/logs/wp-f2-takeover/live-origin-9999.txt`。
 - **整合策略**：四包各自在 7c2fe26 上驗證，經檢查沒有重疊檔案，但有語意交互（SV-17 的 `LiqiToolResult` 被 Bot／Bridge 呼叫）。取捨：不逐包 commit 後再 rebase，而是先在獨立整合樹以 `git apply` 套用四包並跑完整閘；通過後再依 `refactor:`／`fix:` 分組 commit。理由是逐包分別驗證抓不到交互，整合閘才是 commit 前的最後依據。
 - **WP-F2 再度活動**：未提交檔由 17 增為 21，延後條目的判斷維持。
 
@@ -139,7 +139,7 @@ Bridge 復驗結論「要修正（小幅）」。fixture 等價性已獨立證�
 
 ### 延後與後續待辦
 
-- **WP-F2 合併後**：SV-05 接線（`DebugServer.handleRequest` 傳 `boundPort: actualPort`，同改 `testDebugServerCallsRequestGuardBeforeRouting`）；UI-12 剩餘；介面 22 條與服務 13 條 in-flight 條目。
+- **WP-F2 合併後**：SV-05 接線（`DebugServer.handleRequest` 傳 `boundPort: actualPort`，同改 `testDebugServerCallsRequestGuardBeforeRouting`；**狀態：已於 WP-F2 合併時接線**，live 證據 `.swfd/logs/wp-f2-takeover/live-origin-9999.txt`）；UI-12 剩餘；介面 22 條與服務 13 條 in-flight 條目。
 - **下一輪**：`NativeBotController` 的模型名稱字面值改用 UI 包新增的常數；SV-17 遷移後移除 `AutoConfirmDispatcher` 已不可達的 `?? "unknown"`；BT-12 offline 字面值單一來源（跨 Bridge 與 Views）。
 - **已知缺口**：Bridge 特性化 fixture 未涵蓋快照含副露、seat 未知、跨局 dora；變異 harness 只覆蓋比較／邏輯／三元運算子；`LiqiParserLearningTests` 子集紅不穩定（推測）。
 - **未驗證**：所有 live 行為；BT-03 九種九牌端到端；BR-01 live 回應形狀；replay-check.sh。

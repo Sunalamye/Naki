@@ -108,7 +108,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 ### 三個雀魂區服，啟動時選
 
 國服、日服、國際服。**預設每次啟動都問**——各服的帳號不互通，選錯不是畫面不對而是
-登不進去。勾「以後都用這個伺服器」就不再問；進階設定裡可以隨時換服，也可以把固定取消、
+登不進去。勾「以後都用這個伺服器」就不再問；設定的「連線」頁可以隨時換服，也可以把固定取消、
 恢復每次詢問。
 
 <table>
@@ -140,7 +140,7 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 
 ### 雲端推論（可選）
 
-進階設定 →「雲端推論」：貼上 API key 之後，每個決策點會把**本局至今的
+設定 → 「AI」頁 →「雲端推論」：貼上 API key 之後，每個決策點會把**本局至今的
 對局事件（含自家手牌）**上傳到推論伺服器（預設 Akagi 官方
 `mjapi.shinkuan.me`，也可自架），換取更強模型的決策。
 
@@ -166,24 +166,24 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
   watchdog 重連／送出停滯會**發 macOS 通知**——不必自己盯 log
 
 <p align="center">
-  <img src="docs/images/settings.png" width="760" alt="進階設定">
+  <img src="docs/images/settings.png" width="760" alt="設定（改版前的兩欄設計稿，待換成分頁新圖）">
 </p>
 
-進階設定分兩欄：左邊是這台機器怎麼跑（畫面、自動操作、Bot、MCP Server），
-右邊是雲端推論。金鑰狀態在填好 key 之後自動出現，不必按測試連線。
+Mac 的設定是獨立視窗，分四個分頁：**一般**（語言、畫面、更新）、**連線**（雀魂伺服器、自訂 User-Agent 與 header）、
+**AI**（自動操作、雲端推論）、**開發者**（雲端 API、Bot 管理、MCP Server）。金鑰狀態在填好 key 之後自動出現，不必按測試連線。
 
-<sub>macOS 設定頁圖為設計稿（`docs/ui-reference/`）。App 內的截圖 API 抓不到 sheet 的完整渲染，
+<sub>上圖是改版前的兩欄設計稿（`docs/ui-reference/`），分頁版新圖待補。App 內的截圖 API 抓不到 sheet 的完整渲染，
 見 `CaptureScreenshotAction.windowScreenshot` 的註解。</sub>
 
-iPhone 是同一份設定表單的單欄版（窄畫面放不下兩欄）：
+iPhone 是同一份設定的單頁捲動版（四段，「開發者」預設折疊）；下面兩張是改版前的截圖，待重拍：
 
 <table>
 <tr>
 <td width="50%">
-<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone 進階設定：自動操作與畫面">
+<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone 設定：自動操作與畫面">
 </td>
 <td width="50%">
-<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone 進階設定：雲端推論">
+<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone 設定：雲端推論">
 </td>
 </tr>
 </table>
@@ -211,7 +211,7 @@ iPhone 是同一份設定表單的單欄版（窄畫面放不下兩欄）：
 
 ### App 內語言（macOS）
 
-進階設定 →「語言」：跟隨系統，或指定**繁體中文、简体中文、English、日本語、한국어**
+設定 → 「一般」頁 →「語言」：跟隨系統，或指定**繁體中文、简体中文、English、日本語、한국어**
 五種之一，切換後介面與狀態訊息立即改用該語言。iOS 沒有 App 內選單，用系統設定中的 App 語言（同樣可選這五種）。
 
 ### 其他

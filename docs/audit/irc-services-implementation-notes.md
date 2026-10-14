@@ -20,7 +20,7 @@
 |---|---|---|---|---|
 | SV-01 | 已修 | `BotSyncTool` 補 `message`（取 `statusMessage`），`ForceReconnectOutcome`（NakiActions.swift，in-flight）未動 | 是：失敗時多一個欄位 | `testBotSyncFailureOutputSatisfiesOutputSchemaRequired` |
 | SV-04 | 已修 | 另計 `totalDecisions`，`truncated = totalDecisions > decisions.count` | 是：邊界值與 limit 0 | `testReplayTruncatedOnlyWhenLimitDroppedDecisions` |
-| SV-05 | guard 已就緒、接線未做 | `NakiMCPOriginPolicy.isAllowed(_:boundPort:)`、`NakiMCPRequestGuard.rejection(lines:boundPort:)`；`boundPort` 預設 nil，行為與 main 相同 | 未接線時否 | `testOriginPortMustMatchBoundPort`、`testOriginWithoutHeaderAndNonLoopbackBehaviorUnchangedWhenBound`、`testOriginUnboundKeepsLegacyBehavior`、`testRequestGuardPassesBoundPortToOriginCheck` |
+| SV-05 | guard 已就緒、接線未做（**狀態更新：已於 WP-F2 合併時接線**，`DebugServer.handleRequest` 傳 `boundPort: actualPort`；live 證據 `.swfd/logs/wp-f2-takeover/live-origin-9999.txt`，帶 Origin `http://localhost:9999` 回 403） | `NakiMCPOriginPolicy.isAllowed(_:boundPort:)`、`NakiMCPRequestGuard.rejection(lines:boundPort:)`；`boundPort` 預設 nil，行為與 main 相同 | 未接線時否 | `testOriginPortMustMatchBoundPort`、`testOriginWithoutHeaderAndNonLoopbackBehaviorUnchangedWhenBound`、`testOriginUnboundKeepsLegacyBehavior`、`testRequestGuardPassesBoundPortToOriginCheck` |
 | SV-12 | 完成 | 兩處註解改為與 `plan` 及測試一致 | 否 | 無（註解） |
 | SV-13 | 完成 | `MCPArguments.inGameAwaitMs/lobbyAwaitMs/roomAwaitMs`；描述字串插值；`room_quick_test` 的 4000／3000／4000 命名為私有常數。值不變，理由未知 | 否 | `testAwaitDefaultsKeepValuesAndDescriptionsQuoteThem` |
 | SV-14 | 部分 | 只做 `DefaultNakiMCPContext.defaultServerPort`。`DebugServer.swift`、`GameStore.swift` 兩處不在範圍，仍是字面值 8765 | 否 | 編譯 |

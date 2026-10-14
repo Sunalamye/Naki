@@ -49,6 +49,7 @@ curl -X POST http://127.0.0.1:8765/js \
 | AI package | MortalSwift 0.6.0／`da7238c…`（含 AkagiSanma 三麻引擎；由已提交的 `Package.resolved` 釘住） |
 | 預設模式 | **新安裝預設 `.auto`（自動送出）**（`AutoPlayModeStore.defaultMode`；2026-10-12 用戶裁決 U3 維持現狀）。Legacy path 不支援自動送出，會收斂成 `.recommend` |
 | Debug／MCP | loopback port 8765，same process／same port |
+| 設定介面 | macOS 是 `Settings` scene 的獨立設定視窗（主視窗工具列的齒輪 `SettingsLink`），四個分頁：一般／連線／AI／開發者；iOS 是單頁捲動的四段，「開發者」預設折疊。分頁歸屬只在 `AdvancedSettingsSheet` 的 `SettingsTab`／`page(_:)` 定義；`/debug/ui` 的 `showAdvancedSettings` 在 macOS 回報設定視窗實際可見，`/screenshot?window=settings` 截設定視窗（背景透明、深色模式文字為白色，檢視時疊深色底） |
 | MCP 協定 | 雙版本並存：帶 `_meta.io.modelcontextprotocol/protocolVersion` 走 2026-07-28（stateless、`server/discover`、`resultType`），`initialize` handshake 服務 2025-03-26～2025-11-25 |
 
 Xcode dependency requirement 是 MortalSwift `[0.6.0,0.7.0)`（`upToNextMinorVersion`、`minimumVersion = 0.6.0`，`project.pbxproj` 的 `XCRemoteSwiftPackageReference "MortalSwift"` 段），不是 exact——**0.5.0 會編不過**，因為 `NativeBotController` 呼叫的 `bot.inferCurrentState()` 是 0.5.1 才有的 API。範圍下界只是保護，真正決定 revision 的是 `Package.resolved`（`Naki.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`）：它已從 `.gitignore` 移出並提交，clean clone 會拿到同一個 `da7238c`。**改 requirement 或跑 `-resolvePackageDependencies` 之後，要把重寫的 `Package.resolved` 一起 commit**，否則 lockfile 又會跟 requirement 漂開。
@@ -203,11 +204,11 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## 2026-09-30 審查修正後的行為
 
-以下都有單測（NakiTests 1074 個、0 failures（2026-10-14，irc-integrate b2d7d73，`.swfd/logs/irc-commit/final-full-test.log`；前一次 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
+以下都有單測（NakiTests 1091 個、0 failures（2026-10-14，WP-F2 合併後，`.swfd/logs/wp-f2-takeover/fixup-nakitests.log`；前一次 1074 個，irc-integrate b2d7d73；再前一次 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。
-- **Debug server**（`DebugServer.swift`）：Origin 與 Host 由 `NakiMCPRequestGuard` 單一入口檢查，非 loopback 回 403（沒有 Host header 放行）；chunked 或「無 Content-Length 卻帶 body」回 411（無 body 的 POST 照常）；每連線 30 秒內必須收齊 request。`execute_js` 有 `timeout`（預設 30、上限 60，`ExecuteJSTool`），逾時後頁面端 Promise 仍可能在跑。`/js` 回傳非 JSON 型別（Date 等）經 `JSONSanitizer` 轉字串，不再崩潰。403／411 已有單測在 loopback 高位 port 起真 server 驗過（`DebugServerFramingTests`）；逾時與 live server 仍未測。Origin 的 port 判斷已在 `NakiMCPRequestGuard`／`NakiMCPOriginPolicy` 就緒（帶 Origin 且 port 不等於實際綁定 port 時拒絕）；但 `DebugServer.handleRequest` 尚未傳入綁定 port，接線前行為與舊版相同，待 WP-F2 合併後接線（SV-05）。
+- **Debug server**（`DebugServer.swift`）：Origin 與 Host 由 `NakiMCPRequestGuard` 單一入口檢查，非 loopback 回 403（沒有 Host header 放行）；chunked 或「無 Content-Length 卻帶 body」回 411（無 body 的 POST 照常）；每連線 30 秒內必須收齊 request。`execute_js` 有 `timeout`（預設 30、上限 60，`ExecuteJSTool`），逾時後頁面端 Promise 仍可能在跑。`/js` 回傳非 JSON 型別（Date 等）經 `JSONSanitizer` 轉字串，不再崩潰。403／411 已有單測在 loopback 高位 port 起真 server 驗過（`DebugServerFramingTests`）；逾時與 live server 仍未測。Origin 的 port 判斷已在 `NakiMCPRequestGuard`／`NakiMCPOriginPolicy` 就緒（帶 Origin 且 port 不等於實際綁定 port 時拒絕）；`DebugServer.handleRequest` 已傳 `boundPort: actualPort`（SV-05，WP-F2 合併時接線）：帶 Origin 且 port 不符回 403，live 驗證見 `.swfd/logs/wp-f2-takeover/live-origin-9999.txt`（Origin `http://localhost:9999` 回 403）。8765 被占用而改綁 8766 的路徑沒有 live 驗證。
 - **負分**：`LiqiWire.decodeSignedVarint` 讓 int32 欄位（scores）能解負數；`decodeVarint` 維持非負契約。
 - **分數／場風解析失敗**（例如超出 Int32、`chang`／`ju` 型別錯）：`MajsoulBridge.roundBlocked` 讓**本局**不餵 bot，但 `end_kyoku` 與 oplist 照常處理，所以伺服器授權的和牌仍會送（`MajsoulBridge` 內 `roundBlocked` 只丟 start_kyoku 之後的牌局事件，oplist 在此之前已由 `recordOperationSnapshot` 登記）。
 
