@@ -75,11 +75,12 @@ final class AkagiSanmaBot: MahjongBot {
         if isMine, ["ankan", "kakan", "daiminkan"].contains(type) { return nil }
         // 本地授權讀 pending，雲端讀事件上的序號；兩者不同代表 consumer 落後於 oplist，授權可能來自下一批
         let eventSequence = events.compactMap { $0[MJAIEventKey.oplistSequence] as? UInt64 }.last
-        let pendingSequence = snapshot()?.sequence
+        let pending = snapshot()
+        let pendingSequence = pending?.sequence
         if eventSequence != pendingSequence {
             botLog("[AkagiSanmaBot] 授權序號與事件不一致：pending=\(pendingSequence.map(String.init) ?? "nil")，事件=\(eventSequence.map(String.init) ?? "nil")（\(type ?? "?")）")
         }
-        guard let decision = engine.decide(authorized: Self.authorizedKinds(snapshot(), seat: seat))
+        guard let decision = engine.decide(authorized: Self.authorizedKinds(pending, seat: seat))
         else { return nil }
 
         // 自家碰完 mjai 不再送事件，但需要新的捨牌建議（同 BundledCoreMLBot）

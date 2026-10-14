@@ -10,8 +10,8 @@
 //
 //  - `Task.sleep` 同時擔任輪詢間隔、動作延遲與重試間隔，沒有 Timer 也沒有 asyncAfter。
 //  - 重試是 `while` 迴圈，不是遞迴。
-//  - 執行狀態是 enum（`idle`／`waiting`／`executing`），而且只能經由 `occupy(...)`
-//    這個**作用域**進出：`defer { state = .idle }` 讓「一定歸零」變成語言保證。
+//  - 執行狀態是 enum（`idle`／`waiting`／`executing`），進出只有 `occupy(...)` 這個**作用域**
+//    （`stop()` 另外直接歸零）：`defer { state = .idle }` 讓「一定歸零」變成語言保證。
 //    自己手寫進出、漏掉任何一條結束路徑，殘留狀態會讓輪詢永久停用、自動打牌卡死。
 //  - 決策用的 snapshot 由閘門一路傳到 executor，中途**不重讀** `store.pending`：
 //    重讀等於讓「因為 A 批而觸發」的動作落在換批後的 B 批上，而 resolver 的
@@ -74,7 +74,8 @@ nonisolated struct AutoPlayCycle {
 /// 是顯示了一個會被誤讀成正常的訊號——正好違反 `design-review-vs-akagi.md` P9
 /// 自己寫下的原則（「看起來一樣但其實不是決策」不行）。
 nonisolated struct AutoPlayStall: Equatable {
-    /// 最近一拍沒送出的原因（`AutoPlayCycle` 的 reason 字串）
+    /// 最近一拍沒送出的原因。可能是機器原因碼（`notSent:...`），也可能是已在地化的句子
+    /// （和牌送不出去），斷線時是 `LiqiSendResult.isOffline` 對應的 detail 字串。
     let reason: String
     /// 已經連續幾拍有機會卻沒動作
     let consecutiveTicks: Int
@@ -86,7 +87,7 @@ nonisolated struct AutoPlayStall: Equatable {
 
 /// 執行位的狀態。
 ///
-/// 「有沒有動作在跑」與「跑到哪一階段」是同一個值，而且只有 `occupy(...)` 能改它。
+/// 「有沒有動作在跑」與「跑到哪一階段」是同一個值，只有 `occupy(...)` 與 `stop()` 能改它。
 nonisolated enum AutoPlayExecutionState: Equatable {
     /// 沒有動作在跑，閘門可以放行
     case idle
@@ -165,16 +166,17 @@ final class AutoPlayEngine {
         /// 該批 `timeFixed - 1` 秒（見 `runCycle`）。段位場的等待會吃到長考時間，
         /// 這是取捨——搶送「過」不可逆，晚送最壞是伺服器逾時自己判過。
         var callPassGrace: TimeInterval = 8.0
-        /// 和牌送出失敗的重試間隔（漏和不可逆，間隔短一點）
+        /// 和牌送出失敗的重試間隔。比一般動作（`retry`）長、比「過」（`passRetry`）短；0.2 的理由未知
         var horaRetry: TimeInterval = 0.2
-        /// 「過」送出失敗的重試間隔
+        /// 「過」送出失敗的重試間隔（0.5 的理由未知）
         var passRetry: TimeInterval = 0.5
-        /// 其餘動作送出失敗的重試間隔
+        /// 其餘動作送出失敗的重試間隔（0.1 的理由未知）
         var retry: TimeInterval = 0.1
         /// 一輪之內最多送幾次
         ///
-        /// 從 50（5 秒）降到 15（1.5 秒）：觸發點已經確認過 oplist 存在，
-        /// 這裡要處理的只是短暫空窗，等 5 秒不會讓它比較可能消失。
+        /// 從 50 降到 15：觸發點已經確認過 oplist 存在，這裡要處理的只是短暫空窗，
+        /// 多試幾十次不會讓它比較可能消失。每次嘗試還要等 RESPONSE（`actionAwaitResponseMs`）
+        /// 與回音（`actionEchoTimeoutMs`），所以一輪的最長佔用時間遠大於次數乘 `retry`。
         var maxAttempts: Int = 15
         /// 打牌／副露／和牌送出後等同 msgId RESPONSE 的毫秒數（第 2 層驗證）。
         /// 0＝只驗第 1 層（sendRaw）。正式路徑 800ms：實測 RESPONSE 約 100ms 到，800ms 有餘裕；
@@ -186,10 +188,15 @@ final class AutoPlayEngine {
         /// 同一批 oplist 一輪送不出去之後，下一輪要先等這麼久；之後每輪加倍，
         /// 上限 `failureBackoffCap`。0＝不退避（測試預設）。
         /// 沒有它，每輪 15 次的上限會被下一輪歸零，live 拔北 5 分鐘重送 1246 次。
+        /// 預設起始值 0；正式路徑 `.live` 起始 2 秒，上限 30 秒。2 與 30 的數值理由未知（引入的 commit 只寫了數字）。
         var failureBackoff: TimeInterval = 0
         var failureBackoffCap: TimeInterval = 30
-        /// 「過」最多送幾次（伺服器逾時會代打，不必跟和牌一樣拚）
+        /// 「過」最多送幾次（伺服器逾時會代打，不必跟和牌一樣拚）。5 這個數字的理由未知
         var passAttempts: Int = 5
+        /// 副露寬限期要比該批視窗（`timeFixed`）短多少秒，留給送出與伺服器處理；1 的理由未知
+        var callPassWindowMargin: TimeInterval = 1.0
+        /// 去抖窗在擬人延遲之外多加的秒數；0.5 的理由未知。推測是跨輪退避之前的遺留（依 23d9eb4 commit 推得，未驗證）
+        var debounceSlack: TimeInterval = 0.5
         /// 閘門判定「模型判斷不做副露」時的送出策略
         var passPolicy: AutoPassDispatcher.RetryPolicy = .default
         /// 送出前的模擬人類延遲；nil＝用 `ActionDelayModel`（正式路徑）。
@@ -217,7 +224,7 @@ final class AutoPlayEngine {
         /// watchdog 重送的次數上限。用完仍等不到 `ActionNewRound`
         /// 就放掉 `confirmPending`——若瀏覽器其實已進下一局（我們漏收了 frame），繼續無限
         /// 重送會讓正常自動打牌被 confirm 永久餓死；放掉後自動打牌能對「實際正在進行的那局」
-        /// 恢復。若真的卡在結算，退回「使用者自己點確認」的基準，不會更糟。
+        /// 恢復。若真的卡在結算，退回「使用者自己點確認」的基準，不會更糟。3 這個數字的理由未知。
         var confirmMaxWatchdogResends: Int = 3
         /// 時鐘 seam：watchdog 的起算與比對都用它，測試可注入可控時鐘。
         /// 用它而不是 runConfirmCycle 的入口時間——ack 實際發生在 grace + 送出 + 等 RESPONSE
@@ -261,7 +268,7 @@ final class AutoPlayEngine {
 
     // MARK: - 狀態
 
-    /// 執行位。只有 `occupy(...)` 能改。
+    /// 執行位。只有 `occupy(...)` 與 `stop()` 能改。
     private(set) var state: AutoPlayExecutionState = .idle
 
     /// 去抖：兩個觸發源（輪詢／推薦更新）現在是同一條路，共用同一份狀態不再是耦合
@@ -273,7 +280,7 @@ final class AutoPlayEngine {
     private var nap: Task<Void, Never>?
     private var wakeRequested = false
 
-    /// 待處理的手動觸發（MCP `bot_trigger` / 模式切到自動）
+    /// 待處理的手動觸發（`requestManualTrigger`，唯一呼叫端是 `NakiRuntime.triggerAutoPlayNow`）
     private var pendingManual: TimeInterval?
 
     /// 有一個局間結算等著送 confirmNewRound（`end_kyoku` 設、`ActionNewRound`／終局清）。
@@ -455,7 +462,7 @@ final class AutoPlayEngine {
         // 固定時間短的視窗（段位場 5 秒）容不下整段寬限期；timeFixed 未知（0）時用預設
         let windowSeconds = Double(snapshot?.timeFixed ?? 0) / 1000
         let grace = windowSeconds > 0
-            ? max(0, min(timing.callPassGrace, windowSeconds - 1)) : timing.callPassGrace
+            ? max(0, min(timing.callPassGrace, windowSeconds - timing.callPassWindowMargin)) : timing.callPassGrace
 
         let gate = AutoPlayGate.evaluate(.init(
             isAutoMode: ctx.mode.sendsActions,
@@ -474,6 +481,7 @@ final class AutoPlayEngine {
             // 要看被哪一關擋住時，改用 /bot/deep（回傳同一組輸入）重新判一次。
             return finish(gate: gate, outcome: .skipped(reason))
 
+        // 退避擋 .forceHora／.sendPass／.proceed（含和牌），不擋上面已先處理的 .skip；順序是語意。
         case _ where isBackingOff(snapshot):
             return finish(gate: gate, outcome: .notSent(reason: "backoff"))
 
@@ -522,7 +530,7 @@ final class AutoPlayEngine {
                                     deadline: (Double(snapshot.timeFixed) + Double(snapshot.timeAdd)) / 1000)
             guard debounce.allows(key: "\(top.actionType.rawValue)-\(top.displayTile)",
                                   isPass: top.actionType == .none,
-                                  window: delay + 0.5,
+                                  window: delay + timing.debounceSlack,
                                   now: now)
             else {
                 return finish(gate: gate, outcome: .notSent(reason: "debounced"))
@@ -547,17 +555,20 @@ final class AutoPlayEngine {
 
         let ctx = context()
 
+        // 這一輪只讀一次 pending，三道檢查與送出用同一份。
+        let pending = store.pending
+
         // 三麻 fail-closed（同 `AutoPlayGate` 規則）。手動觸發不經閘門，
         // 要自己擋一次；三麻引擎的決策放行，伺服器授權的和牌也放行（resolver 會排在推薦之上）。
         guard AutoPlayGate.sanmaAllows(isSanma: ctx.isSanma, sanmaCapableDecision: ctx.sanmaCapableDecision)
-                || store.pending?.horaOperation != nil else {
+                || pending?.horaOperation != nil else {
             note("⏭️ 三麻對局：本批推薦不是三麻引擎算的，自動送出停用（雲端 3p 或本地 Akagi 三麻才放行）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "sanma_unsupported"))
         }
 
         guard let top = ctx.recommendations.first else {
             // 伺服器授權的和牌不需要推薦（與輪詢路徑的 forceHora 同理），交給 resolver
-            guard let snapshot = store.pending, snapshot.horaOperation != nil else {
+            guard let snapshot = pending, snapshot.horaOperation != nil else {
                 note("無法觸發: 無推薦", to: .log)
                 return finish(gate: nil, outcome: .notSent(reason: "no_recommendation"))
             }
@@ -570,7 +581,7 @@ final class AutoPlayEngine {
         }
 
         // 沒有 oplist 就別排這次觸發：伺服器還沒授權，等下一批到達時輪詢會自己接手。
-        guard let snapshot = store.pending else {
+        guard let snapshot = pending else {
             note("略過觸發: 尚無 oplist（\(top.actionType.rawValue) \(top.displayTile)）", to: .log)
             return finish(gate: nil, outcome: .notSent(reason: "no_oplist"))
         }
@@ -851,7 +862,7 @@ final class AutoPlayEngine {
                 sequence: snapshot.sequence,
                 store: self.store,
                 policy: self.timing.passPolicy,
-                // 迴圈被停掉（App 收掉／模式切換造成 stop）就別再送
+                // 迴圈被停掉（App 收掉）就別再送
                 isCurrent: { !Task.isCancelled },
                 log: { self.note($0, to: .event) },
                 send: {
@@ -1030,6 +1041,9 @@ final class AutoPlayEngine {
     // MARK: - 去抖
 
     /// 同一個推薦短時間內只觸發一次。
+    ///
+    /// 現在仍擋得住的情境：`wake()` 在同一批推薦內提早叫醒，上一輪剛送完又進來。
+    /// 送出失敗後的重入由跨輪退避處理，不靠這裡。
     ///
     /// 「過」不去抖：每一次新的副露機會都必須回應，而它們的 key 會一樣。
     private struct Debounce {

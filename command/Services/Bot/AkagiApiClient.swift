@@ -150,7 +150,7 @@ enum CloudAPIError: Error, LocalizedError {
 /// 綁定一組（伺服器、key）的 client。
 ///
 /// **hold 一份重用**：URLSession 帶著連線池，每次重建都要重付 TCP+TLS 握手。
-/// 呼叫端（`NativeBotController`）只在 URL 或 key 變更時重建（Akagi 同款規則）。
+/// 呼叫端（`CloudBot.reconcileSession`）只在 URL 或 key 變更時重建（Akagi 同款規則）。
 final class AkagiApiClient {
 
     /// react 在對局關鍵路徑上：掛掉的伺服器要**立刻**退回本地模型，

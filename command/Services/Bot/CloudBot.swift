@@ -179,7 +179,7 @@ final class CloudBot: MahjongBot {
             return nil
         }
 
-        // ── 4p：本地閘門——不是決策點連 API 都不打 ──
+        // ── 本地閘門（四麻 BundledCoreMLBot 或三麻 AkagiSanmaBot）——不是決策點連 API 都不打 ──
         guard let localReaction else { return nil }
 
         // 強制手：答案完全確定，伺服器只可能回同一手。本地回答、不花額度；

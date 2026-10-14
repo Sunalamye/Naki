@@ -155,7 +155,7 @@ enum AutoPlayActionExecutor {
 
         case .ryukyoku:
             // 九種九牌：ReqSelfOperation type=10（kyushu）。
-            // 同樣只有三麻引擎的推薦會走到這裡（resolver 已確認 oplist 有 kyushu）。
+            // resolver 已確認 oplist 有 kyushu；推薦可能來自四麻 Mortal（index 44）、雲端或三麻引擎。
             log("執行: 九種九牌")
             spec = LiqiRequestBuilder.kyushu()
 

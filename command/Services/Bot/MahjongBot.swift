@@ -14,7 +14,7 @@
 //    必須站在引擎之外。
 //
 //  現有 conform：`BundledCoreMLBot`（MortalSwift + Core ML）、
-//  `CloudBot`（裝飾器：本地閘門＋雲端代理）。未來的子行程／網路 mjai bot
+//  `AkagiSanmaBot`（三麻本地引擎）、`CloudBot`（裝飾器：本地閘門＋雲端代理）。未來的子行程／網路 mjai bot
 //  也從這裡接入。
 //
 

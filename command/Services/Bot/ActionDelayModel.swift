@@ -100,10 +100,14 @@ nonisolated enum ActionDelayModel {
     /// 上限。這個上限純粹是保護——延遲再長也不該讓對局停住。
     /// **不隨 `scale` 放大**：它的職責是一條與使用者偏好無關的保護線。
     /// 伺服器實際給的時限更短時，由呼叫端傳 `deadline` 收得更緊。
+    /// 12 秒的數值理由未知。
     static let maximum: TimeInterval = 12.0
 
     /// 伺服器時限（`deadline`）內留給送出與網路往返的安全餘裕
     static let deadlineMargin: TimeInterval = 2.0
+
+    /// 長考的固定加項（再加 `tankExtra` 抽樣）；2 秒的數值理由未知。
+    static let tankBase: TimeInterval = 2.0
 
     // MARK: - 牌種
 
@@ -166,8 +170,8 @@ nonisolated enum ActionDelayModel {
         case .kita:
             seconds = sample(kita, using: &generator)
         case .chi, .pon, .kan, .some(.none), .ryukyoku:
-            // 副露視窗的所有回應（含「過」與九種九牌）共用一個分布：
-            // 從使用者的角度它們是同一個介面上的同一次選擇。
+            // 副露視窗的回應（含「過」）共用一個分布：從使用者的角度它們是同一個介面上的
+            // 同一次選擇。九種九牌其實是自家摸牌後的選擇，沒有實測資料，暫借此分布近似。
             seconds = sample(claim, using: &generator)
         case .unknown, nil:
             seconds = sample(claim, using: &generator)
@@ -176,7 +180,7 @@ nonisolated enum ActionDelayModel {
         // 偶發長考。**不要為了體感把這條拿掉**：真人確實會停下來重數牌河，
         // 沒有這個尾巴，時間分布會缺一塊而變得可分。
         if Double.random(in: 0...1, using: &generator) < tankProbability {
-            seconds += 2.0 + sample(tankExtra, using: &generator)
+            seconds += tankBase + sample(tankExtra, using: &generator)
         }
 
         let cap = deadline > 0 ? min(maximum, max(0, deadline - deadlineMargin)) : maximum

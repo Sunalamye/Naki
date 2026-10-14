@@ -9,7 +9,7 @@
 //              ↓
 //      Mortal / Core ML（只負責對候選動作評分）
 //              ↓
-//      本層 Resolver（終局保護、模式閘門、去重）
+//      本層 Resolver（終局保護、模式閘門、oplist 合法性）
 //              ↓
 //      LiqiActionSender（組包送出）
 //
@@ -153,8 +153,8 @@ nonisolated enum AutoPlayDecisionResolver {
             // 會產出這種推薦（四麻 action space 46 沒有拔北槽位）。
             return snapshot.contains(.babei)
         case .ryukyoku:
-            // 九種九牌：oplist type 10（kyushu）。與 `.kita` 同一個形狀——
-            // 四麻 action space 沒有這個槽位，只有三麻引擎會產出。
+            // 九種九牌：oplist type 10（kyushu）。四麻 Mortal 的 action space 有這個槽位
+            // （index 44），雲端與三麻引擎也會產出；這裡只認 oplist 是否真的有 kyushu。
             return snapshot.contains(.kyushu)
         case .none:
             // 「過」永遠可以送（前提是這批確實是副露機會）
@@ -166,7 +166,7 @@ nonisolated enum AutoPlayDecisionResolver {
 
     /// 送出前的最終確認：這批 oplist 還是當初做決策時的那一批嗎？
     ///
-    /// 從決策到真正送出中間有延遲（`calculateDelay` 目前 1.0–1.8 秒），
+    /// 從決策到真正送出中間有延遲（`ActionDelayModel` 抽樣，最長 `ActionDelayModel.maximum`），
     /// 這段期間對局可能已經往前走。序號、座位、來源、觸發牌任一項變了，
     /// 就代表手上這個決策已經過期，不能拿它去操作新的 oplist。
     static func isStillValid(decidedOn decided: LiqiOperationSnapshot,

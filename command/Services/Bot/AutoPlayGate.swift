@@ -53,7 +53,7 @@ nonisolated enum AutoPlayGate {
         /// 仍然結構上無效——所以是**逐決策**判斷，來源不明或四麻模型的那一手
         /// 自動關回 fail-closed。
         var sanmaCapableDecision: Bool = false
-        /// 是否已有動作在執行（`currentExecutionId != nil`）
+        /// 是否已有動作在執行（`AutoPlayEngine.state != .idle`）
         let hasActionInFlight: Bool
         let snapshot: LiqiOperationSnapshot?
         let recommendations: [Recommendation]

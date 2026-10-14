@@ -13,7 +13,7 @@ enum AutoPassOutcome: Equatable {
     case handled(attempts: Int)
     /// 用完重試次數仍送不出去；oplist 保留 pending，留給下一輪重試
     case failed(attempts: Int)
-    /// 一次都沒送：執行已被新的觸發取代，或這批 oplist 已被換掉
+    /// 一次都沒送：執行被取消，或這批 oplist 已被換掉
     case superseded
 }
 
@@ -35,6 +35,7 @@ enum AutoPassDispatcher {
     /// 保留 pending 才能讓 1 秒輪詢在下一輪重新嘗試（還在伺服器的操作時限內，
     /// 多等幾輪沒有代價，靜默放棄機會才有）。
     nonisolated struct RetryPolicy {
+        /// 5 次與 0.2 秒的數值理由未知
         var maxAttempts: Int = 5
         var delay: TimeInterval = 0.2
 
@@ -45,7 +46,7 @@ enum AutoPassDispatcher {
     ///   - sequence: 觸發這次「過」的 oplist 序號；送出成功後才用它 `markHandled`
     ///   - store: oplist 儲存體（正式路徑是 `LiqiOperationStore.shared`）
     ///   - policy: 重試次數與間隔
-    ///   - isCurrent: 這次執行是否仍是當前執行（`currentExecutionId` 比對）
+    ///   - isCurrent: 這次執行是否仍有效；引擎傳 `!Task.isCancelled`
     ///   - log: 診斷輸出
     ///   - send: 實際送出（`LiqiActionSender.pass(channel:)`）
     @discardableResult
@@ -60,7 +61,7 @@ enum AutoPassDispatcher {
 
         var attempts = 0
         while attempts < policy.maxAttempts {
-            // 被新的觸發取代就停手：那條路徑會自己決定要送什麼。
+            // 執行被取消就停手。
             guard isCurrent() else { return .superseded }
 
             // 這批 oplist 已被換掉（對局往前走了）就不要再送——

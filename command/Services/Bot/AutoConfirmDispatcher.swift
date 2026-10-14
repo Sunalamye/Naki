@@ -49,6 +49,7 @@ enum AutoConfirmDispatcher {
     /// 下一輪輪詢重試（伺服器結算窗口有數十秒到數分鐘，多等幾輪沒有代價，
     /// 靜默放棄整局卡死才有）。
     nonisolated struct RetryPolicy {
+        /// 6 次與 0.4 秒的數值理由未知
         var maxAttempts: Int = 6
         var delay: TimeInterval = 0.4
         /// 每次送出後等 RESPONSE 的毫秒數（`<= 0` 表示不等，只看 sendRaw）

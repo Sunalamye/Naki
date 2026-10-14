@@ -104,7 +104,9 @@ final class NativeBotController {
     private(set) var kyotaku: Int = 0
     private(set) var bakazeWind: Wind = .east
     private(set) var jikazeWind: Wind = .east
-    private(set) var scores: [Int] = [25000, 25000, 25000, 25000]
+    /// start_kyoku 帶入分數前的佔位值；三麻起點是 35000 且只有三家，所以三麻在此之前不準
+    private static let placeholderScores = [25000, 25000, 25000, 25000]
+    private(set) var scores: [Int] = NativeBotController.placeholderScores
     private(set) var doraMarkers: [Tile] = []
 
     // MARK: - 可用動作（來源：協定層 oplist）
@@ -355,8 +357,8 @@ final class NativeBotController {
             // 那是另一條路，不影響這裡。
             //
             // 沒有這個 case 的時候它落 default：那張北不會從 `tehai` 移除，補摸又加
-            // 一張，於是**每拔一次北就多累積一張幽靈北**。不影響推論（三麻本地引擎
-            // 是 nil、雲端自行重建狀態），但 `/game/hand`、`tehaiCount`、MCP 匯出
+            // 一張，於是**每拔一次北就多累積一張幽靈北**。不影響推論（各引擎自己從事件流
+            // 維護狀態），但 `/game/hand`、`tehaiCount`、MCP 匯出
             // 與側欄手牌顯示全都會是錯的。
             handleDahaiDict(event)
 
@@ -394,7 +396,7 @@ final class NativeBotController {
         kyoku = 0
         honba = 0
         kyotaku = 0
-        scores = [25000, 25000, 25000, 25000]
+        scores = Self.placeholderScores
 
         // #3: 優先用 bridge 帶來的 is3P 旗標；否則退回 names 陣列長度判斷。
         //     （createBot 已用 is3P 參數設過，此處只在 react 重放 start_game 時保持一致，不覆蓋為錯值。）
@@ -548,7 +550,7 @@ final class NativeBotController {
         kyotaku = 0
         bakazeWind = .east
         jikazeWind = .east
-        scores = [25000, 25000, 25000, 25000]
+        scores = Self.placeholderScores
         doraMarkers = []
         // 可用動作是 oplist 的投影，不在本 class 持有，因此沒有東西要重置。
         // ☁️ 雲端狀態（視窗／client／斷路器）住在 CloudBot，隨 deleteBot 一起釋放；

@@ -4,7 +4,7 @@
 //
 //  雲端推論設定的值快照。
 //
-//  `NativeBotController` 在**每個決策點**經 `cloudConfigProvider` 重讀一份
+//  `CloudBot` 在**每個決策點**經 `configProvider`（`NativeBotController.cloudConfigProvider`）重讀一份
 //  （Akagi 實戰做法：修 key、換模型局中即生效，任何變更會 reset 斷路器）。
 //  Equatable 是為了「有沒有變」這一個判斷——變了才重建 client / 清 tombstone。
 //

@@ -85,6 +85,7 @@ final class AutoRematchEngine {
     // MARK: - 時間常數
 
     /// 結算畫面 → 回到大廳的緩衝。段位場結算會自己跑完，不需要點確認。
+    /// 本檔的 45 秒、探針 3 秒×20 次、重送 10 秒×3 次，數值理由皆未知。
     private let settleDelay: Duration
     private let probeInterval: Duration
     private let maxProbes: Int
@@ -185,17 +186,18 @@ final class AutoRematchEngine {
         }
 
         // 等待期間使用者可能改了模式——每一步都重新確認，不靠進來時那一次判斷
-        guard context().mode.autoRematch else {
+        let ctx = context()
+        guard ctx.mode.autoRematch else {
             log("[自動續局] 模式已變更，取消續局")
             return .cancelled
         }
 
-        let sanma = context().prefersSanma
+        let sanma = ctx.prefersSanma
         let kind = sanma ? "三麻" : "四麻"
 
         // 四麻 bundled 模型的 obs 1012×34 對三麻結構性無效，三麻需要雲端 3p 或本地 Akagi 三麻。
         // 沒有三麻引擎還自動排三麻＝把帳號送進一場自己不會出手的對局。
-        if sanma && !context().sanmaEngineAvailable {
+        if sanma && !ctx.sanmaEngineAvailable {
             return fail("選了三麻但沒有三麻引擎，不排隊——排進去也不會出手。",
                         .sanmaEngineMissing)
         }
@@ -208,8 +210,8 @@ final class AutoRematchEngine {
         guard let target = RematchTargetResolver.resolve(
             level: level,
             sanma: sanma,
-            east: context().prefersEast,
-            preference: context().roomPreference,
+            east: ctx.prefersEast,
+            preference: ctx.roomPreference,
             observations: observations()) else {
             return fail(sanma
                         ? "還沒有可用的三麻 match_sid，不排隊。請先自己點一次三麻的場次入口打一場，Naki 會記下來。"
@@ -220,7 +222,7 @@ final class AutoRematchEngine {
         // 推導出來的候選要講明白，不要讓推論看起來像事實
         let room: String = target.entry?.displayName ?? target.sid
         let levelText: String = level.map(String.init) ?? "未知"
-        let prefText: String = context().roomPreference.label
+        let prefText: String = ctx.roomPreference.label
         let verifyNote: String = target.verified ? "" : "（由表推導，尚未驗證）"
         log("[自動續局] 目標：\(room)（段位 \(levelText)，偏好\(prefText)）"
             + " sid=\(target.sid)\(verifyNote)")

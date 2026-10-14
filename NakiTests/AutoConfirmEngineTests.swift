@@ -232,6 +232,27 @@ final class AutoConfirmEngineTests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
 
+    /// 送出途中下一局開始（pending 被清）→ 即使沒被取消，RESPONSE 也不能計為確認。
+    /// `isSuperseded` 必須是「pending 已清 或 已取消」，不是兩者同時成立。
+    func testRoundBeginningDuringSendIsSupersededWithoutCancellation() async {
+        var calls = 0
+        var engineRef: AutoPlayEngine?
+        let engine = makeEngine(mode: .auto, confirmSend: {
+            calls += 1
+            engineRef?.roundDidBegin()
+            return self.confirmed()
+        })
+        engineRef = engine
+        engine.roundDidEnd()
+
+        let result = await engine.runConfirmCycle()
+
+        XCTAssertEqual(result, .dispatched(.superseded))
+        XCTAssertEqual(calls, 1)
+        XCTAssertFalse(engine.confirmPending)
+        XCTAssertNil(engine.confirmAckedAt)
+    }
+
     /// `.off`：不送，pending 保留（使用者自己在遊戲內確認）
     func testOffModeDoesNotSend() async {
         var calls = 0

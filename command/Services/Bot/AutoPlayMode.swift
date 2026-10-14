@@ -21,9 +21,9 @@ nonisolated enum AutoPlayMode: String, CaseIterable {
     case auto = "自動"           // 顯示推薦，自動執行推薦動作
     case fullAuto = "全自動"     // 自動打牌 ＋ 對局結束後自動排下一場
 
-    /// 是否顯示推薦（側欄 `RecommendationView` 與遊戲內 `__nakiHighlight` 共用同一個閘門）
+    /// 是否顯示推薦（側欄 `DecisionSidebar` 與遊戲內推薦通道共用同一個閘門）
     ///
-    /// 兩個顯示面都必須讀它（`RecommendationView`、`GameHighlightScript.make()`）：
+    /// 兩個顯示面都必須讀它（`DecisionSidebar`、`GameStore.updateHighlight(showRecommendation:)`）：
     /// 漏掉任一邊，`.off` 就只擋得住自動送出，該面照列推薦／照染高亮，
     /// 於是「關閉」在畫面上跟「推薦」看起來一樣。
     ///
@@ -109,7 +109,7 @@ nonisolated enum AutoPlayAvailability {
 
     /// 把「使用者選的／存檔讀到的」模式收斂成這條路徑真的能執行的模式。
     ///
-    /// 不支援自動送出時 `.auto` 一律降級成 `.recommend`——降級而不是 `.off`，
+    /// 不支援自動送出時送出類模式（`.auto`／`.fullAuto`）一律降級成 `.recommend`——降級而不是 `.off`，
     /// 因為使用者要的是「幫我看牌」，把顯示一起關掉會是另一個他沒選的行為。
     static func clamp(_ mode: AutoPlayMode, autoPlaySupported: Bool) -> AutoPlayMode {
         (!autoPlaySupported && mode.sendsActions) ? .recommend : mode
