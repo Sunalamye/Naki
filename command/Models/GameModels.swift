@@ -301,11 +301,9 @@ struct Recommendation: Identifiable, Equatable {
 
         /// 這個動作在遊戲畫面上會不會標到某一張牌。
         ///
-        /// `GameHighlightScript` 只對這幾種產生 mark——和了／過／拔北／九種九牌
-        /// 沒有對應的手牌可標，它們落在那個 switch 的 `default`。
+        /// 和了／過／拔北／九種九牌沒有對應的手牌可標。
         /// `GameStore.highlightedTile` 必須用同一個判斷，否則會宣稱畫面上有一個
         /// 其實不存在的標記（那個欄位的 doc 正是在防這件事）。
-        /// `GameHighlightScriptTests` 有一條測試把兩邊鎖在一起。
         var marksTileOnBoard: Bool {
             switch self {
             case .discard, .riichi, .chi, .pon, .kan: return true

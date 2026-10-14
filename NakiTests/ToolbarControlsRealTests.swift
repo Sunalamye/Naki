@@ -8,7 +8,7 @@
 //  1. 三個模式 × 四個行為的 3×4 矩陣（每格一個斷言，共 12 格）——不能只測 `.off`。
 //     行為讀的是**產品真正讀的那個值／那個純函式**：
 //       - 側欄推薦   → `AutoPlayMode.showRecommendation`（`RecommendationView`/`ContentView` 讀它）
-//       - 遊戲內高亮 → `GameHighlightScript.make(...)`（`.off` 回 clear）
+//       - 遊戲內高亮 → `WebSession.recommendationScript(...)`（`.off` 發布空推薦並 clear）
 //       - 自動送出   → `AutoPlayGate.evaluate(...)`（只有 `.auto` 放行）
 //       - 局間確認   → `AutoPlayGate.allowsConfirm(...)`（p2-5：只有 `.auto` 自動確認）
 //  2. 延遲基準的持久化與縮放係數換算（與 mode 同一套「單一 key、重啟還原」機制）。
@@ -46,7 +46,7 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
     private struct Row {
         let mode: AutoPlayMode
         let sidebar: Bool     // 側欄是否顯示推薦
-        let highlight: Bool   // 遊戲內是否染色（非 clear）
+        let highlight: Bool   // 遊戲內是否發布推薦（非 clear）
         let autoSend: Bool    // 是否自動送出打牌
         let confirm: Bool     // 局間是否自動送 confirmNewRound
     }
@@ -59,6 +59,7 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
 
     // MARK: - 3×4 矩陣（12 格）
 
+    @MainActor
     func testModeBehaviorMatrixHasAllTwelveCells() {
         let snapshot = discardSnapshot()
 
@@ -68,11 +69,10 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
                            "[\(row.mode.rawValue)] 側欄推薦格")
 
             // ── 格 2：遊戲內高亮（`.off` 一律回 clear；有推薦時 recommend/auto 會染）
-            let script = GameHighlightScript.make(mode: row.mode,
-                                                  recommendations: recs,
-                                                  tehaiTiles: tehai,
-                                                  snapshot: nil)
-            let highlightShown = script != GameHighlightScript.clear
+            let script = WebSession.recommendationScript(
+                show: row.mode.showRecommendation, recommendations: recs, tehaiTiles: tehai,
+                tsumoTile: nil, snapshot: nil, recommendationsOplistSequence: nil)
+            let highlightShown = !script.hasSuffix(GameHighlightScript.clear)
             XCTAssertEqual(highlightShown, row.highlight,
                            "[\(row.mode.rawValue)] 遊戲內高亮格：script=\(script)")
 

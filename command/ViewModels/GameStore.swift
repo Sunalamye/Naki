@@ -197,7 +197,7 @@ final class GameStore {
     func updateHighlight(showRecommendation: Bool) {
         guard showRecommendation, let top = recommendations.first,
               top.actionType.marksTileOnBoard else {
-            // 首選是和了／過／拔北／九種九牌時，`GameHighlightScript` 不產生任何 mark。
+            // 首選是和了／過／拔北／九種九牌時，畫面上沒有對應的牌可標。
             // 這裡若仍記一個 `"hora"`／`"none"`，就是宣稱畫面上有一個其實不存在的
             // 標記——`.off` 那條早就補了，動作類型這條沒有。
             highlightedTile = nil

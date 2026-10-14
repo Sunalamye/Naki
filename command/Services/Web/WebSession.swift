@@ -269,22 +269,37 @@ final class WebSession {
 
     // MARK: - 遊戲畫面內高亮
 
-    /// 依目前模式與推薦，暫時改 Unity 畫該牌時的 tint。
+    /// 依目前模式與推薦，更新唯讀推薦通道 `__nakiRecommendations`。
     ///
     /// 牌面自動高亮已移交插件（plugin-system-design §12）：這裡不再自己呼叫
-    /// `__nakiHighlight.set()`，只維護唯讀推薦通道 `__nakiRecommendations`，
-    /// 讓高亮類插件讀它、自己決定要不要染色。移交前內建高亮每次都 `set()`，
-    /// 會把插件剛設的顏色覆蓋掉（live 實測 2026-08-11 確認過這個衝突）。
-    ///
-    /// `GameHighlightScript.make` 保留為 highlight payload 的參考實作與測試對象，
-    /// 不再自動注入。關閉顯示（`.off`）時清一次並清空推薦——使用者關掉的東西不該還在畫面上。
+    /// `__nakiHighlight.set()`，讓高亮類插件讀推薦、自己決定要不要染色。移交前內建高亮
+    /// 每次都 `set()`，會把插件剛設的顏色覆蓋掉（live 實測 2026-08-11 確認過這個衝突）。
+    /// 關閉顯示（`.off`）時清一次並清空推薦——使用者關掉的東西不該還在畫面上。
     func syncHighlight() async {
-        let show = store.autoPlayMode.showRecommendation
-        let recos = show ? store.recommendations : []
-        let json = Self.recommendationsJSON(recos)
-        // Publish the hand and call combination from the same decision as the recommendations.
-        let snapshot = LiqiOperationStore.shared.latest
-        let current = snapshot?.sequence == store.recommendationsOplistSequence
+        let script = Self.recommendationScript(
+            show: store.autoPlayMode.showRecommendation,
+            recommendations: store.recommendations,
+            tehaiTiles: store.tehaiTiles,
+            tsumoTile: store.tsumoTile,
+            snapshot: LiqiOperationStore.shared.latest,
+            recommendationsOplistSequence: store.recommendationsOplistSequence)
+        do {
+            _ = try await backend.callJavaScript(script)
+        } catch {
+            bridgeLog("[Plugin] Recommendation sync failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// `syncHighlight` 實際送出的腳本。手牌與副露組合跟推薦出自同一批決策，所以快照不是
+    /// 推薦當時的那批 oplist 時，不發布組合與副露機會。
+    static func recommendationScript(show: Bool,
+                                     recommendations: [Recommendation],
+                                     tehaiTiles: [String],
+                                     tsumoTile: String?,
+                                     snapshot: LiqiOperationSnapshot?,
+                                     recommendationsOplistSequence: UInt64?) -> String {
+        let recos = show ? recommendations : []
+        let current = snapshot?.sequence == recommendationsOplistSequence
         var callTiles: [String] = []
         if current, let top = recos.first {
             let type: LiqiOperationType?
@@ -310,20 +325,15 @@ final class WebSession {
         }
         let context: [String: Any] = [
             // The drawn tile is stored separately from tehai, but is also visible on the board.
-            "hand": show ? store.tehaiTiles + [store.tsumoTile].compactMap { $0 } : [],
+            "hand": show ? tehaiTiles + [tsumoTile].compactMap { $0 } : [],
             "callTiles": callTiles,
             "isCallOpportunity": current && snapshot?.isCallOpportunity == true
         ]
         let contextJSON = (try? JSONSerialization.data(withJSONObject: context))
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let recoScript = NakiWebSocketScript.publishRecommendations(json: json, contextJSON: contextJSON)
-        let tail = show ? "" : "\n" + GameHighlightScript.clear
-
-        do {
-            _ = try await backend.callJavaScript(recoScript + tail)
-        } catch {
-            bridgeLog("[Plugin] Recommendation sync failed: \(error.localizedDescription)")
-        }
+        let published = NakiWebSocketScript.publishRecommendations(
+            json: recommendationsJSON(recos), contextJSON: contextJSON)
+        return show ? published : published + "\n" + GameHighlightScript.clear
     }
 
     /// 把推薦序列化成插件好用的 JSON（唯讀快照）。純函式，可測。
