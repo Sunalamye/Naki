@@ -252,6 +252,13 @@ nonisolated final class LiqiMsgIdAllocator: @unchecked Sendable {
         return true
     }
 
+    /// 撤銷登記：封包沒送出去，這個號不該被當成 Naki 自送（之後遊戲自己用到同號時會被誤認）。
+    func revoke(_ msgId: UInt16) {
+        lock.lock()
+        defer { lock.unlock() }
+        issued.removeAll { $0 == msgId }
+    }
+
     /// 是否為本配發器發出且尚未認領的 msgId。不消耗登記（與 `claim` 的差別）。
     func isIssued(_ msgId: UInt16) -> Bool {
         lock.lock()

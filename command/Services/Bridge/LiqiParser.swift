@@ -330,7 +330,6 @@ class LiqiParser {
             if isResponse {
                 return parseAuthGameResponse(innerBlocks)
             } else {
-                // ⭐ 解析 authGame 請求以獲取 accountId
                 return parseAuthGameRequest(innerBlocks)
             }
         }
@@ -508,8 +507,8 @@ class LiqiParser {
                 if let tile = block.stringValue {
                     tiles.append(tile)
                 }
-            case 5: // dora (寶牌指示牌)
-                appendDora(block, to: &result)
+            case 5: // dora（單數，與 field 14 的 doras 分開存，由呼叫端決定以誰為準）
+                if let tile = block.stringValue { result["dora"] = tile }
             case 6: // scores（liqi.json：`repeated int32`）
                 // 調試: 打印原始數據
                 liqiLog("[LiqiParser] NewRound field 6 (scores) raw bytes: "
@@ -947,32 +946,14 @@ class LiqiParser {
         return player
     }
 
-    /// 解析 authGame 請求（獲取 accountId）
+    /// 解析 authGame 請求。account_id 與 token 沒有讀取端：座位只認登入回應的 accountId，
+    /// token 是 session 憑證，不留在 `lastParsed`。
     private func parseAuthGameRequest(_ blocks: [ProtobufBlock]) -> [String: Any]? {
         var result: [String: Any] = [:]
 
-        liqiLog("[LiqiParser] parseAuthGameRequest: \(blocks.count) blocks")
-
         for block in blocks {
-            liqiLog("[LiqiParser] authGame request field \(block.fieldId), wireType \(block.wireType), size \(block.data.count)")
-
             switch block.fieldId {
-            case 1: // account_id
-                if let (accountId, _) = parseVarint(block.data, offset: 0) {
-                    result["accountId"] = accountId
-                    liqiLog("[LiqiParser] ⭐ authGame request accountId: \(accountId)")
-                }
-            // 解不出字串就**不寫 key**（舊版寫空字串，呼叫端無法分辨
-            // 「伺服器沒給」與「給了但解不開」）。
-            case 2: // token
-                if let token = block.stringValue {
-                    result["token"] = token
-                } else {
-                    recordFault(site: "ReqAuthGame.token",
-                                fieldId: 2,
-                                byteCount: block.data.count,
-                                reason: "token 不是合法 UTF-8")
-                }
+            // 解不出字串就不寫 key，讓呼叫端分得出「沒給」與「給了但解不開」
             case 3: // game_uuid
                 if let uuid = block.stringValue {
                     result["gameUuid"] = uuid

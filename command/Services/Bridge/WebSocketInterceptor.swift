@@ -373,7 +373,7 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     /// 雀魂協議橋接器
     private let majsoulBridge = MajsoulBridge()
 
-    /// 目前登入帳號的 account_id（由 MajsoulBridge 從登入／authGame 回應解析）。
+    /// 目前登入帳號的 account_id（由 MajsoulBridge 從登入回應解析）。
     /// `ReqAccountInfo.account_id` 為必填，MCP 的帳號查詢工具需要它當預設值。
     ///
     /// 對外的讀取面是 `NakiAccountIdSource`（見檔案末尾的 conformance）：

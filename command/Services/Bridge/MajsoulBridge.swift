@@ -76,8 +76,11 @@ class MajsoulBridge {
     /// 待處理的立直接受消息
     private var pendingReachAccepted: [String: Any]? = nil
 
-    /// syncGame／enterGame 重放期間；只供 log 標示回音是歷史事件造成的，沒有任何決策讀它
+    /// syncGame／enterGame 重放期間；重放的歷史動作不計入回音
     private var syncing: Bool = false
+
+    /// 本局已發出的碰（pai＋consumed 共三張，含赤五與否），加槓時據此查原碰的牌
+    private var ponMelds: [(actor: Int, tiles: [String])] = []
 
     /// 是否已收到過 authGame（用於判斷是否需要發送 start_game）
     private var hasReceivedAuthGame: Bool = false
@@ -106,6 +109,7 @@ class MajsoulBridge {
         // （重新推導座位）負責，不靠這裡。
         lastDiscard = nil
         doras = []
+        ponMelds = []
         pendingReachAccepted = nil
         syncing = false
         hasReceivedAuthGame = false
@@ -504,7 +508,8 @@ class MajsoulBridge {
                                                actor: event["actor"] as? Int,
                                                seat: seat) else { continue }
             if syncing {
-                bridgeLog("[MajsoulBridge] syncGame 重放期間記到回音：\(type)（\(name)）")
+                bridgeLog("[MajsoulBridge] syncGame 重放期間不計回音：\(type)（\(name)）")
+                continue
             }
             SelfActionEchoTracker.shared.record()
         }
@@ -646,7 +651,8 @@ class MajsoulBridge {
         let tiles = data["tiles"] as? [String] ?? []
         bridgeLog("[MajsoulBridge] parseNewRound: 場=\(chang), ju=\(ju), tiles.count=\(tiles.count)")
 
-        let doraList = data["doras"] as? [String]
+        // field 14（doras）為準；只有舊式單張 field 5（dora）時才用它，兩者並存不重複計首張
+        let doraList = (data["doras"] as? [String]) ?? (data["dora"] as? String).map { [$0] }
         let doraMarker = doraList?.first.flatMap { LiqiTile.mjai(fromMajsoul: $0) }
         guard let startKyoku = makeStartKyoku(fromSnapshot: false, chang: chang, ju: ju,
                                               honba: data["ben"] as? Int ?? 0,
@@ -654,9 +660,9 @@ class MajsoulBridge {
                                               rawScores: data["scores"], hand: tiles,
                                               validHandSize: { [13, 14].contains($0) },
                                               doraMarker: doraMarker ?? "?") else { return nil }
-        if doraMarker != nil, let doraList {
-            doras = doraList
-        }
+        // 無條件重設：首張轉不出牌碼時不得沿用上一局的長度，否則這局的槓寶牌會被吞掉
+        doras = doraList ?? []
+        ponMelds = []
         var results = [startKyoku]
 
         // 如果配牌有 14 張（親家），添加自摸事件
@@ -872,6 +878,7 @@ class MajsoulBridge {
             ]
 
         case 1: // Pon
+            ponMelds.append((actor, [pai] + consumed))
             return [
                 "type": "pon",
                 "actor": actor,
@@ -921,10 +928,7 @@ class MajsoulBridge {
             ]
 
         case 2: // Kakan
-            var consumed = [String](repeating: baseTile, count: 3)
-            if baseTile.first == "5" && !mjaiTile.hasSuffix("r") {
-                consumed[0] = baseTile + "r"
-            }
+            let consumed = kakanConsumed(actor: actor, baseTile: baseTile, mjaiTile: mjaiTile)
             return [
                 "type": "kakan",
                 "actor": actor,
@@ -935,6 +939,22 @@ class MajsoulBridge {
         default:
             return nil
         }
+    }
+
+    /// 加槓的 consumed：優先取同 actor 同底牌的原碰（並移除該筆）；沒有碰紀錄
+    /// （重連從局中開始），或紀錄含重複赤五（封包降級所致，實體不可能）就退回推定，假設原碰含赤五。
+    private func kakanConsumed(actor: Int, baseTile: String, mjaiTile: String) -> [String] {
+        if let index = ponMelds.firstIndex(where: {
+            $0.actor == actor && $0.tiles.allSatisfy { $0.replacingOccurrences(of: "r", with: "") == baseTile }
+        }) {
+            let recorded = ponMelds.remove(at: index).tiles
+            if recorded.filter({ $0.hasSuffix("r") }).count <= 1 { return recorded }
+        }
+        var consumed = [String](repeating: baseTile, count: 3)
+        if baseTile.first == "5" && !mjaiTile.hasSuffix("r") {
+            consumed[0] = baseTile + "r"
+        }
+        return consumed
     }
 
     // MARK: - Sync Game Restore
@@ -992,9 +1012,8 @@ class MajsoulBridge {
                                               // start_kyoku 只帶第一個 dora_marker
                                               doraMarker: doraList?.first.flatMap { LiqiTile.mjai(fromMajsoul: $0) } ?? "?")
         else { return nil }
-        if let doraList {
-            doras = doraList
-        }
+        doras = doraList ?? []
+        ponMelds = []
         var results = [startKyoku]
 
         // start_kyoku 只帶第一個 dora_marker，其餘已翻的 kan-dora 逐一補發。

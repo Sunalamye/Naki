@@ -104,6 +104,7 @@ final class LiqiActionSender {
             let result = LiqiSendResult(method: spec.method, msgId: msgId,
                                         byteCount: bytes.count, success: false,
                                         detail: "no_send_handler")
+            LiqiMsgIdAllocator.shared.revoke(msgId)
             lastResult = result
             logHandler?("[Liqi] \(result.logLine)")
             return result
@@ -115,9 +116,18 @@ final class LiqiActionSender {
         let result = LiqiSendResult(method: spec.method, msgId: msgId,
                                     byteCount: bytes.count, success: raw.success,
                                     detail: raw.detail)
+        if !raw.success && Self.failedBeforeSending(raw.detail) { LiqiMsgIdAllocator.shared.revoke(msgId) }
         lastResult = result
         logHandler?("[Liqi] \(result.logLine)")
         return result
+    }
+
+    /// 只有送出前即確定失敗才撤銷登記；`js_error`、`unparsable_js_result`、`runtime_deallocated`
+    /// 無法確定 JS 是否已送出，撤銷會讓遊戲對該號的回應被誤認為遊戲自送。
+    private static func failedBeforeSending(_ detail: String?) -> Bool {
+        guard let detail else { return false }
+        return ["no_open_majsoul_connection", "no_game_gateway_connection", "invalid_base64",
+                "decode_failed", "empty_payload", "send_failed"].contains { detail.hasPrefix($0) }
     }
 
     /// 憑證類請求（見 `LiqiCredentialMethods`）只記長度：

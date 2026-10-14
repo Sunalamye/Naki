@@ -52,6 +52,11 @@ final class GameRecorder {
 
     func record(_ event: [String: Any]) {
         guard gameId != nil else { return }
+        var event = event
+        if event["type"] as? String == "start_game" {
+            // 與雲端上傳同一套佔位名；錄影會被 replay、分享，不留他人暱稱
+            event["names"] = KyokuStreamAccumulator.apiEvent(event, is3P: false)["names"]
+        }
         buffer.append(event)
     }
 
