@@ -111,3 +111,20 @@
     U4 下，全面封鎖網路應屬可選產品政策；它會限制遠端選項資料等正常用途，不宜成為 WP-A 的必做安全工程。
 
 總評：**REWORK**。A、rewriteSend 與三項自由度擴充方向可保留，但目前不能視為可合併的完整功能；Phase 4 也尚無可靠通行證。已重跑 Node 15／15，並以額外反例確認上述封包問題；正常路徑中，零插件原物件、Naki 自送及替換後 Swift／socket bytes 一致的測試通過。文件對多數未驗證項目有誠實標示，但已知 parser 缺陷與更新破壞不能只列風險。本次未重跑 Swift／WebKit、build 或 live 對局；未修改任何檔案，結束時 git 狀態與開始一致，`git diff --check` 通過。
+## 用戶裁決：spike 提前合進 main（2026-10-14）
+
+用戶決定為了併入 v2.18.0，把 spike 在 PV2-A 手測與 PV2-B1 live 驗證之前合進 main。
+
+仍未驗證的項目照列：
+
+- App 內設定頁的實際顯示
+- iOS 17–25 上的執行
+- 真實 HTTPS／GitHub 匯入
+- `rewriteSend` 在伺服器上的效果
+
+風險界線：
+
+- `rewriteSend` 受 L3 總開關 `pluginsMayModifyOutbound` 把關，預設關。
+- 零插件與 Naki 自送路徑有單測鎖住「原物件直送」。
+
+PV2-A／PV2-B1 的剩餘工作（見設計 §10）不變。
