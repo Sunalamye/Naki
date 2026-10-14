@@ -49,6 +49,8 @@ final class AutoConfirmEngineTests: XCTestCase {
                             confirmAckWatchdog: TimeInterval = 6.0,
                             maxWatchdogResends: Int = 3,
                             clock: (() -> Date)? = nil,
+                            store: LiqiOperationStore = LiqiOperationStore(),
+                            onStall: @escaping (AutoPlayStall?) -> Void = { _ in },
                             confirmSend: @escaping () async -> LiqiToolSendOutcome)
         -> AutoPlayEngine {
         var timing = AutoPlayEngine.Timing()
@@ -60,7 +62,7 @@ final class AutoConfirmEngineTests: XCTestCase {
         timing.confirmPolicy = .init(maxAttempts: 3, delay: 0, awaitResponseMs: 0)
         timing.confirmSend = confirmSend
         return AutoPlayEngine(
-            store: LiqiOperationStore(),
+            store: store,
             sender: LiqiActionSender(),
             timing: timing,
             context: {
@@ -69,7 +71,8 @@ final class AutoConfirmEngineTests: XCTestCase {
                                        seat: 0,
                                        isSanma: isSanma,
                                        tsumoTile: nil)
-            })
+            },
+            onStallChanged: onStall)
     }
 
     // MARK: - 模式閘門（驗收條件 #2）
@@ -125,6 +128,82 @@ final class AutoConfirmEngineTests: XCTestCase {
         clockBox.now = t0.addingTimeInterval(2.5)
         _ = await engine.runConfirmCycle()
         XCTAssertEqual(calls, 2, "逾時未進下一局要重送，否則整局卡在結算畫面")
+    }
+
+    /// BT-07：等確認期間超過上限仍沒進下一局，而伺服器已經發了新的 oplist（漏收 ActionNewRound 的跡象）
+    /// → 停滯要上得了畫面；上限之前不報。
+    func testConfirmPendingWithoutProgressReportsStall() async {
+        let t0 = Date(timeIntervalSince1970: 3_000_000)
+        let clockBox = ClockBox(t0)
+        let store = LiqiOperationStore()
+        var reported: [AutoPlayStall?] = []
+        let engine = makeEngine(mode: .auto, confirmAckWatchdog: 2.0,
+                                clock: { clockBox.now }, store: store,
+                                onStall: { reported.append($0) },
+                                confirmSend: { self.sendFailure() })
+        engine.roundDidEnd()
+        store.record(seat: 0, operations: [LiqiOperation(type: .discard)],
+                     timeFixed: 300_000, contextTile: "5p", source: "test")
+
+        for second in 0..<2 {
+            clockBox.now = t0.addingTimeInterval(Double(second))
+            _ = await engine.runConfirmCycle()
+        }
+        XCTAssertTrue(reported.compactMap { $0 }.isEmpty, "上限之前不報停滯")
+
+        for second in 2..<10 {
+            clockBox.now = t0.addingTimeInterval(Double(second))
+            _ = await engine.runConfirmCycle()
+        }
+        XCTAssertEqual(reported.compactMap { $0 }.last?.reason, "confirmStalled")
+    }
+
+    /// BT-07：不會自動送的模式（推薦）沒有「卡住」可言，超過上限也不報停滯。
+    func testConfirmPendingDoesNotReportStallWhenModeNeverSends() async {
+        let t0 = Date(timeIntervalSince1970: 3_200_000)
+        let clockBox = ClockBox(t0)
+        let store = LiqiOperationStore()
+        var reported: [AutoPlayStall?] = []
+        let engine = makeEngine(mode: .recommend, confirmAckWatchdog: 2.0,
+                                clock: { clockBox.now }, store: store,
+                                onStall: { reported.append($0) },
+                                confirmSend: { self.sendFailure() })
+        engine.roundDidEnd()
+        store.record(seat: 0, operations: [LiqiOperation(type: .discard)],
+                     timeFixed: 300_000, contextTile: "5p", source: "test")
+
+        for second in 0..<10 {
+            clockBox.now = t0.addingTimeInterval(Double(second))
+            _ = await engine.runConfirmCycle()
+        }
+        XCTAssertTrue(reported.compactMap { $0 }.isEmpty, "推薦模式不送 confirm，不該報 confirmStalled")
+    }
+
+    /// BT-07：confirm 被受理（ack）不算進展，停滯仍從進入 pending 起算。
+    func testConfirmAckDoesNotResetStallClock() async {
+        let t0 = Date(timeIntervalSince1970: 3_500_000)
+        let clockBox = ClockBox(t0)
+        let store = LiqiOperationStore()
+        var reported: [AutoPlayStall?] = []
+        let engine = makeEngine(mode: .auto, confirmAckWatchdog: 2.0,
+                                clock: { clockBox.now }, store: store,
+                                onStall: { reported.append($0) },
+                                confirmSend: { self.confirmed() })
+        engine.roundDidEnd()
+        store.record(seat: 0, operations: [LiqiOperation(type: .discard)],
+                     timeFixed: 300_000, contextTile: "5p", source: "test")
+
+        clockBox.now = t0.addingTimeInterval(1.5)
+        _ = await engine.runConfirmCycle()
+        XCTAssertNotNil(engine.confirmAckedAt, "前置：此輪 confirm 已受理")
+        XCTAssertTrue(reported.compactMap { $0 }.isEmpty)
+
+        for tenths in stride(from: 25, through: 60, by: 10) {
+            clockBox.now = t0.addingTimeInterval(Double(tenths) / 10)
+            _ = await engine.runConfirmCycle()
+        }
+        XCTAssertEqual(reported.compactMap { $0 }.last?.reason, "confirmStalled",
+                       "從進入 pending 算起已超過上限，ack 不重置起算點")
     }
 
     /// p5 #3（Codex 復核）：watchdog 重送用完仍等不到 ActionNewRound → 放掉 pending，

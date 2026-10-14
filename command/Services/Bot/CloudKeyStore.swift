@@ -62,9 +62,12 @@ nonisolated enum CloudKeyStore {
         return key
     }
 
+    /// 貼上常帶尾端換行；換行進 Keychain 與 Authorization header 會變成 401
+    static func sanitized(_ key: String) -> String { key.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     /// 寫入 key；空字串＝刪除。
     static func save(_ key: String) {
-        let trimmed = key.trimmingCharacters(in: .whitespaces)
+        let trimmed = sanitized(key)
         guard !trimmed.isEmpty else {
             SecItemDelete(baseQuery as CFDictionary)
             return

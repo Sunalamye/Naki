@@ -444,6 +444,28 @@ final class AkagiApiClientTests: XCTestCase {
                         "頭尾空白與尾斜線要被正規化")
     }
 
+    /// BT-25：貼上帶換行的 key／URL 不可原樣存進 Keychain 與 Authorization header
+    func test_newlinesAreTrimmedFromKeyAndURL() {
+        XCTAssertEqual(AkagiApiClient.normalize(baseURL: "\nhttps://host/\r\n"), "https://host")
+        XCTAssertEqual(CloudKeyStore.sanitized("  abc12345\n"), "abc12345")
+        XCTAssertEqual(CloudKeyStore.sanitized("\n"), "")
+
+        let config = CloudInferenceConfig(enabled: true, baseURL: "https://host\n",
+                                          apiKey: "abc12345\n", model4P: "\n", model3P: "")
+        XCTAssertEqual(config.keyLast4, "2345")
+        XCTAssertEqual(config.model(is3P: false), "")
+        XCTAssertTrue(config.isActive)
+
+        let models = CloudInferenceConfig(enabled: true, baseURL: "https://host", apiKey: "k",
+                                          model4P: " m4\n", model3P: "m3\r\n")
+        XCTAssertEqual(models.model(is3P: false), "m4")
+        XCTAssertEqual(models.model(is3P: true), "m3")
+
+        let blank = CloudInferenceConfig(enabled: true, baseURL: "\n", apiKey: "\n", model4P: "", model3P: "")
+        XCTAssertFalse(blank.isActive, "只有換行等於空")
+        XCTAssertEqual(blank.missingRequirements, ["伺服器 URL", "API Key"])
+    }
+
     func test_react_sendsBearerHeader_andKeyNeverAppearsInURL() async throws {
         CloudMockURLProtocol.reset(script: [
             (200, #"{"reaction":{"type":"none"},"candidates":[{"action":"none","prob":1.0}],"model":"4p-x"}"#, [:]),

@@ -69,7 +69,7 @@ final class AutoPassDispatcherTests: XCTestCase {
             sequence: sequence, store: store, policy: noDelay,
             send: {
                 sendCount += 1
-                return self.result(success: sendCount >= 2, detail: "no_open_majsoul_connection")
+                return self.result(success: sendCount >= 2, detail: "no_gateway")
             })
 
         XCTAssertEqual(outcome, .handled(attempts: 2))
@@ -89,13 +89,31 @@ final class AutoPassDispatcherTests: XCTestCase {
             sequence: sequence, store: store, policy: noDelay,
             send: {
                 sendCount += 1
-                return self.result(success: false, detail: "no_open_majsoul_connection")
+                return self.result(success: false, detail: "no_gateway")
             })
 
         XCTAssertEqual(outcome, .failed(attempts: 3))
         XCTAssertEqual(sendCount, 3, "重試次數要用滿")
         XCTAssertEqual(store.pending?.sequence, sequence,
                        "一個 request 都沒送出去，不可以把這批機會當成處理完")
+    }
+
+    /// BT-02：斷線時立刻停手，不把重試次數用滿（斷線重送無望，交給引擎跨輪退避）
+    @MainActor
+    func testOfflineStopsRetryingImmediately() async {
+        let (store, sequence) = storeWithCallOpportunity()
+        var sendCount = 0
+
+        let outcome = await AutoPassDispatcher.send(
+            sequence: sequence, store: store, policy: noDelay,
+            send: {
+                sendCount += 1
+                return self.result(success: false, detail: "no_open_majsoul_connection")
+            })
+
+        XCTAssertEqual(outcome, .failed(attempts: 1))
+        XCTAssertEqual(sendCount, 1, "斷線只送一次")
+        XCTAssertEqual(store.pending?.sequence, sequence, "oplist 仍保留")
     }
 
     /// 用完次數放棄之後，下一輪（1 秒輪詢）還能對同一批 oplist 再送一次並成功

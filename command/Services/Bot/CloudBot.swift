@@ -108,7 +108,7 @@ final class CloudBot: MahjongBot {
             name: local == nil ? "cloud-only" : "cloud+\(base.name)",
             displayName: local == nil ? "雲端推論" : "\(base.displayName) ＋ 雲端",
             // 雲端只有在「啟用＋選了 3p 模型」時才如實支援三麻
-            supports3P: base.supports3P || !cfg.model3P.trimmingCharacters(in: .whitespaces).isEmpty,
+            supports3P: base.supports3P || !cfg.model3P.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
             isLocal: false)
     }
 

@@ -29,8 +29,8 @@ struct CloudInferenceConfig: Equatable {
     /// 開關開著、URL 與 key 都非空才算「已設定完成」。
     var isActive: Bool {
         enabled
-            && !baseURL.trimmingCharacters(in: .whitespaces).isEmpty
-            && !apiKey.trimmingCharacters(in: .whitespaces).isEmpty
+            && !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !CloudKeyStore.sanitized(apiKey).isEmpty
             && !AkagiApiClient.isForbiddenHost(baseURL)
     }
 
@@ -47,19 +47,19 @@ struct CloudInferenceConfig: Equatable {
     private var missingItems: [(text: String, key: LocalizedStringKey)] {
         var missing: [(text: String, key: LocalizedStringKey)] = []
         if !enabled { missing.append(("「啟用雲端推論」開關", "「啟用雲端推論」開關")) }
-        if baseURL.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(("伺服器 URL", "伺服器 URL")) }
+        if baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { missing.append(("伺服器 URL", "伺服器 URL")) }
         else if AkagiApiClient.isForbiddenHost(baseURL) { missing.append(("伺服器 URL 不可為雀魂網域", "伺服器 URL 不可為雀魂網域")) }
-        if apiKey.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(("API Key", "API Key")) }
+        if CloudKeyStore.sanitized(apiKey).isEmpty { missing.append(("API Key", "API Key")) }
         return missing
     }
 
     /// 依對局人數選模型 id（空字串 ⇒ 呼叫端不送 `model` 欄位）。
     func model(is3P: Bool) -> String {
-        (is3P ? model3P : model4P).trimmingCharacters(in: .whitespaces)
+        (is3P ? model3P : model4P).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// key 的後四碼（log 與 UI 顯示用；完整 key 不得出現在任何 log）。
     var keyLast4: String {
-        String(apiKey.trimmingCharacters(in: .whitespaces).suffix(4))
+        String(CloudKeyStore.sanitized(apiKey).suffix(4))
     }
 }

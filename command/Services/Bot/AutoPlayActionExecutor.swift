@@ -186,7 +186,7 @@ enum AutoPlayActionExecutor {
     }
 
     /// 送出並套用三層成功判準。`awaitResponseMs == 0` 時只看第 1 層（sendRaw）。
-    private static func sendAndVerify(
+    static func sendAndVerify(
         action: Recommendation.ActionType,
         spec: LiqiRequestSpec,
         sender: LiqiActionSender,

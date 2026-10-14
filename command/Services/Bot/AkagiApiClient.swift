@@ -168,7 +168,7 @@ final class AkagiApiClient {
 
     /// 去頭尾空白與尾端斜線（`https://host/` 貼進來也能用）。
     static func normalize(baseURL: String) -> String {
-        var trimmed = baseURL.trimmingCharacters(in: .whitespaces)
+        var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while trimmed.hasSuffix("/") { trimmed = String(trimmed.dropLast()) }
         return trimmed
     }
@@ -204,7 +204,7 @@ final class AkagiApiClient {
         self.base = base
         self.host = host
         self.isDefaultServer = base.caseInsensitiveCompare(SettingsStore.defaultCloudBaseURL) == .orderedSame
-        self.key = key.trimmingCharacters(in: .whitespaces)
+        self.key = CloudKeyStore.sanitized(key)
         self.session = URLSession(configuration: configuration)
     }
 
@@ -287,7 +287,7 @@ final class AkagiApiClient {
     /// 寫過同一類防護（proxy URL 常帶 `user:pass@host`，而錯誤訊息會進 bug report），
     /// Naki 用「不做 proxy」規避了那條線，這裡是同一個原則的另一個面向。
     private func redactingKey(_ message: String) -> String {
-        let trimmed = key.trimmingCharacters(in: .whitespaces)
+        let trimmed = CloudKeyStore.sanitized(key)
         // 空 key（`/healthz` 那條路）不必遮，也不能遮——會把整串訊息切碎。
         guard trimmed.count >= 8 else { return message }
         return message.replacingOccurrences(of: trimmed, with: "***\(trimmed.suffix(4))")

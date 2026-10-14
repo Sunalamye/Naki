@@ -31,7 +31,6 @@ final class AutoPlayEngineTests: XCTestCase {
         timing.retry = 0
         timing.maxAttempts = maxAttempts
         timing.passAttempts = maxAttempts
-        timing.passPolicy = .init(maxAttempts: maxAttempts, delay: 0)
         timing.actionDelay = { _, _, _ in 0 }
         timing.actionAwaitResponseMs = 0   // 這些測試只驗第 1 層（沒注入 RESPONSE）
         return timing
@@ -818,6 +817,31 @@ final class AutoPlayEngineTests: XCTestCase {
         XCTAssertTrue(run.log.contains { $0.contains("Pass 送出失敗") })
     }
 
+    /// 主動送「過」每輪上限看 `passAttempts`，不是 `maxAttempts`（夾具刻意讓兩者不同）
+    func testPassAttemptsPerCycleUseOwnLimit() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var sends = 0
+        sender.sendHandler = { _ in sends += 1; return .failure("no channel") }
+        ponSnapshot(store)
+        let afterGrace = store.pending!.capturedAt.addingTimeInterval(timing().callPassGrace + 1)
+        var t = timing(maxAttempts: 15)
+        t.passAttempts = 3
+        t.clock = { afterGrace }
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: t,
+            context: {
+                AutoPlayEngine.Context(mode: .auto, recommendations: [], seat: 0,
+                                       isSanma: false, tsumoTile: nil,
+                                       recommendationsOplistSequence: store.pending?.sequence)
+            })
+
+        let run = await engine.runCycle()
+
+        XCTAssertEqual(run.outcome, .passed(attempts: 3, handled: false))
+        XCTAssertEqual(sends, 3, "一輪內恰送 passAttempts 次")
+    }
+
     // MARK: - K1：跨輪退避與斷線（live 房 30887：拔北 5 分鐘重送 1246 次）
 
     private func backoffEngine(store: LiqiOperationStore,
@@ -1056,8 +1080,9 @@ final class AutoPlayEngineTests: XCTestCase {
             let gateNow = base.addingTimeInterval(timing().callPassGrace + 1)
 
             let first = await engine.runCycle(now: gateNow)
-            XCTAssertEqual(first.outcome, .passed(attempts: 2, handled: false), detail)
-            XCTAssertEqual(sends, 2, detail)
+            let perCycle = offline ? 1 : 2   // BT-02：斷線只送一次
+            XCTAssertEqual(first.outcome, .passed(attempts: perCycle, handled: false), detail)
+            XCTAssertEqual(sends, perCycle, detail)
             if offline {
                 XCTAssertEqual(reported.compactMap { $0 }.last?.reason, "no_open_majsoul_connection")
                 XCTAssertEqual(reported.compactMap { $0 }.last?.consecutiveTicks, 1, "斷線不等 4 拍門檻")
@@ -1066,12 +1091,65 @@ final class AutoPlayEngineTests: XCTestCase {
             clockNow = base.addingTimeInterval(1.9)
             let blocked = await engine.runCycle(now: gateNow)
             XCTAssertEqual(blocked.outcome, .notSent(reason: "backoff"), detail)
-            XCTAssertEqual(sends, 2, "\(detail)：退避期間不再送")
+            XCTAssertEqual(sends, perCycle, "\(detail)：退避期間不再送")
 
             clockNow = base.addingTimeInterval(2.1)
             _ = await engine.runCycle(now: gateNow)
-            XCTAssertEqual(sends, 4, "\(detail)：退避到期才再試一輪")
+            XCTAssertEqual(sends, perCycle * 2, "\(detail)：退避到期才再試一輪")
         }
+    }
+
+    // MARK: - BT-06：「過」與其他動作同一個成功判準（同 msgId RESPONSE 且無 error）
+
+    private func passEngine(sender: LiqiActionSender, store: LiqiOperationStore) -> AutoPlayEngine {
+        var t = timing(maxAttempts: 2)
+        t.actionAwaitResponseMs = 300
+        return AutoPlayEngine(
+            store: store, sender: sender, timing: t,
+            context: {
+                AutoPlayEngine.Context(mode: .auto, recommendations: [], seat: 0, isSanma: false,
+                                       tsumoTile: nil, recommendationsOplistSequence: store.pending?.sequence)
+            })
+    }
+
+    private func responding(hasError: Bool) -> LiqiActionSender {
+        let sender = LiqiActionSender()
+        sender.sendHandler = { base64 in
+            if let data = Data(base64Encoded: base64), data.count >= 3 {
+                let msgId = Int(data[1]) | (Int(data[2]) << 8)
+                let fields: [String: Any] = hasError ? ["field1": Data([0x08, 0xEC, 0x07])] : [:]
+                LiqiResponseStore.shared.recordResponse(
+                    msgId: msgId, method: ".lq.FastTest.inputChiPengGang", fields: fields)
+            }
+            return self.ok()
+        }
+        return sender
+    }
+
+    func testPassRejectedByServerIsNotHandled() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        ponSnapshot(store)
+        let engine = passEngine(sender: responding(hasError: true), store: store)
+
+        let cycle = await engine.runCycle(now: Date().addingTimeInterval(timing().callPassGrace + 1))
+
+        XCTAssertEqual(cycle.outcome, .passed(attempts: 2, handled: false))
+        XCTAssertNotNil(store.pending, "伺服器拒絕就保留 oplist")
+        LiqiResponseStore.shared.reset()
+    }
+
+    func testPassAcceptedByServerIsHandled() async {
+        LiqiResponseStore.shared.reset()
+        let store = LiqiOperationStore()
+        ponSnapshot(store)
+        let engine = passEngine(sender: responding(hasError: false), store: store)
+
+        let cycle = await engine.runCycle(now: Date().addingTimeInterval(timing().callPassGrace + 1))
+
+        XCTAssertEqual(cycle.outcome, .passed(attempts: 1, handled: true))
+        XCTAssertNil(store.pending)
+        LiqiResponseStore.shared.reset()
     }
 }
 

@@ -197,8 +197,6 @@ final class AutoPlayEngine {
         var callPassWindowMargin: TimeInterval = 1.0
         /// 去抖窗在擬人延遲之外多加的秒數；0.5 的理由未知。推測是跨輪退避之前的遺留（依 23d9eb4 commit 推得，未驗證）
         var debounceSlack: TimeInterval = 0.5
-        /// 閘門判定「模型判斷不做副露」時的送出策略
-        var passPolicy: AutoPassDispatcher.RetryPolicy = .default
         /// 送出前的模擬人類延遲；nil＝用 `ActionDelayModel`（正式路徑）。
         ///
         /// 第二個參數是使用者的延遲係數（`Context.actionDelayScale`），第三個是該批
@@ -293,6 +291,9 @@ final class AutoPlayEngine {
     /// 逾時前一直保留。nil＝尚未送出成功或已進下一局。`confirmPending && confirmAckedAt != nil`
     /// 代表「已確認、等下一局」；confirmed 不可以直接清 pending，否則 watchdog 沒有起算點。
     private(set) var confirmAckedAt: Date?
+
+    /// 進入 `confirmPending` 的時間；等不到 `ActionNewRound` 的停滯從這裡起算（ack 不重置）
+    private var confirmPendingSince: Date?
 
     /// 已 watchdog 重送幾次。到上限就放掉 pending，避免自動打牌餓死。
     private var confirmWatchdogResends = 0
@@ -410,6 +411,7 @@ final class AutoPlayEngine {
 
     private func resetConfirm(pending: Bool = false) {
         confirmPending = pending
+        confirmPendingSince = pending ? timing.clock() : nil
         confirmAckedAt = nil
         confirmWatchdogResends = 0
         confirmInRecovery = false
@@ -618,6 +620,13 @@ final class AutoPlayEngine {
         guard confirmPending else { return .noPending }
 
         beginCycle()
+
+        // 伺服器已發新 oplist（updateStall 以 pending 為前提）卻仍卡在等確認：
+        // confirm 期間 tick 不跑 runCycle，不在這裡報就上不了畫面
+        if let since = confirmPendingSince,
+           timing.clock().timeIntervalSince(since) >= timing.confirmAckWatchdog {
+            updateStall(reason: context().mode.sendsActions ? "confirmStalled" : nil)
+        }
 
         // 已受理、正在等 ActionNewRound：watchdog 內就安靜等，逾時才進入 recovery。
         if let ackedAt = confirmAckedAt {
@@ -861,12 +870,15 @@ final class AutoPlayEngine {
             let outcome = await AutoPassDispatcher.send(
                 sequence: snapshot.sequence,
                 store: self.store,
-                policy: self.timing.passPolicy,
+                policy: .init(maxAttempts: self.retryLimit(for: .none), delay: self.timing.passRetry),
                 // 迴圈被停掉（App 收掉）就別再送
                 isCurrent: { !Task.isCancelled },
                 log: { self.note($0, to: .event) },
                 send: {
-                    let result = await self.sender.pass(channel: channel)
+                    let result = await AutoPlayActionExecutor.sendAndVerify(
+                        action: .none, spec: LiqiRequestBuilder.cancel(channel: channel),
+                        sender: self.sender, awaitResponseMs: self.timing.actionAwaitResponseMs,
+                        echoTimeoutMs: 0, event: { self.note($0, to: .event) })
                     lastSendOffline = result.isOffline
                     return result
                 })

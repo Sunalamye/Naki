@@ -84,7 +84,7 @@ final class CloudBotTests: XCTestCase {
     /// 設定生效後：本地引擎支援三麻就維持 true；否則只看雲端是否選了 3p 模型
     func test_identity_supports3P_followsLocalOrCloud3pModel() async throws {
         for (localSupports, model3P, expected) in [(true, "", true), (false, "", false),
-                                                    (false, "3p-x", true)] {
+                                                    (false, "3p-x", true), (false, "\n", false)] {
             CloudMockURLProtocol.reset(script: [(500, "", [:])])
             let local = StubEngine()
             local.identity = BotIdentity(name: "stub", displayName: "Stub",

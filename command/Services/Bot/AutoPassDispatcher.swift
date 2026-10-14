@@ -29,13 +29,13 @@ enum AutoPassOutcome: Equatable {
 /// 「失敗保留 pending、成功才 handled」就有機械驗收依據。
 enum AutoPassDispatcher {
 
-    /// 重試參數
+    /// 重試參數（正式路徑與 executor 的「過」同一組：`Timing.passAttempts`／`passRetry`）
     ///
     /// 與和牌路徑同型：短間隔、次數有限。用完次數**不** markHandled——
     /// 保留 pending 才能讓 1 秒輪詢在下一輪重新嘗試（還在伺服器的操作時限內，
     /// 多等幾輪沒有代價，靜默放棄機會才有）。
     nonisolated struct RetryPolicy {
-        /// 5 次與 0.2 秒的數值理由未知
+        /// 5 次與 0.2 秒的數值理由未知；只有單測直接用預設值
         var maxAttempts: Int = 5
         var delay: TimeInterval = 0.2
 
@@ -48,7 +48,7 @@ enum AutoPassDispatcher {
     ///   - policy: 重試次數與間隔
     ///   - isCurrent: 這次執行是否仍有效；引擎傳 `!Task.isCancelled`
     ///   - log: 診斷輸出
-    ///   - send: 實際送出（`LiqiActionSender.pass(channel:)`）
+    ///   - send: 實際送出；`success` 的判準由呼叫端決定（引擎傳入「同 msgId RESPONSE 且無 error」）
     @discardableResult
     static func send(
         sequence: UInt64,
@@ -81,6 +81,8 @@ enum AutoPassDispatcher {
                 return .handled(attempts: attempts)
             }
 
+            // 斷線重送無望；停手讓引擎走跨輪退避並立即報停滯
+            guard !result.isOffline else { break }
             guard attempts < policy.maxAttempts else { break }
             log("⚠️ 過送出失敗, 重試 \(attempts + 1)/\(policy.maxAttempts)")
             if policy.delay > 0 {
