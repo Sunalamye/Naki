@@ -36,9 +36,8 @@ struct CloudInferenceConfig: Equatable {
 
     /// 還缺哪些條件才會生效；空陣列代表 `isActive == true`。
     ///
-    /// 生效條件是三個分開的控制（開關、URL、key），而開關在設定畫面上排在 key 欄位
-    /// **上方**——「貼完 key 就走」是最常見的狀態，結果是一份看起來已配置、行為卻
-    /// 完全是本地模型的設定。設定畫面拿這個陣列直接把缺口寫出來，
+    /// 生效條件是三個分開的控制（開關、URL、key），而「貼完 key 就走」是最常見的
+    /// 狀態，結果是一份看起來已配置、行為卻完全是本地模型的設定。設定畫面拿這個陣列直接把缺口寫出來，
     /// 判定與 `isActive` 共用同一份定義，不會漂。
     var missingRequirements: [String] { missingItems.map(\.text) }
 
@@ -47,7 +46,7 @@ struct CloudInferenceConfig: Equatable {
 
     private var missingItems: [(text: String, key: LocalizedStringKey)] {
         var missing: [(text: String, key: LocalizedStringKey)] = []
-        if !enabled { missing.append(("上方的「啟用雲端推論」開關", "上方的「啟用雲端推論」開關")) }
+        if !enabled { missing.append(("「啟用雲端推論」開關", "「啟用雲端推論」開關")) }
         if baseURL.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(("伺服器 URL", "伺服器 URL")) }
         else if AkagiApiClient.isForbiddenHost(baseURL) { missing.append(("伺服器 URL 不可為雀魂網域", "伺服器 URL 不可為雀魂網域")) }
         if apiKey.trimmingCharacters(in: .whitespaces).isEmpty { missing.append(("API Key", "API Key")) }

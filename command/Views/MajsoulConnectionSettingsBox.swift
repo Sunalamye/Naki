@@ -40,6 +40,7 @@ struct MajsoulConnectionSettingsBox: View {
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         #endif
+                        .help(settings.majsoulUserAgent.isEmpty ? (defaultUserAgent ?? "") : settings.majsoulUserAgent)
                         .accessibilityIdentifier("majsoul-user-agent-field")
                     Button("還原預設") { settings.majsoulUserAgent = "" }
                         .disabled(settings.majsoulUserAgent.isEmpty)

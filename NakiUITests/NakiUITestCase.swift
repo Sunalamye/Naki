@@ -28,7 +28,25 @@ class NakiUITestCase: XCTestCase {
         super.tearDown()
     }
 
+    /// 8765 已有回應＝使用者的 Naki 正在跑；測試的 `/debug/ui` 等請求會打到它並改掉真實設定。
+    static func realAppIsRunning() -> Bool {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:8765/status")!)
+        request.timeoutInterval = 2
+        let done = DispatchSemaphore(value: 0)
+        var responded = false
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            responded = response != nil
+            done.signal()
+        }.resume()
+        done.wait()
+        return responded
+    }
+
     func launch() throws {
+        guard !Self.realAppIsRunning() else {
+            XCTFail("偵測到執行中的 Naki，UI 測試會打到真實 App，先關閉它")
+            return
+        }
         app.launch()
         var mode: String?
         _ = eventually(20) {

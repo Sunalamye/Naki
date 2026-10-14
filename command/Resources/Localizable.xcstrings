@@ -2523,31 +2523,31 @@
         }
       }
     },
-    "上方的「啟用雲端推論」開關": {
+    "「啟用雲端推論」開關": {
       "comment": "雲端缺項（CloudInferenceConfig.missingRequirementKeys）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "the \"Enable cloud inference\" switch above"
+            "value": "the \"Enable cloud inference\" switch"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "上の「クラウド推論を有効にする」スイッチ"
+            "value": "「クラウド推論を有効にする」スイッチ"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "위의 \"클라우드 추론 사용\" 스위치"
+            "value": "\"클라우드 추론 사용\" 스위치"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上方的“启用云端推理”开关"
+            "value": "“启用云端推理”开关"
           }
         }
       }

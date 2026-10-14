@@ -253,8 +253,8 @@ struct AdvancedSettingsSheet: View {
     /// 「現在到底有沒有在用雲端」——把 `enabled && url && key` 這個三段條件
     /// 直接寫成一句話。
     ///
-    /// 缺哪一項就講哪一項：使用者最常見的狀態是「key 貼了、開關沒開」，而那個開關
-    /// 排在 key 欄位上方，捲下來填完就不會再往上看。
+    /// 缺哪一項就講哪一項：使用者最常見的狀態是「key 貼了、開關沒開」，而開關不在
+    /// key 欄位旁，填完 key 就不會再去找它。
     @ViewBuilder
     private var cloudEffectiveStateRow: some View {
         let missing = naki.settings.cloudConfig.missingRequirementKeys
