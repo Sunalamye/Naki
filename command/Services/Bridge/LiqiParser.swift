@@ -78,7 +78,7 @@ class LiqiParser {
     ///
     /// RESPONSE 的 envelope 不帶方法名，只能靠 msgId 對回當初的 REQUEST。
     /// 送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.observeOutgoing`，
-    /// 所以遊戲自己送的與 Naki 自己送的（msgId 60000+）都會登記在這裡；
+    /// 所以遊戲自己送的與 Naki 自己送的（`LiqiMsgIdAllocator` 配發、含插件）都會登記在這裡；
     /// `LiqiResponseStore` 拿得到方法名正是因為如此。
     private var pendingRequests: [Int: String] = [:]
 
@@ -183,6 +183,9 @@ class LiqiParser {
 
         return result
     }
+
+    /// RESPONSE 帶 `account_id` 的登入方法（`ResLogin` 形狀）。bridge 以此判斷「這則回應該不該交給 parser 取 accountId」。
+    static let loginResponseMethods: Set<String> = [".lq.Lobby.login", ".lq.Lobby.oauth2Login", ".lq.Lobby.emailLogin"]
 
     /// 這筆請求是不是 Naki（自送或插件注入）發的，而非遊戲自己。
     nonisolated static func isNakiSent(msgId: Int) -> Bool {
@@ -337,8 +340,7 @@ class LiqiParser {
         }
 
         // 只有 ResLogin 形狀（liqi.json responseType == ResLogin）才有 account_id
-        if (methodName == ".lq.Lobby.login" || methodName == ".lq.Lobby.oauth2Login" ||
-            methodName == ".lq.Lobby.emailLogin") && isResponse {
+        if Self.loginResponseMethods.contains(methodName) && isResponse {
             return parseLoginResponse(innerBlocks)
         }
 

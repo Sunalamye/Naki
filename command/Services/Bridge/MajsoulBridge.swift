@@ -71,10 +71,12 @@ class MajsoulBridge {
     /// 是否為三麻
     private var is3P: Bool = false
 
+    private var playerCount: Int { is3P ? 3 : 4 }
+
     /// 待處理的立直接受消息
     private var pendingReachAccepted: [String: Any]? = nil
 
-    /// 是否正在同步（斷線重連時使用）
+    /// syncGame／enterGame 重放期間；只供 log 標示回音是歷史事件造成的，沒有任何決策讀它
     private var syncing: Bool = false
 
     /// 是否已收到過 authGame（用於判斷是否需要發送 start_game）
@@ -175,7 +177,6 @@ class MajsoulBridge {
             return 0
         }
 
-        let playerCount = is3P ? 3 : 4
         guard let actor = value as? Int, (0..<playerCount).contains(actor) else {
             // parser 對型別錯的 seat 給 -1（合法 varint 不會是負數），文字要分得出不是越界
             let problem = (value as? Int).map { $0 < 0 } == true
@@ -261,8 +262,7 @@ class MajsoulBridge {
         var results: [[String: Any]] = []
 
         // 處理登入響應 - 獲取帳號 ID
-        if (method == ".lq.Lobby.login" || method == ".lq.Lobby.oauth2Login" ||
-            method == ".lq.Lobby.emailLogin") && msgType == "response" {
+        if LiqiParser.loginResponseMethods.contains(method) && msgType == "response" {
             bridgeLog("[MajsoulBridge] 偵測到登入回應: \(method)")
             bridgeLog("[MajsoulBridge] 登入資料鍵: \(msgData.keys)")
 
@@ -536,149 +536,128 @@ class MajsoulBridge {
         }
 
         let contextTile = data["tile"] as? String
-        guard let snapshot = operations.record(fromParsed: operation,
-                                               contextTile: contextTile,
-                                               source: name) else {
-            // 動作**帶了** operation 卻建不出快照，代表解析結果不合預期
-            // （operationList 空、或每筆都缺 type）。這在莊家第一打時實測發生過：
-            // ActionNewRound 的 keys 有 operation，但沒有任何 oplist 更新，
-            // 於是自動打牌整巡不送，直到伺服器逾時代打。
-            //
-            // 原本這條路是靜默的 `clear()`，查不出所以然。把內容印出來，
-            // 下次發生時可以直接看到 operation 長什麼樣。
-            let list = operation["operationList"] as? [[String: Any]]
+        if let snapshot = operations.record(fromParsed: operation, contextTile: contextTile, source: name) {
+            eventLog("[MajsoulBridge] oplist 更新: \(name) seat=\(snapshot.seat) "
+                      + "types=\(snapshot.rawTypes) tile=\(contextTile ?? "-") seq=\(snapshot.sequence)")
+            return snapshot.sequence
+        }
 
-            // 空的 operationList 是**正常**的：別家摸牌時伺服器也會附一個
-            // operation，只是裡面沒有我們可做的事。實測一局出現 14 次。
-            // 只有「有內容卻建不出快照」才值得看——那才是解析出問題。
-            guard let list, !list.isEmpty else {
-                // ActionNewRound 的空 operation 不正常：莊家第一打的授權就在這裡。
-                // 別的動作（別家摸牌）帶空清單是常態，維持靜默。
-                if name == "ActionNewRound" {
-                    eventLog("[MajsoulBridge] ⚠️ ActionNewRound 的 operation 是空的"
-                             + "（莊家第一打會因此拿不到 oplist）: "
-                             + "rawBytes=\(operation["_rawBytes"] as? Int ?? -1) "
-                             + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
-                             + "keys=\(operation.keys.sorted())")
-                }
-                operations.clear()
-                return nil
-            }
+        // 沒有可做的操作：上一批機會一律作廢，不論下面是正常還是解析出問題
+        operations.clear()
 
+        // 動作**帶了** operation 卻建不出快照。空清單是正常的（別家摸牌時伺服器也會附，實測一局 14 次），
+        // 只有 ActionNewRound 例外：莊家第一打的授權就在這裡，實測發生過空的，自動打牌因此整巡不送、
+        // 直到伺服器逾時代打。有內容卻建不出快照（每筆都缺 type）則是解析出問題；兩者都把內容印出來。
+        let list = operation["operationList"] as? [[String: Any]] ?? []
+        if list.isEmpty {
+            guard name == "ActionNewRound" else { return nil }
+            eventLog("[MajsoulBridge] ⚠️ ActionNewRound 的 operation 是空的"
+                     + "（莊家第一打會因此拿不到 oplist）: "
+                     + "rawBytes=\(operation["_rawBytes"] as? Int ?? -1) "
+                     + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
+                     + "keys=\(operation.keys.sorted())")
+        } else {
             eventLog("[MajsoulBridge] ⚠️ \(name) 帶了 operation 但無法建立快照: "
                      + "seat=\(operation["seat"] as? Int ?? -1) "
                      + "list=\(list.count) keys=\(operation.keys.sorted()) "
                      + "rawBytes=\(operation["_rawBytes"] as? Int ?? -1) "
                      + "rawHex=\(operation["_rawHex"] as? String ?? "-") "
                      + "list3=\(String(describing: list.prefix(3)))")
-            operations.clear()
+        }
+        return nil
+    }
+
+    /// 兩條開局路徑（`ActionNewRound`、重連快照）共用的場風／莊家守衛；不過就記 blocking、讓本局不餵 bot。
+    ///
+    /// `chang` 直接拿去索引 `BAKAZE_NAMES`（4 個元素），`ju` 會變成 `oya` 與 `kyoku` 進 MJAI 事件流。
+    /// 兩者都是沒有上界的 parsed varint——畸形封包、或 XOR 規則變了導致解出近似隨機 bytes 時可以是任意數；
+    /// Swift 陣列越界是 trap，整個 App 當場結束連 log 都留不下。開不出這一局遠比崩掉好。
+    private func acceptKyokuRange(chang: Int, ju: Int, fromSnapshot: Bool) -> Bool {
+        if (0..<4).contains(chang), (0..<4).contains(ju) { return true }
+        recordBlockingFault(site: fromSnapshot ? "GameSnapshot.chang/ju" : "ActionNewRound.chang/ju", fieldId: 1,
+                            reason: fromSnapshot
+                                ? "重連快照的場風或莊家座位超出範圍（chang=\(chang), ju=\(ju)）→ 不發 start_kyoku"
+                                : "場風或莊家座位超出範圍（chang=\(chang), ju=\(ju)） → 不發 start_kyoku，這一局不做推薦")
+        roundBlocked = true
+        return false
+    }
+
+    /// 兩條開局路徑共用的點數／手牌守衛與組裝；呼叫前須先過 `acceptKyokuRange`。
+    ///
+    /// 守衛不過就記 blocking、讓本局不餵 bot、回 nil；通過則收掉 start_kyoku 系列的常駐錯誤並回事件
+    /// （authGame／座位若仍未解決，那個 blocking 要留著——Bot 根本沒建，橫幅不能消失）。
+    private func makeStartKyoku(fromSnapshot: Bool, chang: Int, ju: Int, honba: Int, kyotaku: Int,
+                                rawScores: Any?, hand: [String], validHandSize: (Int) -> Bool,
+                                doraMarker: String) -> [String: Any]? {
+        let prefix = fromSnapshot ? "GameSnapshot" : "ActionNewRound"
+        let tail = fromSnapshot ? " → 不發 start_kyoku" : " → 不發 start_kyoku，這一局不做推薦"
+
+        // 分數解不出來就**不開這一局**：補假分數的話，「解析失敗」與「大家都還是起始分」在 Bot 眼裡一樣，
+        // 而 Mortal 的決策吃順位與點差——推薦看起來正常，只是錯的，且不留任何痕跡。
+        // 個數要與人數一致：四麻 4 個、三麻 3 個（或已含補位的 4 個）。
+        guard var scores = rawScores as? [Int], scores.count == 4 || (is3P && scores.count == 3) else {
+            recordBlockingFault(site: fromSnapshot ? "GameSnapshot.players.score" : "ActionNewRound.scores",
+                                fieldId: fromSnapshot ? 9 : 6,
+                                reason: (fromSnapshot ? "重連快照拿不到點數" : "拿不到本局起始點數")
+                                    + "（scores=\(rawScores ?? "nil")，is3P=\(is3P)）" + tail)
+            roundBlocked = true
+            return nil
+        }
+        if is3P && scores.count == 3 {
+            scores.append(0)
+        }
+
+        // 手牌張數不對就不開局：自家手牌留空，Bot 會拿殘缺手牌照常推薦。
+        guard validHandSize(hand.count) else {
+            recordBlockingFault(site: "\(prefix).tiles", fieldId: fromSnapshot ? 6 : 4,
+                                reason: (fromSnapshot ? "重連快照沒有手牌" : "起手牌張數不對（tiles.count=\(hand.count)）") + tail)
+            roundBlocked = true
             return nil
         }
 
-        eventLog("[MajsoulBridge] oplist 更新: \(name) seat=\(snapshot.seat) "
-                  + "types=\(snapshot.rawTypes) tile=\(contextTile ?? "-") seq=\(snapshot.sequence)")
-        return snapshot.sequence
+        var tehais = [[String]](repeating: [String](repeating: "?", count: 13), count: playerCount)
+        if seat >= 0 && seat < playerCount {
+            tehais[seat] = hand.prefix(13).compactMap { LiqiTile.mjai(fromMajsoul: $0) }.sorted(by: LiqiTile.compare)
+        }
+
+        roundBlocked = false
+        faultState.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
+        return [
+            "type": "start_kyoku",
+            "bakaze": BAKAZE_NAMES[chang % 4],
+            "dora_marker": doraMarker,
+            "honba": honba,
+            "kyoku": ju + 1,
+            "kyotaku": kyotaku,
+            "oya": ju,
+            "scores": scores,
+            "tehais": tehais
+        ]
     }
 
     /// 解析新一局開始
     private func parseNewRound(_ data: [String: Any]) -> [[String: Any]]? {
-        var results: [[String: Any]] = []
-
         bridgeLog("[MajsoulBridge] parseNewRound 調用, 資料鍵: \(data.keys)")
 
         // proto3 預設值不上線（代理重新序列化也會省略 0）：缺席 = 東場／東一局
         let chang = data["chang"] as? Int ?? 0
         let ju = data["ju"] as? Int ?? 0
-
-        // `chang` 直接拿去索引 `BAKAZE_NAMES`（4 個元素），`ju` 會變成 `oya` 與
-        // `kyoku` 進 MJAI 事件流。兩者都是沒有上界的 parsed varint——畸形封包、
-        // 或 XOR 規則變了導致解出近似隨機 bytes 時，值可以是任意數。
-        // `BAKAZE_NAMES[chang % 4]` 對負 `chang` 會取到負索引，而 Swift 的陣列越界
-        // 是 trap 不是可捕捉的錯誤：整個 App 當場結束，連 log 都留不下。
-        //
-        // 開不出這一局遠比崩掉好——後續事件會在 log 裡大聲報錯，那是可以查的。
-        guard (0..<4).contains(chang), (0..<4).contains(ju) else {
-            recordBlockingFault(site: "ActionNewRound.chang/ju",
-                                fieldId: 1,
-                                reason: "場風或莊家座位超出範圍（chang=\(chang), ju=\(ju)）"
-                                    + " → 不發 start_kyoku，這一局不做推薦")
-            roundBlocked = true
-            return nil
-        }
-
+        guard acceptKyokuRange(chang: chang, ju: ju, fromSnapshot: false) else { return nil }
         let tiles = data["tiles"] as? [String] ?? []
         bridgeLog("[MajsoulBridge] parseNewRound: 場=\(chang), ju=\(ju), tiles.count=\(tiles.count)")
 
-        let bakaze = BAKAZE_NAMES[chang % 4]
-        let kyoku = ju + 1
-        let honba = data["ben"] as? Int ?? 0
-        let kyotaku = data["liqibang"] as? Int ?? 0
-
-        // 分數解不出來就**不開這一局**。
-        //
-        // 若在 parser 端補 [25000, 25000, 25000, 25000]、這裡再 `?? ` 一次同樣的預設值，
-        // 「解析失敗」與「大家都還是起始分」在 Bot 眼裡就完全一樣，而 Mortal 的
-        // 決策吃順位與點差——拿假點數推出來的推薦看起來一樣正常，只是錯的。
-        // 少一個 start_kyoku 會讓後續事件在 log 裡大聲報錯，那是可以查的；
-        // 用假分數打完一整局不會留下任何痕跡。
-        // 個數要與人數一致：四麻 4 個、三麻 3 個（或已含補位的 4 個）
-        guard var scores = data["scores"] as? [Int], scores.count == 4 || (is3P && scores.count == 3) else {
-            recordBlockingFault(site: "ActionNewRound.scores",
-                                fieldId: 6,
-                                reason: "拿不到本局起始點數（scores=\(data["scores"] ?? "nil")，is3P=\(is3P)）"
-                                    + " → 不發 start_kyoku，這一局不做推薦")
-            roundBlocked = true
-            return nil
-        }
-
-        if is3P && scores.count == 3 {
-            scores.append(0)
-        }
-
-        // 手牌不是 13／14 張（親家多一張）就不開局：自家手牌留空，Bot 會拿殘缺手牌照常推薦。
-        guard [13, 14].contains(tiles.count) else {
-            recordBlockingFault(site: "ActionNewRound.tiles",
-                                fieldId: 4,
-                                reason: "起手牌張數不對（tiles.count=\(tiles.count)）"
-                                    + " → 不發 start_kyoku，這一局不做推薦")
-            roundBlocked = true
-            return nil
-        }
-
-        // 處理寶牌
-        var doraMarker = "?"
-        if let doraList = data["doras"] as? [String],
-           let firstDora = doraList.first,
-           let mjaiDora = LiqiTile.mjai(fromMajsoul: firstDora) {
+        let doraList = data["doras"] as? [String]
+        let doraMarker = doraList?.first.flatMap { LiqiTile.mjai(fromMajsoul: $0) }
+        guard let startKyoku = makeStartKyoku(fromSnapshot: false, chang: chang, ju: ju,
+                                              honba: data["ben"] as? Int ?? 0,
+                                              kyotaku: data["liqibang"] as? Int ?? 0,
+                                              rawScores: data["scores"], hand: tiles,
+                                              validHandSize: { [13, 14].contains($0) },
+                                              doraMarker: doraMarker ?? "?") else { return nil }
+        if doraMarker != nil, let doraList {
             doras = doraList
-            doraMarker = mjaiDora
         }
-
-        // 轉換手牌
-        let playerCount = is3P ? 3 : 4
-        var tehais = [[String]](repeating: [String](repeating: "?", count: 13), count: playerCount)
-
-        let myTehais = tiles.prefix(13).compactMap { LiqiTile.mjai(fromMajsoul: $0) }
-        if seat >= 0 && seat < playerCount {
-            tehais[seat] = myTehais.sorted(by: LiqiTile.compare)
-        }
-
-        roundBlocked = false
-        results.append([
-            "type": "start_kyoku",
-            "bakaze": bakaze,
-            "dora_marker": doraMarker,
-            "honba": honba,
-            "kyoku": kyoku,
-            "kyotaku": kyotaku,
-            "oya": ju,
-            "scores": scores,
-            "tehais": tehais
-        ])
-
-        // 這一局開起來了 → 只收掉 start_kyoku 系列的常駐錯誤（authGame／座位
-        // 若仍未解決，那個 blocking 要留著——Bot 根本沒建，橫幅不能消失）
-        faultState.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
+        var results = [startKyoku]
 
         // 如果配牌有 14 張（親家），添加自摸事件
         let isOya = (seat == ju)
@@ -797,7 +776,6 @@ class MajsoulBridge {
         // fallback 的「上家」必須用本局人數算：寫死 `% 4` 在三麻會算出座位 3
         // ——那個座位不存在，而這個 target 會原樣進 MJAI 的 pon/daiminkan 事件，
         // 三麻送雲端時還會照原樣上傳給伺服器。
-        let playerCount = is3P ? 3 : 4
         var target = lastDiscard ?? ((actor + playerCount - 1) % playerCount)
         var pai = ""
         var consumed: [String] = []
@@ -838,10 +816,8 @@ class MajsoulBridge {
             if opType == 0 { // Chi - 排除 pai，其餘 2 張是 consumed
                 for tile in tiles {
                     let mjaiTile = LiqiTile.mjai(fromMajsoul: tile) ?? tile
-                    if mjaiTile != pai || consumed.count >= 2 {
-                        if consumed.count < 2 {
-                            consumed.append(mjaiTile)
-                        }
+                    if mjaiTile != pai && consumed.count < 2 {
+                        consumed.append(mjaiTile)
                     }
                 }
                 // 如果還是不夠，添加所有非 pai 的牌
@@ -1000,108 +976,41 @@ class MajsoulBridge {
 
     /// 解析遊戲狀態
     private func parseGameState(_ gameState: [String: Any]) -> [[String: Any]]? {
-        var results: [[String: Any]] = []
-
-        // 從 gameState 中提取信息構建 start_kyoku 事件
-        let chang = gameState["chang"] as? Int ?? 0
-        let ju = gameState["ju"] as? Int ?? 0
-        let ben = gameState["ben"] as? Int ?? 0
-        let kyotaku = gameState["liqibang"] as? Int ?? 0
-
-        // 與 `parseNewRound` 同一條範圍檢查：`chang` 是要拿去索引 `BAKAZE_NAMES`
-        // 的 parsed varint，負值會變成負索引而 trap 掉整個 App。
-        guard (0..<4).contains(chang), (0..<4).contains(ju) else {
-            recordBlockingFault(site: "GameSnapshot.chang/ju",
-                                fieldId: 1,
-                                reason: "重連快照的場風或莊家座位超出範圍"
-                                    + "（chang=\(chang), ju=\(ju)）→ 不發 start_kyoku")
-            roundBlocked = true
-            return nil
-        }
-
-        let bakaze = BAKAZE_NAMES[chang % 4]
-        let kyoku = ju + 1
-
-        // 與 `parseNewRound` 同一條規則：解不出點數就不發 start_kyoku。
         // 重連時 actions 不含 ActionNewRound 就走這條；`GameSnapshot` 的點數在
         // `players[].score`（liqi.json field 9 → PlayerSnapshot field 1）。
-        guard var scores = gameState["scores"] as? [Int], scores.count == 4 || (is3P && scores.count == 3) else {
-            recordBlockingFault(site: "GameSnapshot.players.score",
-                                fieldId: 9,
-                                reason: "重連快照拿不到點數（scores=\(gameState["scores"] ?? "nil")，is3P=\(is3P)）"
-                                    + " → 不發 start_kyoku")
-            roundBlocked = true
-            return nil
-        }
-
-        if is3P && scores.count == 3 {
-            scores.append(0)
-        }
-
-        // 重連時手牌張數會隨副露變少，只擋「完全沒有手牌」
-        guard let myTiles = gameState["tiles"] as? [String], !myTiles.isEmpty else {
-            recordBlockingFault(site: "GameSnapshot.tiles",
-                                fieldId: 6,
-                                reason: "重連快照沒有手牌 → 不發 start_kyoku")
-            roundBlocked = true
-            return nil
-        }
-
-        let playerCount = is3P ? 3 : 4
-        var tehais = [[String]](repeating: [String](repeating: "?", count: 13), count: playerCount)
-        var tsumoTile: String?
-        if seat >= 0 && seat < playerCount {
-            tehais[seat] = myTiles.prefix(13).compactMap { LiqiTile.mjai(fromMajsoul: $0) }
-                .sorted(by: LiqiTile.compare)
-            // 14 張 = 本家剛摸牌：末張以 tsumo 補回，與 parseNewRound 的親家配牌同一做法
-            if myTiles.count == 14 {
-                tsumoTile = LiqiTile.mjai(fromMajsoul: myTiles[13])
-            }
-        }
-
-        // 處理寶牌：start_kyoku 只帶第一個 dora_marker
-        var doraMarker = "?"
-        if let doraList = gameState["doras"] as? [String] {
-            if let firstDora = doraList.first,
-               let mjaiDora = LiqiTile.mjai(fromMajsoul: firstDora) {
-                doraMarker = mjaiDora
-            }
+        // 手牌張數會隨副露變少，只擋「完全沒有手牌」。
+        let chang = gameState["chang"] as? Int ?? 0
+        let ju = gameState["ju"] as? Int ?? 0
+        guard acceptKyokuRange(chang: chang, ju: ju, fromSnapshot: true) else { return nil }
+        let myTiles = gameState["tiles"] as? [String] ?? []
+        let doraList = gameState["doras"] as? [String]
+        guard let startKyoku = makeStartKyoku(fromSnapshot: true, chang: chang, ju: ju,
+                                              honba: gameState["ben"] as? Int ?? 0,
+                                              kyotaku: gameState["liqibang"] as? Int ?? 0,
+                                              rawScores: gameState["scores"], hand: myTiles,
+                                              validHandSize: { $0 > 0 },
+                                              // start_kyoku 只帶第一個 dora_marker
+                                              doraMarker: doraList?.first.flatMap { LiqiTile.mjai(fromMajsoul: $0) } ?? "?")
+        else { return nil }
+        if let doraList {
             doras = doraList
         }
-
-        roundBlocked = false
-        results.append([
-            "type": "start_kyoku",
-            "bakaze": bakaze,
-            "dora_marker": doraMarker,
-            "honba": ben,
-            "kyoku": kyoku,
-            "kyotaku": kyotaku,
-            "oya": ju,
-            "scores": scores,
-            "tehais": tehais
-        ])
-
-        // 重連的局面接起來了 → 只收掉 start_kyoku 系列的常駐錯誤
-        faultState.clearBlocking(matchingSitePrefixes: ["ActionNewRound", "GameSnapshot"])
+        var results = [startKyoku]
 
         // start_kyoku 只帶第一個 dora_marker，其餘已翻的 kan-dora 逐一補發。
         // 不會與重放重複：上面已把 doras 設成完整清單，重放 action 的 doras 不會更多。
-        if let doraList = gameState["doras"] as? [String], doraList.count > 1 {
-            for extraDora in doraList.dropFirst() {
-                if let mjaiExtra = LiqiTile.mjai(fromMajsoul: extraDora) {
-                    results.append([
-                        "type": "dora",
-                        "dora_marker": mjaiExtra
-                    ])
-                }
+        for extraDora in doraList?.dropFirst() ?? [] {
+            if let mjaiExtra = LiqiTile.mjai(fromMajsoul: extraDora) {
+                results.append(["type": "dora", "dora_marker": mjaiExtra])
             }
         }
 
-        if let tsumoTile {
+        // 14 張 = 本家剛摸牌：末張以 tsumo 補回，與 parseNewRound 的親家配牌同一做法
+        if myTiles.count == 14, (0..<playerCount).contains(seat),
+           let tsumoTile = LiqiTile.mjai(fromMajsoul: myTiles[13]) {
             results.append(["type": "tsumo", "actor": seat, "pai": tsumoTile])
         }
 
-        return results.isEmpty ? nil : results
+        return results
     }
 }

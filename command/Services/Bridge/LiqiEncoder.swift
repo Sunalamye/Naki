@@ -10,8 +10,8 @@
 //  Ground truth（.lq.Route.heartbeat，msgId = 141）：
 //      028d000a132e6c712e526f7574652e686561727462656174120808001000180b200f
 //
-//  注意：request envelope **沒有** XOR。XOR 只作用在 notify 的
-//  ActionPrototype.data（見 LiqiParser.liqiDecode），不要在這裡套用。
+//  注意：request envelope **沒有** XOR。WebSocket 上的 ActionPrototype.data 才需要 XOR
+//  （見 LiqiParser.liqiDecode；`GameRestore.actions` 內的不需要），不要在這裡套用。
 //
 
 import Foundation
@@ -171,7 +171,7 @@ enum LiqiEncoder {
 
     // MARK: - msgId
 
-    /// 從共用配發器取下一個 msgId（60000...65500 區段，避免撞到遊戲自己的遞增號）
+    /// 從共用配發器取下一個 msgId（60000–63999 區段，避免撞到遊戲自己的遞增號；64000–65500 保留給插件）
     static func nextMsgId() -> UInt16 {
         LiqiMsgIdAllocator.shared.next()
     }
@@ -194,7 +194,7 @@ enum LiqiEncoder {
 /// Naki 注入用的 msgId 配發器（thread-safe）
 ///
 /// 遊戲自己用的是低位遞增號（實測 141、142…），為了不撞號，
-/// Naki 一律從 60000 開始配發，超過 65500 回捲。
+/// Naki 從 60000 開始配發，超過 `rangeEnd` 回捲。判定「這筆是不是 Naki 自送」以 `isIssued` 登記為準，不看號段。
 ///
 /// `nonisolated`：專案設了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，
 /// 不標注的 class 會被推導成 MainActor-isolated 並帶 **isolated deinit**；

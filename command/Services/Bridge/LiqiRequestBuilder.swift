@@ -81,7 +81,7 @@ struct LiqiFriendRoomConfig {
     var extraDetailRuleFields: [LiqiField] = []
 
     /// 三麻房用三麻細則預設（赤寶 2、35000 起手、40000 返點）；四麻不變。
-    /// 三麻值為推測（四麻值送三麻房 live 全回 error 1112），待 live 驗證。
+    /// 三麻值已 live 驗證（2026-10-09，`.swfd/logs/s3-live-4/live-all.log`：帶這組細則建房後開局；四麻值送三麻房全回 error 1112）。
     init(playerCount: UInt32 = 4) {
         self.playerCount = playerCount
         if playerCount == 3 {

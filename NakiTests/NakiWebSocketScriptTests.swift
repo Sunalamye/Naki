@@ -99,6 +99,17 @@ final class NakiWebSocketScriptTests: XCTestCase {
     XCTAssertEqual(NakiWebSocketScript.closedCount(from: 1.0 as Double), 1)
     XCTAssertEqual(NakiWebSocketScript.closedCount(from: Double.nan), 0)
     XCTAssertEqual(NakiWebSocketScript.closedCount(from: Double.infinity), 0)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: 1e300), 0)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: 2.9 as Double), 2)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: -3.0 as Double), -3)
+    let limit = 9_007_199_254_740_992.0
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: limit - 1), 9_007_199_254_740_991)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: -(limit - 1)), -9_007_199_254_740_991)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: limit), 0)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: -limit), 0)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: limit + 2), 0)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: 9e18), 0)
+    XCTAssertEqual(NakiWebSocketScript.closedCount(from: -9e18), 0)
   }
 
   func testClosedCountFromString() {

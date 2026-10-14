@@ -18,9 +18,10 @@
 //  這條決策鏈判斷「現在到底能做什麼」。
 //
 //  驗收語彙（2026-08-01）：
-//  - 欄位編號取自 docs/protocol/liqi.json；repo snapshot 與當日 live CDN byte-identical。
+//  - 欄位編號取自 docs/protocol/liqi.json；那份 schema 的基準本身過期（見 CLAUDE.md），
+//    與 live CDN 一致不能證明正確。
 //  - runtime 已對到 discard(1)、pon(3)、riichi(7)、tsumo request(8)、ron(9)。
-//  - chi variant／赤五 combination、三種槓、九種九牌與拔北仍需真實對局驗證。
+//  - chi variant／赤五 combination、三種槓、九種九牌仍需真實對局驗證；拔北已於 2026-10-09 三麻 live 驗過（11/11）。
 //
 
 import Foundation

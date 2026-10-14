@@ -80,6 +80,9 @@ enum NakiWebSocketScript {
     return .failure(dict["reason"] as? String ?? "unknown_reason")
   }
 
+  /// Double 能精確表示整數的上限（2^53）；絕對值達此上限的輸入視為不可信，回 0。
+  private static let exactIntegerLimit = 9_007_199_254_740_992.0
+
   /// 把 `forceReconnect` 的 JS 回傳值轉成關閉數。
   ///
   /// JS number 過橋後可能是 `Int`、`Double` 或 `NSNumber`（依 WebPage / WKWebView 而異），
@@ -90,9 +93,7 @@ enum NakiWebSocketScript {
       return value
     case let value as Double:
       // NaN／Inf／超出 Int 範圍的值直接 Int(...) 會 trap，一律當作 0
-      guard value.isFinite, value > -9_007_199_254_740_992, value < 9_007_199_254_740_992 else {
-        return 0
-      }
+      guard value.isFinite, abs(value) < exactIntegerLimit else { return 0 }
       return Int(value)
     case let value as NSNumber:
       return value.intValue

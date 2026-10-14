@@ -194,7 +194,9 @@ nonisolated enum RematchTargetResolver {
         // 這個人數的、已確認的觀察（最可靠的來源）
         let confirmed = observations.filter { $0.is3P == sanma }
 
-        // 段位不明時退回「沿用上次打的那個房間」——不猜房間，但也不至於停擺
+        // 兩種情況都退回「沿用上次打的那個房間」——不猜房間，但也不至於停擺：
+        // ① 段位不明；② 段位已知但表裡沒有進得去的房間（`pick` 回 nil）。
+        // ② 與 `pick`「不硬塞」的精神相反，但伺服器會以 1303／1306 拒絕不合法的 sid，所以退回是安全失敗。
         guard let level, let target = MatchModeTable.pick(
             level: level, sanma: sanma, east: east, preference: preference) else {
             guard let fallback = confirmed.max(by: { $0.seenAt < $1.seenAt }) else { return nil }
@@ -237,7 +239,7 @@ nonisolated enum RematchTargetResolver {
 /// field 22 → { 1: 20102, 2: 0 }     三麻段位（初心2）與分數
 /// ```
 ///
-/// 欄位編號取自實際封包而不是 `liqi.json`——那份 descriptor 已過期（見 CLAUDE.md）。
+/// 欄位編號取自實際封包，與 `liqi.json` 的 `Account.level`／`level3`（21／22）一致。
 /// 解不出來就回 `nil`，呼叫端一律 fail-closed，不要用 0 當預設（0 會比對成
 /// 「什麼房間都進不去」還是「初心」都說不準）。
 enum AccountLevelParser {

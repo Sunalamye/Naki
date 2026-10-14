@@ -158,7 +158,7 @@ enum WebSocketInterceptor {
 
     /// JavaScript 模組文件名稱（按載入順序）
     ///
-    /// 只剩兩個模組。`naki-autoplay` / `naki-game-api` / `naki-coordinator` 已整檔刪除：
+    /// 只剩三個模組。`naki-autoplay` / `naki-game-api` / `naki-coordinator` 已整檔刪除：
     /// 它們的每一條路徑都走 `Laya` / `GameMgr` / `app.NetAgent` / `view.DesktopMgr`，
     /// 而 Unity WebGL 客戶端沒有這些物件，所以那 2,900 行在 runtime 只會靜默失敗。
     /// 注入腳本是 `forMainFrameOnly: false`，每個 iframe 都要 parse 一次，留著只有成本。
@@ -660,7 +660,7 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: - Public Methods
 
-    /// 重置橋接器狀態（開始新遊戲時調用）
+    /// 重置橋接器狀態（雀魂 WebSocket 由全斷轉為連上時調用，即局中重連；保留 accountId／seat，不要在 start_game 呼叫，會清掉剛登記的 msgId）
     func reset() {
         majsoulBridge.reset()
     }

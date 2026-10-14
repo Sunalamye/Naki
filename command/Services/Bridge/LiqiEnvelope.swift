@@ -23,8 +23,8 @@
 //  （送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.observeOutgoing`，
 //  所以連 Naki 自己送的請求也在那份表裡）。
 //
-//  注意：envelope 本身**沒有** XOR。XOR 只作用在 notify 的 ActionPrototype.data
-//  （見 `liqiDecode`），不要在這一層套用。
+//  注意：envelope 本身**沒有** XOR。WebSocket 上的 ActionPrototype.data 才需要 XOR
+//  （見 `liqiDecode`；`GameRestore.actions` 內的不需要），不要在這一層套用。
 //
 
 import Foundation

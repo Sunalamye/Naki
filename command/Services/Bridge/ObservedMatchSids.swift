@@ -65,6 +65,9 @@ final class ObservedMatchSids {
     /// 剛送出、還在等 `start_game` 回填類型的 sid
     private var awaitingGameKind: String?
 
+    /// 只留最近這麼多組，避免長時間執行後無限成長；也決定續局能找到多舊的 sid
+    private static let observationLimit = 20
+
     /// 持久化 key。`awaitingGameKind` 刻意不存：它是「這次啟動剛送出、還沒開局」的
     /// 短暫狀態，跨啟動保留只會把下一局的人數標到上次那個 sid 上。
     nonisolated static let storageKey = "naki.observedMatchSids"
@@ -135,8 +138,7 @@ final class ObservedMatchSids {
                                         count: 1,
                                         is3P: nil))
         systemLog("[match_sid] 觀察到新的一組: sid=\(sid) ver=\(clientVersionString)")
-        // 只留最近 20 組，避免長時間執行後無限成長
-        if observations.count > 20 { observations.removeFirst() }
+        if observations.count > Self.observationLimit { observations.removeFirst() }
         save()
     }
 
