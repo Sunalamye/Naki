@@ -114,7 +114,8 @@ struct StartUnifiedMatchTool: MCPTool {
         // 沒帶參數時退回「最近觀察到的那一組」——這是唯一有真憑據的預設值。
         // 猜一個 sid 送出去比失敗更糟：可能排進非預期的場次。
         let observed = ObservedMatchSids.shared.latest
-        let matchSid = (arguments["match_sid"] as? String) ?? observed?.sid ?? ""
+        let argumentSid = arguments["match_sid"] as? String
+        let matchSid = argumentSid ?? observed?.sid ?? ""
         guard !matchSid.isEmpty else {
             throw MCPToolError.invalidParameter(
                 "match_sid",
@@ -133,7 +134,7 @@ struct StartUnifiedMatchTool: MCPTool {
             result.outcome, spec: result.spec,
             extra: ["match_sid": matchSid,
                     "client_version_string": clientVersion,
-                    "sidSource": arguments["match_sid"] == nil ? "observed" : "argument"])
+                    "sidSource": argumentSid == nil ? "observed" : "argument"])
     }
 }
 
@@ -206,7 +207,8 @@ struct AccountInfoTool: MCPTool {
         let nakiContext = try context.naki()
 
         let known = (nakiContext.getGameSnapshot()?["accountId"] as? Int) ?? 0
-        let accountId = arguments["account_id"] as? Int ?? known
+        let argumentId = arguments["account_id"] as? Int
+        let accountId = argumentId ?? known
 
         guard accountId > 0 else {
             return [
@@ -223,7 +225,7 @@ struct AccountInfoTool: MCPTool {
                                                  awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
                                                          extra: ["account_id": accountId,
-                                                                 "accountIdSource": arguments["account_id"] == nil ? "naki-login-capture" : "argument"])
+                                                                 "accountIdSource": argumentId == nil ? "naki-login-capture" : "argument"])
     }
 }
 

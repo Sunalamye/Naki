@@ -53,7 +53,8 @@ struct GetStatusTool: MCPTool {
             "logDir": LogManager.shared.logDirectory.path,
             "logFile": LogManager.shared.logFilePath,
             "logFileNote": "合併日誌（不含解析細節）。每次啟動一個 <timestamp> 目錄，"
-                + "同一層的其他目錄是前幾次執行（保留 8 次）",
+                + "同一層的其他目錄是前幾次執行（保留最近 \(LogManager.sessionKeepCount) 次完整目錄，"
+                + "更舊且有錄影的只留 games/）",
             // 查「剛剛發生什麼」看這個——只有對局事件，一行一件
             "eventLog": LogManager.shared.eventLogPath,
             "categoryLogs": LogManager.shared.categoryLogPaths

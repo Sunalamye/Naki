@@ -124,7 +124,7 @@ class LogManager {
     let logDirectory: URL
 
     /// 保留幾次執行的紀錄（含當次）
-    private let sessionKeepCount = 8
+    nonisolated static let sessionKeepCount = 8
 
     private init() {
         // 每次啟動一個獨立目錄，而不是固定檔名 + 輪替。
@@ -174,7 +174,7 @@ class LogManager {
 
         // XCTest host 不輪替：它每次啟動都會跑一次，會刪掉同時在跑的正式 App 的目錄
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
-            Self.pruneOldSessions(root: root, keep: sessionKeepCount)
+            Self.pruneOldSessions(root: root, keep: Self.sessionKeepCount)
         }
     }
 

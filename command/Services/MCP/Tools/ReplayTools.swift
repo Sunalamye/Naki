@@ -154,12 +154,14 @@ enum ReplaySupport {
         defer { controller.deleteBot() }
 
         var decisions: [[String: Any]] = []
+        var totalDecisions = 0
         var errors: [[String: Any]] = []
 
         for (index, event) in events.enumerated() {
             do {
                 let response = try await controller.react(event: event)
                 guard let response else { continue }
+                totalDecisions += 1
                 if decisions.count < limit {
                     decisions.append([
                         "index": index,
@@ -183,7 +185,7 @@ enum ReplaySupport {
             "is3P": is3P,
             "decisions": decisions,
             "decisionCount": decisions.count,
-            "truncated": decisions.count >= limit,
+            "truncated": totalDecisions > decisions.count,
             "errors": errors,
             "note": "純離線重跑，沒有送出任何 Liqi 請求。"
                 + "決策是模型對錄影中該局面的回應，可與當時的實際送出比對。"

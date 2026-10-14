@@ -336,7 +336,9 @@ nonisolated enum NakiMCPOriginPolicy {
     /// 允許的 host（瀏覽器只會把 loopback 頁面標成這幾種）
     static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
 
-    static func isAllowed(_ origin: String?) -> Bool {
+    /// `boundPort` 非 nil 時，Origin 的 port（未寫則依 scheme 取 80／443）必須等於它：
+    /// 本機其他 port 的網頁同樣是瀏覽器分頁。nil 維持只看 host 的舊行為。
+    static func isAllowed(_ origin: String?, boundPort: UInt16? = nil) -> Bool {
         guard let raw = origin?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
             // 非瀏覽器 client（curl / MCP client）不送 Origin
             return true
@@ -349,7 +351,9 @@ nonisolated enum NakiMCPOriginPolicy {
               let host = url.host?.lowercased() else {
             return false
         }
-        return loopbackHosts.contains(host)
+        guard loopbackHosts.contains(host) else { return false }
+        guard let boundPort else { return true }
+        return (url.port ?? (scheme == "https" ? 443 : 80)) == Int(boundPort)
     }
 
     /// 被擋下時的回應 body（規格允許放一個沒有 id 的 JSON-RPC error）
@@ -400,9 +404,10 @@ nonisolated enum NakiMCPHostPolicy {
 nonisolated enum NakiMCPRequestGuard {
 
     /// 被擋下時回 (log 原因, 403 body)；放行回 nil。
-    static func rejection(lines: [String]) -> (reason: String, body: String)? {
+    /// `boundPort` 是 server 實際綁定的 port，傳 nil 時 Origin 不檢查 port。
+    static func rejection(lines: [String], boundPort: UInt16? = nil) -> (reason: String, body: String)? {
         let origin = NakiHTTPHeaderReader.value("origin", in: lines)
-        guard NakiMCPOriginPolicy.isAllowed(origin) else {
+        guard NakiMCPOriginPolicy.isAllowed(origin, boundPort: boundPort) else {
             return ("Rejected non-loopback origin: \(origin ?? "?")",
                     NakiMCPOriginPolicy.forbiddenBody(origin: origin))
         }

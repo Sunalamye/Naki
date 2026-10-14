@@ -251,6 +251,9 @@ struct BotSyncTool: MCPTool {
         // 否則 UI 與 MCP 會變成兩份各自漂移的實作。
         let outcome = await nakiContext.forceReconnect()
         context.log("MCP: forceReconnect result: \(outcome.statusMessage)")
-        return outcome.dictionary
+        // `.failed` 只有 `error`；outputSchema 要求每種結果都有 `message`
+        var result = outcome.dictionary
+        result["message"] = result["message"] ?? outcome.statusMessage
+        return result
     }
 }
