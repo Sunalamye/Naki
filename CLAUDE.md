@@ -146,6 +146,16 @@ OptionalOperationList
   跑久了也會進 60000+。`LiqiMsgIdAllocator.isIssued`（未認領的 Naki 自送）或插件號段
   （JS 自配發、不在登記表）＝ Naki 側（`LiqiMsgIdAllocator.isIssued`、`LiqiParser.isNakiSent`）；
   `LiqiResponseStore` 只收登記過的回應（`LiqiResponseStore.capture` 內的 `allocator.claim`）。
+  回應到達時 `LiqiParser.parseResponse` 先以不消耗的 `isIssued` 判斷，之後 `capture` 才認領。
+- **送出失敗的 msgId 登記**（BR-08）：`LiqiActionSender.send` 只對送出前即確定失敗撤銷登記
+  （沒有 `sendHandler`，或 detail 開頭為 `no_open_majsoul_connection`、`no_game_gateway_connection`、
+  `invalid_base64`、`decode_failed`、`empty_payload`、`send_failed`）。`js_error`、
+  `unparsable_js_result`、`runtime_deallocated` 時 JS 可能已送出，保留登記，讓遲到的回應仍被認領，
+  不被當成遊戲自送。單測與整合時的臨時跨包測試已驗（`.swfd/logs/irc2-integrate/cross-test.log`），**未 live 驗證**。
+- **`ReqAuthGame` 只取 `game_uuid`**（BR-04）：不再解析 `account_id` 與 token；座位只認登入回應的
+  accountId，token 不留在 `MajsoulBridge.lastParsed`。
+- **對局錄影的 `start_game` 用佔位名**（BR-09）：`GameRecorder` 把 `names` 換成雲端上傳同一套
+  （`KyokuStreamAccumulator.apiEvent`，`Player0`…），錄影不留他人暱稱；座位與三麻旗標照舊。
 
 ## 平台差距
 
@@ -153,7 +163,11 @@ OptionalOperationList
 
 兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（動作 switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、每輪 bounded retry 15 次；同一批 oplist 跨輪退避 2→30 秒，`no_open_majsoul_connection` 時非和牌動作立刻停手並立即報停滯，換批才恢復；「過」送出失敗也走同一套跨輪退避，且失敗不再把停滯清零，BT-01、BT-02）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
 
-斷線時「過」與上述「立刻停手」有差距：`AutoPassDispatcher` 本輪會先送滿 `RetryPolicy` 的 5 次（間隔 0.2 秒）才回報失敗，`AutoPlayEngine.sendPass` 此時才 `deferRetry(offline: true)`，跨輪才停手。是否改成斷線即停手，待用戶決策（BT-02）。
+「過」的送出（`AutoPlayEngine.sendPass`）：每輪上限 `Timing.passAttempts`（5 次，間隔 `passRetry` 0.5 秒）。斷線時本輪只送 1 次即停（`AutoPassDispatcher` 遇 `isOffline` 跳出），交由 `deferRetry(offline: true)` 跨輪退避並立即報停滯（BT-02）。成功判準與其他動作相同：改走 `AutoPlayActionExecutor.sendAndVerify`，同 msgId RESPONSE 到達且無 error 才算成功（等 `actionAwaitResponseMs` 800ms，「過」不等回音）；伺服器拒絕或等不到 RESPONSE 都不消化 oplist，交給上述 bounded retry 與跨輪退避（BT-06）。
+
+確認（`confirmPending`）期間 tick 不跑 `runCycle`：進入 `confirmPending` 超過 `Timing.confirmAckWatchdog`（6 秒，伺服器受理不重置起點）仍等不到 `ActionNewRound` 時，報停滯 `confirmStalled`，側欄 `DecisionAlerts` 的停滯列會顯示；只在會送出的模式報（`mode.sendsActions`），推薦模式不報（BT-07）。
+
+以上三條只有單測（`AutoPassDispatcherTests`、`AutoPlayEngineTests`、`AutoConfirmEngineTests`），**未 live 驗證**。
 
 ## 自摸問題的 current truth
 
@@ -171,7 +185,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 其他 failure path 已收斂成同一語意（`AutoPassDispatcher` + 轉換失敗不標記）：沒有送出成功就不消化 oplist。這只有單測，沒有 live 驗證。
 
-`.off` 現在同時關掉顯示：`DecisionSidebar` 與 `WebSession.syncHighlight` 都讀 `showRecommendation`。關閉時側欄顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」），遊戲內推空推薦並送 `__nakiHighlight.clear()`；正式路徑只用 `GameHighlightScript.clear`，`GameHighlightScript.make()` 只剩測試呼叫（保留為 highlight payload 的參考實作）。AI 仍在背景計算（否則切回來會一片空白），`/bot/status` 的 recommendations 也照舊為真。腳本內容有單測，**畫面實際效果未 live 驗證**。狀態列的推薦數徽章也只在推薦顯示開啟時出現（`GameStore.showsRecommendationBadge`，UI-01）。
+`.off` 現在同時關掉顯示：`DecisionSidebar` 與 `WebSession.syncHighlight` 都讀 `showRecommendation`。關閉時側欄顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」），遊戲內推空推薦並送 `__nakiHighlight.clear()`；`GameHighlightScript` 只剩 `clear`（`make()` 已於 IRC 第二輪刪除，發布內容由 `WebSession.recommendationScript` 產生並有單測）。AI 仍在背景計算（否則切回來會一片空白），`/bot/status` 的 recommendations 也照舊為真。腳本內容有單測，**畫面實際效果未 live 驗證**。狀態列的推薦數徽章也只在推薦顯示開啟時出現（`GameStore.showsRecommendationBadge`，UI-01）。
 
 正確修法：由 oplist arrival 驅動、先處理 hora；sender 回傳結果，收到成功 send／最好同 msgId RESPONSE 或 `ActionHule` 後才 handled；失敗保留 pending、bounded retry；Legacy 收斂到同一 resolver。
 
@@ -204,7 +218,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## 2026-09-30 審查修正後的行為
 
-以下都有單測（NakiTests 1091 個、0 failures（2026-10-14，WP-F2 合併後，`.swfd/logs/wp-f2-takeover/fixup-nakitests.log`；前一次 1074 個，irc-integrate b2d7d73；再前一次 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
+以下都有單測（NakiTests 1130 個、0 failures（2026-10-15，IRC 第二輪三包整合閘，`.swfd/logs/irc2-integrate/test-full.log`；前一次 1091 個，2026-10-14，WP-F2 合併後，`.swfd/logs/wp-f2-takeover/fixup-nakitests.log`；再前一次 1074 個，irc-integrate b2d7d73；更早 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。
@@ -300,6 +314,8 @@ MCP 工具結果現在同時回 `structuredContent`（真的 JSON 物件）與 `
 | 測試數停在舊快照；多處 `檔名:行號` 引用 | 測試數以最近一次整合閘為準（見上）；行號一律改成函式名（行號每次改動都會漂） | 2026-10-13 |
 | 「四麻 action space 沒有九種九牌槽位」（`ActionType.ryukyoku` 舊註解） | 實際 index 44 就是 ryukyoku；修前被映射成打牌（BT-03） | 2026-10-14 |
 | 「`.passed` 一律代表送出成功」 | `handled: false` 是送不出去，曾把停滯歸零（BT-01） | 2026-10-14 |
+| 「斷線時『過』本輪照樣重送 5 次才停」 | 斷線送 1 次即停，交給跨輪退避（BT-02） | 2026-10-15 |
+| 「『過』只要 `sendRaw` 成功就算送出」 | 改為同 msgId RESPONSE 且無 error；伺服器拒絕不消化 oplist（BT-06） | 2026-10-15 |
 
 回答「目前是什麼狀態」一律以**執行中的 Naki loopback API、原始碼、或當場跑一次
 build/test** 為準；文件只用來解釋「為什麼是這樣」。改了行為就順手改文件——

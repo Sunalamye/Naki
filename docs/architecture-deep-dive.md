@@ -156,7 +156,7 @@ p3-4 之後 Legacy path 走同一個引擎，只是模式永遠不是 `.auto`，
 
 ## 遊戲內高亮
 
-`WebSession.syncHighlight()` 不再自己呼叫 `__nakiHighlight.set()`（內建染色已於 `c0b7564` 移交插件）：它只發布唯讀推薦通道 `window.__nakiRecommendations`，讓高亮類插件自己決定要不要染色；`.off` 時推空推薦並送 `GameHighlightScript.clear`（`__nakiHighlight.clear()`），這是「關閉真的關掉顯示」的正式路徑。純函式 `GameHighlightScript.make(mode:recommendations:tehaiTiles:snapshot:)` 保留為 highlight payload 的參考實作與測試對象，正式路徑不呼叫。`naki-core.js` 從 WebGL `_MainTex_ST` UV 辨識牌 identity，在單次 draw 前暫改 `_Tint`／`_Color` 並還原。
+`WebSession.syncHighlight()` 不再自己呼叫 `__nakiHighlight.set()`（內建染色已於 `c0b7564` 移交插件）：它只發布唯讀推薦通道 `window.__nakiRecommendations`，讓高亮類插件自己決定要不要染色；`.off` 時推空推薦並送 `GameHighlightScript.clear`（`__nakiHighlight.clear()`），這是「關閉真的關掉顯示」的正式路徑。`GameHighlightScript.make` 已刪除；發布內容由純函式 `WebSession.recommendationScript` 產生並有單測。`naki-core.js` 從 WebGL `_MainTex_ST` UV 辨識牌 identity，在單次 draw 前暫改 `_Tint`／`_Color` 並還原。
 
 這條路徑不依賴 Laya 或螢幕座標。它目前只有 hook 活性證據，沒有視覺正確性測試；同名牌全染與 popup heuristic 是已知限制。
 

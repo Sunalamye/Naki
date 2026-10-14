@@ -194,7 +194,7 @@ Legacy iOS 17–25 的第三個漏洞（完全沒走 resolver）已修，見 AUD
 `NakiGameAction` 目前會 fallback 成 tsumo，而不是 fail closed。這不是自動 resolver 路徑，但同樣應改成缺權威資料就拒絕。
 
 Mode 語意（2026-08-02 收斂）：`.off` 同時關掉自動送出與顯示——`DecisionSidebar` 顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」），
-`WebSession.syncHighlight` 推空推薦並送 `__nakiHighlight.clear()`（`GameHighlightScript.clear`；`make()` 只剩測試呼叫）。AI 仍在背景推論（刻意保留：否則切回 `.recommend` 是一片空白），
+`WebSession.syncHighlight` 推空推薦並送 `__nakiHighlight.clear()`（`GameHighlightScript` 只剩 `clear`；推薦發布腳本由 `WebSession.recommendationScript` 組）。AI 仍在背景推論（刻意保留：否則切回 `.recommend` 是一片空白），
 `/bot/status` 的 recommendations 也照舊為真。「關閉 = 不顯示、不送出」是目前程式事實；
 「關閉 = AI 也不算」**不是**。畫面上真的清空未 live 驗證。
 

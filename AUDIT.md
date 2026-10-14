@@ -58,9 +58,9 @@ iOS 17–25 的 `LegacyWebViewModel` 曾直接使用 AI 第一推薦，沒有 re
 
 ### 已處理：off mode 的顯示語意（2026-08-02）
 
-`.off` 現在同時關掉顯示：`DecisionSidebar` 讀 `autoPlayMode.showRecommendation`，關閉時顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」）；`WebSession.syncHighlight` 在 `.off` 時推空推薦並送 `__nakiHighlight.clear()`（正式路徑只用 `GameHighlightScript.clear`，`make()` 只剩測試呼叫），切回 `.recommend`／`.auto` 恢復推薦通道。內建染色已於 `c0b7564` 移交插件。`setAutoPlayMode` 會立刻重推一次，不必等下一個 Bot 回應。AI 仍在背景計算（刻意：否則切回來是空白）。
+`.off` 現在同時關掉顯示：`DecisionSidebar` 讀 `autoPlayMode.showRecommendation`，關閉時顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」）；`WebSession.syncHighlight` 在 `.off` 時推空推薦並送 `__nakiHighlight.clear()`（`GameHighlightScript` 只剩 `clear`；推薦發布腳本由 `WebSession.recommendationScript` 組），切回 `.recommend`／`.auto` 恢復推薦通道。內建染色已於 `c0b7564` 移交插件。`setAutoPlayMode` 會立刻重推一次，不必等下一個 Bot 回應。AI 仍在背景計算（刻意：否則切回來是空白）。
 
-腳本內容有 7 條單測（`GameHighlightScriptTests`）。**畫面上真的清空／恢復未 live 驗證**——WebGL hook 沒有 screenshot regression。
+發布腳本由 `WebSessionHighlightPublishTests` 測試。**畫面上真的清空／恢復未 live 驗證**——WebGL hook 沒有 screenshot regression。
 
 ### 已處理：其他 failure path 不再過早消化 snapshot
 
