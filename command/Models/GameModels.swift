@@ -162,6 +162,11 @@ struct BotStatus: Equatable {
     /// 雲端啟用期間連續以非雲端來源結束的決策數；0＝雲端正常服務
     var cloudFallbackStreak: Int = 0
 
+    /// 側欄「改用本機」的唯一判準：異常列與展開層都讀它。
+    var isCloudFallback: Bool {
+        cloudHost != nil && (cloudDegraded || cloudFallbackStreak > 0)
+    }
+
     // MARK: - Available Actions
     //
     // 這七個欄位的唯一真實來源是協定層 oplist（見 `BotAvailableActions`）。

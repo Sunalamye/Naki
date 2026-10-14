@@ -122,8 +122,11 @@ final class GameStore {
     /// 寫入點：`DebugServer` 綁上 port 時，以及 `NakiRuntime.stopDebugServer()`。
     var isDebugServerRunning = false
 
-    /// 實際綁到的 port（8765 被佔用時會往上找，所以不等於 preferred port）
-    var debugServerPort: UInt16 = 8765
+    /// 啟動 server 時先試的 port；重啟一律從這裡開始，不沿用上次實際綁到的值。
+    var debugServerPreferredPort: UInt16 = DefaultNakiMCPContext.defaultServerPort
+
+    /// 實際綁到的 port（偏好 port 被佔用時會往上找）；工具列與設定頁顯示讀這個。
+    var debugServerPort: UInt16 = DefaultNakiMCPContext.defaultServerPort
 
     // MARK: - 導出值
 

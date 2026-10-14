@@ -300,7 +300,7 @@ struct GameDetailsPanel: View {
     }
 
     private var cloudState: LocalizedStringKey {
-        if botStatus.cloudDegraded { return "改用本機" }
+        if botStatus.isCloudFallback { return "改用本機" }
         if botStatus.cloudHost != nil { return "已連線" }
         return cloudConfigured ? "已設定・未使用" : "未啟用"
     }
@@ -645,7 +645,7 @@ struct DecisionAlerts: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelLayout.Spacing.s6) {
-            if showsCloudFallback {
+            if botStatus.isCloudFallback {
                 alert(icon: "icloud.slash.fill",
                       tone: PanelLayout.danger,
                       text: botStatus.is3P
@@ -687,11 +687,7 @@ struct DecisionAlerts: View {
 
     /// 哪幾列在畫面上；只看有無，停滯秒數每秒變動不該觸發動畫。
     private var shown: [Bool] {
-        [showsCloudFallback, botStatus.cloudHost != nil, autoPlayStall != nil, sanmaNotice]
-    }
-
-    private var showsCloudFallback: Bool {
-        botStatus.cloudHost != nil && (botStatus.cloudDegraded || botStatus.cloudFallbackStreak > 0)
+        [botStatus.isCloudFallback, botStatus.cloudHost != nil, autoPlayStall != nil, sanmaNotice]
     }
 
     private var sanmaNotice: Bool { botStatus.is3P && !botStatus.isSanmaCapableDecision }

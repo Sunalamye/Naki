@@ -45,13 +45,14 @@ enum NakiGameAction {
         return nil
     }
 
-    /// 解析槓型（未指定時由 oplist 推導，再退回暗槓）
-    static func kanType(explicit: String?, snapshot: LiqiOperationSnapshot?) -> LiqiOperationType {
+    /// 解析槓型：未指定時由 oplist 推導，再退回暗槓；指定了卻無法辨識則報錯，不當成沒給。
+    static func kanType(explicit: String?, snapshot: LiqiOperationSnapshot?) throws -> LiqiOperationType {
         switch explicit?.lowercased() {
+        case nil: return snapshot?.defaultKanType ?? .ankan
         case "ankan": return .ankan
         case "minkan", "daiminkan": return .minkan
         case "kakan": return .kakan
-        default: return snapshot?.defaultKanType ?? .ankan
+        default: throw MCPToolError.invalidParameter("kanType", expected: "ankan / kakan / minkan")
         }
     }
 
@@ -96,8 +97,9 @@ enum NakiGameAction {
             return LiqiRequestBuilder.pon(index: index, timeuse: timeuse)
 
         case "kan":
-            let type = kanType(explicit: arguments["kanType"] as? String, snapshot: snapshot)
-            let tile = (arguments["tile"] as? String).flatMap { majsoulTile(from: $0) }
+            let given = { (key: String) in arguments[key].flatMap { $0 is NSNull ? nil : $0 } }
+            let type = try kanType(explicit: given("kanType").map { $0 as? String ?? "" }, snapshot: snapshot)
+            let tile = given("tile") == nil ? nil : try requiredTile()
             return LiqiRequestBuilder.kan(type: type, index: index, tile: tile, timeuse: timeuse)
 
         case "tsumo":

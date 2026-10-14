@@ -366,7 +366,7 @@ final class NakiRuntime {
 
         // 上一個 server 可能綁 port 全失敗而停在半死狀態：停掉再換新的才能重啟
         debugServer?.stop()
-        let server = DebugServer(port: store.debugServerPort,
+        let server = DebugServer(port: store.debugServerPreferredPort,
                                  dependencies: makeMCPDependencies())
         debugServer = server
         server.start()

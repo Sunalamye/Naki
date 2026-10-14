@@ -65,6 +65,7 @@ final class BotToolsTests: XCTestCase {
         let runtime = NakiRuntime()
         let port = UInt16.random(in: 50000...60000)
         runtime.store.debugServerPort = port
+        runtime.store.debugServerPreferredPort = port
         runtime.store.isDebugServerRunning = true
 
         runtime.startDebugServer()
