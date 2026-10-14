@@ -158,12 +158,13 @@ struct CaptureScreenshotAction {
 
   /// 視窗內容轉 PNG。**有 sheet 時截 sheet。**
   ///
-  /// 先前 `windows.first` 多半挑中主視窗，所以進階設定（attached sheet，屬於
-  /// 另一個 `NSWindow`）怎麼截都是它後面的遊戲畫面——設定頁等於無法用這支 API 驗。
-  /// 改成「有 sheet 就截 sheet」：那才是使用者當下在看的東西。
+  /// 先前 `windows.first` 多半挑中主視窗，所以 attached sheet（屬於另一個 `NSWindow`）
+  /// 怎麼截都是它後面的遊戲畫面。改成「有 sheet 就截 sheet」：那才是使用者當下在看的東西。
+  /// 設定是獨立的 `Settings` 視窗，不在這條路徑上，改由 `SettingsWindowAction` 截。
   ///
   /// **已知限制：截不到 toolbar。** `contentView` 不含 titlebar／toolbar 區域，而模式
-  /// 切換、延遲 stepper、MCP／連線指示與雲端開關全在那裡。試過的兩條路都不行：
+  /// 切換、延遲 stepper、MCP／連線指示與雲端開關全在那裡；設定視窗同樣截不到分頁列。
+  /// 試過的兩條路都不行：
   ///
   /// - 改截 theme frame（`contentView.superview`）：位置有了，但 `cacheDisplay`
   ///   畫不出 NSToolbar 裡的 SwiftUI hosting view，整排控制項變成白色空塊——
@@ -189,8 +190,16 @@ struct CaptureScreenshotAction {
       guard let target = base?.attachedSheet ?? base else {
         return .failure(NakiActionError.notAvailable("no visible window"))
       }
+      return png(of: target)
+    #else
+      return .failure(NakiActionError.notAvailable("window screenshot (macOS only)"))
+    #endif
+  }
+
+  #if os(macOS)
+    static func png(of window: NSWindow) -> Result<Data, Error> {
       guard
-        let view = target.contentView,
+        let view = window.contentView,
         view.bounds.width > 0, view.bounds.height > 0,
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
       else {
@@ -201,11 +210,59 @@ struct CaptureScreenshotAction {
         return .failure(NakiActionError.notAvailable("png encoding"))
       }
       return .success(png)
-    #else
-      return .failure(NakiActionError.notAvailable("window screenshot (macOS only)"))
-    #endif
+    }
+  #endif
+}
+
+// MARK: - SettingsWindowAction
+
+/// macOS `Settings` 視窗的查詢、關閉與截圖（`/debug/ui`、`/screenshot?window=settings`）。
+///
+/// 視窗由設定根 View 在 `viewDidMoveToWindow` 以 weak 參考登記；比對物件而不是 identifier
+/// （SwiftUI 給的 identifier 不是公開 API）。關閉後視窗被保留（`isVisible` 為 false）或釋放
+/// （參考變 nil）都算不可見。iOS 的設定是 sheet：可見回 nil，由呼叫端改讀 `UIState`。
+@MainActor
+struct SettingsWindowAction {
+
+  private let visible: () -> Bool?
+  private let closeWindow: () -> Void
+  private let capture: () -> Result<Data, Error>
+
+  private init(visible: @escaping () -> Bool?, close: @escaping () -> Void,
+               capture: @escaping () -> Result<Data, Error>) {
+    self.visible = visible
+    self.closeWindow = close
+    self.capture = capture
   }
 
+  #if os(macOS)
+    static weak var window: NSWindow?
+
+    init() {
+      self.init(
+        visible: { Self.window?.isVisible == true },
+        close: { Self.window?.performClose(nil) },
+        capture: {
+          guard let window = Self.window else {
+            return .failure(NakiActionError.notAvailable("settings window"))
+          }
+          return CaptureScreenshotAction.png(of: window)
+        })
+    }
+  #else
+    init() { self = .unavailable }
+  #endif
+
+  static let unavailable = SettingsWindowAction(
+    visible: { nil }, close: {},
+    capture: { .failure(NakiActionError.notAvailable("settings window")) })
+
+  /// 設定視窗目前可見；nil＝這個平台沒有獨立設定視窗。
+  var isVisible: Bool? { visible() }
+
+  func close() { closeWindow() }
+
+  func screenshot() -> Result<Data, Error> { capture() }
 }
 
 // MARK: - SendActionAction
@@ -628,7 +685,7 @@ struct StartFullAutoNowAction {
 
 // MARK: - DeleteBotAction
 
-/// 刪除原生 Bot（進階設定的「刪除 Bot」按鈕）。
+/// 刪除原生 Bot（設定的「刪除 Bot」按鈕）。
 ///
 /// 只清 Bot 與屬於這一局的資料；`gameState` 刻意保留（座位來源，
 /// 見 `GameStore.clearAfterBotDeleted`）。
@@ -664,7 +721,7 @@ struct DeleteBotAction {
 
 // MARK: - ToggleDebugServerAction
 
-/// 啟動／停止 MCP Server（工具列指示燈與進階設定共用）。
+/// 啟動／停止 MCP Server（工具列指示燈與設定共用）。
 @MainActor
 struct ToggleDebugServerAction {
 

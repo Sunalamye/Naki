@@ -3,16 +3,11 @@ import XCTest
 /// macOS UI 測試（host = Naki.app）。
 /// 依賴 Phase 3 為各元件補上的 accessibilityIdentifier —— 這正是「讓 mac app 測試更友好」的成果。
 /// 若某 identifier 找不到，代表對應 View 的 a11y 標記被移除或改名，應同步更新。
-final class NakiUITests: XCTestCase {
-
-    override func setUpWithError() throws {
-        continueAfterFailure = false
-    }
+final class NakiUITests: NakiUITestCase {
 
     /// App 能啟動並顯示主要可測面（原生側板與 WebView 容器）。
     func testAppLaunchesAndExposesAccessibleSurface() throws {
-        let app = XCUIApplication()
-        app.launch()
+        try launch()
 
         // WebView 容器（Unity WebGL 黑盒，但容器有 identifier 可斷言存在）
         XCTAssertTrue(
@@ -23,8 +18,7 @@ final class NakiUITests: XCTestCase {
 
     /// 工具列的核心互動元件都以 identifier 可定位（測試友好性的核心驗收）。
     func testToolbarControlsAreAddressable() throws {
-        let app = XCUIApplication()
-        app.launch()
+        try launch()
 
         // 這些 id 由 Phase 3 ContentView 的 a11y 補強提供
         let reload = app.descendants(matching: .any)["toolbar-reload"]

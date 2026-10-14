@@ -18,6 +18,9 @@ final class UIState {
     var showLog = false
     /// 全自動確認表；只是畫面，不代表已啟動全自動。
     var showFullAutoKindChoice = false
+    /// macOS 設定視窗的開啟請求：每次 `apply(screen: .settings)` 加 1，`ContentView` 以值變化呼叫 `openSettings()`。
+    /// 開啟請求不等於可見；可見由 `SettingsWindowAction` 讀實際視窗。
+    var settingsOpenRequest = 0
 
     /// 可由外部指定的畫面；互斥，一次只開一個。
     enum Screen: String, CaseIterable {
@@ -30,6 +33,7 @@ final class UIState {
         showPlugins = screen == .plugins
         showLog = screen == .log
         showFullAutoKindChoice = screen == .fullauto
+        if screen == .settings { settingsOpenRequest += 1 }
     }
 
     nonisolated init() { }

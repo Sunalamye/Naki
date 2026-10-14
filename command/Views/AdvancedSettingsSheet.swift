@@ -2,18 +2,45 @@
 //  AdvancedSettingsSheet.swift
 //  Naki
 //
-//  進階設定表（含雲端探測）。
+//  設定根 View：macOS 是 `Settings` scene 的分頁視窗，iOS 是單頁捲動的 sheet。
 //
 
 import SwiftUI
 
-// MARK: - Advanced Settings Sheet
+// MARK: - Settings
 
 struct AdvancedSettingsSheet: View {
     @Environment(\.naki) private var naki
     @Environment(\.dismiss) private var dismiss
 
-    /// 「測試連線」的結果（只活在這張 sheet 裡；nil＝還沒測）
+    /// 分頁歸屬的唯一定義點：macOS 的 `TabView` 與 iOS 的四個段落都經 `page(_:)`。
+    enum SettingsTab: String, CaseIterable, Identifiable {
+        case general, connection, ai, developer
+
+        var id: String { rawValue }
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .general: "一般"
+            case .connection: "連線"
+            case .ai: "AI"
+            case .developer: "開發者"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .general: "gearshape"
+            case .connection: "link"
+            case .ai: "cpu"
+            case .developer: "chevron.left.forwardslash.chevron.right"
+            }
+        }
+    }
+
+    // 以下狀態都留在設定根 View：分頁 View 重建或切頁時不丟探測結果與未套用的草稿。
+
+    /// 「測試連線」的結果（nil＝還沒測）
     @State private var cloudTest: CloudConnectionTest?
     @State private var cloudTestRunning = false
     @State private var updateCheckRunning = false
@@ -24,53 +51,120 @@ struct AdvancedSettingsSheet: View {
     /// 自動探測失敗的原因（nil＝沒失敗）
     @State private var cloudProbeFailure: CloudKeyProbe?
     @State private var cloudProbing = false
+    /// 雀魂連線的 Header 草稿；只經「套用並重新載入」寫回設定
+    @State private var headerRows: [MajsoulConnectionSettingsBox.HeaderRow] = []
+#if os(iOS)
+    @State private var developerExpanded = false
+#endif
 
     var body: some View {
-        #if os(macOS)
-        macOSSettingsContent
-        #else
-        iOSSettingsContent
-        #endif
+        Group {
+#if os(macOS)
+            macOSSettingsContent
+#else
+            iOSSettingsContent
+#endif
+        }
+        .task(id: cloudProbeToken) { await autoProbeCloud() }
+        .task { headerRows = MajsoulConnectionSettingsBox.rows(from: naki.settings.majsoulExtraHeaders) }
     }
 
-    #if os(macOS)
-    private var macOSSettingsContent: some View {
-        VStack(spacing: 0) {
-            // 標題列
-            HStack {
-                Text("進階設定")
-                    .font(.headline)
-                Spacer()
-                Button("完成") {
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("settings-done-button")
-            }
-            .padding()
-            .background(Color.contentBackground)
-
-            Divider()
-
-            ScrollView {
-                settingsForm
+    @ViewBuilder
+    private func page(_ tab: SettingsTab) -> some View {
+        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
+            switch tab {
+            case .general:
+#if os(macOS)
+                languageBox
+#endif
+                displayBox
+                updateBox
+            case .connection:
+                majsoulServerBox
+                MajsoulConnectionSettingsBox(rows: $headerRows)
+            case .ai:
+                autoPlayAvailabilityBox
+                autoPlaySettingsBox
+                cloudInferenceBox
+            case .developer:
+                cloudAPIBox
+                botManagementBox
+                mcpServerBox
             }
         }
-        // a11y: fixed sheet size; large Dynamic Type may clip — kept to preserve layout
-        .frame(width: 900, height: 620)
-        .task(id: cloudProbeToken) { await autoProbeCloud() }
+        .groupBoxStyle(FullWidthGroupBoxStyle())
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings-page-\(tab.id)")
     }
-    #endif
 
-    #if os(iOS)
+    /// 單欄頁面裡每個 GroupBox 撐滿寬度（系統樣式只貼著內容寬）。
+    private struct FullWidthGroupBoxStyle: GroupBoxStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            GroupBox {
+                configuration.content.frame(maxWidth: .infinity, alignment: .leading)
+            } label: {
+                configuration.label
+            }
+            .groupBoxStyle(.automatic)
+        }
+    }
+
+#if os(macOS)
+    /// 分頁由系統畫成視窗 toolbar，標題列跟著選取的分頁；沒有完成鈕，以視窗關閉為準。
+    private var macOSSettingsContent: some View {
+        TabView {
+            ForEach(SettingsTab.allCases) { tab in
+                ScrollView {
+                    page(tab).padding()
+                }
+                .tabItem { Label(tab.title, systemImage: tab.systemImage) }
+            }
+        }
+        // a11y: fixed window size; large Dynamic Type scrolls inside each page
+        .frame(width: 600, height: 560)
+        .background(SettingsWindowRegistrar())
+    }
+
+    /// 把所在的 `NSWindow` 登記給 `SettingsWindowAction`（weak，比對物件不比對 identifier）。
+    private struct SettingsWindowRegistrar: NSViewRepresentable {
+        func makeNSView(context: Context) -> NSView { RegistrarView() }
+        func updateNSView(_ nsView: NSView, context: Context) {}
+
+        final class RegistrarView: NSView {
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                if let window { SettingsWindowAction.window = window }
+            }
+        }
+    }
+#endif
+
+#if os(iOS)
+    /// 四組依序捲動；「開發者」預設折疊。折疊與捲動位置隨 sheet 重建而重設。
     private var iOSSettingsContent: some View {
         NavigationStack {
             ScrollView {
-                settingsForm
+                VStack(alignment: .leading, spacing: PanelLayout.Spacing.s20) {
+                    ForEach(SettingsTab.allCases) { tab in
+                        if tab == .developer {
+                            DisclosureGroup(isExpanded: $developerExpanded) {
+                                page(tab).padding(.top, PanelLayout.Spacing.s8)
+                            } label: {
+                                // 掛在 label 上：掛在 DisclosureGroup 會蓋掉內容的 `settings-page-developer`
+                                sectionTitle(tab).accessibilityIdentifier("settings-developer-disclosure")
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
+                                sectionTitle(tab)
+                                page(tab)
+                            }
+                        }
+                    }
+                }
+                .padding()
             }
-            .navigationTitle("進階設定")
+            .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.inline)
-            .task(id: cloudProbeToken) { await autoProbeCloud() }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") {
@@ -81,7 +175,14 @@ struct AdvancedSettingsSheet: View {
             }
         }
     }
-    #endif
+
+    private func sectionTitle(_ tab: SettingsTab) -> some View {
+        Text(tab.title)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+    }
+#endif
 
 #if os(macOS)
     /// 語言。setter 走 Action，與其他會影響執行期行為的設定同一條路。
@@ -134,7 +235,7 @@ struct AdvancedSettingsSheet: View {
                 .autocorrectionDisabled()
                 .accessibilityIdentifier(accessibilityId)
             Menu(pickerLabel, systemImage: "chevron.down.circle") {
-                Button("伺服器預設（清空）") { text.wrappedValue = "" }
+                Button("還原預設") { text.wrappedValue = "" }
                 ForEach(cloudModels.filter { $0.game.isEmpty || $0.game == game },
                         id: \.id) { model in
                     Button(model.desc.isEmpty ? model.id : "\(model.id) — \(model.desc)") {
@@ -144,7 +245,7 @@ struct AdvancedSettingsSheet: View {
             }
             .labelStyle(.iconOnly)
             .disabled(cloudModels.isEmpty)
-            .help(cloudModels.isEmpty ? "先按「測試連線」取得模型清單" : "從伺服器清單選擇")
+            .help(cloudModels.isEmpty ? "先到「開發者」按「測試連線」" : "從伺服器清單選擇")
             .accessibilityIdentifier("\(accessibilityId)-picker")
         }
     }
@@ -164,7 +265,7 @@ struct AdvancedSettingsSheet: View {
                 .foregroundStyle(PanelLayout.success)
                 .accessibilityIdentifier("cloud-effective-state")
         } else {
-            Label("雲端推論尚未生效，仍在用內建本地模型。還缺：\(missingList(missing))",
+            Label("雲端推論尚未生效，仍在用內建本機模型。還缺：\(missingList(missing))",
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(PanelLayout.warning)
@@ -334,64 +435,9 @@ struct AdvancedSettingsSheet: View {
             let list = models.isEmpty ? L10n.text("無") : models.map { "\($0.id)(\($0.game))" }.joined(separator: ", ")
             if naki.settings.cloudInferenceEnabled { return Text("伺服器 \(status)；可用模型：\(list)") }
             return models.isEmpty
-                ? Text("伺服器 \(status)；可用模型：\(list)（但開關未開，對局仍走本地模型）")
-                : Text("伺服器 \(status)；可用模型：\(list)（但開關未開，對局仍走本地模型）——可用模型欄旁的箭頭直接選")
+                ? Text("伺服器 \(status)；可用模型：\(list)（但開關未開，對局仍走本機模型）")
+                : Text("伺服器 \(status)；可用模型：\(list)（但開關未開，對局仍走本機模型）——可用模型欄旁的箭頭直接選")
         }
-    }
-
-    /// 設定表單。
-    ///
-    /// macOS 走兩欄。單欄 400pt 捲動 sheet 的問題不只是要捲：雲端那組有六個控制
-    /// （開關／URL／key／兩個模型欄／測試連線），而「生效」需要開關＋URL＋key 三者同時成立，
-    /// 開關又排在 key 上面——捲下去貼完 key 就不會再往上看，於是得到一個看起來配置好、
-    /// 行為卻完全是本地模型的設定（Akagi #221 的形狀）。兩欄讓開關與其結果同時在畫面上。
-    /// iOS 維持單欄捲動：窄畫面放不下兩欄。
-    private var settingsForm: some View {
-#if os(macOS)
-        HStack(alignment: .top, spacing: PanelLayout.Spacing.s16) {
-            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
-                operationalSettings
-            }
-            .frame(width: 300)
-
-            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s16) {
-                cloudSettings
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding()
-#else
-        VStack(alignment: .leading, spacing: PanelLayout.Spacing.s20) {
-            operationalSettings
-            cloudSettings
-        }
-        .padding()
-#endif
-    }
-
-    /// 左欄：這台機器怎麼跑（畫面／自動操作／Bot／MCP）
-    @ViewBuilder
-    private var operationalSettings: some View {
-        // 自動打牌可用性（只有在這條路徑不支援時才出現）
-        autoPlayAvailabilityBox
-
-        autoPlaySettingsBox
-
-        majsoulServerBox
-
-        MajsoulConnectionSettingsBox()
-
-        #if os(macOS)
-        languageBox
-        #endif
-
-        displayBox
-
-        updateBox
-
-        botManagementBox
-
-        mcpServerBox
     }
 
     @ViewBuilder
@@ -411,14 +457,14 @@ struct AdvancedSettingsSheet: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
 
-                Text("換伺服器會**整頁重新載入**，等於登出重來——各服的帳號不互通。對局中不要換。")
+                Text("換服要重新登入，對局中別換")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Divider()
 
-                Toggle("啟動時不再詢問", isOn: $settings.pinMajsoulServer)
+                Toggle("不再詢問", isOn: $settings.pinMajsoulServer)
                     .accessibilityIdentifier("pin-majsoul-server-toggle")
 
                 // 這行是「取消固定」的說明：關掉開關就會恢復每次啟動詢問。
@@ -461,14 +507,7 @@ struct AdvancedSettingsSheet: View {
                 Toggle("視窗在背景時保持遊戲運作", isOn: keepAliveInBackground)
                     .accessibilityIdentifier("keep-alive-in-background-toggle")
 
-                Text("視窗被蓋住或 App 隱藏時，遊戲仍以低頻率運作，避免停止心跳而斷線；會持續耗用少量 CPU。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Divider()
-
-                Text("暱稱隱藏與牌面高亮已改由**插件**提供（工具列拼圖圖示 → 插件頁面）。裝「暱稱隱藏」「牌面變色」插件即可；底層 API 仍在，只是不再內建自動開。")
+                Text("開啟後，視窗被蓋住仍低頻運作")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -480,11 +519,14 @@ struct AdvancedSettingsSheet: View {
 
                 Toggle("顯示狀態訊息列", isOn: $settings.showStatusBar)
                     .accessibilityIdentifier("show-status-bar-toggle")
+                #endif
 
-                Text("牌桌底部那條浮動訊息（連線狀態、未自動送出的原因等）。預設關閉——它疊在牌桌上，而內容多半是一次性回饋或診斷輸出。真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。")
+                Divider()
+
+                Text("暱稱隱藏與牌面高亮改由插件提供")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                #endif
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } label: {
             Label("畫面", systemImage: "eye.slash")
@@ -522,7 +564,7 @@ struct AdvancedSettingsSheet: View {
     private var botManagementBox: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: PanelLayout.Spacing.s12) {
-                Text("Bot 會在遊戲開始時自動創建，通常不需要手動管理。")
+                Text("開局時自動建立，通常不必管")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -598,21 +640,50 @@ struct AdvancedSettingsSheet: View {
         }
     }
 
-    /// 右欄：雲端推論（唯一一組需要對外連線的設定）
+    /// AI 頁：雲端推論的開關與模型（資料外送聲明在這裡）。
     @ViewBuilder
-    private var cloudSettings: some View {
+    private var cloudInferenceBox: some View {
         @Bindable var settings = naki.settings
 
-        // ☁️ 雲端推論（docs/cloud-inference-plan.md；key 在 Keychain）
         GroupBox {
             VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 Toggle("啟用雲端推論", isOn: $settings.cloudInferenceEnabled)
                     .accessibilityIdentifier("cloud-inference-toggle")
 
-                Text("啟用後，每個決策點會把**本局至今的對局事件**（含自家手牌）上傳到下方伺服器換取決策；伺服器失敗時自動退回內建本地模型，對局不會停擺。API key 存在 Keychain，不會出現在 log 或設定檔。")
+                Text("啟用後上傳本局牌譜與手牌，失敗改用本機")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                cloudModelRow(placeholder: "四麻模型（空＝伺服器預設）",
+                              pickerLabel: "選擇四麻模型",
+                              text: $settings.cloudModel4P, game: "4p",
+                              accessibilityId: "cloud-model-4p-field")
+                cloudModelRow(placeholder: "三麻模型（空＝伺服器預設）",
+                              pickerLabel: "選擇三麻模型",
+                              text: $settings.cloudModel3P, game: "3p",
+                              accessibilityId: "cloud-model-3p-field")
+
+                // 生效條件是 `enabled && url && key` 三者，開關與 URL／金鑰分在兩頁。
+                // 兩頁都放這一行，否則「貼完 key 就走」會得到看起來已配置、行為卻是本機模型的設定
+                // （Akagi #221 的形狀）。
+                cloudEffectiveStateRow
+
+                Text("三麻提醒：本機有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的建議來源會如實顯示。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } label: {
+            Label("雲端推論", systemImage: "icloud.and.arrow.up")
+        }
+    }
+
+    /// 開發者頁：雲端伺服器、金鑰與連線測試。金鑰經 `SettingsStore` 存 Keychain。
+    @ViewBuilder
+    private var cloudAPIBox: some View {
+        @Bindable var settings = naki.settings
+
+        GroupBox {
+            VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
                 HStack {
                     TextField("伺服器 URL", text: $settings.cloudServerURL)
                         .textFieldStyle(.roundedBorder)
@@ -637,14 +708,9 @@ struct AdvancedSettingsSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("cloud-api-key-field")
 
-                cloudModelRow(placeholder: "四麻模型（空＝伺服器預設）",
-                              pickerLabel: "選擇四麻模型",
-                              text: $settings.cloudModel4P, game: "4p",
-                              accessibilityId: "cloud-model-4p-field")
-                cloudModelRow(placeholder: "三麻模型（空＝伺服器預設）",
-                              pickerLabel: "選擇三麻模型",
-                              text: $settings.cloudModel3P, game: "3p",
-                              accessibilityId: "cloud-model-3p-field")
+                Text("金鑰存在鑰匙圈，不會寫進紀錄")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack {
                     Button(cloudTestRunning ? "測試中…" : "測試連線") {
@@ -662,20 +728,12 @@ struct AdvancedSettingsSheet: View {
                     }
                 }
 
-                // 生效條件是 `enabled && url && key` 三者，而它們是三個分開的控制、
-                // 開關還排在 key 欄位**上方**。沒有這一行，「貼完 key 就走」會得到
-                // 一個看起來已配置、行為卻完全是本地模型的設定——而畫面上任何地方
-                // 都不會說。這是 Akagi #221 的形狀，Naki 當初照抄了它的判定條件。
                 cloudEffectiveStateRow
 
                 cloudKeyStatusCard
-
-                Text("三麻提醒：本地有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的決策來源會如實顯示。")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
         } label: {
-            Label("雲端推論", systemImage: "icloud.and.arrow.up")
+            Label("雲端 API", systemImage: "key")
         }
     }
 
@@ -700,7 +758,7 @@ struct AdvancedSettingsSheet: View {
                 if naki.settings.supportsAutoPlay {
                     Divider()
                     ActionDelayStepper()
-                    Text("這是縮放係數，不是固定值：實際送出仍會套用 ActionDelayModel 的隨機分布。")
+                    Text("延遲是倍率，實際送出仍會隨機浮動")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -720,14 +778,14 @@ struct AdvancedSettingsSheet: View {
         if !naki.settings.supportsAutoPlay {
             GroupBox {
                 VStack(alignment: .leading, spacing: PanelLayout.Spacing.s8) {
-                    Text("自動送出：不可用")
+                    Text("不能自動")
                         .font(.callout)
                         .fontWeight(.semibold)
                     Text(AutoPlayAvailability.autoUnavailableReasonKey)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("模式選單只提供「關 / 推薦」。")
+                    Text("模式選單只有「關」與「推薦」")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -736,7 +794,7 @@ struct AdvancedSettingsSheet: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("autoplay-unavailable-note")
-            .accessibilityLabel("自動送出不可用")
+            .accessibilityLabel("不能自動")
             .accessibilityValue(AutoPlayAvailability.autoUnavailableReasonKey)
         }
     }

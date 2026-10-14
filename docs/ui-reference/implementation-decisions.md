@@ -300,6 +300,25 @@ defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
 
 ---
 
+## 設定分頁：macOS 原生 Settings scene 實測結果（WP-F2，2026-10-14）
+
+macOS UI 測試因 Automation Mode 需要用戶驗證而無法執行（`automationmode-status.txt`）。以下是以隔離環境值啟動 Debug App 後，用 loopback HTTP 與 AX API 實測的結果，log 在 `.swfd/logs/wp-f2/`。
+
+| 項目 | 結果 |
+|---|---|
+| ⌘, 與 App 選單 | 系統提供「設定⋯ ⌘,」，按下開出設定視窗（`ax-open-menu.log`） |
+| 標題列 | 跟著選取的分頁變（`ax-tabs.log`） |
+| 分頁按鈕的 identifier | `.tabItem` 內掛的 identifier 傳不到 toolbar 按鈕，只能以標籤查 |
+| 視窗關閉後是否保留 | 保留：關閉再開都是同一個 CGWindowID；但根 View 內容重建 |
+| 關閉後再開的 Header 草稿 | 不保留；分頁停在上次選的那頁（`smoke-2.log`） |
+| 背景時 `openSettings()` | 視窗照樣開出，App 不取得前景；`GET /debug/ui` 與實際視窗一致（`smoke-4.log`） |
+| 唯一性 | 選單連按兩次、`POST settings` 連送兩次，設定視窗都只有一個（`ax-http-integration.log`） |
+| 不帶參數的 `/screenshot` | 設定視窗在前景時截到設定視窗，不是插件 sheet（`smoke-3.log`） |
+| `?window=settings` 的影像 | `cacheDisplay` 畫不出多數 SwiftUI 內容（只剩勾選框）；GroupBox 歸屬改以 `screencapture -l` 對照 |
+| 框架寫入真實偏好檔 | `NSWindow Frame com_apple_SwiftUI_Settings_window` 與 `com_apple_SwiftUI_Settings_selectedTabIndex` 都寫進 `.standard`，不經 `SettingsStore.standard`，隔離鉤子管不到 |
+
+---
+
 ## 已知遺留
 
 | 項目 | 狀態 |

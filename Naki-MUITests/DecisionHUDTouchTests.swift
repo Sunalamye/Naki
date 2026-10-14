@@ -16,11 +16,15 @@ import XCTest
 ///
 /// 單元測試與 build 都抓不到——它只在真的有觸控事件時發生，而截圖驗證不會產生觸控。
 /// 所以這條測試的價值不在斷言什麼結果，而在**真的去點**：只要 App 還在前景，就沒事。
-final class DecisionHUDTouchTests: XCTestCase {
+///
+/// 會在 WebView（雀魂頁面）上點擊、拖曳與輸入，所以預設略過；設了 `NAKI_UI_TEST_ALLOW_WEBVIEW_TOUCH=1`
+/// 才執行（UI 測試的 App 用真實的 WebKit 資料，見 `NakiMUITestCase`）。
+final class DecisionHUDTouchTests: NakiMUITestCase {
 
-    override func setUp() {
-        super.setUp()
-        continueAfterFailure = false
+    override func setUpWithError() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["NAKI_UI_TEST_ALLOW_WEBVIEW_TOUCH"] == "1",
+                          "會操作遊戲頁面，只在明確允許時執行")
+        try super.setUpWithError()
     }
 
     /// 點帳號欄位後**停住**，讓外部（`simctl io screenshot`）拍到當下畫面。
@@ -30,8 +34,7 @@ final class DecisionHUDTouchTests: XCTestCase {
     func testTapAccountFieldAndHold() throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["NAKI_HOLD_AFTER_TAP"] == "1",
                           "只在需要人工觀察畫面時執行")
-        let app = XCUIApplication()
-        app.launch()
+        launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
 
         let field = app.webViews.textFields.firstMatch
@@ -56,8 +59,7 @@ final class DecisionHUDTouchTests: XCTestCase {
     /// 改寫成 overlay 之後那行沒了。
     @MainActor
     func testTappingWebViewTextFieldDoesNotCrash() {
-        let app = XCUIApplication()
-        app.launch()
+        launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
 
         // 雀魂登入頁是 HTML 表單，等它出現。抓不到具名元素時退回座標。
@@ -90,8 +92,7 @@ final class DecisionHUDTouchTests: XCTestCase {
 
     @MainActor
     func testTappingAroundWebViewAndHUDDoesNotCrash() {
-        let app = XCUIApplication()
-        app.launch()
+        launch()
 
         // 等頁面起來。WebView 載入很慢，但這條測試不依賴內容，只要 App 在前景就能點。
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30),
@@ -155,12 +156,11 @@ final class DecisionHUDTouchTests: XCTestCase {
 /// 2026-08-09 觀察到：App 啟動約 20 秒時 HUD 還在，雀魂登入頁完全載入之後就從
 /// 截圖裡消失了。截圖看不出「不存在」與「存在但透明」的差別，所以直接問
 /// accessibility 樹。
-final class DecisionHUDPresenceTests: XCTestCase {
+final class DecisionHUDPresenceTests: NakiMUITestCase {
 
     @MainActor
     func testHUDStaysVisibleAfterWebViewFinishesLoading() {
-        let app = XCUIApplication()
-        app.launch()
+        launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
 
         // 用 HUD 內的實際文字判斷，不用容器的 identifier——SwiftUI 容器上的

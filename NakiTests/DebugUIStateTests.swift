@@ -40,6 +40,17 @@ final class UIStateTests: XCTestCase {
         }
     }
 
+    func testOnlySettingsIncrementsOpenRequest() {
+        let ui = UIState()
+        ui.apply(screen: .settings)
+        ui.apply(screen: .settings)
+        XCTAssertEqual(ui.settingsOpenRequest, 2)
+        for screen in UIState.Screen.allCases where screen != .settings {
+            ui.apply(screen: screen)
+            XCTAssertEqual(ui.settingsOpenRequest, 2, "\(screen)")
+        }
+    }
+
     func testApplyNeverTouchesGamePanel() {
         let ui = UIState()
         ui.showGamePanel = false
@@ -94,13 +105,31 @@ final class DebugUIRequestTests: XCTestCase {
         let ui = UIState()
         ui.apply(screen: .log)
         ui.showGamePanel = false
-        let payload = DebugServer.uiStatusPayload(ui: ui, language: .zhHant)
+        let payload = DebugServer.uiStatusPayload(ui: ui, language: .zhHant, settingsVisible: false)
         XCTAssertEqual(payload["showLog"] as? Bool, true)
         XCTAssertEqual(payload["showAdvancedSettings"] as? Bool, false)
         XCTAssertEqual(payload["showPlugins"] as? Bool, false)
         XCTAssertEqual(payload["showFullAutoKindChoice"] as? Bool, false)
         XCTAssertEqual(payload["showGamePanel"] as? Bool, false)
         XCTAssertEqual(payload["language"] as? String, "zh-Hant")
+        XCTAssertEqual(payload.keys.count, 7)
+    }
+
+    /// 欄位回報實際可見，不是開啟請求：旗標為 true 而視窗不可見時回 false。
+    func testSettingsFieldReportsVisibilityNotRequest() {
+        let ui = UIState()
+        ui.apply(screen: .settings)
+        XCTAssertTrue(ui.showAdvancedSettings)
+        XCTAssertEqual(DebugServer.uiStatusPayload(ui: ui, language: .zhHant, settingsVisible: false)["showAdvancedSettings"] as? Bool, false)
+        XCTAssertEqual(DebugServer.uiStatusPayload(ui: UIState(), language: .zhHant, settingsVisible: true)["showAdvancedSettings"] as? Bool, true)
+    }
+
+    /// 預設不接任何視窗（三處測試建構點共用）：可見回 nil，呼叫端改讀旗標。
+    func testUnavailableSettingsWindowHasNoVisibility() {
+        XCTAssertNil(SettingsWindowAction.unavailable.isVisible)
+        guard case .failure = SettingsWindowAction.unavailable.screenshot() else {
+            return XCTFail("沒有設定視窗時截圖應失敗")
+        }
     }
 }
 #endif

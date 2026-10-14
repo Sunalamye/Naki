@@ -171,6 +171,8 @@ struct ContentView: View {
 #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
+#else
+    @Environment(\.openSettings) private var openSettings
 #endif
 
     // sheet 上的暫存選擇：按「開始」才寫進 settings，取消就整個丟掉。
@@ -214,7 +216,7 @@ struct ContentView: View {
         Picker("模式", selection: autoPlayModeSelection) {
             // 選項來自 `AutoPlayAvailability`：不支援自動送出的路徑上，
             // 「自動」不是灰掉的按鈕而是根本不存在——灰掉的控制照樣要解釋，
-            // 而解釋放在進階設定裡（`autoPlayAvailabilityBox`）。
+            // 而解釋放在設定裡（`autoPlayAvailabilityBox`）。
             ForEach(availableAutoPlayModes, id: \.self) { mode in
                 Text(mode.pickerLabelKey).tag(mode)
             }
@@ -357,9 +359,8 @@ struct ContentView: View {
             StatusBar()
         }
         // 不放 `.animation(_:value:)`：子樹含 WebView。面板開合由工具列切換處的 `withAnimation` 驅動。
-        .sheet(isPresented: Bindable(naki.ui).showAdvancedSettings) {
-            AdvancedSettingsSheet().appLocale()
-        }
+        // 設定是 `Settings` scene：`/debug/ui` 的開啟請求在這裡轉成 `openSettings()`；主視窗不在時沒有讀者，不補開。
+        .onChange(of: naki.ui.settingsOpenRequest) { openSettings() }
         .sheet(isPresented: Bindable(naki.ui).showPlugins) {
             PluginsPageView().appLocale()
         }
@@ -375,12 +376,14 @@ struct ContentView: View {
             cloudQuickToggle
         }
 
-        // 進階設定
+        // 設定（`Settings` scene，與 ⌘, 同一個視窗）
         ToolbarItem(placement: .primaryAction) {
-            Button("進階設定", systemImage: "gearshape") { naki.ui.showAdvancedSettings = true }
-                .labelStyle(.iconOnly)
-                .help("進階設定")
-                .accessibilityIdentifier("toolbar-settings")
+            SettingsLink {
+                Label("設定", systemImage: "gearshape")
+            }
+            .labelStyle(.iconOnly)
+            .help("設定")
+            .accessibilityIdentifier("toolbar-settings")
         }
 
         // 插件（獨立頁面：清單 + 熱插拔開關 + 即時 log）
@@ -658,7 +661,7 @@ struct ContentView: View {
                     cloudQuickToggle
                         .iOSTapTarget()
 
-                    Button("進階設定", systemImage: "gearshape") { naki.ui.showAdvancedSettings = true }
+                    Button("設定", systemImage: "gearshape") { naki.ui.showAdvancedSettings = true }
                         .iOSTapTarget()
                         .accessibilityIdentifier("toolbar-settings")
 
@@ -838,7 +841,7 @@ struct ServerPickerView: View {
                 .padding(.top, PanelLayout.Spacing.s16)
                 .accessibilityIdentifier("server-picker-pin-toggle")
 
-            Text("之後可以在進階設定裡改，或取消固定。")
+            Text("之後可以在設定裡改，或取消固定。")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 340, alignment: .leading)

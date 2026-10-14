@@ -29,6 +29,8 @@ private struct ExecuteJSRequest: Codable {
 struct DebugHTTPRequest {
     let method: String
     let path: String
+    /// query string（`/screenshot?window=settings`）
+    let query: [String: String]
     /// 原始請求的行（含 header），`/mcp` 需要
     let lines: [String]
     let body: String
@@ -325,6 +327,9 @@ class DebugServer: MCPHTTPResponder {
         let rawPath = parts[1]
         // query string 要拆掉，否則 `/screenshot?mode=view` 會走到 404
         let path = rawPath.components(separatedBy: "?").first ?? rawPath
+        let query = Dictionary(
+            (URLComponents(string: rawPath)?.queryItems ?? []).map { ($0.name, $0.value ?? "") },
+            uniquingKeysWith: { _, last in last })
 
         // Origin 驗證（MCP Streamable HTTP 的 DNS rebinding 防護）。
         //
@@ -352,7 +357,7 @@ class DebugServer: MCPHTTPResponder {
         }
 
         // 路由處理：查同一份 endpoint 表（首頁也是從這份表產生的）
-        let parsed = DebugHTTPRequest(method: method, path: path, lines: lines, body: body)
+        let parsed = DebugHTTPRequest(method: method, path: path, query: query, lines: lines, body: body)
         guard let endpoint = Self.endpoints.first(where: { $0.method == method && $0.path == path }) else {
             sendResponse(connection: connection, status: 404, body: "Not Found: \(method) \(path)")
             return
@@ -389,8 +394,9 @@ class DebugServer: MCPHTTPResponder {
             server.handleJavaScript(body: req.body, connection: conn)
         },
         DebugEndpoint("GET", "/screenshot", group: "Debug",
-                      summary: "WebView 內容輸出 PNG（不需螢幕錄製權限，視窗被遮住也拍得到）") { server, _, conn in
-            server.handleScreenshot(connection: conn)
+                      summary: "WebView 內容輸出 PNG（不需螢幕錄製權限，視窗被遮住也拍得到）；"
+                          + "?window=settings 截設定視窗") { server, req, conn in
+            server.handleScreenshot(window: req.query["window"], connection: conn)
         },
         DebugEndpoint("GET", "/logs", group: "Debug",
                       summary: "讀記憶體 log（LogManager，時間排序）") { server, _, conn in
@@ -490,6 +496,7 @@ class DebugServer: MCPHTTPResponder {
     ///   "available": ["discard","riichi","chi","pon","kan","hora","kita"],
     ///   "tehai": ["1m","2m"] }
     /// ```
+    /// 回應是當下的可見值，不等待：`settings` 在下一次 View 更新才開，呼叫端以 `GET /debug/ui` 輪詢。
     private func handleDebugUIState(body: String, connection: NWConnection) {
         guard let data = body.data(using: .utf8),
               let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
@@ -506,7 +513,11 @@ class DebugServer: MCPHTTPResponder {
             return
         }
         let store = dependencies.store
-        if let screen = request.screen { dependencies.ui.apply(screen: screen) }
+        if let screen = request.screen {
+            dependencies.ui.apply(screen: screen)
+            // 設定視窗不受 `apply` 的互斥管：換到別的畫面時在回應前關掉它
+            if screen != .settings { dependencies.settingsWindow.close() }
+        }
         if let language = request.language { dependencies.settings.appLanguage = language }
 
         if let recs = json["recommendations"] as? [[String: Any]] {
@@ -559,10 +570,11 @@ class DebugServer: MCPHTTPResponder {
         return .success((screen, language))
     }
 
-    static func uiStatusPayload(ui: UIState, language: AppLanguage) -> [String: Any] {
+    /// `showAdvancedSettings` 回報設定畫面**目前可見**，不是開啟請求。
+    static func uiStatusPayload(ui: UIState, language: AppLanguage, settingsVisible: Bool) -> [String: Any] {
         ["ok": true,
          "showGamePanel": ui.showGamePanel,
-         "showAdvancedSettings": ui.showAdvancedSettings,
+         "showAdvancedSettings": settingsVisible,
          "showPlugins": ui.showPlugins,
          "showLog": ui.showLog,
          "showFullAutoKindChoice": ui.showFullAutoKindChoice,
@@ -571,7 +583,9 @@ class DebugServer: MCPHTTPResponder {
 
     private func sendDebugUIStatus(connection: NWConnection) {
         sendJSON(connection: connection,
-                 data: Self.uiStatusPayload(ui: dependencies.ui, language: dependencies.settings.appLanguage))
+                 data: Self.uiStatusPayload(
+                    ui: dependencies.ui, language: dependencies.settings.appLanguage,
+                    settingsVisible: dependencies.settingsWindow.isVisible ?? dependencies.ui.showAdvancedSettings))
     }
     #endif
 
@@ -672,17 +686,34 @@ class DebugServer: MCPHTTPResponder {
         callToolAndRespond(tool: "execute_js", arguments: ["code": code], connection: connection)
     }
 
-    private func handleScreenshot(connection: NWConnection) {
+    private func handleScreenshot(window: String?, connection: NWConnection) {
+        switch window {
+        case nil: break
+        case "settings":
+            guard dependencies.settingsWindow.isVisible == true else {
+                sendJSON(connection: connection, data: ["error": "settings window not visible"])
+                return
+            }
+            sendScreenshot(dependencies.settingsWindow.screenshot(), connection: connection)
+            return
+        default:
+            sendJSON(connection: connection, status: 400, data: ["error": "window 未知值，可用：settings"])
+            return
+        }
         Task { [weak self] in
             guard let self else { return }
-            switch await self.dependencies.captureScreenshot() {
-            case .success(let data) where !data.isEmpty:
-                self.sendBinary(connection: connection, data: data, contentType: "image/png")
-            case .success:
-                self.sendJSON(connection: connection, data: ["error": "empty snapshot"])
-            case .failure(let error):
-                self.sendJSON(connection: connection, data: ["error": error.localizedDescription])
-            }
+            self.sendScreenshot(await self.dependencies.captureScreenshot(), connection: connection)
+        }
+    }
+
+    private func sendScreenshot(_ result: Result<Data, Error>, connection: NWConnection) {
+        switch result {
+        case .success(let data) where !data.isEmpty:
+            sendBinary(connection: connection, data: data, contentType: "image/png")
+        case .success:
+            sendJSON(connection: connection, data: ["error": "empty snapshot"])
+        case .failure(let error):
+            sendJSON(connection: connection, data: ["error": error.localizedDescription])
         }
     }
 

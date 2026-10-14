@@ -342,6 +342,7 @@ final class NakiRuntime {
             settings: settings,
             executeJavaScript: javaScript,
             captureScreenshot: CaptureScreenshotAction(),
+            settingsWindow: SettingsWindowAction(),
             sendAction: send,
             startUnifiedMatch: StartUnifiedMatchAction(send: send),
             cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),

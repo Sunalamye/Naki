@@ -31,5 +31,13 @@ struct NakiApp: App {
                 Button("檢查更新…") { Task { await runtime.checkForUpdate(manual: true) } }
             }
         }
+
+        // 第二個 scene 不繼承主視窗的 environment：`\.naki` 用同一份 runtime，
+        // `.appLocale()` 寫在內層才讀得到注入的 `naki.settings`。
+        Settings {
+            AdvancedSettingsSheet()
+                .appLocale()
+                .environment(\.naki, runtime.environment)
+        }
     }
 }

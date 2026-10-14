@@ -2,7 +2,7 @@
 //  MajsoulConnectionSettingsBox.swift
 //  Naki
 //
-//  進階設定的「雀魂連線」區：自訂 User-Agent 與額外請求 header。
+//  設定「連線」頁的「雀魂連線」區：自訂 User-Agent 與額外請求 header。
 //
 
 import SwiftUI
@@ -11,14 +11,18 @@ struct MajsoulConnectionSettingsBox: View {
 
     @Environment(\.naki) private var naki
 
-    private struct HeaderRow: Identifiable {
+    struct HeaderRow: Identifiable {
         let id = UUID()
         var name: String
         var value: String
     }
 
-    /// 編輯中的草稿；按「套用並重新載入」才寫回設定。
-    @State private var rows: [HeaderRow] = []
+    static func rows(from headers: [String: String]) -> [HeaderRow] {
+        headers.sorted { $0.key < $1.key }.map { HeaderRow(name: $0.key, value: $0.value) }
+    }
+
+    /// 編輯中的草稿，由設定根 View 持有（切頁不丟）；按「套用並重新載入」才寫回設定。
+    @Binding var rows: [HeaderRow]
     @State private var defaultUserAgent: String?
 
     var body: some View {
@@ -49,6 +53,7 @@ struct MajsoulConnectionSettingsBox: View {
                     Button("新增 Header", systemImage: "plus") {
                         rows.append(HeaderRow(name: "", value: ""))
                     }
+                    .accessibilityIdentifier("add-majsoul-header-button")
                     Spacer()
                     Button("套用並重新載入") {
                         naki.actions.connectionSettings.apply(headers: rows.map { ($0.name, $0.value) })
@@ -56,12 +61,12 @@ struct MajsoulConnectionSettingsBox: View {
                         .accessibilityIdentifier("apply-majsoul-connection-button")
                 }
 
-                Text("額外 header 只套用在頁面主文件請求；User-Agent 會套用到全部請求，包含 WebSocket 握手。")
+                Text("額外 Header 只用於主頁面，User-Agent 用於全部請求")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("變更後需重新載入才會生效。對局中不要套用。")
+                Text("套用時會重新載入，對局中別套用")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -70,8 +75,6 @@ struct MajsoulConnectionSettingsBox: View {
             Label("雀魂連線", systemImage: "network")
         }
         .task {
-            rows = naki.settings.majsoulExtraHeaders.sorted { $0.key < $1.key }
-                .map { HeaderRow(name: $0.key, value: $0.value) }
             defaultUserAgent = await naki.actions.connectionSettings.defaultUserAgent()
         }
     }
@@ -81,6 +84,7 @@ struct MajsoulConnectionSettingsBox: View {
             HStack {
                 TextField("Header 名稱", text: row.name)
                     .labelsHidden()
+                    .accessibilityIdentifier("majsoul-header-name-field")
                     .autocorrectionDisabled()
                     .frame(maxWidth: 160)
                 TextField("Header 值", text: row.value)

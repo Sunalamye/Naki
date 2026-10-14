@@ -40,6 +40,9 @@ struct NakiMCPDependencies {
   /// 視窗截圖（`GET /screenshot`）
   let captureScreenshot: CaptureScreenshotAction
 
+  /// 設定視窗的可見、關閉與截圖（`/debug/ui`、`/screenshot?window=settings`）；預設不碰任何視窗
+  var settingsWindow: SettingsWindowAction = .unavailable
+
   /// 送出 Liqi REQUEST（動作類與大廳類工具的共同出口）
   let sendAction: SendActionAction
 

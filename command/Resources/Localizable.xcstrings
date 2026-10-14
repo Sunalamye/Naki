@@ -436,6 +436,35 @@
         }
       }
     },
+    "AI": {
+      "comment": "設定分頁名",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI"
+          }
+        }
+      }
+    },
     "AI 推薦": {
       "comment": "無障礙標籤",
       "localizations": {
@@ -635,35 +664,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bot 已重新同步 (Player %lld)"
-          }
-        }
-      }
-    },
-    "Bot 會在遊戲開始時自動創建，通常不需要手動管理。": {
-      "comment": "設定頁說明",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The bot is created automatically when a game starts; you usually don't need to manage it manually."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bot はゲーム開始時に自動で作成されるため、通常は手動で管理する必要はありません。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bot은 게임이 시작될 때 자동으로 생성되므로 보통 직접 관리할 필요가 없습니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bot 会在游戏开始时自动创建，通常不需要手动管理。"
           }
         }
       }
@@ -983,6 +983,441 @@
           "stringUnit": {
             "state": "translated",
             "value": "URL 格式不对"
+          }
+        }
+      }
+    },
+    "一般": {
+      "comment": "設定分頁名",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "General"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一般"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "일반"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通用"
+          }
+        }
+      }
+    },
+    "三麻提醒：本機有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的建議來源會如實顯示。": {
+      "comment": "設定頁雲端區塊提醒（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3P note: the on-device Akagi 3P engine (default strength, imitates Tenhou players) takes over, and the cloud has priority when enabled; the sidebar shows the real recommendation source."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三麻の注意：端末内の Akagi 三麻（default strength、天鳳プレイヤーを模倣）が引き継ぎ、クラウド有効時はクラウド優先です。サイドバーに実際のおすすめの情報源が表示されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3인 마작 안내: 기기 내 Akagi 3인 마작(default strength, 텐호 플레이어 모방)이 이어받으며, 클라우드가 켜져 있으면 클라우드가 우선입니다. 사이드바에 실제 추천 출처가 표시됩니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三麻提醒：本机有 Akagi 三麻（default strength，模仿天凤玩家）接手，云端启用时云端优先；侧栏的建议来源会如实显示。"
+          }
+        }
+      }
+    },
+    "不再詢問": {
+      "comment": "設定頁 Toggle（雀魂伺服器）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Don't ask again"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今後確認しない"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "다시 묻지 않기"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不再询问"
+          }
+        }
+      }
+    },
+    "不能自動": {
+      "comment": "設定頁不可用說明標題／a11y 標籤",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto unavailable"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動は使用不可"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "자동 사용 불가"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不能自动"
+          }
+        }
+      }
+    },
+    "之後可以在設定裡改，或取消固定。": {
+      "comment": "伺服器選擇說明",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can change this later in Settings, or unpin it."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あとで設定から変更または固定の解除ができます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "나중에 설정에서 변경하거나 고정을 해제할 수 있습니다."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "之后可以在设置里修改，或取消固定。"
+          }
+        }
+      }
+    },
+    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本機模型）": {
+      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the on-device model)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局は端末内のモデルのままです）"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 기기 내 모델을 사용합니다)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本机模型）"
+          }
+        }
+      }
+    },
+    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本機模型）——可用模型欄旁的箭頭直接選": {
+      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單（機器翻譯，未經母語校對）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the on-device model) — pick one with the arrow next to the model field"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局は端末内のモデルのままです）——モデル欄の横の矢印から選べます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 기기 내 모델을 사용합니다)——모델 입력란 옆의 화살표로 바로 선택하세요"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本机模型）——可直接用模型栏旁的箭头选择"
+          }
+        }
+      }
+    },
+    "先到「開發者」按「測試連線」": {
+      "comment": "模型欄下拉 tooltip（停用時）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go to \"Developer\" and click \"Test Connection\" first"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先に「開発者」で「接続テスト」を押してください"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "먼저 \"개발자\"에서 \"연결 테스트\"를 누르세요"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先到“开发者”点击“测试连接”"
+          }
+        }
+      }
+    },
+    "啟用後上傳本局牌譜與手牌，失敗改用本機": {
+      "comment": "設定頁說明句（雲端推論；資料外送聲明）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When enabled, this round's game record and your hand are uploaded; on failure the on-device model is used"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効にすると、この局の牌譜と手牌をアップロードします。失敗時は端末内のモデルを使います"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "켜면 이번 국의 패보와 손패를 업로드하며, 실패하면 기기 내 모델을 사용합니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用后上传本局牌谱与手牌，失败改用本机"
+          }
+        }
+      }
+    },
+    "套用時會重新載入，對局中別套用": {
+      "comment": "設定頁說明句（雀魂連線）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applying reloads the page; don't apply during a game"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "適用するとページを再読み込みします。対局中は適用しないでください"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "적용하면 페이지를 다시 로드합니다. 대국 중에는 적용하지 마세요"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用时会重新加载，对局中别应用"
+          }
+        }
+      }
+    },
+    "延遲是倍率，實際送出仍會隨機浮動": {
+      "comment": "設定頁說明句（自動操作）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The delay is a multiplier; actual sends still vary randomly"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "遅延は倍率で、実際の送信はランダムに揺らぎます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지연은 배율이며 실제 전송은 무작위로 달라집니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "延迟是倍率，实际发送仍会随机浮动"
+          }
+        }
+      }
+    },
+    "換服要重新登入，對局中別換": {
+      "comment": "設定頁說明句（雀魂伺服器）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switching servers requires signing in again; don't switch during a game"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サーバーを変えると再ログインが必要です。対局中は変えないでください"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "서버를 바꾸면 다시 로그인해야 합니다. 대국 중에는 바꾸지 마세요"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "换服需要重新登录，对局中别换"
+          }
+        }
+      }
+    },
+    "暱稱隱藏與牌面高亮改由插件提供": {
+      "comment": "設定頁提示（畫面框最下方）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nickname hiding and tile highlighting are now provided by plugins"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ニックネーム非表示と牌のハイライトはプラグインで提供されます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "닉네임 숨기기와 패 강조는 플러그인으로 제공됩니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "昵称隐藏与牌面高亮改由插件提供"
+          }
+        }
+      }
+    },
+    "模式選單只有「關」與「推薦」": {
+      "comment": "設定頁說明句（自動打牌不支援時）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The mode menu only has \"Off\" and \"Recommend\""
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "モードメニューは「オフ」と「おすすめ」のみです"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "모드 메뉴에는 \"끔\"과 \"추천\"만 있습니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "模式菜单只有“关”与“推荐”"
+          }
+        }
+      }
+    },
+    "連線": {
+      "comment": "設定分頁名",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接続"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "连接"
           }
         }
       }
@@ -1827,31 +2262,147 @@
         }
       }
     },
-    "三麻提醒：本地有 Akagi 三麻（default strength，模仿天鳳人類）接手，雲端啟用時雲端優先；側欄的決策來源會如實顯示。": {
-      "comment": "設定頁雲端區塊提醒（機器翻譯，未經母語校對）",
+    "金鑰存在鑰匙圈，不會寫進紀錄": {
+      "comment": "設定頁說明句（雲端 API）",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "3P note: the local Akagi 3P engine (default strength, imitates Tenhou players) takes over, and the cloud has priority when enabled; the sidebar shows the real decision source."
+            "value": "The key is stored in the Keychain and never written to logs"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻の注意：ローカルの Akagi 三麻（default strength、天鳳プレイヤーを模倣）が引き継ぎ、クラウド有効時はクラウド優先です。サイドバーに実際の判断元が表示されます。"
+            "value": "キーはキーチェーンに保存され、ログには書き込まれません"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "3인 마작 안내: 로컬 Akagi 3인 마작(default strength, 텐호 플레이어 모방)이 이어받으며, 클라우드가 켜져 있으면 클라우드가 우선입니다. 사이드바에 실제 결정 출처가 표시됩니다."
+            "value": "키는 키체인에 저장되며 로그에 기록되지 않습니다"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "三麻提醒：本地有 Akagi 三麻（default strength，模仿天凤玩家）接手，云端启用时云端优先；侧栏的决策来源会如实显示。"
+            "value": "密钥存放在钥匙串，不会写进日志"
+          }
+        }
+      }
+    },
+    "開啟後，視窗被蓋住仍低頻運作": {
+      "comment": "設定頁說明句（畫面）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When on, the game keeps running at a low rate while the window is covered"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オンにすると、ウインドウが隠れても低頻度で動作します"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "켜면 창이 가려져도 낮은 빈도로 계속 실행됩니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后，窗口被遮挡仍低频运行"
+          }
+        }
+      }
+    },
+    "開局時自動建立，通常不必管": {
+      "comment": "設定頁說明句（Bot 管理）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created automatically when a game starts; usually nothing to do"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "対局開始時に自動で作成されるため、通常は操作不要です"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "대국이 시작될 때 자동으로 만들어지므로 보통 신경 쓸 필요가 없습니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开局时自动建立，通常不必管"
+          }
+        }
+      }
+    },
+    "開發者": {
+      "comment": "設定分頁名",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Developer"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開発者"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "개발자"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开发者"
+          }
+        }
+      }
+    },
+    "雲端 API": {
+      "comment": "設定 GroupBox 標題（開發者頁）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud API"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クラウド API"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "클라우드 API"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端 API"
           }
         }
       }
@@ -2084,35 +2635,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "中"
-          }
-        }
-      }
-    },
-    "之後可以在進階設定裡改，或取消固定。": {
-      "comment": "伺服器選擇說明",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "You can change this later in Advanced Settings, or unpin it."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "あとで詳細設定から変更または固定の解除ができます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "나중에 고급 설정에서 변경하거나 고정을 해제할 수 있습니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "之后可以在高级设置里修改，或取消固定。"
           }
         }
       }
@@ -2703,35 +3225,6 @@
         }
       }
     },
-    "伺服器預設（清空）": {
-      "comment": "模型欄選單項",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Server default (clear)"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "サーバーの既定値（クリア）"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "서버 기본값(비우기)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "服务器默认（清空）"
-          }
-        }
-      }
-    },
     "使用中": {
       "comment": "金鑰狀態卡徽章",
       "localizations": {
@@ -2960,35 +3453,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "允许插件发送游戏操作？"
-          }
-        }
-      }
-    },
-    "先按「測試連線」取得模型清單": {
-      "comment": "模型欄下拉 tooltip（停用時）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Click \"Test Connection\" first to get the model list"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "先に「接続テスト」を押してモデル一覧を取得してください"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "먼저 \"연결 테스트\"를 눌러 모델 목록을 가져오세요"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请先点击“测试连接”获取模型列表"
           }
         }
       }
@@ -4181,35 +4645,6 @@
         }
       }
     },
-    "啟動時不再詢問": {
-      "comment": "設定頁 Toggle",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Don't ask at launch"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "起動時に確認しない"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "시작할 때 묻지 않기"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "启动时不再询问"
-          }
-        }
-      }
-    },
     "啟用": {
       "comment": "插件詳情 Toggle",
       "localizations": {
@@ -4264,35 +4699,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "启用后修改设置会立即生效（热重载）。"
-          }
-        }
-      }
-    },
-    "啟用後，每個決策點會把**本局至今的對局事件**（含自家手牌）上傳到下方伺服器換取決策；伺服器失敗時自動退回內建本地模型，對局不會停擺。API key 存在 Keychain，不會出現在 log 或設定檔。": {
-      "comment": "雲端推論說明（Markdown 粗體；隱私重點）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "When enabled, at each decision point **the game events so far in this round (including your own hand)** are uploaded to the server below to get a decision. If the server fails, the app falls back to the built-in local model automatically, so the game never stalls. The API key is stored in the Keychain and never appears in logs or settings files."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "有効にすると、各判断の場面で**この局のここまでの対局イベント**（自分の手牌を含む）を下記のサーバーにアップロードして判断を取得します。サーバーが失敗した場合は自動的に内蔵のローカルモデルに戻るため、対局が止まることはありません。API キーは Keychain に保存され、ログや設定ファイルには現れません。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "사용하면 각 판단 시점마다 **이번 국의 지금까지 대국 이벤트**(내 손패 포함)를 아래 서버에 업로드해 판단을 받아옵니다. 서버가 실패하면 자동으로 내장 로컬 모델로 돌아가므로 대국이 멈추지 않습니다. API 키는 Keychain에 저장되며 로그나 설정 파일에는 나타나지 않습니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "启用后，每个决策点会把**本局至今的对局事件**（含自家手牌）上传到下方服务器以换取决策；服务器失败时自动退回内置本地模型，对局不会停摆。API key 存放在 Keychain，不会出现在日志或设置文件中。"
           }
         }
       }
@@ -5774,6 +6180,35 @@
         }
       }
     },
+    "雲端推論尚未生效，仍在用內建本機模型。還缺：%@": {
+      "comment": "設定頁生效狀態列；%@ 為已本地化的缺項清單",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud inference is not active yet; still using the built-in on-device model. Missing: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クラウド推論はまだ有効ではなく、内蔵の端末内モデルを使用中です。不足: %@"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "클라우드 추론이 아직 적용되지 않아 내장 기기 내 모델을 사용 중입니다. 부족한 항목: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "云端推理尚未生效，仍在使用内置本机模型。还缺：%@"
+          }
+        }
+      }
+    },
     "預覽": {
       "comment": "插件匯入預覽按鈕",
       "localizations": {
@@ -6062,35 +6497,6 @@
         }
       }
     },
-    "換伺服器會**整頁重新載入**，等於登出重來——各服的帳號不互通。對局中不要換。": {
-      "comment": "設定頁警告（Markdown 粗體）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switching servers **reloads the whole page**, which signs you out — accounts are not shared between servers. Don't switch during a game."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "サーバーを切り替えると**ページ全体が再読み込み**され、ログアウトされます——サーバー間でアカウントは共通ではありません。対局中は切り替えないでください。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "서버를 바꾸면 **페이지 전체가 다시 로드**되어 로그아웃됩니다——서버 간에 계정이 호환되지 않습니다. 대국 중에는 바꾸지 마세요."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换服务器会**整页重新加载**，相当于退出登录重来——各服务器的账号互不通用。对局中请勿切换。"
-          }
-        }
-      }
-    },
     "搜尋…": {
       "comment": "日誌搜尋框 placeholder",
       "localizations": {
@@ -6290,35 +6696,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "日志分类"
-          }
-        }
-      }
-    },
-    "暱稱隱藏與牌面高亮已改由**插件**提供（工具列拼圖圖示 → 插件頁面）。裝「暱稱隱藏」「牌面變色」插件即可；底層 API 仍在，只是不再內建自動開。": {
-      "comment": "設定頁說明（Markdown 粗體）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nickname hiding and tile highlighting are now provided by **plugins** (puzzle icon in the toolbar → Plugins page). Just install the \"Hide Nicknames\" and \"Tile Recolor\" plugins; the underlying API is still there, it's just no longer enabled automatically."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ニックネームの非表示と牌のハイライトは**プラグイン**で提供されるようになりました（ツールバーのパズルアイコン → プラグインページ）。「ニックネーム非表示」「牌の色変更」プラグインを入れてください。基盤の API は残っており、組み込みで自動的にオンにならなくなっただけです。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "닉네임 숨기기와 패 강조는 이제 **플러그인**으로 제공됩니다(도구 모음의 퍼즐 아이콘 → 플러그인 페이지). \"닉네임 숨기기\"와 \"패 색 변경\" 플러그인을 설치하세요. 내부 API는 그대로 있으며, 더 이상 기본으로 자동 켜지지 않을 뿐입니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "昵称隐藏与牌面高亮已改由**插件**提供（工具栏拼图图标 → 插件页面）。安装“昵称隐藏”“牌面变色”插件即可；底层 API 仍在，只是不再内置自动开启。"
           }
         }
       }
@@ -6986,35 +7363,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "模式已变更: %@, 推荐数: %lld"
-          }
-        }
-      }
-    },
-    "模式選單只提供「關 / 推薦」。": {
-      "comment": "設定頁不可用說明",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The mode menu only offers \"Off / Recommend\"."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "モードメニューには「オフ / おすすめ」のみ表示されます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "모드 메뉴에는 \"끔 / 추천\"만 표시됩니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "模式菜单只提供“关 / 推荐”。"
           }
         }
       }
@@ -7798,35 +8146,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "牌局信息"
-          }
-        }
-      }
-    },
-    "牌桌底部那條浮動訊息（連線狀態、未自動送出的原因等）。預設關閉——它疊在牌桌上，而內容多半是一次性回饋或診斷輸出。真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。": {
-      "comment": "設定頁說明（iOS）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The floating message at the bottom of the table (connection status, reasons why nothing was auto-sent, etc.). Off by default — it overlaps the table and its content is mostly one-off feedback or diagnostics. Errors that won't fix themselves use the top banner and are not affected by this switch."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "卓の下部に浮かぶメッセージ（接続状態、自動送信されなかった理由など）です。既定ではオフです——卓の上に重なり、内容も多くは一度きりのフィードバックや診断出力だからです。自然に直らないエラーは上部のバナーに表示され、このスイッチの影響を受けません。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "테이블 하단에 떠 있는 메시지입니다(연결 상태, 자동 전송되지 않은 이유 등). 기본값은 꺼짐입니다——테이블 위에 겹쳐 표시되고 내용도 대부분 일회성 피드백이나 진단 출력이기 때문입니다. 저절로 해결되지 않는 오류는 상단 배너에 표시되며 이 스위치의 영향을 받지 않습니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "牌桌底部那条浮动消息（连接状态、未自动发送的原因等）。默认关闭——它叠在牌桌上，而内容多半是一次性反馈或诊断输出。真正不会自行恢复的错误走顶部横幅，不受此开关影响。"
           }
         }
       }
@@ -8699,64 +9018,6 @@
         }
       }
     },
-    "自動送出不可用": {
-      "comment": "a11y 標籤",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Auto-send unavailable"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自動送信は利用できません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "자동 전송 사용 불가"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自动发送不可用"
-          }
-        }
-      }
-    },
-    "自動送出：不可用": {
-      "comment": "設定頁不可用說明標題",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Auto-send: unavailable"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自動送信: 利用不可"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "자동 전송: 사용 불가"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自动发送：不可用"
-          }
-        }
-      }
-    },
     "落地路徑不在插件目錄底下": {
       "comment": "manifest 無效的細節",
       "localizations": {
@@ -8931,37 +9192,8 @@
         }
       }
     },
-    "視窗被蓋住或 App 隱藏時，遊戲仍以低頻率運作，避免停止心跳而斷線；會持續耗用少量 CPU。": {
-      "comment": "設定頁說明",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "When the window is covered or the app is hidden, the game keeps running at a low rate so the heartbeat doesn't stop and the connection isn't dropped; this uses a small amount of CPU continuously."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ウインドウが隠れたりアプリが非表示になっても、ハートビートが止まって切断されないよう、ゲームを低頻度で動作させ続けます。少量の CPU を継続的に消費します。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "창이 가려지거나 앱이 숨겨져도 하트비트가 멈춰 연결이 끊기지 않도록 게임을 낮은 빈도로 계속 실행합니다. CPU를 조금씩 계속 사용합니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "窗口被遮挡或 App 隐藏时，游戏仍以低频率运行，避免心跳停止而断线；会持续消耗少量 CPU。"
-          }
-        }
-      }
-    },
     "設定": {
-      "comment": "插件詳情小標",
+      "comment": "插件詳情小標／工具列設定鈕 help／iOS 設定導覽列",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -9306,35 +9538,6 @@
         }
       }
     },
-    "這是縮放係數，不是固定值：實際送出仍會套用 ActionDelayModel 的隨機分布。": {
-      "comment": "設定頁延遲說明",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This is a scale factor, not a fixed value: actual sends still follow the random distribution of ActionDelayModel."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "これは固定値ではなく倍率です。実際の送信には引き続き ActionDelayModel のランダム分布が適用されます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "이 값은 고정값이 아니라 배율입니다. 실제 전송에는 여전히 ActionDelayModel의 무작위 분포가 적용됩니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "这是缩放系数，不是固定值：实际发送仍会套用 ActionDelayModel 的随机分布。"
-          }
-        }
-      }
-    },
     "進入遊戲": {
       "comment": "伺服器選擇確認鈕",
       "localizations": {
@@ -9389,35 +9592,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "入口点读不到：%@"
-          }
-        }
-      }
-    },
-    "進階設定": {
-      "comment": "工具列按鈕／設定頁標題／a11y",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Advanced Settings"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "詳細設定"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "고급 설정"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "高级设置"
           }
         }
       }
@@ -10207,7 +10381,7 @@
       }
     },
     "還原預設": {
-      "comment": "User-Agent 還原按鈕",
+      "comment": "User-Agent 還原按鈕／模型欄選單項",
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -10382,66 +10556,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "应用并重新加载"
-          }
-        }
-      }
-    },
-    "額外 header 只套用在頁面主文件請求；User-Agent 會套用到全部請求，包含 WebSocket 握手。": {
-      "comment": "設定頁說明：WebKit 限制",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Extra headers apply only to the page's main document request. The User-Agent applies to all requests, including the WebSocket handshake."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "追加ヘッダーはページのメインドキュメントのリクエストにのみ適用されます。User-Agent は WebSocket ハンドシェイクを含むすべてのリクエストに適用されます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "추가 헤더는 페이지의 기본 문서 요청에만 적용됩니다. User-Agent는 WebSocket 핸드셰이크를 포함한 모든 요청에 적용됩니다."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "额外 header 仅应用于页面主文档请求；User-Agent 会应用于所有请求，包括 WebSocket 握手。"
-          }
-        }
-      }
-    },
-    "變更後需重新載入才會生效。對局中不要套用。": {
-      "comment": "設定頁說明：重載才生效",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changes take effect after a reload. Don't apply during a game."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "変更は再読み込み後に有効になります。対局中は適用しないでください。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "변경 사항은 다시 로드한 뒤에 적용됩니다. 대국 중에는 적용하지 마세요."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "更改需重新加载后才会生效。对局中请勿应用。"
           }
         }
       }
@@ -10763,35 +10877,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "云端推理 (3P) ⚠️ 未生效，无推理"
-          }
-        }
-      }
-    },
-    "雲端推論尚未生效，仍在用內建本地模型。還缺：%@": {
-      "comment": "設定頁生效狀態列；%@ 為已本地化的缺項清單",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cloud inference is not active yet; still using the built-in local model. Missing: %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "クラウド推論はまだ有効ではなく、内蔵のローカルモデルを使用中です。不足: %@"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "클라우드 추론이 아직 적용되지 않아 내장 로컬 모델을 사용 중입니다. 부족한 항목: %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "云端推理尚未生效，仍在使用内置本地模型。还缺：%@"
           }
         }
       }
@@ -11173,6 +11258,35 @@
         }
       }
     },
+    "額外 Header 只用於主頁面，User-Agent 用於全部請求": {
+      "comment": "設定頁提示（雀魂連線，新增 Header 下方）",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra headers apply only to the main page; the User-Agent applies to all requests"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追加ヘッダーはメインページのみ、User-Agent はすべてのリクエストに適用されます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "추가 헤더는 메인 페이지에만, User-Agent는 모든 요청에 적용됩니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额外 Header 只用于主页面，User-Agent 用于全部请求"
+          }
+        }
+      }
+    },
     "顯示日誌": {
       "comment": "iOS 控制列 a11y",
       "localizations": {
@@ -11372,64 +11486,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld 次/分・top-%lld"
-          }
-        }
-      }
-    },
-    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本地模型）": {
-      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單；由既有三段譯文組合（機器翻譯，未經母語校對）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the local model)"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局はローカルモデルのままです）"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本地模型）"
-          }
-        }
-      }
-    },
-    "伺服器 %@；可用模型：%@（但開關未開，對局仍走本地模型）——可用模型欄旁的箭頭直接選": {
-      "comment": "測試連線結果；%1$@ 為狀態、%2$@ 為模型清單；由既有三段譯文組合（機器翻譯，未經母語校對）",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Server %1$@; available models: %2$@ (but the switch is off, so games still use the local model) — pick one with the arrow next to the model field"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "サーバー %1$@、利用可能なモデル: %2$@（ただしスイッチがオフのため、対局はローカルモデルのままです）——モデル欄の横の矢印から選べます"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "서버 %1$@; 사용 가능한 모델: %2$@ (하지만 스위치가 꺼져 있어 대국은 계속 로컬 모델을 사용합니다)——모델 입력란 옆의 화살표로 바로 선택하세요"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "服务器 %1$@；可用模型：%2$@（但开关未开，对局仍使用本地模型）——可直接用模型栏旁的箭头选择"
           }
         }
       }

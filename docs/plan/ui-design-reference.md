@@ -627,7 +627,7 @@ Settings {
 
 **截圖**：
 
-- `GET /screenshot` 不帶參數時行為不變：`mainWindow ?? keyWindow ?? 第一個可見視窗`，有 sheet 截 sheet。設定視窗開在背景時也不會被截到。
+- `GET /screenshot` 不帶參數時行為不變：`mainWindow ?? keyWindow ?? 第一個可見視窗`，有 sheet 截 sheet。設定視窗開在背景時也不會被截到。**WP-F2 實測**：設定視窗在前景（成為 main／key window）時，不帶參數截到的是設定視窗，與 `?window=settings` 位元組相同；關掉設定視窗後才截到插件 sheet（`smoke-3.log`）。選窗邏輯依派工不改。
 - `GET /screenshot?window=settings`（新增）：截設定視窗的 `contentView`；設定視窗不可見時回 `{"error":"settings window not visible"}`。iOS 回同一錯誤（設定是 sheet，照不帶參數的路徑截）。
 - 現在路由會丟掉 query（`DebugServer.swift` 拆 `?` 的那一行）。WP-F 在 `DebugHTTPRequest` 加 `query` 欄位傳給 handler。
 - 這是 HTTP `/screenshot` 的能力；MCP 層沒有截圖工具（`command/Services/MCP` 只有註解提到 `/screenshot`）。
@@ -694,7 +694,7 @@ SettingsStore（cloudInferenceEnabled、cloudServerURL、cloudAPIKey→CloudKeyS
 - 現況 `MajsoulConnectionSettingsBox` 以 `@State rows` 保存未套用的 Header 編輯，按「套用並重新載入」才寫回；它的 `.task` 每次執行都從 `SettingsStore` 覆寫 `rows`。切頁若讓這個 View 重建或 `.task` 重跑，未套用的輸入會消失。`TabView` 切頁是否重建分頁內容**未實測**，設計不依賴它。
 - 修法：`rows` 移到設定根 View 的 `@State`，以 `Binding` 傳給 `MajsoulConnectionSettingsBox`。初始化放在根 View 的 `.task`：設定根 View 每次出現時從 `SettingsStore` 載入一次。分頁 View 不再載入或覆寫草稿。`defaultUserAgent` 是唯讀快取，留在原處。
 - 草稿是 §8.6 第 1 條「不得持有設定值副本」的明確例外：它是使用者尚未送出的輸入，不是設定值的鏡像；寫回仍只經「套用並重新載入」。
-- **推測**：macOS 關閉設定視窗後根 View 可能被保留，再開時不觸發 `.task`，草稿會留著上次未套用的內容。WP-F 實測並記錄；若保留，維持此行為（未套用的輸入不丟），不另加清除。
+- **推測**：macOS 關閉設定視窗後根 View 可能被保留，再開時不觸發 `.task`，草稿會留著上次未套用的內容。WP-F 實測並記錄；若保留，維持此行為（未套用的輸入不丟），不另加清除。**WP-F2 實測**：推翻。關閉再開後草稿列不在（根 View 重建、`.task` 重新載入）；分頁停在上次選的那頁（`smoke-2.log`）。
 
 ### 8.4 說明句定稿
 
@@ -830,7 +830,7 @@ xcodebuild build-for-testing -project Naki.xcodeproj -scheme Naki-M -configurati
     - Header 草稿：輸入 Header → 切到其他頁 → 切回 → 輸入仍在（唯讀斷言，不按「套用並重新載入」）。
     - 雲端跨頁：開關關閉、缺 key 兩種狀態下，AI 頁與開發者頁的生效狀態列文字相同；查詢先限定在 `settings-page-*` 容器內。
   - `Naki-MUITests`（iOS 模擬器，同樣帶隔離鉤子）：「開發者」預設折疊；展開後關閉 sheet 再開，回到折疊且捲到頂端；展開後兩個 `cloud-effective-state` 以容器區分。
-  - 新增 identifier（**提議**）：`settings-tab-general`、`settings-tab-connection`、`settings-tab-ai`、`settings-tab-developer`、`settings-page-general`、`settings-page-connection`、`settings-page-ai`、`settings-page-developer`、`settings-developer-disclosure`。
+  - 新增 identifier（**提議**）：`settings-tab-general`、`settings-tab-connection`、`settings-tab-ai`、`settings-tab-developer`（**WP-F2 實測**：`.tabItem` 內的 identifier 傳不到 toolbar 分頁按鈕，未採用，UI 測試改以標籤查詢）、`settings-page-general`、`settings-page-connection`、`settings-page-ai`、`settings-page-developer`、`settings-developer-disclosure`。
   - `NakiUITests`、`Naki-MUITests` 是同步目錄，在既有目錄新增測試檔不需登記 pbxproj。
 - 文件：本節；`docs/ui-reference/implementation-decisions.md` 補一條「設定分頁：macOS 原生 Settings scene 實測結果」，記下設定視窗關閉後是否被保留、背景時 `openSettings()` 的結果、關閉後再開時 Header 草稿是否保留、smoke 結果。
 - 驗收：
@@ -849,7 +849,7 @@ xcodebuild test -project Naki.xcodeproj -scheme Naki-M -configuration Debug \
   - Debug 端點 smoke（只在 Debug build，log 放主 repo 的 `.swfd/logs/wp-f/`）：
     1. App 在前景，`POST /debug/ui` 帶 `{"screen":"settings"}`，之後 `GET /debug/ui` 輪詢到 `showAdvancedSettings` 為 true。必要證據擇一：`NakiUITests` 的 `XCUIApplication().windows` 斷言，或 `GET /debug/ui` 的可見值。不依賴影像內容判定。
     2. 對設定視窗按 ⌘W；`GET /debug/ui` 輪詢到 false。再送一次 `{"screen":"settings"}` 能重新開出。
-    3. 順序：先 `POST /debug/ui {"screen":"plugins"}` 讓主視窗開插件 sheet，再按 ⌘, 開設定（不經 `apply`，兩者並存）。此時 `GET /screenshot` 不帶參數截到插件 sheet，`?window=settings` 截到設定視窗的分頁內容。關閉設定視窗後，`?window=settings` 回錯誤。
+    3. 順序：先 `POST /debug/ui {"screen":"plugins"}` 讓主視窗開插件 sheet，再按 ⌘, 開設定（不經 `apply`，兩者並存）。此時 `GET /screenshot` 不帶參數截到插件 sheet，`?window=settings` 截到設定視窗的分頁內容（**WP-F2 實測**：前者推翻，見 §8.2「截圖」）。關閉設定視窗後，`?window=settings` 回錯誤。
     4. App 在背景時送 `{"screen":"settings"}`：通過標準是 `GET /debug/ui` 的值與實際視窗一致，不要求開得出來。
   - 視覺驗收：分頁內容以 `GET /screenshot?window=settings` 截圖為主；分頁列與標題列以 `NakiUITests` 的 Accessibility 斷言為準（§8.2 視覺驗證分工）。
   - MCP 層沒有開設定頁或截圖的工具（`command/Services/MCP` 內 grep 不到 `apply(screen`），所以 smoke 只走 HTTP 端點。
