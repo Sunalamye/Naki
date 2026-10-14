@@ -50,6 +50,46 @@ final class LiqiParserLearningTests: XCTestCase {
         XCTAssertEqual(ObservedMatchSids.shared.observations[0].is3P, true)
     }
 
+    /// BR-01：遊戲自己的 startUnifiedMatch 被伺服器拒絕 → 不會有對局開出來，之後的友人房不得回填到該 sid
+    func testGameSentStartUnifiedMatchErrorResponseClearsAwaitingGameKind() async {
+        isolateSharedObservedMatchSids(self)
+        let parser = LiqiParser()
+        let start = LiqiRequestBuilder.startUnifiedMatch(matchSid: "ranked")
+        _ = parser.parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: 142)))
+        let error = LiqiEncoder.encodeLengthDelimited(field: 1, bytes: LiqiEncoder.encodeVarintField(field: 1, value: 1303))
+        _ = parser.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: 142, method: "", payload: error)))
+
+        ObservedMatchSids.shared.gameDidStart(is3P: true)
+        XCTAssertNil(ObservedMatchSids.shared.observations[0].is3P)
+    }
+
+    func testGameSentStartUnifiedMatchSuccessResponseKeepsAwaitingGameKind() async {
+        isolateSharedObservedMatchSids(self)
+        let parser = LiqiParser()
+        let start = LiqiRequestBuilder.startUnifiedMatch(matchSid: "ranked")
+        _ = parser.parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: 142)))
+        _ = parser.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: 142, method: "", payload: [])))
+
+        ObservedMatchSids.shared.gameDidStart(is3P: true)
+        XCTAssertEqual(ObservedMatchSids.shared.observations[0].is3P, true)
+    }
+
+    /// 成功回應帶空 error 或 code=0：不是被拒，不得清除
+    func testGameSentStartUnifiedMatchEmptyOrZeroErrorKeepsAwaitingGameKind() async {
+        let zeroCode = LiqiEncoder.encodeLengthDelimited(field: 1, bytes: LiqiEncoder.encodeVarintField(field: 1, value: 0))
+        let empty = LiqiEncoder.encodeLengthDelimited(field: 1, bytes: [])
+        for payload in [zeroCode, empty] {
+            isolateSharedObservedMatchSids(self)
+            let parser = LiqiParser()
+            let start = LiqiRequestBuilder.startUnifiedMatch(matchSid: "ranked")
+            _ = parser.parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: 142)))
+            _ = parser.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: 142, method: "", payload: payload)))
+
+            ObservedMatchSids.shared.gameDidStart(is3P: true)
+            XCTAssertEqual(ObservedMatchSids.shared.observations[0].is3P, true)
+        }
+    }
+
     // MARK: trace 遮蔽
 
     private func traceLog() -> String {

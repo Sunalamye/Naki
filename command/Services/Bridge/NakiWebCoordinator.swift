@@ -301,6 +301,7 @@ extension NakiWebCoordinator: WebNavigationLifecycle {
     /// 狀態列由 `WebSession` 自己處理；這裡只管牌局側。
     func webNavigationDidStart() {
         websocketHandler.fullReset()
+        ObservedMatchSids.shared.cancelAwaitingGameKind()  // 重載後排隊作廢；留著會把下一局友人房的人數標到該 sid
         eventStream.endGame()
         deleteBot()   // 手牌／推薦／botStatus 一併清空
         store.isConnected = false

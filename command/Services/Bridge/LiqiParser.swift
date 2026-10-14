@@ -264,6 +264,15 @@ class LiqiParser {
             result["data"] = parsedData
         }
 
+        // 遊戲自己的段位場請求被拒（`Error.code` 非 0）：不會有對局開出來。空 error 或 code 0 不算被拒
+        if methodName == LiqiRequestBuilder.startUnifiedMatchMethod, !Self.isNakiSent(msgId: msgId) {
+            let record = LiqiResponseRecord(msgId: msgId, method: methodName,
+                                            fields: result["data"] as? [String: Any] ?? [:], receivedAt: Date())
+            if let code = record.errorCode, code != 0 {
+                ObservedMatchSids.shared.cancelAwaitingGameKind()
+            }
+        }
+
         return result
     }
 

@@ -62,4 +62,15 @@ final class NakiWebCoordinatorTests: XCTestCase {
         XCTAssertEqual(errorLogCount(a), 1, "第二次同樣的錯誤不再記")
         XCTAssertEqual(errorLogCount(b), 1, "換了錯誤訊息要再記")
     }
+
+    /// BR-01：排隊中重載頁面 → 待回填的 sid 作廢；之後的友人房 start_game 不得改寫段位場 sid 的人數
+    func testNavigationStartClearsAwaitingGameKind() {
+        isolateSharedObservedMatchSids(self)
+        ObservedMatchSids.shared.record(sid: "ranked", clientVersionString: "v1")
+
+        coordinator.webNavigationDidStart()
+        ObservedMatchSids.shared.gameDidStart(is3P: true)
+
+        XCTAssertNil(ObservedMatchSids.shared.observations[0].is3P)
+    }
 }
