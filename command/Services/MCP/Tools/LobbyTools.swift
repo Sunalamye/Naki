@@ -37,7 +37,7 @@ struct LobbyStatusTool: MCPTool {
         """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)，0 = 不等）")
         ],
         required: []
     )
@@ -52,7 +52,7 @@ struct LobbyStatusTool: MCPTool {
         let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.fetchGamingInfo()
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
@@ -97,7 +97,7 @@ struct StartUnifiedMatchTool: MCPTool {
         properties: [
             "match_sid": .string("匹配 sid 字串（不填則用 lobby_match_sids 最近觀察到的一組）"),
             "client_version_string": .string("客戶端版本字串（不填則沿用該次觀察到的值）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -128,7 +128,7 @@ struct StartUnifiedMatchTool: MCPTool {
         let result = await nakiContext.startUnifiedMatch(
             matchSid: matchSid,
             clientVersionString: clientVersion,
-            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         context.log("🎮 lobby_start_unified_match match_sid=\(matchSid)")
         return LiqiToolResult.dictionaryLoggingRejection(
             result.outcome, spec: result.spec,
@@ -148,7 +148,7 @@ struct CancelUnifiedMatchTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "match_sid": .string("要取消的匹配 sid（不填則用最近觀察到的一組）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -161,7 +161,6 @@ struct CancelUnifiedMatchTool: MCPTool {
 
     func execute(arguments: [String: Any]) async throws -> Any {
         let nakiContext = try context.naki()
-        // `??` 右側是 autoclosure，不能直接放 await——先取出來再合併。
         let observed = ObservedMatchSids.shared.latest
         let matchSid = (arguments["match_sid"] as? String) ?? observed?.sid ?? ""
         guard !matchSid.isEmpty else {
@@ -171,7 +170,7 @@ struct CancelUnifiedMatchTool: MCPTool {
 
         let result = await nakiContext.cancelUnifiedMatch(
             matchSid: matchSid,
-            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+            awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         context.log("⏹️ lobby_cancel_unified_match match_sid=\(matchSid)")
         return LiqiToolResult.dictionaryLoggingRejection(result.outcome, spec: result.spec,
                                                          extra: ["match_sid": matchSid])
@@ -192,7 +191,7 @@ struct AccountInfoTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "account_id": .integer("要查詢的 account_id；不填則用 Naki 已知的登入帳號"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -222,7 +221,7 @@ struct AccountInfoTool: MCPTool {
 
         let spec = LiqiRequestBuilder.fetchAccountInfo(accountId: try MCPArguments.uint32(accountId, "account_id"))
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
                                                          extra: ["account_id": accountId,
                                                                  "accountIdSource": argumentId == nil ? "naki-login-capture" : "argument"])
@@ -241,7 +240,7 @@ struct ServerTimeTool: MCPTool {
         """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -256,7 +255,7 @@ struct ServerTimeTool: MCPTool {
         let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.fetchServerTime()
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
@@ -274,7 +273,7 @@ struct HeartbeatTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "no_operation_counter": .integer("無操作計數（預設 0；為 0 時依 proto3 省略，payload 為空）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -290,7 +289,7 @@ struct HeartbeatTool: MCPTool {
         let counter = try MCPArguments.uint32(arguments, "no_operation_counter")
         let spec = LiqiRequestBuilder.heatbeat(noOperationCounter: counter)
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         context.log("💓 lobby_heartbeat sent")
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
                                                          extra: ["no_operation_counter": Int(counter)])
@@ -309,7 +308,7 @@ struct LoginBeatTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "contract": .string("contract 字串（由登入流程取得）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -325,7 +324,7 @@ struct LoginBeatTool: MCPTool {
         let contract = arguments["contract"] as? String ?? ""
         let spec = LiqiRequestBuilder.loginBeat(contract: contract)
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
                                                          extra: ["contractProvided": !contract.isEmpty])
     }

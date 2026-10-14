@@ -121,14 +121,9 @@ enum ReplaySupport {
 
     /// 錄影只能從 log 根目錄讀：`file` 收絕對路徑、相對名稱可含 `..`，
     /// 不擋的話 `replay_game` 能拿去解析任意檔案。解析 symlink 與 `..` 之後再比前綴。
-    nonisolated static func isInsideLogsRoot(_ url: URL, root: URL = logsRoot) -> Bool {
+    nonisolated static func isInsideLogsRoot(_ url: URL, root: URL = LogManager.logsRoot) -> Bool {
         let resolved = url.resolvingSymlinksInPath().standardizedFileURL.path
         return resolved.hasPrefix(root.resolvingSymlinksInPath().standardizedFileURL.path + "/")
-    }
-
-    nonisolated static var logsRoot: URL {
-        FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs/Naki", isDirectory: true)
     }
 
     /// 用一個獨立的 Bot 重跑事件流

@@ -61,6 +61,13 @@ nonisolated enum NakiMCPProtocol {
 
     // MARK: - 錯誤碼
 
+    /// JSON-RPC 2.0 標準碼
+    static let parseErrorCode = -32700
+    static let invalidRequestCode = -32600
+    static let methodNotFoundCode = -32601
+    static let invalidParamsCode = -32602
+    static let internalErrorCode = -32603
+
     /// `-32020`：header 與 body 不一致
     static let headerMismatchCode = -32020
     /// `-32022`：不支援請求的協定版本
@@ -303,7 +310,8 @@ nonisolated struct NakiMCPFailure {
     let code: Int
     let message: String
     let data: [String: Any]?
-    /// modern era 的 status 由規格指定（400 / 403 / 404）；legacy era 一律 200 + JSON-RPC error
+    /// 請求本身不合法（parse／batch／版本／header 不一致）兩個 era 都回 400；
+    /// 方法不存在與缺工具名在 modern era 為 400／404，legacy era 為 200 + JSON-RPC error
     let httpStatus: Int
 
     init(code: Int, message: String, data: [String: Any]? = nil, httpStatus: Int = 200) {
@@ -363,11 +371,11 @@ nonisolated enum NakiMCPOriginPolicy {
 
     /// Origin／Host 兩道檢查共用的 403 body
     fileprivate static func forbiddenJSON(_ message: String) -> String {
-        let failure = NakiMCPFailure(code: -32600, message: message, data: nil, httpStatus: 403)
+        let failure = NakiMCPFailure(code: NakiMCPProtocol.invalidRequestCode, message: message, data: nil, httpStatus: 403)
         let payload: [String: Any] = ["jsonrpc": "2.0", "error": failure.errorObject]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let text = String(data: data, encoding: .utf8) else {
-            return "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Forbidden\"}}"
+            return "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":\(NakiMCPProtocol.invalidRequestCode),\"message\":\"Forbidden\"}}"
         }
         return text
     }
@@ -474,13 +482,13 @@ nonisolated enum NakiMCPRouter {
         guard let data = body.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) else {
             return Plan(id: nil, era: .legacy, outcome: .failure(
-                NakiMCPFailure(code: -32700, message: "Parse error", httpStatus: 400)))
+                NakiMCPFailure(code: NakiMCPProtocol.parseErrorCode, message: "Parse error", httpStatus: 400)))
         }
 
         // JSON-RPC batching 在 2025-06-18 被移除：明確拒絕，不要默默只處理第一筆
         if json is [Any] {
             return Plan(id: nil, era: .legacy, outcome: .failure(
-                NakiMCPFailure(code: -32600,
+                NakiMCPFailure(code: NakiMCPProtocol.invalidRequestCode,
                                message: "JSON-RPC batching was removed in MCP 2025-06-18; send one request per POST",
                                httpStatus: 400)))
         }
@@ -488,7 +496,7 @@ nonisolated enum NakiMCPRouter {
         guard let object = json as? [String: Any],
               let method = object["method"] as? String else {
             return Plan(id: nil, era: .legacy, outcome: .failure(
-                NakiMCPFailure(code: -32600, message: "Invalid Request: missing method", httpStatus: 400)))
+                NakiMCPFailure(code: NakiMCPProtocol.invalidRequestCode, message: "Invalid Request: missing method", httpStatus: 400)))
         }
 
         let id = object["id"]
@@ -555,7 +563,7 @@ nonisolated enum NakiMCPRouter {
             guard let name = params["name"] as? String, !name.isEmpty else {
                 // 缺 name 是 malformed request，不是模型可以改參數修好的錯 → protocol error
                 return Plan(id: id, era: era, outcome: .failure(
-                    NakiMCPFailure(code: -32602,
+                    NakiMCPFailure(code: NakiMCPProtocol.invalidParamsCode,
                                    message: "Invalid params: missing tool name",
                                    httpStatus: era == .modern ? 400 : 200)))
             }
@@ -583,7 +591,7 @@ nonisolated enum NakiMCPRouter {
     /// 未知方法。modern era 的 HTTP status 由規格指定為 404
     /// （body 仍是 JSON-RPC `-32601`，用來與「沒有這個 endpoint」的 404 區分）。
     static func methodNotFound(_ method: String, era: NakiMCPProtocol.Era) -> NakiMCPFailure {
-        NakiMCPFailure(code: -32601,
+        NakiMCPFailure(code: NakiMCPProtocol.methodNotFoundCode,
                        message: "Method not found: \(method)",
                        data: nil,
                        httpStatus: era == .modern ? 404 : 200)

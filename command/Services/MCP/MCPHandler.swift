@@ -94,18 +94,6 @@ final class MCPHandler {
 
     // MARK: - Method Handlers
 
-    /// `initialize` 的回應內容。
-    ///
-    /// 抽成 static 是為了讓「serverInfo.version == App 版本」可以被單測比對，
-    /// 不必起一個真的 server。版本一律讀 `NakiAppVersion`；寫死字串的話 MCP client
-    /// 拿到的版本會在下次升版時默默變成假的。
-    ///
-    /// 內容本身已搬到 `NakiMCPProtocol`（協定語意的單一來源），這裡保留同名
-    /// 入口讓既有呼叫端與測試不必跟著改。
-    nonisolated static func initializeResult(requestedVersion: String? = nil) -> [String: Any] {
-        NakiMCPProtocol.initializeResult(requestedVersion: requestedVersion)
-    }
-
     /// 參數落 log 前遮蔽憑證值——`lobby_login_beat` 的 contract 曾原文
     /// 進 `all.log`（CLAUDE.md：不得提交 credential）
     nonisolated static let sensitiveArgKeys: Set<String> = [
@@ -186,8 +174,8 @@ final class MCPHandler {
         sendJSON(connection: connection, data: response, status: 200)
     }
 
-    /// 發送 MCP 錯誤（HTTP status 由 `NakiMCPFailure` 決定：
-    /// modern era 的 400／404 是規格要求，legacy era 維持 200 + JSON-RPC error）
+    /// 發送 MCP 錯誤（HTTP status 由 `NakiMCPFailure` 決定：請求本身不合法一律 400，
+    /// 方法不存在與缺工具名在 modern era 為 400／404，legacy era 為 200 + JSON-RPC error）
     private func sendFailure(connection: NWConnection, id: Any?, failure: NakiMCPFailure) {
         var response: [String: Any] = [
             "jsonrpc": "2.0",
@@ -209,7 +197,7 @@ final class MCPHandler {
         } catch {
             responder?.sendMCPResponse(
                 connection: connection, status: 500,
-                body: "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"Internal error\"}}",
+                body: "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":\(NakiMCPProtocol.internalErrorCode),\"message\":\"Internal error\"}}",
                 contentType: "application/json")
         }
     }

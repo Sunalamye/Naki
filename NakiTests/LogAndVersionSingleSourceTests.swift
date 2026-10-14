@@ -148,7 +148,7 @@ final class LogAndVersionSingleSourceTests: XCTestCase {
     func testMCPServerInfoVersionMatchesAppBundle() {
         let bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
 
-        let serverInfo = MCPHandler.initializeResult()["serverInfo"] as? [String: Any]
+        let serverInfo = NakiMCPProtocol.initializeResult()["serverInfo"] as? [String: Any]
         let reported = serverInfo?["version"] as? String
 
         XCTAssertNotNil(bundleVersion, "test host 應為 Naki.app")

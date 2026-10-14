@@ -44,7 +44,7 @@ struct SendEmojiTool: MCPTool {
             "emo_id": .integer("表情索引 (0-8)"),
             "count": .integer("連續發送次數 (1-5)，預設 1"),
             "except_self": .boolean("是否不廣播給自己（預設 false）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.inGameAwaitMs)，0 = 不等）")
         ],
         required: ["emo_id"]
     )
@@ -66,7 +66,7 @@ struct SendEmojiTool: MCPTool {
 
         let count = max(1, min(5, arguments["count"] as? Int ?? 1))
         let exceptSelf = arguments["except_self"] as? Bool ?? false
-        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? MCPArguments.inGameAwaitMs
 
         let spec = LiqiRequestBuilder.emoji(emoId: emoId, exceptSelf: exceptSelf)
         var sends: [[String: Any]] = []

@@ -17,26 +17,31 @@ import Foundation
 /// 「送出 + （可選）等待回應」的完整結果，供 MCP 工具轉成 JSON。
 ///
 /// 三種狀態要分清楚：
-/// - `unavailableReason != nil`：連送都沒送（這條 path 不提供送出通道）
-/// - `sent?.success == false`：送出被 JS 端拒絕（沒有 OPEN 的雀魂連線等）
-/// - `sent?.success == true && response == nil`：**送出去了，但沒等到回應**
+/// - `.unavailable`：連送都沒送（這條 path 不提供送出通道）
+/// - `.attempted` 且 `sent.success == false`：送出被 JS 端拒絕（沒有 OPEN 的雀魂連線等）
+/// - `.attempted` 且 `sent.success == true`、`response == nil`：**送出去了，但沒等到回應**
 ///   （可能是伺服器沒回、也可能是等待時間不夠；不可當成失敗，也不可當成成功）
-struct LiqiToolSendOutcome {
-    let sent: LiqiSendResult?
-    let response: LiqiResponseRecord?
-    let unavailableReason: String?
+enum LiqiToolSendOutcome {
+    case unavailable(String)
+    case attempted(LiqiSendResult, response: LiqiResponseRecord?)
 
-    init(sent: LiqiSendResult? = nil,
-         response: LiqiResponseRecord? = nil,
-         unavailableReason: String? = nil) {
-        self.sent = sent
-        self.response = response
-        self.unavailableReason = unavailableReason
+    init(sent: LiqiSendResult, response: LiqiResponseRecord? = nil) {
+        self = .attempted(sent, response: response)
     }
 
-    /// 沒有送出通道時的結果
-    static func unavailable(_ reason: String) -> LiqiToolSendOutcome {
-        LiqiToolSendOutcome(unavailableReason: reason)
+    var sent: LiqiSendResult? {
+        if case .attempted(let result, _) = self { return result }
+        return nil
+    }
+
+    var response: LiqiResponseRecord? {
+        if case .attempted(_, let record) = self { return record }
+        return nil
+    }
+
+    var unavailableReason: String? {
+        if case .unavailable(let reason) = self { return reason }
+        return nil
     }
 }
 
@@ -66,10 +71,10 @@ enum LiqiToolResult {
         ]
         result.merge(extra) { current, _ in current }
 
-        guard let sent = outcome.sent else {
+        guard case .attempted(let sent, let response) = outcome else {
             result["success"] = false
             result["error"] = "liqi_sender_unavailable"
-            result["reason"] = outcome.unavailableReason ?? "unknown"
+            result["reason"] = outcome.unavailableReason
             return result
         }
 
@@ -83,7 +88,7 @@ enum LiqiToolResult {
             return result
         }
 
-        if let response = outcome.response {
+        if let response {
             result["response"] = response.dictionary
             result["serverAccepted"] = serverAccepted(response)
             // 被拒絕時直接把碼寫進 log。以前只記 `✅ 已送出`（那只代表 bytes 出去了），

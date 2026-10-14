@@ -97,14 +97,20 @@ struct BotOpsTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
+        OperationsSnapshotPayload.current()
+    }
+}
+
+/// `bot_ops` 與 `game_ops` 的共同輸出（schema 是 `NakiToolOutputSchemas.opsSnapshot`）
+enum OperationsSnapshotPayload {
+    static func current() -> [String: Any] {
         let store = LiqiOperationStore.shared
-        var result: [String: Any] = [
+        return [
             "source": "LiqiOperationStore (Liqi protocol layer)",
-            "hasPending": store.pending != nil
+            "hasPending": store.pending != nil,
+            "pending": store.pending?.dictionary ?? NSNull(),
+            "latest": store.latest?.dictionary ?? NSNull()
         ]
-        result["pending"] = store.pending?.dictionary ?? NSNull()
-        result["latest"] = store.latest?.dictionary ?? NSNull()
-        return result
     }
 }
 
@@ -161,7 +167,7 @@ struct BotChiTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "index": .integer("吃的組合索引（對應 bot_ops 中 type=2 的 combination，預設 0）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.inGameAwaitMs)，0 = 不等）")
         ],
         required: []
     )
@@ -176,7 +182,7 @@ struct BotChiTool: MCPTool {
         let nakiContext = try context.naki()
 
         let index = try MCPArguments.uint32(arguments, "index")
-        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? MCPArguments.inGameAwaitMs
 
         let spec = LiqiRequestBuilder.chi(index: index)
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
@@ -200,7 +206,7 @@ struct BotPonTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "index": .integer("碰的組合索引（預設 0）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.inGameAwaitMs)，0 = 不等）")
         ],
         required: []
     )
@@ -215,7 +221,7 @@ struct BotPonTool: MCPTool {
         let nakiContext = try context.naki()
 
         let index = try MCPArguments.uint32(arguments, "index")
-        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? MCPArguments.inGameAwaitMs
 
         let spec = LiqiRequestBuilder.pon(index: index)
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)

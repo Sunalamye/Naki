@@ -140,7 +140,7 @@ extension MCPToolRegistry {
     ///   MCP 不需要第二個入口。留著只是讓 `tools/list` 多 6 個永遠失敗的工具，
     ///   還會讓人誤以為「Unity 下高亮不可能」。推薦資料請讀 `bot_status` / `game_hand`。
     func registerBuiltInTools() {
-        // 系統類（6）— 不碰遊戲物件
+        // 系統類 — 不碰遊戲物件
         register(GetStatusTool.self)
         register(GetHelpTool.self)
         register(GetLogsTool.self)
@@ -148,7 +148,7 @@ extension MCPToolRegistry {
         register(ReplayGameTool.self)
         register(ClearLogsTool.self)
 
-        // Bot 控制類（7）— 讀 Swift 協定層狀態 / 送 Liqi 動作
+        // Bot 控制類 — 讀 Swift 協定層狀態 / 送 Liqi 動作
         register(BotStatusTool.self)
         register(BotTriggerTool.self)
         register(BotOpsTool.self)
@@ -157,7 +157,7 @@ extension MCPToolRegistry {
         register(BotPonTool.self)
         register(BotSyncTool.self)
 
-        // 遊戲狀態與動作類（8）— 狀態走協定層、動作走 protobuf
+        // 遊戲狀態與動作類 — 狀態走協定層、動作走 protobuf
         register(GameStateTool.self)
         register(GameHandTool.self)
         register(GameOpsTool.self)
@@ -168,10 +168,10 @@ extension MCPToolRegistry {
         register(GameConfirmNewRoundTool.self)
         register(GameVoteEndTool.self)
 
-        // JavaScript 執行（1）
+        // JavaScript 執行
         register(ExecuteJSTool.self)
 
-        // 大廳類（8）— 全部走 .lq.Lobby.* protobuf
+        // 大廳類 — 全部走 .lq.Lobby.* protobuf
         register(LobbyStatusTool.self)
         // 統一匹配：段位場入口（見 ObservedMatchSids）
         register(MatchSidListTool.self)
@@ -182,10 +182,10 @@ extension MCPToolRegistry {
         register(HeartbeatTool.self)
         register(LoginBeatTool.self)
 
-        // 防閒置（1）— Swift 定期送 .lq.Lobby.heatbeat
+        // 防閒置 — Swift 定期送 .lq.Lobby.heatbeat
         register(AntiIdleToggleTool.self)
 
-        // 友人房類（7）— 新增：建房 → 加人機 → 開局可純由 MCP 完成
+        // 友人房類 — 新增：建房 → 加人機 → 開局可純由 MCP 完成
         register(RoomCreateTool.self)
         register(RoomAddRobotTool.self)
         register(RoomStartTool.self)
@@ -194,7 +194,7 @@ extension MCPToolRegistry {
         register(RoomLeaveTool.self)
         register(RoomQuickTestTool.self)
 
-        // 表情類（2）— 送出走 broadcastInGame、接收走 NotifyGameBroadcast
+        // 表情類 — 送出走 broadcastInGame、接收走 NotifyGameBroadcast
         register(SendEmojiTool.self)
         register(EmojiListenTool.self)
     }

@@ -203,14 +203,7 @@ struct GameOpsTool: MCPTool {
     }
 
     func execute(arguments: [String: Any]) async throws -> Any {
-        let store = LiqiOperationStore.shared
-        var result: [String: Any] = [
-            "source": "LiqiOperationStore (Liqi protocol layer)",
-            "hasPending": store.pending != nil
-        ]
-        result["pending"] = store.pending?.dictionary ?? NSNull()
-        result["latest"] = store.latest?.dictionary ?? NSNull()
-        return result
+        OperationsSnapshotPayload.current()
     }
 }
 
@@ -228,7 +221,7 @@ struct GameDiscardTool: MCPTool {
         properties: [
             "tile": .string("要打出的牌，MJAI（5mr / E）或雀魂（0m / 1z）記法"),
             "moqie": .boolean("是否為摸切（預設 false）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.inGameAwaitMs)，0 = 不等）")
         ],
         required: ["tile"]
     )
@@ -246,7 +239,7 @@ struct GameDiscardTool: MCPTool {
         let spec = try NakiGameAction.spec(action: "discard",
                                            arguments: arguments,
                                            snapshot: snapshot)
-        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? MCPArguments.inGameAwaitMs
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
                                                          extra: ["tile": arguments["tile"] as? String ?? "",
@@ -275,7 +268,7 @@ struct GameActionTool: MCPTool {
             "index": .integer("chi / pon / kan：組合索引（預設 0）"),
             "kanType": .string("kan：ankan（暗槓）/ kakan（加槓）/ minkan（大明槓）；不填則由 game_ops 推導"),
             "timeuse": .integer("思考秒數（預設 0）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.inGameAwaitMs)，0 = 不等）")
         ],
         required: ["action"]
     )
@@ -296,7 +289,7 @@ struct GameActionTool: MCPTool {
         let spec = try NakiGameAction.spec(action: action,
                                            arguments: arguments,
                                            snapshot: snapshot)
-        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? MCPArguments.inGameAwaitMs
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec,
                                                          extra: ["action": action])
@@ -400,7 +393,7 @@ struct GameConfirmNewRoundTool: MCPTool {
         """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.inGameAwaitMs)，0 = 不等）")
         ],
         required: []
     )
@@ -414,7 +407,7 @@ struct GameConfirmNewRoundTool: MCPTool {
     func execute(arguments: [String: Any]) async throws -> Any {
         let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.confirmNewRound()
-        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? MCPArguments.inGameAwaitMs
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
@@ -435,7 +428,7 @@ struct GameVoteEndTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "yes": .boolean("是否投贊成票（預設 true）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 800，0 = 不等）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.inGameAwaitMs)，0 = 不等）")
         ],
         required: []
     )
@@ -450,7 +443,7 @@ struct GameVoteEndTool: MCPTool {
         let nakiContext = try context.naki()
         let yes = arguments["yes"] as? Bool ?? true
         let spec = LiqiRequestBuilder.voteGameEnd(yes: yes)
-        let awaitMs = arguments["awaitResponseMs"] as? Int ?? 800
+        let awaitMs = arguments["awaitResponseMs"] as? Int ?? MCPArguments.inGameAwaitMs
         let outcome = await nakiContext.sendLiqi(spec, awaitResponseMs: awaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: ["yes": yes])
     }

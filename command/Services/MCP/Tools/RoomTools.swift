@@ -58,6 +58,35 @@ enum RoomMode {
     }
 }
 
+// MARK: - Room Config
+
+/// `room_create` 與 `room_quick_test` 共用的建房參數解析。
+/// `room_quick_test` 只吃 mode、time_fixed、time_add、ai_level，其餘規則欄位用 `LiqiFriendRoomConfig` 預設。
+enum RoomConfigParser {
+    static func parse(_ arguments: [String: Any], playerCount: Int, defaultTimeFixed: Int,
+                      acceptsRuleOverrides: Bool) throws
+        -> (config: LiqiFriendRoomConfig, resolved: (mode: Int, adjusted: Bool)) {
+        var config = LiqiFriendRoomConfig(playerCount: UInt32(playerCount))
+        let resolved = try RoomMode.resolve(playerCount: playerCount, requested: arguments["mode"] as? Int)
+        config.mode = UInt32(resolved.mode)
+        config.timeFixed = try MCPArguments.uint32(arguments, "time_fixed", default: defaultTimeFixed)
+        config.timeAdd = try MCPArguments.uint32(arguments, "time_add")
+        if acceptsRuleOverrides {
+            config.doraCount = try MCPArguments.uint32(arguments, "dora_count", default: Int(config.doraCount))
+            config.shiduan = try MCPArguments.uint32(arguments, "shiduan", default: 1)
+            config.initPoint = try MCPArguments.uint32(arguments, "init_point", default: Int(config.initPoint))
+            config.fandian = try MCPArguments.uint32(arguments, "fandian", default: Int(config.fandian))
+            config.publicLive = arguments["public_live"] as? Bool ?? false
+            config.enableAI = arguments["enable_ai"] as? Bool ?? false
+            config.clientVersionString = arguments["client_version_string"] as? String ?? ""
+        }
+        if let aiLevel = arguments["ai_level"] as? Int, aiLevel >= 0 {
+            config.aiLevel = try MCPArguments.uint32(aiLevel, "ai_level")
+        }
+        return (config, resolved)
+    }
+}
+
 // MARK: - Room Create Tool
 
 /// 建立友人房
@@ -84,7 +113,7 @@ struct RoomCreateTool: MCPTool {
             "public_live": .boolean("是否公開觀戰（預設 false）"),
             "enable_ai": .boolean("GameMode.ai：是否允許 AI 代打（預設 false）"),
             "client_version_string": .string("客戶端版本字串（可選）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 2000）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.roomAwaitMs)）")
         ],
         required: []
     )
@@ -103,25 +132,11 @@ struct RoomCreateTool: MCPTool {
             throw MCPToolError.invalidParameter("player_count", expected: "3 或 4")
         }
 
-        var config = LiqiFriendRoomConfig(playerCount: UInt32(playerCount))
-        let resolved = try RoomMode.resolve(playerCount: playerCount, requested: arguments["mode"] as? Int)
-        config.mode = UInt32(resolved.mode)
-        config.timeFixed = try MCPArguments.uint32(arguments, "time_fixed", default: 300)
-        config.timeAdd = try MCPArguments.uint32(arguments, "time_add")
-        config.doraCount = try MCPArguments.uint32(arguments, "dora_count", default: Int(config.doraCount))
-        config.shiduan = try MCPArguments.uint32(arguments, "shiduan", default: 1)
-        config.initPoint = try MCPArguments.uint32(arguments, "init_point", default: Int(config.initPoint))
-        config.fandian = try MCPArguments.uint32(arguments, "fandian", default: Int(config.fandian))
-        config.publicLive = arguments["public_live"] as? Bool ?? false
-        config.enableAI = arguments["enable_ai"] as? Bool ?? false
-        config.clientVersionString = arguments["client_version_string"] as? String ?? ""
-        if let aiLevel = arguments["ai_level"] as? Int, aiLevel >= 0 {
-            config.aiLevel = try MCPArguments.uint32(aiLevel, "ai_level")
-        }
+        let (config, resolved) = try RoomConfigParser.parse(arguments, playerCount: playerCount, defaultTimeFixed: 300, acceptsRuleOverrides: true)
 
         let spec = LiqiRequestBuilder.createRoom(config: config)
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.roomAwaitMs)
         context.log("🏠 room_create player_count=\(playerCount) time=\(config.timeFixed)+\(config.timeAdd)")
 
         var result = LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: [
@@ -159,7 +174,7 @@ struct RoomAddRobotTool: MCPTool {
     static let inputSchema = MCPInputSchema(
         properties: [
             "position": .integer("座位編號（預設 0 = 不指定，由伺服器決定）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -175,7 +190,7 @@ struct RoomAddRobotTool: MCPTool {
         let position = try MCPArguments.uint32(arguments, "position")
         let spec = LiqiRequestBuilder.addRoomRobot(position: position)
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         context.log("🤖 room_add_robot position=\(position)")
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: ["position": Int(position)])
     }
@@ -192,7 +207,7 @@ struct RoomStartTool: MCPTool {
         """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 2000）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.roomAwaitMs)）")
         ],
         required: []
     )
@@ -207,7 +222,7 @@ struct RoomStartTool: MCPTool {
         let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.startRoom()
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.roomAwaitMs)
         context.log("▶️ room_start")
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
@@ -226,7 +241,7 @@ struct RoomInfoTool: MCPTool {
         """
     static let inputSchema = MCPInputSchema(
         properties: [
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 2000）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.roomAwaitMs)）")
         ],
         required: []
     )
@@ -241,7 +256,7 @@ struct RoomInfoTool: MCPTool {
         let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.fetchRoom()
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.roomAwaitMs)
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
 }
@@ -256,7 +271,7 @@ struct RoomJoinTool: MCPTool {
         properties: [
             "room_id": .integer("房號"),
             "client_version_string": .string("客戶端版本字串（可選）"),
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 2000）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.roomAwaitMs)）")
         ],
         required: ["room_id"]
     )
@@ -276,7 +291,7 @@ struct RoomJoinTool: MCPTool {
             roomId: try MCPArguments.uint32(roomId, "room_id"),
             clientVersionString: arguments["client_version_string"] as? String ?? "")
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 2000)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.roomAwaitMs)
         context.log("🚪 room_join room_id=\(roomId)")
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec, extra: ["room_id": roomId])
     }
@@ -290,7 +305,7 @@ struct RoomLeaveTool: MCPTool {
     static let description = "離開目前的友人房。送出 .lq.Lobby.leaveRoom（ReqCommon，空 payload）"
     static let inputSchema = MCPInputSchema(
         properties: [
-            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 1500）")
+            "awaitResponseMs": .integer("等待伺服器回應的毫秒數（預設 \(MCPArguments.lobbyAwaitMs)）")
         ],
         required: []
     )
@@ -305,7 +320,7 @@ struct RoomLeaveTool: MCPTool {
         let nakiContext = try context.naki()
         let spec = LiqiRequestBuilder.leaveRoom()
         let outcome = await nakiContext.sendLiqi(spec,
-                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? 1500)
+                                                 awaitResponseMs: arguments["awaitResponseMs"] as? Int ?? MCPArguments.lobbyAwaitMs)
         context.log("🚪 room_leave")
         return LiqiToolResult.dictionaryLoggingRejection(outcome, spec: spec)
     }
@@ -340,6 +355,11 @@ struct RoomQuickTestTool: MCPTool {
         required: []
     )
 
+    /// 三步各自等回應的毫秒數；數值的由來未知，只命名。
+    private static let createAwaitMs = 4000
+    private static let addRobotAwaitMs = 3000
+    private static let startAwaitMs = 4000
+
     private let context: MCPContext
 
     init(context: MCPContext) {
@@ -369,17 +389,10 @@ struct RoomQuickTestTool: MCPTool {
         }
 
         // 1. 建房
-        var config = LiqiFriendRoomConfig(playerCount: UInt32(playerCount))
-        let resolved = try RoomMode.resolve(playerCount: playerCount, requested: arguments["mode"] as? Int)
-        config.mode = UInt32(resolved.mode)
-        config.timeFixed = try MCPArguments.uint32(arguments, "time_fixed", default: 60)
-        config.timeAdd = try MCPArguments.uint32(arguments, "time_add")
-        if let aiLevel = arguments["ai_level"] as? Int, aiLevel >= 0 {
-            config.aiLevel = try MCPArguments.uint32(aiLevel, "ai_level")
-        }
+        let (config, resolved) = try RoomConfigParser.parse(arguments, playerCount: playerCount, defaultTimeFixed: 60, acceptsRuleOverrides: false)
         let createSpec = LiqiRequestBuilder.createRoom(config: config)
         let created = record("room_create",
-                             await nakiContext.sendLiqi(createSpec, awaitResponseMs: 4000),
+                             await nakiContext.sendLiqi(createSpec, awaitResponseMs: Self.createAwaitMs),
                              spec: createSpec)
         guard created else {
             context.log("🧪 room_quick_test 中止：建房失敗")
@@ -390,7 +403,7 @@ struct RoomQuickTestTool: MCPTool {
         for position in 1..<playerCount {
             let robotSpec = LiqiRequestBuilder.addRoomRobot(position: UInt32(position))
             let ok = record("room_add_robot[\(position)]",
-                            await nakiContext.sendLiqi(robotSpec, awaitResponseMs: 3000),
+                            await nakiContext.sendLiqi(robotSpec, awaitResponseMs: Self.addRobotAwaitMs),
                             spec: robotSpec)
             guard ok else {
                 context.log("🧪 room_quick_test 中止：加人機 position=\(position) 失敗")
@@ -401,7 +414,7 @@ struct RoomQuickTestTool: MCPTool {
         // 3. 開局
         let startSpec = LiqiRequestBuilder.startRoom()
         let started = record("room_start",
-                             await nakiContext.sendLiqi(startSpec, awaitResponseMs: 4000),
+                             await nakiContext.sendLiqi(startSpec, awaitResponseMs: Self.startAwaitMs),
                              spec: startSpec)
         guard started else {
             context.log("🧪 room_quick_test 中止：開局失敗")

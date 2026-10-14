@@ -75,6 +75,12 @@ extension MCPContext {
 /// 超界統一回參數錯誤。負數維持既有語意，夾成 0。
 enum MCPArguments {
 
+    /// 等待伺服器回應的預設毫秒數：對局內動作、大廳請求、建房／開局各一檔。
+    /// 數值的由來未知，只命名；工具描述字串引用同一份。
+    nonisolated static let inGameAwaitMs = 800
+    nonisolated static let lobbyAwaitMs = 1500
+    nonisolated static let roomAwaitMs = 2000
+
     nonisolated static func uint32(_ value: Int, _ name: String) throws -> UInt32 {
         guard let result = UInt32(exactly: max(0, value)) else {
             throw MCPToolError.invalidParameter(name, expected: "0–\(UInt32.max) 的整數")
@@ -105,7 +111,10 @@ final class DefaultNakiMCPContext: NakiMCPContext {
     /// 實際綁到的 port（`get_status` / `get_help` 要輸出它）
     var serverPort: UInt16
 
-    init(dependencies: NakiMCPDependencies, serverPort: UInt16 = 8765) {
+    /// server 綁定前回報的 port（Debug server 的預設 port）
+    nonisolated static let defaultServerPort: UInt16 = 8765
+
+    init(dependencies: NakiMCPDependencies, serverPort: UInt16 = DefaultNakiMCPContext.defaultServerPort) {
         self.dependencies = dependencies
         self.serverPort = serverPort
     }

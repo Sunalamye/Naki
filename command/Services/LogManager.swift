@@ -81,7 +81,7 @@ class LogManager {
     /// 500 條在真實對局下只夠涵蓋十幾秒（單一摸打就會產生數十行 parser 記錄），
     /// 事後回查「上一局為什麼這樣打」時早就被輪掉了。檔案日誌才是完整紀錄，
     /// 記憶體這份僅供 UI 即時顯示與 `/logs` 快取。
-    var maxEntries = 5000
+    let maxEntries = 5000
 
     /// 是否啟用文件日誌
     var fileLoggingEnabled = true
@@ -126,6 +126,11 @@ class LogManager {
     /// 保留幾次執行的紀錄（含當次）
     nonisolated static let sessionKeepCount = 8
 
+    /// 所有 session 目錄的上一層（`replay_game` 只讀這底下的錄影）
+    nonisolated static let logsRoot = (FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+                                       ?? FileManager.default.temporaryDirectory)
+        .appendingPathComponent("Logs/Naki", isDirectory: true)
+
     private init() {
         // 每次啟動一個獨立目錄，而不是固定檔名 + 輪替。
         //
@@ -141,9 +146,7 @@ class LogManager {
         // 改成 `~/Library/Logs/Naki/<timestamp>/`：test host 自然不會撞到，
         // 要回報問題就整個目錄送出。
         let fm = FileManager.default
-        let root = (fm.urls(for: .libraryDirectory, in: .userDomainMask).first
-                    ?? fm.temporaryDirectory)
-            .appendingPathComponent("Logs/Naki", isDirectory: true)
+        let root = Self.logsRoot
 
         let stamp = Self.sessionStampFormatter.string(from: Date())
         var dir = root.appendingPathComponent(stamp, isDirectory: true)
@@ -178,9 +181,12 @@ class LogManager {
         }
     }
 
-    static let sessionStampFormatter: DateFormatter = {
+    nonisolated static let sessionStampFormat = "yyyyMMdd-HHmmss"
+    nonisolated static let sessionStampLength = sessionStampFormat.count
+
+    nonisolated static let sessionStampFormatter: DateFormatter = {
         let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd-HHmmss"
+        f.dateFormat = sessionStampFormat
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = .current
         return f
@@ -194,7 +200,7 @@ class LogManager {
     nonisolated static func pruneOldSessions(root: URL, keep: Int) {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(atPath: root.path) else { return }
-        let sessions = entries.filter { $0.count == 15 && $0.contains("-") }.sorted()
+        let sessions = entries.filter { $0.count == sessionStampLength && $0.contains("-") }.sorted()
         guard sessions.count > keep else { return }
         for name in sessions.prefix(sessions.count - keep) {
             let dir = root.appendingPathComponent(name)
@@ -364,7 +370,6 @@ class LogManager {
 
             let wantsMerged = level >= .info
             let wantsCategory = level >= .info || writeTrace
-            guard wantsMerged || wantsCategory || level == .event else { return }
 
             let ts = Self.fileTimestampFormatter.string(from: timestamp)
             guard let data = "[\(ts)] [\(category.rawValue)] \(message)\n".data(using: .utf8) else {
@@ -431,12 +436,12 @@ func botLog(_ message: @autoclosure () -> String, level: LogLevel = .info) {
     LogManager.shared.log(message(), category: .bot, level: level)
 }
 
-/// 系統日誌
 /// 對局時間軸事件——會另外寫進當次 session 目錄的 events.log
 func eventLog(_ message: @autoclosure () -> String, category: LogCategory = .bridge) {
     LogManager.shared.log(message(), category: category, level: .event)
 }
 
+/// 系統日誌
 func systemLog(_ message: @autoclosure () -> String) {
     LogManager.shared.log(message(), category: .system)
 }

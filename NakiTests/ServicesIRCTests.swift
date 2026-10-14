@@ -118,6 +118,36 @@ final class ServicesIRCTests: XCTestCase {
             forceReconnect: forceReconnect))
     }
 
+    // MARK: - SV-17 送出結果的三種狀態
+
+    func testSendOutcomeStatesAreExclusive() {
+        let sent = LiqiSendResult(method: "m", msgId: 1, byteCount: 2, success: true, detail: nil)
+        let unavailable = LiqiToolSendOutcome.unavailable("why")
+        XCTAssertNil(unavailable.sent)
+        XCTAssertEqual(unavailable.unavailableReason, "why")
+        let attempted = LiqiToolSendOutcome(sent: sent)
+        XCTAssertEqual(attempted.sent?.msgId, 1)
+        XCTAssertNil(attempted.unavailableReason)
+        XCTAssertNil(attempted.response)
+
+        let dict = LiqiToolResult.dictionaryLoggingRejection(
+            unavailable, spec: LiqiRequestSpec(method: "m", fields: []))
+        XCTAssertEqual(dict["error"] as? String, "liqi_sender_unavailable")
+        XCTAssertEqual(dict["reason"] as? String, "why")
+    }
+
+    // MARK: - SV-18 bot_trigger 錯誤碼判斷順序與 main 一致
+
+    func testBotTriggerWithoutOplistAndRecommendationKeepsMainErrorCode() async throws {
+        let shared = LiqiOperationStore.shared
+        shared.reset()
+        defer { shared.reset() }
+
+        let result = try await BotTriggerTool(context: makeContext()).execute(arguments: [:]) as? [String: Any]
+
+        XCTAssertEqual(result?["error"] as? String, "no_recommendation")
+    }
+
     // MARK: - SV-19 來源標記看實際用的值
 
     func testAccountInfoSourceMarkerFollowsResolvedValue() async throws {
@@ -132,11 +162,142 @@ final class ServicesIRCTests: XCTestCase {
         XCTAssertEqual(given?["accountIdSource"] as? String, "argument")
     }
 
+    // MARK: - SV-20 room_quick_test 與 room_create 共用參數解析
+
+    func testRoomConfigParserSharesRulesAndOnlyTimeFixedDefaultDiffers() throws {
+        let create = try RoomConfigParser.parse([:], playerCount: 4, defaultTimeFixed: 300, acceptsRuleOverrides: true)
+        let quick = try RoomConfigParser.parse([:], playerCount: 4, defaultTimeFixed: 60, acceptsRuleOverrides: false)
+        XCTAssertEqual(create.config.timeFixed, 300)
+        XCTAssertEqual(quick.config.timeFixed, 60)
+        XCTAssertEqual(create.config.mode, 2)
+        XCTAssertEqual(create.config.doraCount, quick.config.doraCount)
+        XCTAssertEqual(create.config.initPoint, quick.config.initPoint)
+
+        let sanma = try RoomConfigParser.parse(
+            ["mode": 1, "dora_count": 5, "ai_level": 2], playerCount: 3, defaultTimeFixed: 60, acceptsRuleOverrides: true)
+        XCTAssertEqual(sanma.config.mode, 11)
+        XCTAssertTrue(sanma.resolved.adjusted)
+        XCTAssertEqual(sanma.config.doraCount, 5)
+        XCTAssertEqual(sanma.config.aiLevel, 2)
+        XCTAssertThrowsError(try RoomConfigParser.parse(
+            ["time_fixed": 1 << 40], playerCount: 4, defaultTimeFixed: 60, acceptsRuleOverrides: false))
+    }
+
+    /// 與 main 逐欄位相同：quick test 只吃 mode、time_fixed、time_add、ai_level
+    func testRoomQuickTestRequestIgnoresRuleOverrides() async throws {
+        var sent: [LiqiRequestSpec] = []
+        let send = SendActionAction(stub: { spec, _ in
+            sent.append(spec)
+            return .unavailable("stop_after_create")
+        })
+        let store = GameStore()
+        let context = DefaultNakiMCPContext(dependencies: NakiMCPDependencies(
+            store: store, ui: UIState(), settings: SettingsStore(),
+            executeJavaScript: .unavailable, captureScreenshot: .unavailable,
+            sendAction: send,
+            startUnifiedMatch: StartUnifiedMatchAction(send: send),
+            cancelUnifiedMatch: CancelUnifiedMatchAction(send: send),
+            triggerAutoPlay: .unavailable, setAntiIdle: .unavailable,
+            gameSnapshot: GameSnapshotAction(store: store, accountSource: nil),
+            forceReconnect: .unavailable))
+        let tool = RoomQuickTestTool(context: context)
+
+        _ = try await tool.execute(arguments: [
+            "mode": 1, "time_fixed": 20, "time_add": 3, "ai_level": 2,
+            "dora_count": 5, "shiduan": 0, "init_point": 1000, "fandian": 2000,
+            "public_live": true, "enable_ai": true, "client_version_string": "x"
+        ])
+
+        var expected = LiqiFriendRoomConfig(playerCount: 4)
+        expected.mode = 1
+        expected.timeFixed = 20
+        expected.timeAdd = 3
+        expected.aiLevel = 2
+        XCTAssertEqual(sent.count, 1)
+        XCTAssertEqual(sent.first?.payload, LiqiRequestBuilder.createRoom(config: expected).payload)
+    }
+
+    // MARK: - SV-22 bot_ops 與 game_ops 輸出相同
+
+    func testBotOpsAndGameOpsShareOneOutput() async throws {
+        let shared = LiqiOperationStore.shared
+        shared.reset()
+        defer { shared.reset() }
+        shared.record(seat: 0, operations: [LiqiOperation(type: .discard)], contextTile: "5p")
+        let context = makeContext()
+
+        let bot = try await BotOpsTool(context: context).execute(arguments: [:]) as? [String: Any]
+        let game = try await GameOpsTool(context: context).execute(arguments: [:]) as? [String: Any]
+
+        XCTAssertEqual(bot?["hasPending"] as? Bool, true)
+        let required = NakiToolOutputSchemas.schema(for: "bot_ops")["required"] as? [String] ?? []
+        for key in required {
+            XCTAssertNotNil(bot?[key], key)
+            XCTAssertNotNil(game?[key], key)
+        }
+        XCTAssertEqual(bot?["source"] as? String, game?["source"] as? String)
+    }
+
+    // MARK: - SV-27 輪替只認時間戳目錄
+
+    func testPruneIgnoresDirectoriesThatAreNotSessionStamps() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("naki-prune-stamp-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: root) }
+        let shortName = "20260101-00000"
+        let names = ["20260101-000001", "abcdefg-hijklmn", "20261301-000000", shortName]
+        for name in names {
+            try fm.createDirectory(at: root.appendingPathComponent(name), withIntermediateDirectories: true)
+        }
+
+        LogManager.pruneOldSessions(root: root, keep: 0)
+
+        XCTAssertEqual(Set(try fm.contentsOfDirectory(atPath: root.path)), [shortName],
+                       "判斷只看 15 字元且含「-」，與 main 相同；14 字元不是 session 目錄")
+    }
+
     func testLogFileNoteDescribesRetentionRule() async throws {
         let status = try await GetStatusTool(context: makeContext()).execute(arguments: [:]) as? [String: Any]
         let note = try XCTUnwrap(status?["logFileNote"] as? String)
         XCTAssertTrue(note.contains("保留最近 \(LogManager.sessionKeepCount) 次完整目錄"), note)
         XCTAssertTrue(note.contains("更舊且有錄影的只留 games/"), note)
+    }
+
+    func testLogFileNoteUsesRetentionConstant() {
+        XCTAssertEqual(LogManager.sessionKeepCount, 8)
+        XCTAssertEqual(LogManager.logsRoot.lastPathComponent, "Naki")
+        XCTAssertTrue(ReplaySupport.isInsideLogsRoot(LogManager.logsRoot.appendingPathComponent("x/games/a.jsonl")))
+    }
+
+    // MARK: - SV-15 JSON-RPC 標準碼
+
+    func testJSONRPCStandardCodesKeepWireValues() {
+        XCTAssertEqual(NakiMCPProtocol.parseErrorCode, -32700)
+        XCTAssertEqual(NakiMCPProtocol.invalidRequestCode, -32600)
+        XCTAssertEqual(NakiMCPProtocol.methodNotFoundCode, -32601)
+        XCTAssertEqual(NakiMCPProtocol.invalidParamsCode, -32602)
+        XCTAssertEqual(NakiMCPProtocol.internalErrorCode, -32603)
+    }
+
+    // MARK: - SV-13 預設等待毫秒數只命名、不改值
+
+    func testAwaitDefaultsKeepValuesAndDescriptionsQuoteThem() {
+        XCTAssertEqual(MCPArguments.inGameAwaitMs, 800)
+        XCTAssertEqual(MCPArguments.lobbyAwaitMs, 1500)
+        XCTAssertEqual(MCPArguments.roomAwaitMs, 2000)
+        XCTAssertEqual(GameDiscardTool.inputSchema.properties["awaitResponseMs"]?.description?.contains("預設 800"), true)
+        XCTAssertEqual(AccountInfoTool.inputSchema.properties["awaitResponseMs"]?.description?.contains("預設 1500"), true)
+        XCTAssertEqual(RoomStartTool.inputSchema.properties["awaitResponseMs"]?.description?.contains("預設 2000"), true)
+    }
+
+    // MARK: - 強化：變異存活者
+
+    func testOriginWithoutPortUsesSchemeDefault() {
+        XCTAssertTrue(NakiMCPOriginPolicy.isAllowed("http://localhost", boundPort: 80))
+        XCTAssertFalse(NakiMCPOriginPolicy.isAllowed("http://localhost", boundPort: 443))
+        XCTAssertTrue(NakiMCPOriginPolicy.isAllowed("https://localhost", boundPort: 443))
+        XCTAssertFalse(NakiMCPOriginPolicy.isAllowed("https://localhost", boundPort: 80))
+        XCTAssertTrue(NakiMCPOriginPolicy.isAllowed("https://localhost:8765", boundPort: 8765), "明寫的 port 優先於 scheme 預設")
     }
 
     func testStartUnifiedMatchSidSourceFollowsResolvedValue() async throws {

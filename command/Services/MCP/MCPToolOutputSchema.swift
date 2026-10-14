@@ -129,7 +129,7 @@ enum NakiToolOutputSchemas {
             properties: [
                 "source": string("固定 swift-protocol-layer"),
                 "registeredTools": integer("registry 工具數"),
-                "snapshot": nullableObject("遊戲快照；回調未設定時為 null"),
+                "snapshot": nullableObject("遊戲快照；取不到時為 null"),
                 "snapshotError": string("快照不可用的原因"),
                 "recentResponses": array("Naki 自送請求（msgId 登記制）的 RESPONSE"),
                 "broadcasts": array("收到的表情廣播"),

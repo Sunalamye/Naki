@@ -145,7 +145,7 @@ final class MCPToolHardeningTests: XCTestCase {
     // MARK: - 錄影路徑限制（E33）
 
     func testReplayPathConfinedToLogsRoot() {
-        let root = ReplaySupport.logsRoot
+        let root = LogManager.logsRoot
         XCTAssertTrue(ReplaySupport.isInsideLogsRoot(
             root.appendingPathComponent("20260101-000000/games/a.mjai.jsonl")))
         XCTAssertFalse(ReplaySupport.isInsideLogsRoot(URL(fileURLWithPath: "/etc/passwd")))
