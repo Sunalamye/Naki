@@ -129,6 +129,11 @@ final class MCPToolHardeningTests: XCTestCase {
         let crossSite = NakiMCPRequestGuard.rejection(
             lines: request("Host: 127.0.0.1:8765", "Origin: https://evil.example"))
         XCTAssertTrue(crossSite?.body.contains("Forbidden origin") == true)
+        let otherPort = NakiMCPRequestGuard.rejection(
+            lines: request("Host: 127.0.0.1:8765", "Origin: http://localhost:9999"), boundPort: 8765)
+        XCTAssertTrue(otherPort?.body.contains("Forbidden origin") == true, "loopback 但 port 不同的 Origin 被拒")
+        XCTAssertNil(NakiMCPRequestGuard.rejection(
+            lines: request("Host: 127.0.0.1:8765", "Origin: http://localhost:8765"), boundPort: 8765))
     }
 
     /// DebugServer 是 MainActor 類別、需要 live server 才能跑 handler；這裡鎖「守衛在路由之前被呼叫」。
@@ -137,7 +142,7 @@ final class MCPToolHardeningTests: XCTestCase {
         let source = try String(contentsOf: URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("command/Services/Debug/DebugServer.swift"), encoding: .utf8)
-        let guardCall = try XCTUnwrap(source.range(of: "NakiMCPRequestGuard.rejection(lines: lines)"))
+        let guardCall = try XCTUnwrap(source.range(of: "NakiMCPRequestGuard.rejection(lines: lines, boundPort: actualPort)"))
         let routing = try XCTUnwrap(source.range(of: "trace(\"Request:"))
         XCTAssertLessThan(guardCall.lowerBound, routing.lowerBound)
     }

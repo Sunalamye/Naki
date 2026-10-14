@@ -340,7 +340,7 @@ class DebugServer: MCPHTTPResponder {
         // Host 驗證是 DNS rebinding 的另一半：Origin 只有跨站請求才會帶，rebinding 之後
         // 頁面與 server 同源，GET 不帶 Origin，只有 Host 會露出攻擊者的網域。
         // 兩道檢查都在 `NakiMCPRequestGuard`，沒有 Host 的請求（HTTP/1.0 的 curl）放行不會開洞。
-        if let rejected = NakiMCPRequestGuard.rejection(lines: lines) {
+        if let rejected = NakiMCPRequestGuard.rejection(lines: lines, boundPort: actualPort) {
             log("\(rejected.reason) for \(method) \(path)")
             sendResponse(connection: connection, status: 403, body: rejected.body,
                          contentType: "application/json")
