@@ -213,7 +213,7 @@ struct StatusBar: View {
                 Spacer()
 
                 // 顯示推薦數量
-                if naki.store.recommendationCount > 0 {
+                if naki.store.showsRecommendationBadge {
                     Text("\(naki.store.recommendationCount) 推薦")
                         .font(.caption)
                         .padding(.horizontal, PanelLayout.Spacing.s8)

@@ -133,6 +133,10 @@ final class GameStore {
     /// `recommendations` 的地方跟著更新，漏一處就會與列表長度不一致。
     var recommendationCount: Int { recommendations.count }
 
+    /// 狀態列要不要顯示「N 推薦」徽章。`.off` 時 AI 仍在背景算，`recommendations` 不為空，
+    /// 但推薦顯示已關，徽章要跟側欄一致。
+    var showsRecommendationBadge: Bool { autoPlayMode.showRecommendation && recommendationCount > 0 }
+
     /// 是否真的在對局中（`/game/state` 的 `inGame`）。
     ///
     /// `botStatus.isActive` 只代表「Bot 物件存在」——Bot 在 authGame 當下就建立，
