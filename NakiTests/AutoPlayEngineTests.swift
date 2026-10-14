@@ -955,6 +955,124 @@ final class AutoPlayEngineTests: XCTestCase {
             }
         }
     }
+
+    // MARK: - 「過」送不出去：停滯與跨輪退避（BT-01／BT-02）
+
+    private func ponSnapshot(_ store: LiqiOperationStore) {
+        store.record(seat: 0, operations: [LiqiOperation(type: .pon)],
+                     timeFixed: 300_000, contextTile: "5p", source: "test")
+    }
+
+    /// BT-18：只注入 clock、不傳 now，副露寬限期也跟著同一條時間軸走
+    func testCallPassGraceFollowsInjectedClockWhenNowIsOmitted() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in self.ok() }
+        ponSnapshot(store)
+        let captured = store.pending!.capturedAt
+        var clockNow = captured.addingTimeInterval(1)
+        let engine = backoffEngine(store: store, sender: sender, recommendations: [],
+                                   clock: { clockNow })
+
+        let early = await engine.runCycle()
+        XCTAssertEqual(early.outcome, .skipped(.awaitingInference))
+        clockNow = captured.addingTimeInterval(60)
+        let late = await engine.runCycle()
+        XCTAssertEqual(late.outcome, .passed(attempts: 1, handled: true))
+    }
+
+    /// BT-01：`.passed(handled: false)` 不是「送出成功」，不可把停滯歸零
+    func testFailedPassIsNotMistakenForASentAction() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in .failure("no channel") }
+        var reported: [AutoPlayStall?] = []
+        ponSnapshot(store)
+        let afterGrace = store.pending!.capturedAt.addingTimeInterval(timing().callPassGrace + 1)
+        var t = timing(maxAttempts: 2)
+        t.clock = { afterGrace }
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: t,
+            context: {
+                AutoPlayEngine.Context(mode: .auto, recommendations: [], seat: 0,
+                                       isSanma: false, tsumoTile: nil,
+                                       recommendationsOplistSequence: store.pending?.sequence)
+            },
+            onStallChanged: { reported.append($0) })
+
+        var outcomes: [AutoPlayCycleOutcome] = []
+        for _ in 0..<5 { outcomes.append(await engine.runCycle().outcome) }
+
+        XCTAssertEqual(outcomes.first, .passed(attempts: 2, handled: false))
+        let stall = reported.compactMap { $0 }.last
+        XCTAssertNotNil(stall, "「過」連續送不出去必須上畫面")
+        XCTAssertEqual(stall?.reason, "passFailed:2")
+        XCTAssertEqual(stall?.consecutiveTicks, 5)
+    }
+
+    /// BT-01 的反向鎖：「過」送出成功就清掉停滯
+    func testSuccessfulPassClearsStall() async {
+        let store = LiqiOperationStore()
+        let sender = LiqiActionSender()
+        var online = false
+        sender.sendHandler = { _ in online ? self.ok() : .failure("no channel") }
+        var reported: [AutoPlayStall?] = []
+        ponSnapshot(store)
+        let afterGrace = store.pending!.capturedAt.addingTimeInterval(timing().callPassGrace + 1)
+        var t = timing(maxAttempts: 1)
+        t.clock = { afterGrace }
+        let engine = AutoPlayEngine(
+            store: store, sender: sender, timing: t,
+            context: {
+                AutoPlayEngine.Context(mode: .auto, recommendations: [], seat: 0,
+                                       isSanma: false, tsumoTile: nil,
+                                       recommendationsOplistSequence: store.pending?.sequence)
+            },
+            onStallChanged: { reported.append($0) })
+
+        for _ in 0..<4 { _ = await engine.runCycle() }
+        XCTAssertNotNil(reported.compactMap { $0 }.last)
+        online = true
+        let run = await engine.runCycle()
+
+        XCTAssertEqual(run.outcome, .passed(attempts: 1, handled: true))
+        XCTAssertEqual(reported.last, .some(nil))
+    }
+
+    /// BT-02：「過」送不出去也走跨輪退避；斷線時停滯立刻上畫面
+    func testFailedPassBacksOffAcrossCyclesAndFlagsOffline() async {
+        for (detail, offline) in [("no_open_majsoul_connection", true), ("no channel", false)] {
+            let store = LiqiOperationStore()
+            let sender = LiqiActionSender()
+            var sends = 0
+            sender.sendHandler = { _ in sends += 1; return .failure(detail) }
+            let base = Date()
+            var clockNow = base
+            var reported: [AutoPlayStall?] = []
+            let engine = backoffEngine(store: store, sender: sender, recommendations: [],
+                                       clock: { clockNow }, maxAttempts: 2,
+                                       onStall: { reported.append($0) })
+            ponSnapshot(store)
+            let gateNow = base.addingTimeInterval(timing().callPassGrace + 1)
+
+            let first = await engine.runCycle(now: gateNow)
+            XCTAssertEqual(first.outcome, .passed(attempts: 2, handled: false), detail)
+            XCTAssertEqual(sends, 2, detail)
+            if offline {
+                XCTAssertEqual(reported.compactMap { $0 }.last?.reason, "no_open_majsoul_connection")
+                XCTAssertEqual(reported.compactMap { $0 }.last?.consecutiveTicks, 1, "斷線不等 4 拍門檻")
+            }
+
+            clockNow = base.addingTimeInterval(1.9)
+            let blocked = await engine.runCycle(now: gateNow)
+            XCTAssertEqual(blocked.outcome, .notSent(reason: "backoff"), detail)
+            XCTAssertEqual(sends, 2, "\(detail)：退避期間不再送")
+
+            clockNow = base.addingTimeInterval(2.1)
+            _ = await engine.runCycle(now: gateNow)
+            XCTAssertEqual(sends, 4, "\(detail)：退避到期才再試一輪")
+        }
+    }
 }
 
 // MARK: - 結構鎖（p3-2 的驗收條件之一）

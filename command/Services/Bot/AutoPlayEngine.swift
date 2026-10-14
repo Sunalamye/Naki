@@ -440,10 +440,11 @@ final class AutoPlayEngine {
 
     /// 輪詢／事件路徑的一輪：閘門 →（延遲）→ resolver → 送出。
     ///
-    /// - Parameter now: 注入時間，讓「副露寬限期內／已過」可以在測試裡擺出來。
+    /// - Parameter now: 注入時間，讓「副露寬限期內／已過」可以在測試裡擺出來；預設取 `timing.clock()`，與退避同一個時鐘。
     @discardableResult
-    func runCycle(now: Date = Date()) async -> AutoPlayCycle {
+    func runCycle(now: Date? = nil) async -> AutoPlayCycle {
         beginCycle()
+        let now = now ?? timing.clock()
 
         let ctx = context()
 
@@ -617,6 +618,15 @@ final class AutoPlayEngine {
             confirmInRecovery = true
         }
 
+        // 閘門先於 recovery 預算：skip 沒有 dispatch，不能消耗預算、也不能寫假的重送 log。
+        let ctx = context()
+        if let reason = AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.sendsActions, isSanma: ctx.isSanma,
+                                                   sanmaEngineAvailable: ctx.sanmaEngineAvailable) {
+            // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。
+            // 使用者在 `.off`/`.recommend`/三麻自己確認，ActionNewRound 到達會清 pending。
+            return .skipped(reason)
+        }
+
         // Recovery 模式：**每一次** dispatch 都消耗 budget，不論這次是 confirmed 還是 failed。
         // 改成只在「ACK 後再次逾時」才 +1 的話，resend 一直回 .failed 時 confirmAckedAt 停在
         // nil、永遠不進 watchdog 分支、counter 卡在 1，confirm 會永久佔住 tick 讓自動打牌餓死。
@@ -632,42 +642,31 @@ final class AutoPlayEngine {
                  + "(\(confirmWatchdogResends)/\(timing.confirmMaxWatchdogResends))", to: .event)
         }
 
-        let ctx = context()
-        switch AutoPlayGate.allowsConfirm(isAutoMode: ctx.mode.sendsActions, isSanma: ctx.isSanma,
-                                          sanmaEngineAvailable: ctx.sanmaEngineAvailable) {
-        case .skip(let reason):
-            // 不記 log：這條路一秒判一次（pending 期間），記下來會淹掉 log。
-            // 使用者在 `.off`/`.recommend`/三麻自己確認，ActionNewRound 到達會清 pending。
-            return .skipped(reason)
+        let policy = timing.confirmPolicy
+        note("🏁 局間結算：送出 confirmNewRound (\(policy.maxAttempts) 次上限)", to: .event)
 
-        case .proceed, .forceHora, .sendPass:
-            // allowsConfirm 只會回 .proceed 或 .skip；其餘 case 不可能，但 switch 要窮舉。
-            let policy = timing.confirmPolicy
-            note("🏁 局間結算：送出 confirmNewRound (\(policy.maxAttempts) 次上限)", to: .event)
-
-            let outcome = await occupy(delay: timing.confirmGrace) {
-                await AutoConfirmDispatcher.send(
-                    policy: policy,
-                    // 下一局已開始（roundDidBegin 清 pending）或迴圈被停掉 → 停手
-                    isSuperseded: { !self.confirmPending || Task.isCancelled },
-                    log: { self.note($0, to: .event) },
-                    send: self.confirmSend(awaitResponseMs: policy.awaitResponseMs))
-            }
-
-            switch outcome {
-            case .confirmed:
-                // 第 2 層達成，但還沒進下一局：保留 pending、記**實際 ack 時間**（clock() 在
-                // occupy/grace/送出/等 RESPONSE 之後才讀，不是 cycle 入口時間），交給 watchdog
-                // 等第 3 層。用入口時間當起算點會讓後段 attempt 成功時 watchdog 立刻誤判逾時。
-                confirmAckedAt = timing.clock()
-            case .superseded:
-                confirmPending = false
-                confirmAckedAt = nil
-            case .failed:
-                break   // 保留 pending，下一輪重試
-            }
-            return .dispatched(outcome)
+        let outcome = await occupy(delay: timing.confirmGrace) {
+            await AutoConfirmDispatcher.send(
+                policy: policy,
+                // 下一局已開始（roundDidBegin 清 pending）或迴圈被停掉 → 停手
+                isSuperseded: { !self.confirmPending || Task.isCancelled },
+                log: { self.note($0, to: .event) },
+                send: self.confirmSend(awaitResponseMs: policy.awaitResponseMs))
         }
+
+        switch outcome {
+        case .confirmed:
+            // 第 2 層達成，但還沒進下一局：保留 pending、記**實際 ack 時間**（clock() 在
+            // occupy/grace/送出/等 RESPONSE 之後才讀，不是 cycle 入口時間），交給 watchdog
+            // 等第 3 層。用入口時間當起算點會讓後段 attempt 成功時 watchdog 立刻誤判逾時。
+            confirmAckedAt = timing.clock()
+        case .superseded:
+            confirmPending = false
+            confirmAckedAt = nil
+        case .failed:
+            break   // 保留 pending，下一輪重試
+        }
+        return .dispatched(outcome)
     }
 
     /// 送 confirmNewRound 的實際通道。正式路徑走 `sender.sendAwaitingResponse`
@@ -847,6 +846,7 @@ final class AutoPlayEngine {
                           channel: LiqiActionChannel,
                           gate: AutoPlayGate.Decision?) async -> AutoPlayCycle {
         await occupy(delay: 0) {
+            var lastSendOffline = false
             let outcome = await AutoPassDispatcher.send(
                 sequence: snapshot.sequence,
                 store: self.store,
@@ -854,12 +854,17 @@ final class AutoPlayEngine {
                 // 迴圈被停掉（App 收掉／模式切換造成 stop）就別再送
                 isCurrent: { !Task.isCancelled },
                 log: { self.note($0, to: .event) },
-                send: { await self.sender.pass(channel: channel) })
+                send: {
+                    let result = await self.sender.pass(channel: channel)
+                    lastSendOffline = result.isOffline
+                    return result
+                })
 
             switch outcome {
             case .handled(let attempts):
                 return self.finish(gate: gate, outcome: .passed(attempts: attempts, handled: true))
             case .failed(let attempts):
+                self.deferRetry(snapshot.sequence, offline: lastSendOffline)
                 return self.finish(gate: gate, outcome: .passed(attempts: attempts, handled: false))
             case .superseded:
                 return self.finish(gate: gate, outcome: .passSuperseded)
@@ -949,6 +954,7 @@ final class AutoPlayEngine {
         case .surfaced(let a):       reason = "surfaced:\(a.rawValue)"
         case .sendFailed(_, let n):  reason = "sendFailed:\(n)"
         case .passSuperseded:        reason = "passSuperseded"
+        case .passed(let n, false):  reason = "passFailed:\(n)"
         case .sent, .passed:         reason = nil   // 真的送出去了，重置
         }
         if let reason {

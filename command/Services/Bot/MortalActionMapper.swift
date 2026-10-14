@@ -167,6 +167,8 @@ struct MortalActionMapper {
             return Recommendation(tile: "kan", probability: probability, actionType: .kan)
         case AI.hora:
             return Recommendation(tile: "hora", probability: probability, actionType: .hora)
+        case AI.ryukyoku:
+            return Recommendation(tile: "ryukyoku", probability: probability, actionType: .ryukyoku)
         case AI.pass:
             return Recommendation(tile: "none", probability: probability, actionType: .none)
         default:

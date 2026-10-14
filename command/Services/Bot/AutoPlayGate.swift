@@ -166,15 +166,15 @@ nonisolated enum AutoPlayGate {
     /// 流程訊號），所以不走 `evaluate` 的 snapshot 分支。但「只有自動模式才自動送、
     /// 三麻 fail-closed」與打牌同一條規則，故共用同一組 `Reason`，收斂在同一個檔案：
     ///
-    /// - `.off` / `.recommend`：不自動送（使用者要自己在遊戲內確認）→ `.skip(.notAutoMode)`
+    /// - `.off` / `.recommend`：不自動送（使用者要自己在遊戲內確認）→ `.notAutoMode`
     /// - 三麻：fail-closed，除非目前引擎支援三麻（雲端 3p 或本地 Akagi 三麻）——局間確認
-    ///   不是模型決策，看引擎能力而非逐決策 → `.skip(.sanmaUnsupported)`
+    ///   不是模型決策，看引擎能力而非逐決策 → `.sanmaUnsupported`
     ///
-    /// - Returns: `.proceed` 表示可以送；否則 `.skip(reason)`（永遠不會回 `.forceHora`/`.sendPass`）
+    /// - Returns: nil 表示可以送；否則是擋下的原因
     static func allowsConfirm(isAutoMode: Bool, isSanma: Bool,
-                              sanmaEngineAvailable: Bool = false) -> Decision {
-        guard isAutoMode else { return .skip(.notAutoMode) }
-        guard !isSanma || sanmaEngineAvailable else { return .skip(.sanmaUnsupported) }
-        return .proceed
+                              sanmaEngineAvailable: Bool = false) -> Reason? {
+        guard isAutoMode else { return .notAutoMode }
+        guard !isSanma || sanmaEngineAvailable else { return .sanmaUnsupported }
+        return nil
     }
 }

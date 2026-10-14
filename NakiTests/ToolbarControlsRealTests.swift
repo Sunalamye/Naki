@@ -93,7 +93,7 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
             // ── 格 4：局間確認（p2-5：只有 .auto 自動送 confirmNewRound）
             let confirmDecision = AutoPlayGate.allowsConfirm(
                 isAutoMode: row.mode.sendsActions, isSanma: false)
-            let expectedConfirm: AutoPlayGate.Decision = row.confirm ? .proceed : .skip(.notAutoMode)
+            let expectedConfirm: AutoPlayGate.Reason? = row.confirm ? nil : .notAutoMode
             XCTAssertEqual(confirmDecision, expectedConfirm,
                            "[\(row.mode.rawValue)] 局間確認格")
         }
@@ -105,11 +105,11 @@ final class AutoPlayModeBehaviorMatrixTests: XCTestCase {
     /// 一眼看得出是哪一格破。
     func testBetweenRoundConfirmOnlyInAutoMode() {
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.off.sendsActions,
-                                                  isSanma: false), .skip(.notAutoMode))
+                                                  isSanma: false), .notAutoMode)
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.recommend.sendsActions,
-                                                  isSanma: false), .skip(.notAutoMode))
+                                                  isSanma: false), .notAutoMode)
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: AutoPlayMode.auto.sendsActions,
-                                                  isSanma: false), .proceed)
+                                                  isSanma: false), nil)
     }
 }
 

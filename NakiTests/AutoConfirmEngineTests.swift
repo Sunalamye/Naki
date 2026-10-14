@@ -190,6 +190,48 @@ final class AutoConfirmEngineTests: XCTestCase {
         XCTAssertFalse(engine.confirmPending)
     }
 
+    /// BT-04：recovery 的預算只能被真正的 dispatch 消耗。閘門 skip（例如使用者切到推薦）
+    /// 期間沒有送出任何東西，不可遞增預算、不可寫假的「重送」log，更不可因此放掉 pending。
+    func testSkippedTicksDuringRecoveryDoNotConsumeBudget() async {
+        let t0 = Date(timeIntervalSince1970: 4_000_000)
+        let clockBox = ClockBox(t0)
+        var mode = AutoPlayMode.auto
+        var calls = 0
+        var events: [String] = []
+        var timing = AutoPlayEngine.Timing()
+        timing.confirmGrace = 0
+        timing.confirmAckWatchdog = 1.0
+        timing.confirmMaxWatchdogResends = 3
+        timing.clock = { clockBox.now }
+        timing.confirmPolicy = .init(maxAttempts: 3, delay: 0, awaitResponseMs: 0)
+        timing.confirmSend = { calls += 1; return self.confirmed() }
+        let engine = AutoPlayEngine(
+            store: LiqiOperationStore(), sender: LiqiActionSender(), timing: timing,
+            context: {
+                AutoPlayEngine.Context(mode: mode, recommendations: [], seat: 0,
+                                       isSanma: false, tsumoTile: nil)
+            },
+            event: { events.append($0) })
+        engine.roundDidEnd()
+
+        _ = await engine.runConfirmCycle()           // 送出並受理
+        mode = .recommend
+        clockBox.now = t0.addingTimeInterval(1.5)    // watchdog 逾時，進入 recovery
+        for _ in 0..<5 {
+            let r = await engine.runConfirmCycle()
+            XCTAssertEqual(r, .skipped(.notAutoMode))
+        }
+
+        XCTAssertTrue(engine.confirmPending, "沒有送出任何東西就不能放掉待確認")
+        XCTAssertFalse(events.contains { $0.contains("recovery 重送") }, "沒有 dispatch 就不該寫重送")
+        XCTAssertEqual(calls, 1)
+
+        mode = .auto
+        let resumed = await engine.runConfirmCycle()
+        XCTAssertEqual(resumed, .dispatched(.confirmed(attempts: 1)), "切回自動後預算仍完整")
+        XCTAssertEqual(calls, 2)
+    }
+
     /// `.off`：不送，pending 保留（使用者自己在遊戲內確認）
     func testOffModeDoesNotSend() async {
         var calls = 0

@@ -93,20 +93,20 @@ final class GameFlowRequestTests: XCTestCase {
 
     /// `.auto` 才放行；`.off`/`.recommend` 一律 `.skip(.notAutoMode)`
     func testAllowsConfirmOnlyInAutoMode() {
-        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: false), .proceed)
+        XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: false), nil)
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: false, isSanma: false),
-                       .skip(.notAutoMode))
+                       .notAutoMode)
     }
 
     /// 三麻 fail-closed：即使自動模式也不送（內建模型只有四麻一份）
     func testAllowsConfirmFailsClosedOnSanma() {
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true),
-                       .skip(.sanmaUnsupported))
+                       .sanmaUnsupported)
     }
 
     /// 模式先於三麻判斷：非自動模式一律先被 notAutoMode 擋
     func testAllowsConfirmModeCheckedBeforeSanma() {
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: false, isSanma: true),
-                       .skip(.notAutoMode))
+                       .notAutoMode)
     }
 }

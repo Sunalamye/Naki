@@ -208,19 +208,19 @@ final class AutoPlayGateTests: XCTestCase {
     /// 局間確認：三麻在引擎支援三麻（雲端 3p 或本地 Akagi 三麻）時放行；沒有三麻引擎照舊擋
     func testSanmaConfirmFollowsSanmaEngineAvailability() {
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true,
-                                                  sanmaEngineAvailable: true), .proceed)
+                                                  sanmaEngineAvailable: true), nil)
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true,
                                                   sanmaEngineAvailable: false),
-                       .skip(.sanmaUnsupported))
+                       .sanmaUnsupported)
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: false, isSanma: true,
                                                   sanmaEngineAvailable: true),
-                       .skip(.notAutoMode))
+                       .notAutoMode)
     }
 
     /// 嚴格方向的預設值（省略＝擋下）是刻意保留的；鎖住省略時真的落在擋下那一邊
     func testOmittedStrictDefaultsFailClosed() {
         XCTAssertEqual(AutoPlayGate.allowsConfirm(isAutoMode: true, isSanma: true),
-                       .skip(.sanmaUnsupported))
+                       .sanmaUnsupported)
         let d = AutoPlayGate.evaluate(.init(
             isAutoMode: true, isSanma: true, hasActionInFlight: false,
             snapshot: snapshot(types: [1]), recommendations: [rec(.discard)],
