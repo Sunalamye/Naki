@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/badge/version-2.17.0-green" alt="Version 2.17.0"></a>
+  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/badge/version-2.18.0-green" alt="Version 2.18.0"></a>
   <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS">
   <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS">
   <img src="https://img.shields.io/badge/Apple%20Silicon-required-red" alt="Architecture">
@@ -165,23 +165,38 @@ Naki は雀魂と麻雀 AI をひとつのウィンドウにまとめました�
 - `scripts/cloud-watch.sh`（任意）はバックグラウンドで event log を監視し、同期ずれ／失敗／
   watchdog による再接続／送信の停滞が起きると **macOS 通知を出します**。log を自分で見張る必要はありません
 
-<p align="center">
-  <img src="docs/images/settings.png" width="760" alt="設定（改版前の 2 列デザイン案。タブ版の画像に差し替え予定）">
-</p>
-
-Mac の設定は独立したウィンドウで、4 つのタブに分かれています：**一般**（言語、画面、アップデート）、**接続**（雀魂サーバー、カスタム User-Agent とヘッダー）、**AI**（自動操作、クラウド推論）、**開発者**（クラウド API、Bot 管理、MCP Server）。キーの状態は key を入力すると自動で表示され、接続テストを押す必要はありません。
-
-<sub>上の画像は改版前の 2 列デザイン案（`docs/ui-reference/`）です。タブ版の画像は未作成です。</sub>
-
-iPhone は同じ設定を 1 ページのスクロールにした版です（4 つのセクション、「開発者」は初期状態で折りたたみ）。下の 2 枚は改版前のスクリーンショットで、撮り直しが必要です：
+<p align="center"><sub>Mac の設定ウィンドウ（ダーク外観）：一般・接続・AI・開発者の 4 タブ</sub></p>
 
 <table>
 <tr>
 <td width="50%">
-<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone 設定：自動操作と画面">
+<img src="docs/images/settings.png" width="100%" alt="Mac 設定「一般」タブ：言語、画面、アップデート">
 </td>
 <td width="50%">
-<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone 設定：クラウド推論">
+<img src="docs/images/settings-connection.png" width="100%" alt="Mac 設定「接続」タブ：雀魂サーバー、User-Agent とヘッダー">
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="docs/images/settings-ai.png" width="100%" alt="Mac 設定「AI」タブ：自動操作、クラウド推論">
+</td>
+<td width="50%">
+<img src="docs/images/settings-developer.png" width="100%" alt="Mac 設定「開発者」タブ：クラウド API、Bot 管理、MCP Server">
+</td>
+</tr>
+</table>
+
+Mac の設定は独立したウィンドウで、4 つのタブに分かれています：**一般**（言語、画面、アップデート）、**接続**（雀魂サーバー、カスタム User-Agent とヘッダー）、**AI**（自動操作、クラウド推論）、**開発者**（クラウド API、Bot 管理、MCP Server）。キーの状態は key を入力すると自動で表示され、接続テストを押す必要はありません。
+
+iPhone は同じ設定を 1 ページのスクロールにした版です（4 つのセクション、「開発者」は初期状態で折りたたみ）。下の 2 枚は iOS 26 シミュレーター（ダーク外観）の、「一般」セクションと「AI」セクションのクラウド推論です：
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone 設定：一般（画面とアップデート）">
+</td>
+<td width="50%">
+<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone 設定：AI セクションのクラウド推論">
 </td>
 </tr>
 </table>
@@ -196,6 +211,12 @@ iPhone は同じ設定を 1 ページのスクロールにした版です（4 �
 ### プラグインシステム
 
 ツールバーのパズルピースのアイコンから**プラグインページ**を開きます。プラグインのオン／オフは即座に反映され、ページの再読み込みは不要です。プラグインは `~/Library/Application Support/Naki/Plugins/<id>/`（macOS）に置くか、gist または HTTPS の `plugin.json` の URL を貼って一度だけ取り込みます。Naki はマーケットプレイスや組み込みの配布元を持ちません。牌の色替えや名前の非表示といった表示機能は内蔵ではなくなり、プラグインで実装できます。
+
+<p align="center">
+  <img src="docs/images/plugins.png" width="640" alt="プラグインページ：インストール済みプラグインと取り込み">
+</p>
+
+プラグインは独自の設定ページを持てます：manifest にフィールドを宣言すると、Naki の設定画面が自動で UI を生成し、値は Naki 側に保存されます。
 
 - プラグインの能力は 3 段階です：**L1 読み取り専用**（パケットを見るだけ）、**L2 ローカル表示の変更**（ゲームクライアントが見るパケットを書き換える。サーバーや他のプレイヤーには影響しない）、**L3 送信側**（あなたのアカウントでゲームのアクションを送れる）。L3 は初期状態では完全に使えず、別のマスタースイッチをオンにして確認を通す必要があります
 - ⚠️ **L3 のリスク：** プラグインはゲームと同じ JavaScript 環境で動き、権限設定は誤用の防止であって悪意あるプラグインへの防御ではありません。悪意あるプラグインは、あなたのアカウントで送信パケットを送信・書き換えたり、ページ上のあらゆるデータ（ログイン token を含む）を読み取ったりできます。**プラグインをインストールする ＝ 作者を信頼する**ことです。信頼できるプラグインだけを入れ、サブアカウントでのみ使ってください

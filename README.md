@@ -165,25 +165,39 @@ Naki 把雀魂和麻將 AI 裝進同一個視窗。**不需要 Python、Docker�
 - `scripts/cloud-watch.sh`（選用）在背景監看 event log，脫節／失敗／
   watchdog 重連／送出停滯會**發 macOS 通知**——不必自己盯 log
 
-<p align="center">
-  <img src="docs/images/settings.png" width="760" alt="設定（改版前的兩欄設計稿，待換成分頁新圖）">
-</p>
-
-Mac 的設定是獨立視窗，分四個分頁：**一般**（語言、畫面、更新）、**連線**（雀魂伺服器、自訂 User-Agent 與 header）、
-**AI**（自動操作、雲端推論）、**開發者**（雲端 API、Bot 管理、MCP Server）。金鑰狀態在填好 key 之後自動出現，不必按測試連線。
-
-<sub>上圖是改版前的兩欄設計稿（`docs/ui-reference/`），分頁版新圖待補。App 內的截圖 API 抓不到 sheet 的完整渲染，
-見 `CaptureScreenshotAction.windowScreenshot` 的註解。</sub>
-
-iPhone 是同一份設定的單頁捲動版（四段，「開發者」預設折疊）；下面兩張是改版前的截圖，待重拍：
+<p align="center"><sub>Mac 設定視窗（深色外觀）：一般、連線、AI、開發者四個分頁</sub></p>
 
 <table>
 <tr>
 <td width="50%">
-<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone 設定：自動操作與畫面">
+<img src="docs/images/settings.png" width="100%" alt="Mac 設定「一般」分頁：語言、畫面、更新">
 </td>
 <td width="50%">
-<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone 設定：雲端推論">
+<img src="docs/images/settings-connection.png" width="100%" alt="Mac 設定「連線」分頁：雀魂伺服器、User-Agent 與 Header">
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="docs/images/settings-ai.png" width="100%" alt="Mac 設定「AI」分頁：自動操作、雲端推論">
+</td>
+<td width="50%">
+<img src="docs/images/settings-developer.png" width="100%" alt="Mac 設定「開發者」分頁：雲端 API、Bot 管理、MCP Server">
+</td>
+</tr>
+</table>
+
+Mac 的設定是獨立視窗，分四個分頁：**一般**（語言、畫面、更新）、**連線**（雀魂伺服器、自訂 User-Agent 與 header）、
+**AI**（自動操作、雲端推論）、**開發者**（雲端 API、Bot 管理、MCP Server）。金鑰狀態在填好 key 之後自動出現，不必按測試連線。
+
+iPhone 是同一份設定的單頁捲動版（四段，「開發者」預設折疊）；下面兩張是 iOS 26 模擬器（深色外觀）的「一般」段與「AI」段的雲端推論：
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone 設定：一般（畫面與更新）">
+</td>
+<td width="50%">
+<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone 設定：AI 段的雲端推論">
 </td>
 </tr>
 </table>
@@ -201,6 +215,12 @@ iPhone 是同一份設定的單頁捲動版（四段，「開發者」預設折�
 `~/Library/Application Support/Naki/Plugins/<id>/`（macOS），或在頁面貼 gist／HTTPS 的
 `plugin.json` URL 一次性匯入；Naki 不內建市集或任何來源。牌面變色、暱稱隱藏這類顯示功能
 已不再內建，可由插件實作。
+
+<p align="center">
+  <img src="docs/images/plugins.png" width="640" alt="插件頁面：已安裝插件清單與從來源加入">
+</p>
+
+插件可以自帶設定頁：在 manifest 宣告欄位，Naki 的設定頁會自動渲染成介面，值存在 Naki 這側。
 
 - 插件分三級能力：**L1 唯讀**（看封包）、**L2 改本機顯示**（改遊戲客戶端看到的封包，不影響伺服器與其他玩家）、
   **L3 送出側**（能替你的帳號送出遊戲動作）。L3 預設完全不可用，要另外開總開關並確認

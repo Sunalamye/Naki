@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/badge/version-2.17.0-green" alt="Version 2.17.0"></a>
+  <a href="https://github.com/Sunalamye/Naki/releases/latest"><img src="https://img.shields.io/badge/version-2.18.0-green" alt="Version 2.18.0"></a>
   <img src="https://img.shields.io/badge/macOS-26.0+-blue" alt="macOS 26.0 or later">
   <img src="https://img.shields.io/badge/iOS-17.0+-blue" alt="iOS 17.0 or later">
   <img src="https://img.shields.io/badge/Mac-Apple%20Silicon-red" alt="Apple Silicon required on Mac">
@@ -169,6 +169,12 @@ The toolbar also offers a **delay baseline** control, from 0.5 to 3.0 seconds. T
 
 The puzzle-piece icon in the toolbar opens the **Plugins page**. Toggling a plugin takes effect immediately, with no page reload. Place plugins in `~/Library/Application Support/Naki/Plugins/<id>/` (macOS), or paste a gist or HTTPS `plugin.json` URL for a one-time import. Naki ships no marketplace or built-in source. Display features such as tile recoloring and name hiding are no longer built in; plugins can implement them.
 
+<p align="center">
+  <img src="docs/images/plugins.png" width="640" alt="Plugins page: installed plugins and add from a source">
+</p>
+
+A plugin can ship its own settings page: it declares fields in its manifest, and Naki renders them in its settings UI and stores the values on its own side.
+
 - Plugins have three capability levels: **L1 read-only** (observe packets), **L2 local display** (rewrite what the game client sees, without affecting the server or other players), and **L3 outbound** (send game actions with your account). L3 is completely unavailable until you turn on a separate master switch and confirm it.
 - ⚠️ **L3 risk:** a plugin runs in the same JavaScript environment as the game, and its permissions only guard against mistakes, not against a malicious plugin. A malicious plugin can send or rewrite outgoing packets with your account and read anything on the page, including your login token. **Installing a plugin means trusting its author.** Install only plugins you trust, and use them only on a secondary account.
 - The contract and its limits are in [`docs/plugin-api-v1.md`](docs/plugin-api-v1.md).
@@ -206,23 +212,38 @@ Open **Settings → AI page → Cloud Inference** and supply your own API key. T
 
 ### Settings on Mac and iPhone
 
-<p align="center">
-  <img src="docs/images/settings.png" width="760" alt="Pre-redesign two-column settings mock-up on macOS (to be replaced with tabbed screenshots)">
-</p>
-
-Mac settings open in their own window with four tabs: **General** (language, display, updates), **Connection** (Mahjong Soul server, custom User-Agent and headers), **AI** (automation, cloud inference), and **Developer** (cloud API, Bot management, MCP Server). Key status appears after a key is entered, without requiring Test Connection.
-
-<sub>The image above is the pre-redesign two-column mock-up from <code>docs/ui-reference/</code>; tabbed screenshots are still to be added.</sub>
-
-On iPhone, the same settings are a single scrolling page with four sections (Developer is collapsed by default); the two images below predate the redesign and are to be retaken:
+<p align="center"><sub>Mac settings window (dark appearance): General, Connection, AI, and Developer tabs</sub></p>
 
 <table>
 <tr>
 <td width="50%">
-<img src="docs/images/ios-settings-general.png" width="100%" alt="General and automation settings on iPhone">
+<img src="docs/images/settings.png" width="100%" alt="Mac settings, General tab: language, display, updates">
 </td>
 <td width="50%">
-<img src="docs/images/ios-settings-cloud.png" width="100%" alt="Cloud inference settings on iPhone">
+<img src="docs/images/settings-connection.png" width="100%" alt="Mac settings, Connection tab: Mahjong Soul server, User-Agent and headers">
+</td>
+</tr>
+<tr>
+<td width="50%">
+<img src="docs/images/settings-ai.png" width="100%" alt="Mac settings, AI tab: automation, cloud inference">
+</td>
+<td width="50%">
+<img src="docs/images/settings-developer.png" width="100%" alt="Mac settings, Developer tab: cloud API, Bot management, MCP Server">
+</td>
+</tr>
+</table>
+
+Mac settings open in their own window with four tabs: **General** (language, display, updates), **Connection** (Mahjong Soul server, custom User-Agent and headers), **AI** (automation, cloud inference), and **Developer** (cloud API, Bot management, MCP Server). Key status appears after a key is entered, without requiring Test Connection.
+
+On iPhone, the same settings are a single scrolling page with four sections (Developer is collapsed by default). The two images below, from an iOS 26 simulator in dark appearance, show the General section and the Cloud Inference part of the AI section:
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/ios-settings-general.png" width="100%" alt="iPhone settings: General (display and updates)">
+</td>
+<td width="50%">
+<img src="docs/images/ios-settings-cloud.png" width="100%" alt="iPhone settings: Cloud inference in the AI section">
 </td>
 </tr>
 </table>
