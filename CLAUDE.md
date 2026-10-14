@@ -138,7 +138,7 @@ OptionalOperationList
 - **`match_sid` 猜不出來**：形狀是 `"{match_group}:{mode_id}"`（實測 `"1:2"` ＝銅之間
   四人東），但 `liqi.json` 裡**沒有任何訊息會產生它**，`lqc.lqbin` 的 41 表 263 sheets
   也沒有 sid 欄位。唯一來源是攔玩家自己點入口時送出的那一筆
-  （`ObservedMatchSids`，已持久化）。搭配的 `client_version_string` 是
+  （`ObservedMatchSids`，已持久化）。`ObservedMatchSids` 的待回填人數在頁面導覽開始時（`NakiWebCoordinator.webNavigationDidStart`），以及遊戲自送的 `startUnifiedMatch` 回應 `errorCode` 非 0 時（`LiqiParser`）作廢（BR-01）。搭配的 `client_version_string` 是
   `"WebGL_2022-0.16.257"`——**不是** `version.json` 的 `0.11.252.w`。
   ⚠️ 記錄時必須濾掉 Naki 自送的，否則猜錯的嘗試值會被記成「觀察到的真值」再變成預設，
   錯誤自我餵養（2026-08-09 踩過）。判斷是 **msgId 登記制**而非號段：遊戲自己的 msgId
@@ -150,7 +150,9 @@ OptionalOperationList
 
 `WebSession.init` 的 `#available`：OS 26+ 用 `WebPageBackend`（WebPage），iOS 17–25 用 `LegacyWebBackend`（WKWebView）。macOS deployment target 是 26，所以 macOS 不走 Legacy。p3-4 之後**兩條 path 只差三件事**：怎麼執行 JS（WebPage 原生函式體 vs WKWebView 的 IIFE 包裝）、怎麼重連（關 WebSocket vs 整頁重載）、交出哪個 View。其餘（bot、event stream、autoplay engine、MCP、狀態）全部共用一份。
 
-兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（動作 switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、每輪 bounded retry 15 次；同一批 oplist 跨輪退避 2→30 秒，`no_open_majsoul_connection` 時非和牌動作立刻停手並立即報停滯，換批才恢復）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
+兩條 path 都走 `AutoPlayDecisionResolver`（oplist 合法性、seat、stale、fail-closed、server hora override）、同一個 `AutoPlayActionExecutor`（動作 switch、chi 組合對照、成功才 markHandled、診斷輸出）、同一個 `AutoPlayEngine`（輪詢閘門、擬人延遲、去抖、每輪 bounded retry 15 次；同一批 oplist 跨輪退避 2→30 秒，`no_open_majsoul_connection` 時非和牌動作立刻停手並立即報停滯，換批才恢復；「過」送出失敗也走同一套跨輪退避，且失敗不再把停滯清零，BT-01、BT-02）；`sendRaw` 的腳本字串與回傳值解析只剩 `NakiWebSocketScript` 一份。**Legacy 不自動送出**這件事現在只由一個值表達：`LegacyWebBackend.supportsAutoPlay == false` → `AutoPlayAvailability.commit` 把模式收斂掉 `.auto` → `AutoPlayGate` 第一關 `.skip(.notAutoMode)`，而且 MCP 的動作類能力一律 `.unavailable("legacy_path_action_send_disabled")`。Legacy 路徑沒有 live 驗證（macOS deployment target 是 26，跑不到這條）。
+
+斷線時「過」與上述「立刻停手」有差距：`AutoPassDispatcher` 本輪會先送滿 `RetryPolicy` 的 5 次（間隔 0.2 秒）才回報失敗，`AutoPlayEngine.sendPass` 此時才 `deferRetry(offline: true)`，跨輪才停手。是否改成斷線即停手，待用戶決策（BT-02）。
 
 ## 自摸問題的 current truth
 
@@ -168,7 +170,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 其他 failure path 已收斂成同一語意（`AutoPassDispatcher` + 轉換失敗不標記）：沒有送出成功就不消化 oplist。這只有單測，沒有 live 驗證。
 
-`.off` 現在同時關掉顯示：`DecisionSidebar` 與 `WebSession.syncHighlight` 都讀 `showRecommendation`。關閉時側欄顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」），遊戲內推空推薦並送 `__nakiHighlight.clear()`；正式路徑只用 `GameHighlightScript.clear`，`GameHighlightScript.make()` 只剩測試呼叫（保留為 highlight payload 的參考實作）。AI 仍在背景計算（否則切回來會一片空白），`/bot/status` 的 recommendations 也照舊為真。腳本內容有單測，**畫面實際效果未 live 驗證**。
+`.off` 現在同時關掉顯示：`DecisionSidebar` 與 `WebSession.syncHighlight` 都讀 `showRecommendation`。關閉時側欄顯示 `RecommendationsDisabledView`（「推薦顯示已關閉」），遊戲內推空推薦並送 `__nakiHighlight.clear()`；正式路徑只用 `GameHighlightScript.clear`，`GameHighlightScript.make()` 只剩測試呼叫（保留為 highlight payload 的參考實作）。AI 仍在背景計算（否則切回來會一片空白），`/bot/status` 的 recommendations 也照舊為真。腳本內容有單測，**畫面實際效果未 live 驗證**。狀態列的推薦數徽章也只在推薦顯示開啟時出現（`GameStore.showsRecommendationBadge`，UI-01）。
 
 正確修法：由 oplist arrival 驅動、先處理 hora；sender 回傳結果，收到成功 send／最好同 msgId RESPONSE 或 `ActionHule` 後才 handled；失敗保留 pending、bounded retry；Legacy 收斂到同一 resolver。
 
@@ -177,6 +179,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 ## MortalSwift／模型
 
 - 目前解到 0.6.0／`da7238c`（`Package.resolved`）；bundled Core ML 仍是固定 Mortal v4 四麻模型。
+- 四麻 Mortal（MortalSwift da7238c）的 action index 44 是 ryukyoku（九種九牌）：`MortalActionMapper` 已映射成 `.ryukyoku`，`AutoPlayActionExecutor` 送 `kyushu`（`ReqSelfOperation type=10`）。有單測（`RyukyokuActionIndexTests`），**送出未 live 驗證**（BT-03）。
 - 0.5.2 移除了 `PlayerState` 的 `isAllLast`／`isWRiichi`／`kansOnBoard`／`dorasOwned`／`dorasSeen`／`atIppatsu`，Naki 全都沒用到。
 - 0.5.3：`handleReach` 在自家宣言後打開 `canDiscard`，`BundledCoreMLBot` 因此在 `react` 回 `reach` 時餵合成 `reach` 再 `inferCurrentState()`，推薦列的打牌項是立直後的第二次推論（失敗退回立直前的打牌項）。
 - observation `1012 × 34`，action mask 46。
@@ -200,11 +203,11 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## 2026-09-30 審查修正後的行為
 
-以下都有單測（NakiTests 1010 個、0 failures（2026-10-13，main 8b51848，`.swfd/logs/merge-main/test-8b51848.log`）；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
+以下都有單測（NakiTests 1074 個、0 failures（2026-10-14，irc-integrate b2d7d73，`.swfd/logs/irc-commit/final-full-test.log`；前一次 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。
-- **Debug server**（`DebugServer.swift`）：Origin 與 Host 由 `NakiMCPRequestGuard` 單一入口檢查，非 loopback 回 403（沒有 Host header 放行）；chunked 或「無 Content-Length 卻帶 body」回 411（無 body 的 POST 照常）；每連線 30 秒內必須收齊 request。`execute_js` 有 `timeout`（預設 30、上限 60，`ExecuteJSTool`），逾時後頁面端 Promise 仍可能在跑。`/js` 回傳非 JSON 型別（Date 等）經 `JSONSanitizer` 轉字串，不再崩潰。403／411 已有單測在 loopback 高位 port 起真 server 驗過（`DebugServerFramingTests`）；逾時與 live server 仍未測。
+- **Debug server**（`DebugServer.swift`）：Origin 與 Host 由 `NakiMCPRequestGuard` 單一入口檢查，非 loopback 回 403（沒有 Host header 放行）；chunked 或「無 Content-Length 卻帶 body」回 411（無 body 的 POST 照常）；每連線 30 秒內必須收齊 request。`execute_js` 有 `timeout`（預設 30、上限 60，`ExecuteJSTool`），逾時後頁面端 Promise 仍可能在跑。`/js` 回傳非 JSON 型別（Date 等）經 `JSONSanitizer` 轉字串，不再崩潰。403／411 已有單測在 loopback 高位 port 起真 server 驗過（`DebugServerFramingTests`）；逾時與 live server 仍未測。Origin 的 port 判斷已在 `NakiMCPRequestGuard`／`NakiMCPOriginPolicy` 就緒（帶 Origin 且 port 不等於實際綁定 port 時拒絕）；但 `DebugServer.handleRequest` 尚未傳入綁定 port，接線前行為與舊版相同，待 WP-F2 合併後接線（SV-05）。
 - **負分**：`LiqiWire.decodeSignedVarint` 讓 int32 欄位（scores）能解負數；`decodeVarint` 維持非負契約。
 - **分數／場風解析失敗**（例如超出 Int32、`chang`／`ju` 型別錯）：`MajsoulBridge.roundBlocked` 讓**本局**不餵 bot，但 `end_kyoku` 與 oplist 照常處理，所以伺服器授權的和牌仍會送（`MajsoulBridge` 內 `roundBlocked` 只丟 start_kyoku 之後的牌局事件，oplist 在此之前已由 `recordOperationSnapshot` 登記）。
 
@@ -273,6 +276,7 @@ MCP 工具結果現在同時回 `structuredContent`（真的 JSON 物件）與 `
 - `docs/akagi-audit-p0-decisions.md`：掃 Akagi 89 個 issue 對照出的**具體 bug**與修法
   取捨（2026-08-07），含兩個被推翻的判斷。
 - `docs/plugin-api-v1.md`、`docs/plugin-system-design.md`：插件 API 契約與設計；`isNaki` 語意與授權邊界以 `plugin-api-v1.md` 為準。
+- `docs/audit/intention-revealing-2026-10-14.md`：2026-10-14 Intention-Revealing Code 審查報告（144 條發現、處理結果、待用戶決策清單、延後清單）。
 - `docs/README.md`：全部文件的索引；其中「歷史工作紀錄」一節的各 `*-implementation-notes.md` 不是 current truth。
 
 ## 文件與程式碼的一致性
@@ -293,6 +297,8 @@ MCP 工具結果現在同時回 `structuredContent`（真的 JSON 物件）與 `
 | `LiqiResponseStore` 的 error 一律在 field 1 | 20 個 Res 不是（如 `ResServerTime` 在 field 2），曾把「被拒」讀成成功 | 2026-09-30 |
 | 「停滯顯示在 `BotStatusView`」「`.off` 由 `RecommendationView` 讀」「內建高亮由 `syncGameHighlight()` 驅動」 | 型別與函式都已不存在：停滯在 `DecisionAlerts`，`.off` 由 `DecisionSidebar` 讀，內建染色已移交插件 | 2026-10-13 |
 | 測試數停在舊快照；多處 `檔名:行號` 引用 | 測試數以最近一次整合閘為準（見上）；行號一律改成函式名（行號每次改動都會漂） | 2026-10-13 |
+| 「四麻 action space 沒有九種九牌槽位」（`ActionType.ryukyoku` 舊註解） | 實際 index 44 就是 ryukyoku；修前被映射成打牌（BT-03） | 2026-10-14 |
+| 「`.passed` 一律代表送出成功」 | `handled: false` 是送不出去，曾把停滯歸零（BT-01） | 2026-10-14 |
 
 回答「目前是什麼狀態」一律以**執行中的 Naki loopback API、原始碼、或當場跑一次
 build/test** 為準；文件只用來解釋「為什麼是這樣」。改了行為就順手改文件——
