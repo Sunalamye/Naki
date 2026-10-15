@@ -44,6 +44,9 @@ nonisolated struct PluginManifest: Decodable, Sendable, Equatable {
     /// 插件自帶的設定頁（v2 草案，docs/plan/plugin-v2.md §A）：插件目錄內單一 `.html` 檔名。
     /// 只讀寫 `settings` schema 宣告過的 key，所以宣告它就必須同時宣告 `settings`。
     let settingsUI: String?
+    /// 送出守衛（docs/plan/plugin-v2-b2.md §3）：這些 REQUEST 只有插件放行才原樣送出，否則由 Naki 回本地錯誤。
+    /// 限 `.lq.Lobby.*` 且必須在 `methods` 內；送出禁改名單由 naki-plugins.js 在 register 時再擋。
+    let sendGuard: [String]?
 }
 
 /// 設定 schema 的單一欄位（§7.10a）。`default` 型別依 `type` 而定。
@@ -171,6 +174,9 @@ extension PluginManifest {
             guard settings?.isEmpty == false else {
                 return .manifestInvalid(L10n.text("宣告 settingsUI 必須同時宣告 settings"))
             }
+        }
+        if let sendGuard, sendGuard.isEmpty || sendGuard.contains(where: { !$0.hasPrefix(".lq.Lobby.") || !methods.contains($0) }) {
+            return .manifestInvalid(L10n.text("sendGuard 必須非空，且每個方法都是 .lq.Lobby.* 並列在 methods"))
         }
         return nil
     }
@@ -360,6 +366,7 @@ nonisolated enum PluginRegistry {
             "observeNakiTraffic": manifest.observeNakiTraffic ?? false
         ]
         if let allow = manifest.rewriteAllow { grant["rewriteAllow"] = allow }
+        if let guarded = manifest.sendGuard { grant["sendGuard"] = guarded }
         if let schema = manifest.settings {
             // settings 值 = 使用者覆寫 ?? default（§7.10a）
             var resolved: [String: Any] = [:]

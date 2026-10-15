@@ -12,7 +12,7 @@
 //  本檔把兩類「丟棄掉但有用」的訊息接住：
 //
 //    1. type=3 且 msgId 是 `LiqiMsgIdAllocator` 配發過、尚未認領的 → 這是**我們自己送出的請求**的回應。
-//       LiqiParser 用 `pendingRequests[msgId]` 配對方法名，所以連方法名都有。
+//       LiqiParser 用 `pendingRequests[(連線, msgId)]` 配對方法名，所以連方法名都有。
 //    2. `.lq.NotifyGameBroadcast` → 表情廣播（seat + content）。
 //
 //  ⚠️ 驗收語彙：

@@ -80,7 +80,10 @@ class LiqiParser {
     /// 送出面的 frame 會經過 JS 的 `ws.send` hook 回到 `MajsoulBridge.observeOutgoing`，
     /// 所以遊戲自己送的與 Naki 自己送的（`LiqiMsgIdAllocator` 配發、含插件）都會登記在這裡；
     /// `LiqiResponseStore` 拿得到方法名正是因為如此。
-    private var pendingRequests: [Int: String] = [:]
+    /// REQUEST 依「連線＋msgId」登記：RESPONSE 只會回到送出它的那條連線。不分連線時，
+    /// 另一條連線同 msgId 的本地回應（插件送出守衛）會消耗掉這條的登記（docs/plan/plugin-v2-b2.md §1.3）。
+    private struct PendingKey: Hashable { let socketId: Int; let msgId: Int }
+    private var pendingRequests: [PendingKey: String] = [:]
 
     /// 自上次 `reset()` 起，所有雀魂 socket 配不到 request 的 RESPONSE 累計。
     private(set) var unmatchedResponseCount = 0
@@ -129,7 +132,7 @@ class LiqiParser {
     /// 解析雀魂消息
     /// - Parameter data: 原始二進制消息
     /// - Returns: 解析後的消息字典，包含 type, method, data 等字段
-    func parse(_ data: Data) -> [String: Any]? {
+    func parse(_ data: Data, socketId: Int = 0) -> [String: Any]? {
         // 每則訊息各自結帳：呼叫端讀到的 faults 只屬於剛剛那一則
         faults.removeAll()
         lastEnvelopeFailure = nil
@@ -154,10 +157,11 @@ class LiqiParser {
         case .request:
             return parseRequest(msgId: Int(envelope.msgId ?? 0),
                                 method: envelope.method ?? "",
-                                payload: envelope.payload)
+                                payload: envelope.payload,
+                                socketId: socketId)
 
         case .response:
-            return parseResponse(msgId: Int(envelope.msgId ?? 0), payload: envelope.payload)
+            return parseResponse(msgId: Int(envelope.msgId ?? 0), payload: envelope.payload, socketId: socketId)
         }
     }
 
@@ -194,11 +198,11 @@ class LiqiParser {
             || (LiqiMsgIdAllocator.pluginRangeStart...LiqiMsgIdAllocator.pluginRangeEnd).contains(id)
     }
 
-    private func parseRequest(msgId: Int, method: String, payload: Data) -> [String: Any]? {
+    private func parseRequest(msgId: Int, method: String, payload: Data, socketId: Int) -> [String: Any]? {
         liqiLog("[LiqiParser] parseRequest msgId=\(msgId), method: \(method)")
 
         // 記錄請求以便匹配響應
-        pendingRequests[msgId] = method
+        pendingRequests[PendingKey(socketId: socketId, msgId: msgId)] = method
 
         // 從遊戲自己的流量學 match_sid。段位場入口已換成 startUnifiedMatch，而
         // match_sid 是字串且 liqi.json 裡沒有任何訊息會產生它（見 ObservedMatchSids）。
@@ -236,11 +240,11 @@ class LiqiParser {
         return result
     }
 
-    private func parseResponse(msgId: Int, payload: Data) -> [String: Any]? {
-        liqiLog("[LiqiParser] parseResponse msgId=\(msgId), pending=\(pendingRequests.keys.sorted())")
+    private func parseResponse(msgId: Int, payload: Data, socketId: Int) -> [String: Any]? {
+        liqiLog("[LiqiParser] parseResponse socket=\(socketId) msgId=\(msgId), pending=\(pendingRequests.keys.map { "\($0.socketId):\($0.msgId)" }.sorted())")
 
         // RESPONSE 的 envelope 不帶方法名，只能靠 msgId 對回 REQUEST；對不上就沒得解。
-        guard let methodName = pendingRequests.removeValue(forKey: msgId) else {
+        guard let methodName = pendingRequests.removeValue(forKey: PendingKey(socketId: socketId, msgId: msgId)) else {
             liqiLog("[LiqiParser] parseResponse: no pending request for msgId=\(msgId)"
                     + "，payload \(payload.count) bytes")
             // 重連後在途的回應可能成串到達：info 只報首次與 2 的冪次，fault 只記首次，避免洗版 /logs 與 recent

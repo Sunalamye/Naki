@@ -14,6 +14,7 @@
 //  observe 唯讀；rewriteReceive → ctx.replace（等長就地改寫，isNaki 流量不給）、
 //  rewriteSend → send 方向的 ctx.replace（可改長度與 method，受 L3 總開關把關；v2 草案，docs/plan/plugin-v2.md §B）、
 //  injectSend → ctx.sendRequest（受 L3 總開關把關）。沒有 drop。
+//  送出守衛（manifest sendGuard，docs/plan/plugin-v2-b2.md）：守衛方法 fail-closed，插件污染後持續到頁面重載。
 //
 (function () {
     'use strict';
@@ -56,8 +57,10 @@
         try { entry.spec.onDisable({ log: function (msg) { pluginLog(entry.spec.id, msg); } }); }
         catch (e) { pluginLog(entry.spec.id, 'cleanup failed: ' + e.message); }
     }
-    // 自己維護的 msgId -> method（只為 RESPONSE 對回；與 nicknameMask 各一份，刻意隔離）
+    // 自己維護的 (連線, msgId) -> method（只為 RESPONSE 對回；與 nicknameMask 各一份，刻意隔離）。
+    // RESPONSE 只回到送出它的那條連線，所以一律以連線＋msgId 為鍵（審查第三輪第 2 條）。
     var pendingMethods = new Map();
+    function msgKey(socketId, msgId) { return socketId + ':' + msgId; }
     var PENDING_LIMIT = 256;
 
     // ---- L3 送出側（injectSend，§7.6/§7.7b）----
@@ -69,8 +72,28 @@
         pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
         return v;
     }
-    // 插件注入的 msgId -> 發起插件 id（回應路由，§7.7b）
+    // 插件注入的 (連線, msgId) -> 發起插件 id（回應路由，§7.7b）
     var injectedMsgIds = new Map();
+
+    // 守衛只作用在已確認的大廳連線（/gateway，不是 /game-gateway）。對局連線與 .lq.FastTest.* 不進任何守衛路徑。
+    function isLobbyUrl(url) { return typeof url === 'string' && url.indexOf('/gateway') !== -1; }
+
+    // ---- 送出守衛（N1／N2，docs/plan/plugin-v2-b2.md §3–§4）----
+    // 已污染：插件 id -> 守衛方法 Set。只增不減，活在本閉包裡：disable、setGrant、自動停用、熱重載都碰不到，
+    // 頁面重載（本檔重跑）才清空。不受 L3 總開關限制。
+    var tainted = new Map();
+    var guardLog = [];
+    var GUARD_LOG_LIMIT = 256;
+    // 守衛擋下時合成的 Error.code。選擇依據見設計 §3.4；遊戲端怎麼顯示未驗證（需 live）。
+    var GUARD_ERROR_CODE = 6;
+    // 可宣告為守衛的方法：回應型別 field 1 已確認是 Error（docs/protocol/liqi.json），合成的錯誤回應才合型別。
+    // PV2-C 把 schema 打包進 App 後改成載入時依 schema 檢查。
+    var GUARDABLE_METHODS = [
+        'changeCharacterSkin', 'changeMainCharacter', 'changeAvatar', 'useTitle', 'setRandomCharacter',
+        'updateCharacterSort', 'setHiddenCharacter', 'changeCharacterView', 'changeCommonView', 'saveCommonViews',
+        'useCommonView', 'setLoadingImage', 'sendGiftToCharacter', 'upgradeCharacter', 'addFinishedEnding',
+        'receiveEndingReward', 'receiveCharacterRewards', 'mmoActivitySetCharacter', 'mmoActivitySetTeamMember'
+    ].map(function (m) { return '.lq.Lobby.' + m; });
 
     function encodeVarint(n) {
         var out = [];
@@ -128,9 +151,146 @@
         if (f) f[hook] = 0;
     }
 
-    function rememberIfRequest(env, direction) {
+    function settle(thenable, id, hook) {
+        try { thenable.then(function () { noteSuccess(id, hook); }, function (e) { noteFailure(id, hook, e); }); }
+        catch (e) { noteFailure(id, hook, e); }
+    }
+
+    function taint(id, grant) {
+        var set = tainted.get(id) || new Set();
+        var first = !tainted.has(id);
+        (grant.sendGuard || []).forEach(function (m) { set.add(m); });
+        tainted.set(id, set);
+        if (first) {
+            try { sendToSwift('plugin_event', { id: id, kind: 'tainted', msg: '已污染：守衛方法到頁面重載前都不會原樣送出' }); }
+            catch (e) { /* 通知失敗不影響守衛本身 */ }
+        }
+    }
+
+    // 守衛這個 method 的插件：目前註冊且 sendGuard 含它的，加上曾污染且當時守衛它的（即使已不在鏈上）
+    function guardFor(method) {
+        var ids = [];
+        registry.forEach(function (entry, id) {
+            if ((entry.grant.sendGuard || []).indexOf(method) !== -1) ids.push(id);
+        });
+        tainted.forEach(function (set, id) {
+            if (set.has(method) && ids.indexOf(id) === -1) ids.push(id);
+        });
+        return ids.length ? { method: method, ids: ids, approved: [], threw: [], async: [] } : null;
+    }
+
+    function isNakiMsgId(msgId) {
+        var ws = window.__nakiWebSocket;
+        return msgId != null && ((msgId >= PLUGIN_MSGID_FIRST && msgId <= PLUGIN_MSGID_LAST)
+            || !!(ws && ws.isNakiSent && ws.isNakiSent(msgId)));
+    }
+
+    // 守衛者全部有效放行才回 null。已污染者的放行另外要求：仍守衛這個方法、L3 開著（審查第 1 條）
+    function guardFailure(guard) {
+        if (guard.threw.length) return 'hook_threw';
+        if (guard.async.length) return 'async_hook';
+        var ids = guard.ids, m = guard.method, i, entry;
+        for (i = 0; i < ids.length; i++) if (guard.approved.indexOf(ids[i]) === -1) return 'not_on_chain';
+        var taintedHere = ids.filter(function (id) { return tainted.has(id) && tainted.get(id).has(m); });
+        for (i = 0; i < taintedHere.length; i++) {
+            entry = registry.get(taintedHere[i]);
+            if (!entry || (entry.grant.sendGuard || []).indexOf(m) === -1) return 'guard_revoked';
+        }
+        if (taintedHere.length && !window.__nakiPluginsMayModifyOutbound) return 'outbound_disabled';
+        return null;
+    }
+
+    function recordGuard(msgId, method, outcome, reason, ids, socketId) {
+        guardLog.push({ socketId: socketId == null ? null : socketId, msgId: msgId, method: method, outcome: outcome,
+            reason: reason, guards: ids, at: Date.now() });
+        if (guardLog.length > GUARD_LOG_LIMIT) guardLog.shift();
+    }
+
+    function sameBytes(a, b) {
+        if (a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+        return true;
+    }
+
+    // RESPONSE envelope：field 1 一定寫出空字串，與官方伺服器的形狀相同（見 LiqiEnvelope 註解），
+    // payload 只有 field 1 = Error{ code }。守衛方法的 Res 型別 field 1 都是 error（liqi.json）。
+    function guardErrorResponse(msgId) {
+        var err = [0x08].concat(encodeVarint(GUARD_ERROR_CODE));
+        var payload = [0x0a].concat(encodeVarint(err.length), err);
+        return new Uint8Array([3, msgId & 0xff, (msgId >> 8) & 0xff, 0x0a, 0x00, 0x12]
+            .concat(encodeVarint(payload.length), payload));
+    }
+
+    // 頁面上是否有守衛者（已污染，或已註冊且宣告 sendGuard）。查找本身出錯時當成有。
+    function guardActive() {
+        try {
+            if (tainted.size) return true;
+            var any = false;
+            registry.forEach(function (entry) { if ((entry.grant.sendGuard || []).length) any = true; });
+            return any;
+        } catch (e) { return true; }
+    }
+
+    // 擋下：遊戲的 buffer 還原成原樣，交付用的是完整原始快照（審查第 7 條）。這裡不得拋錯，否則呼叫端會退回送出。
+    // 錯誤回應依「原 REQUEST 的方法」建：只有它在 GUARDABLE_METHODS（回應型別 field 1 是 Error）才合成，
+    // 否則不回應（審查第二輪第 4 條）。msgId 與原方法另外帶出，本地結案不再讀交付後的 bytes（第二輪第 5 條）。
+    function blockSend(raw, origObj, original, msgId, method, origMethod, reason, ids) {
+        var response = null;
+        try {
+            restore(raw, origObj, original);
+            recordGuard(msgId, method, 'local_error', reason, ids, raw.wsId);
+            pluginLog(ids.join(','), '守衛擋下 ' + method + ' msgId=' + msgId + '（' + reason + '），改回本地錯誤');
+            if (msgId != null && GUARDABLE_METHODS.indexOf(origMethod) !== -1) response = guardErrorResponse(msgId);
+        } catch (e) { /* 擋下的決定不受記錄或建構失敗影響 */ }
+        return { block: true, reason: reason, request: original, response: response,
+            socketId: raw.wsId, msgId: msgId, method: origMethod };
+    }
+
+    // send 方向的唯一入口。對局連線（以及大廳上的 .lq.FastTest.*）在守衛查找之前就走現行鏈，行為與 main 相同。
+    // 大廳上，守衛方法只有三種結局：原樣送出、本地成功（respondLocally，PV2-B2）、本地錯誤。
+    // 辨識、跑鏈、鏈後判定都在 try 內（第二輪第 1 條）。出錯時：已知是守衛方法 ⇒ 擋下；已知不是 ⇒ 還原原 bytes 照送；
+    // 辨識本身失敗 ⇒ 頁面上有守衛者才擋下（第三輪第 1 條）。
+    function guardedSend(raw) {
+        if (!isLobbyUrl(raw.url)) return plainChain(raw);
+        var origObj = raw.bytes, original = origObj.slice(), env = null, guard = null, identified = false;
+        try {
+            env = parseEnvelope(origObj);
+            if (env && env.method && env.method.indexOf('.lq.FastTest.') === 0) return plainChain(raw, env);
+            guard = env && env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
+            identified = !!env;
+            if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
+            if (guard && isNakiMsgId(env.msgId)) {
+                return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'naki_traffic', guard.ids);
+            }
+            var out = runChain(raw, env, guard);
+            if (!guard) return out;
+            var reason = guardFailure(guard) || (!sameBytes(original, raw.bytes) ? 'rewritten' : null);
+            if (reason) return blockSend(raw, origObj, original, env.msgId, env.method, env.method, reason, guard.ids);
+            recordGuard(env.msgId, env.method, 'sent', null, guard.ids, raw.wsId);
+            return out;
+        } catch (e) {
+            if (guard) return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'dispatch_error', guard.ids);
+            if (identified || !guardActive()) {
+                restore(raw, origObj, original);
+                return undefined;
+            }
+            return blockSend(raw, origObj, original, env ? env.msgId : null, env && env.method, env && env.method, 'guard_error', []);
+        }
+    }
+
+    function plainChain(raw, env) {
+        env = env || parseEnvelope(raw.bytes);
+        return env ? runChain(raw, env, null) : undefined;
+    }
+
+    function restore(raw, origObj, original) {
+        raw.bytes = origObj;
+        if (origObj.length === original.length) origObj.set(original);
+    }
+
+    function rememberIfRequest(env, direction, socketId) {
         if (direction === 'send' && env.type === TYPE_REQUEST && env.msgId != null && env.method) {
-            pendingMethods.set(env.msgId, env.method);
+            pendingMethods.set(msgKey(socketId, env.msgId), env.method);
             if (pendingMethods.size > PENDING_LIMIT) {
                 pendingMethods.delete(pendingMethods.keys().next().value);
             }
@@ -138,11 +298,11 @@
     }
 
     // RESPONSE envelope 不帶 method，靠送出時記下的 msgId 對回（可能對不上 → null）
-    function resolveMethod(env, direction) {
+    function resolveMethod(env, direction, socketId) {
         if (env.method) return env.method;
         if (direction === 'receive' && env.type === TYPE_RESPONSE && env.msgId != null) {
-            var m = pendingMethods.get(env.msgId);
-            if (m != null) { pendingMethods.delete(env.msgId); return m; }
+            var m = pendingMethods.get(msgKey(socketId, env.msgId));
+            if (m != null) { pendingMethods.delete(msgKey(socketId, env.msgId)); return m; }
         }
         return null;
     }
@@ -219,6 +379,11 @@
                     noteFailure(grant.__id, 'replace', new Error('rewriteSend 不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已放棄'));
                     return false;
                 }
+                // 不得改寫成另一個守衛方法：遊戲等的是原方法的回應型別，擋下時合不出正確的錯誤（第二輪第 4 條）
+                if (after.method !== env.method && isLobbyUrl(raw.url) && guardFor(after.method)) {
+                    noteFailure(grant.__id, 'replace', new Error('rewriteSend 不得改寫成守衛方法 ' + after.method + '，已放棄'));
+                    return false;
+                }
                 raw.bytes = next;
                 noteSuccess(grant.__id, 'replace');
                 pluginLog(grant.__id, 'rewriteSend ' + method + ' → ' + after.method + '（' + next.length + ' bytes）');
@@ -248,8 +413,8 @@
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
-                // 登記 msgId → 發起插件（§7.7b 回應路由）
-                injectedMsgIds.set(msgId, grant.__id);
+                // 登記 (連線, msgId) → 發起插件（§7.7b 回應路由）；連線是 sendRaw 實際選到的那條
+                injectedMsgIds.set(msgKey(r.socketId, msgId), grant.__id);
                 if (injectedMsgIds.size > 256) {
                     injectedMsgIds.delete(injectedMsgIds.keys().next().value);
                 }
@@ -336,6 +501,104 @@
         return allow.indexOf(method) === -1;
     }
 
+    function runChain(raw, env, guard) {
+        diagnostics.parsed++;
+        rememberIfRequest(env, raw.direction, raw.wsId);
+        var method = resolveMethod(env, raw.direction, raw.wsId);
+        diagnostics.lastMethod = method;
+        // Naki 自送看 sendRaw 的登記；插件號段另計（websocket 模組缺席時只剩號段）
+        var isNaki = isNakiMsgId(env.msgId);
+
+        // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
+        // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
+        if (raw.direction === 'receive' && env.msgId != null && injectedMsgIds.has(msgKey(raw.wsId, env.msgId))) {
+            var originId = injectedMsgIds.get(msgKey(raw.wsId, env.msgId));
+            injectedMsgIds.delete(msgKey(raw.wsId, env.msgId));
+            var origin = registry.get(originId);
+            if (origin && typeof origin.spec.onInjectResponse === 'function') {
+                var rctx = makeCtx(raw, env, method, isNaki, origin.grant);
+                rctx.inResponseTo = env.msgId;
+                rctx.timedOut = false;
+                try { origin.spec.onInjectResponse(rctx); noteSuccess(originId, 'onInjectResponse'); }
+                catch (e) { noteFailure(originId, 'onInjectResponse', e); }
+            }
+            return;   // 注入回應不進一般鏈
+        }
+
+        // 建鏈：isNaki 走「只含宣告 observeNakiTraffic 的 observer」另一條，
+        // 與一般鏈分開，同一則訊息永遠只屬於其中一條（契約 §7.7）。
+        var chain = [];
+        registry.forEach(function (entry) {
+            var g = entry.grant;
+            if (isNaki && !g.observeNakiTraffic) return;
+            // 白名單在 Naki 這側過濾；method 為 null（RESPONSE 對不回）視為不命中
+            if (method == null) return;
+            var methods = g.methods || [];
+            if (methods.indexOf(method) === -1) return;
+            chain.push(entry);
+        });
+        if (chain.length === 0) return;
+
+        // priority 升冪，同值 id 字典序
+        chain.sort(function (a, b) {
+            var pa = a.grant.priority || 0, pb = b.grant.priority || 0;
+            if (pa !== pb) return pa - pb;
+            return a.spec.id < b.spec.id ? -1 : (a.spec.id > b.spec.id ? 1 : 0);
+        });
+
+        var original = raw.bytes;
+        for (var k = 0; k < chain.length; k++) {
+            var entry = chain[k];
+            var hook = raw.direction === 'receive' ? 'onReceive' : 'onSend';
+            var fn = entry.spec[hook];
+            if (typeof fn !== 'function') continue;
+            var ctx = makeCtx(raw, env, method, isNaki, entry.grant);
+            var before = raw.bytes;
+            var snapshot = raw.mutable === false ? null : before.slice();
+            var isGuard = !!guard && guard.ids.indexOf(entry.spec.id) !== -1;
+            try {
+                diagnostics.hooks++;
+                var ret = fn(ctx);   // 改寫只能經 ctx.replace（見 makeCtx）；回傳 Promise／thenable 不算放行（審查第 2 條）
+                if (ret && typeof ret.then === 'function') {
+                    // 結果出來才記成功或失敗：先記成功會把連續失敗歸零（第二輪第 6 條）
+                    if (isGuard) guard.async.push(entry.spec.id);
+                    settle(ret, entry.spec.id, hook);
+                } else {
+                    noteSuccess(entry.spec.id, hook);
+                    if (isGuard) guard.approved.push(entry.spec.id);
+                }
+                // 大廳上就地改寫成另一個守衛方法：當成這個 hook 失敗，撤回改動，原請求照常送（第三輪第 5 條）
+                if (raw.direction === 'send' && raw.bytes === before && snapshot && isLobbyUrl(raw.url)
+                    && !sameBytes(snapshot, raw.bytes)) {
+                    var now = parseEnvelope(raw.bytes);
+                    if (now && now.method && now.method !== method && guardFor(now.method)) {
+                        throw new Error('就地改寫成守衛方法 ' + now.method + '，已撤回');
+                    }
+                }
+                // 守衛插件改了大廳回應（等長或日後的變長）⇒ 已污染，直到頁面重載
+                if (raw.direction === 'receive' && snapshot && (entry.grant.sendGuard || []).length
+                    && isLobbyUrl(raw.url) && !sameBytes(snapshot, raw.bytes)) {
+                    taint(entry.spec.id, entry.grant);
+                }
+            } catch (e) {
+                // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）。守衛方法另由 guardedSend 改為不送出
+                raw.bytes = before;
+                if (snapshot) before.set(snapshot);
+                if (isGuard) guard.threw.push(entry.spec.id);
+                noteFailure(entry.spec.id, hook, e);
+            }
+            if (raw.bytes !== before) {
+                // 換 buffer：後續插件看新 bytes。method 換了就停——後面的插件是照舊 method 的白名單選進鏈的
+                env = parseEnvelope(raw.bytes);
+                if (env.method !== method) break;
+            }
+        }
+        if (raw.direction !== 'send' || raw.bytes === original) return undefined;
+        // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致
+        if (env && env.method) pendingMethods.set(msgKey(raw.wsId, env.msgId), env.method);
+        return raw.bytes;
+    }
+
     var api = {
         // 插件進入點自己呼叫。manifest（grant）是權威。
         register: function (spec) {
@@ -350,6 +613,13 @@
             }
             if (registry.has(spec.id)) {
                 pluginLog(spec.id, 'register 被拒：重複註冊');
+                return false;
+            }
+            var badGuard = (grant.sendGuard || []).filter(function (m) {
+                return GUARDABLE_METHODS.indexOf(m) === -1 || (grant.methods || []).indexOf(m) === -1;
+            });
+            if (badGuard.length) {
+                pluginLog(spec.id, 'register 被拒：sendGuard 含不可守衛（回應型別未確認）或不在 methods 的方法：' + badGuard.join(','));
                 return false;
             }
             // 把 id 綁進 grant 供 ctx.log 使用（不動原物件語意）
@@ -374,89 +644,75 @@
         // naki-websocket.js 的 handleMessage 在中段呼叫。
         // raw = { direction:'send'|'receive', wsId:Number, url:String, bytes:Uint8Array }
         // 回傳：send 方向被 rewriteSend 換掉時回新的 Uint8Array（呼叫端改送它），其餘一律 undefined。
+        // 守衛方法的 REQUEST 被擋下時回 { block:true, reason, response }：呼叫端不得送出，改把 response 交給遊戲與 Swift。
         dispatch: function (raw) {
             diagnostics.dispatches++;
-            if (registry.size === 0 || !raw || !raw.bytes) return;
+            if (!raw || !raw.bytes || (registry.size === 0 && tainted.size === 0)) return;
 
+            // Blob 的非同步副本已送出，守衛無從判定，只觀察
+            if (raw.direction === 'send' && raw.mutable !== false) return guardedSend(raw);
             var env = parseEnvelope(raw.bytes);
             if (!env) return;
+            return runChain(raw, env, null);
+        },
 
-            diagnostics.parsed++;
-            rememberIfRequest(env, raw.direction);
-            var method = resolveMethod(env, raw.direction);
-            diagnostics.lastMethod = method;
-            // Naki 自送看 sendRaw 的登記；插件號段另計（websocket 模組缺席時只剩號段）
-            var ws = window.__nakiWebSocket;
-            var isNaki = env.msgId != null
-                && ((env.msgId >= PLUGIN_MSGID_FIRST && env.msgId <= PLUGIN_MSGID_LAST)
-                    || !!(ws && ws.isNakiSent && ws.isNakiSent(env.msgId)));
-
-            // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
-            // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
-            if (raw.direction === 'receive' && env.msgId != null && injectedMsgIds.has(env.msgId)) {
-                var originId = injectedMsgIds.get(env.msgId);
-                injectedMsgIds.delete(env.msgId);
-                var origin = registry.get(originId);
-                if (origin && typeof origin.spec.onInjectResponse === 'function') {
-                    var rctx = makeCtx(raw, env, method, isNaki, origin.grant);
-                    rctx.inResponseTo = env.msgId;
-                    rctx.timedOut = false;
-                    try { origin.spec.onInjectResponse(rctx); noteSuccess(originId, 'onInjectResponse'); }
-                    catch (e) { noteFailure(originId, 'onInjectResponse', e); }
-                }
-                return;   // 注入回應不進一般鏈
-            }
-
-            // 建鏈：isNaki 走「只含宣告 observeNakiTraffic 的 observer」另一條，
-            // 與一般鏈分開，同一則訊息永遠只屬於其中一條（契約 §7.7）。
-            var chain = [];
-            registry.forEach(function (entry) {
-                var g = entry.grant;
-                if (isNaki && !g.observeNakiTraffic) return;
-                // 白名單在 Naki 這側過濾；method 為 null（RESPONSE 對不回）視為不命中
-                if (method == null) return;
-                var methods = g.methods || [];
-                if (methods.indexOf(method) === -1) return;
-                chain.push(entry);
+        // 有守衛者（已污染或已註冊 sendGuard）時拒送無法同步辨識的送出（Blob 等，審查第 4 條）。
+        // 呼叫端不得送出，也沒有 msgId 可回應。
+        refuseOpaqueSend: function (url) {
+            if (!isLobbyUrl(url)) return false;
+            var ids = Array.from(tainted.keys());
+            registry.forEach(function (entry, id) {
+                if ((entry.grant.sendGuard || []).length && ids.indexOf(id) === -1) ids.push(id);
             });
-            if (chain.length === 0) return;
+            if (ids.length === 0) return false;
+            recordGuard(null, null, 'refused_opaque', 'opaque', ids);
+            pluginLog(ids.join(','), '已污染：拒送一筆無法同步辨識的送出');
+            return true;
+        },
 
-            // priority 升冪，同值 id 字典序
-            chain.sort(function (a, b) {
-                var pa = a.grant.priority || 0, pb = b.grant.priority || 0;
-                if (pa !== pb) return pa - pb;
-                return a.spec.id < b.spec.id ? -1 : (a.spec.id > b.spec.id ? 1 : 0);
-            });
-
-            var original = raw.bytes;
-            for (var k = 0; k < chain.length; k++) {
-                var entry = chain[k];
-                var hook = raw.direction === 'receive' ? 'onReceive' : 'onSend';
-                var fn = entry.spec[hook];
-                if (typeof fn !== 'function') continue;
-                var ctx = makeCtx(raw, env, method, isNaki, entry.grant);
-                var before = raw.bytes;
-                var snapshot = raw.mutable === false ? null : before.slice();
-                try {
-                    diagnostics.hooks++;
-                    fn(ctx);   // 回傳值忽略；改寫只能經 ctx.replace（見 makeCtx）
-                    noteSuccess(entry.spec.id, hook);
-                } catch (e) {
-                    // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）
-                    raw.bytes = before;
-                    if (snapshot) before.set(snapshot);
-                    noteFailure(entry.spec.id, hook, e);
-                }
-                if (raw.bytes !== before) {
-                    // 換 buffer：後續插件看新 bytes。method 換了就停——後面的插件是照舊 method 的白名單選進鏈的
-                    env = parseEnvelope(raw.bytes);
-                    if (env.method !== method) break;
-                }
+        // naki-websocket 的送出路徑出錯時問這裡。只管已確認的大廳連線，其他連線一律照舊送出。
+        // 大廳上：守衛方法擋下；已知非守衛方法照送；辨識失敗時有守衛者才擋下。回 undefined ＝照舊送出。自己不得拋錯。
+        failSafe: function (data, url, socketId) {
+            if (!isLobbyUrl(url)) return;
+            var b = null, original = null, env = null, raw = null, identified = false;
+            try {
+                b = data instanceof ArrayBuffer ? new Uint8Array(data)
+                    : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+                original = b.slice();
+                raw = { bytes: b, wsId: socketId };
+                env = parseEnvelope(original);
+                if (env && env.method && env.method.indexOf('.lq.FastTest.') === 0) return;
+                var guard = env && env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
+                identified = !!env;
+                if (guard) return blockSend(raw, b, original, env.msgId, env.method, env.method, 'bridge_error', guard.ids);
+                if (identified || !guardActive()) return;
+            } catch (e) {
+                if (identified || !guardActive()) return;
             }
-            if (raw.direction !== 'send' || raw.bytes === original) return undefined;
-            // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致
-            if (env && env.method) pendingMethods.set(env.msgId, env.method);
-            return raw.bytes;
+            var empty = new Uint8Array(0);
+            return blockSend(raw || { bytes: empty, wsId: socketId }, b || empty, original || empty,
+                null, null, null, 'bridge_error', []);
+        },
+
+        // 本地回應交給遊戲之後呼叫：清 msgId 對照，插件注入的請求把本地結果交回發起插件（審查第 8 條）。
+        // msgId 與原方法來自擋下當時的判定，bytes 是交付前另存的快照（第二輪第 5 條）。不跑改寫鏈、不送 Swift。
+        localResponse: function (socketId, msgId, method, bytes) {
+            if (msgId == null) return;
+            var key = msgKey(socketId, msgId);
+            pendingMethods.delete(key);
+            var originId = injectedMsgIds.get(key);
+            if (originId == null) return;
+            injectedMsgIds.delete(key);
+            var origin = registry.get(originId);
+            if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
+            var env = parseEnvelope(bytes) || { type: TYPE_RESPONSE, msgId: msgId, method: null, payload: null };
+            var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: bytes, mutable: false },
+                env, method || null, true, origin.grant);
+            rctx.inResponseTo = msgId;
+            rctx.timedOut = false;
+            rctx.local = true;
+            try { origin.spec.onInjectResponse(rctx); noteSuccess(originId, 'onInjectResponse'); }
+            catch (e) { noteFailure(originId, 'onInjectResponse', e); }
         },
 
         // 推薦不是 WebSocket hook 的副產品：它要等 Swift / Mortal 推論完成才存在。
@@ -477,7 +733,7 @@
         },
 
         diagnostics: function () {
-            return JSON.parse(JSON.stringify({ runtime: diagnostics, registered: api.list(),
+            return JSON.parse(JSON.stringify({ runtime: diagnostics, registered: api.list(), guard: api.guardState(),
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,
@@ -490,9 +746,16 @@
         list: function () {
             var out = [];
             registry.forEach(function (entry, id) {
-                out.push({ id: id, capabilities: entry.grant.capabilities || [] });
+                out.push({ id: id, capabilities: entry.grant.capabilities || [], tainted: tainted.has(id) });
             });
             return out;
+        },
+
+        // 送出守衛現況（唯讀複本）：已污染插件與其守衛方法、最近 256 筆守衛方法的結局
+        guardState: function () {
+            var t = {};
+            tainted.forEach(function (set, id) { t[id] = Array.from(set); });
+            return JSON.parse(JSON.stringify({ tainted: t, log: guardLog }));
         },
 
         // ---- 熱插拔（runtime enable/disable，免 reload）----

@@ -143,8 +143,8 @@ class MajsoulBridge {
     var lastEnvelopeFailure: LiqiEnvelopeDecodeFailure? { liqiParser.lastEnvelopeFailure }
 
     /// 解析雀魂消息並返回原始解析結果（用於調試和請求跟蹤）
-    func observeOutgoing(_ data: Data) -> [String: Any]? {
-        let parsed = liqiParser.parse(data)
+    func observeOutgoing(_ data: Data, socketId: Int = 0) -> [String: Any]? {
+        let parsed = liqiParser.parse(data, socketId: socketId)
         lastParsed = parsed
         drainParserFaults()
         return parsed
@@ -236,8 +236,8 @@ class MajsoulBridge {
     }
 
     /// 解析雀魂消息並返回 MJAI 事件 (字典格式，保持兼容性)
-    func parse(_ data: Data) -> [[String: Any]]? {
-        let parsedOrNil = liqiParser.parse(data)
+    func parse(_ data: Data, socketId: Int = 0) -> [[String: Any]]? {
+        let parsedOrNil = liqiParser.parse(data, socketId: socketId)
         lastParsed = parsedOrNil
         drainParserFaults()
 

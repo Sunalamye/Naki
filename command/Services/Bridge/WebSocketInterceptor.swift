@@ -371,7 +371,8 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
     // MARK: - Properties
 
     /// 雀魂協議橋接器
-    private let majsoulBridge = MajsoulBridge()
+    /// 對外唯讀用途只有測試（讀 `lastParsed` 驗配對）
+    private(set) var majsoulBridge = MajsoulBridge()
 
     /// 目前登入帳號的 account_id（由 MajsoulBridge 從登入回應解析）。
     /// `ReqAccountInfo.account_id` 為必填，MCP 的帳號查詢工具需要它當預設值。
@@ -516,7 +517,8 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
             return
         }
 
-        // 沒有 socketId 也照常處理；-1 只用於 log
+        // 沒有 socketId 也照常處理，以 -1 代替。-1 參與 REQUEST／RESPONSE 配對：兩端都缺值時彼此配得上，
+        // 只有一端缺值時配不上；缺值的訊息之間無法依連線隔離（docs/plan/plugin-v2-b2.md §1.3）
         let socketId = data["socketId"] as? Int ?? -1
 
         // text frame 送來的是原始字串不是 base64；硬解要嘛每筆失敗洗版，要嘛把字串當封包解。
@@ -536,21 +538,37 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         let dirSymbol = direction == "receive" ? "←" : "→"
         wsLog("[WS] socket \(socketId) \(dirSymbol) \(binaryData.count) bytes")
 
+        // 本地交易：插件送出守衛擋下的 REQUEST 與它的本地 RESPONSE 放在同一則訊息（localResponse）。
+        // 兩份都解得開才一起處理，否則整筆不處理，Swift 不會只看到一半（docs/plan/plugin-v2-b2.md §1.3）
+        var localResponse: Data?
+        if let local = data["localResponse"] as? String {
+            guard direction == "send", let decoded = Data(base64Encoded: local) else {
+                wsLog("[WS] socket \(socketId) 本地交易的回應解不開，整筆不處理")
+                return
+            }
+            localResponse = decoded
+        }
+
         // 處理發送的消息（用於跟蹤請求）
         if direction == "send" {
             // 發送的消息是請求，需要解析以跟蹤 msgId
-            if let parsed = majsoulBridge.observeOutgoing(binaryData),
+            if let parsed = majsoulBridge.observeOutgoing(binaryData, socketId: socketId),
                let method = parsed["method"] as? String {
                 wsLog("[WS] socket \(socketId) Sent request: \(method)")
             }
+            if let localResponse { handleReceived(localResponse, socketId: socketId) }
             return
         }
 
-        // 處理接收的消息
         guard direction == "receive" else { return }
+        handleReceived(binaryData, socketId: socketId)
+    }
+
+    /// 收到的訊息（含本地交易的回應）：轉成 MJAI 事件；轉不成的寫診斷 log
+    private func handleReceived(_ binaryData: Data, socketId: Int) {
 
         // 使用 MajsoulBridge 解析消息
-        if let mjaiEvents = majsoulBridge.parse(binaryData) {
+        if let mjaiEvents = majsoulBridge.parse(binaryData, socketId: socketId) {
             for event in mjaiEvents {
                 if let eventType = event["type"] as? String {
                     wsLog("[MJAI] socket \(socketId) \(eventType): \(formatEvent(event))")
