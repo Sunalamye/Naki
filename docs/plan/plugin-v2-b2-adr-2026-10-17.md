@@ -40,3 +40,9 @@ plugin-v2-b2 61／61、plugin-regression 29／29、plugin-v2-regression 21／21�
 ## 未驗證
 
 live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 在遊戲端的表現；大廳換裝請求落在哪條 `/gateway`。
+
+## 用戶裁決（第二次，2026-10-17）
+
+1. 套用送出守衛的接線 patch（`naki-websocket.js`）。
+2. 接受 Swift 配對改動（`pendingRequests` 以「連線＋msgId」為鍵，socketId 傳到 `LiqiParser.parse`）。
+3. 測試通過後先 live 驗證再合併 main。

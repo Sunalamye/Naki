@@ -143,3 +143,11 @@ Astra 第五輪：0【擋】、6【應修】、0【建議】；總評可進入�
 | 變異 | 13／13 被抓（N1–N5 新增；M1–M8 重跑） | `round5b-mutation-js.log` |
 | 接線 patch | 未改；`git apply --check` 通過 | `round5b-patch-check.log` |
 | 全量 | 未重跑（未改 Swift），沿用 1149／0 | `round5-test-full.log` |
+
+## D34：接線套用與 rebase（2026-10-17，用戶裁決）
+
+- **接線已套用**：`proposed-ws-send-wiring.patch` 寫進 `naki-websocket.js`（+53／−2）。Swift 配對改動（`pendingRequests` 以連線＋msgId 為鍵、socketId 傳到 `LiqiParser.parse`）本來就在本分支，用戶一併接受。
+- **回歸腳本同步**：`plugin-v2-b2-regression.cjs` 刪掉 `PROPOSED_WIRING` 與 `wired()`，直接載入已接線的檔案；測試 `without the proposed wiring the verdict is ignored (fail-open)` 整條刪除。該測試的目的是防止誤以為 spike 已生效，接線套用後失去意義。其餘 60 條斷言未改。
+- **rebase 基底 fd74f63**：無衝突，`LiqiParser.swift` 與 `MajsoulBridge.swift` 自動合併（預期的兩處衝突未發生）。wip commit（原 ccd1e0b）仍被帶上：54c1983 建在它之上，丟掉會讓後者失去基底，所以未用 `--onto`。
+- **驗證**（主 repo `.swfd/logs/pv2-b2-wire/`）：node 回歸 60／60、29／29、21／21（`rebased-plugin*.log`）；macOS build 與 iOS Simulator build（scheme `Naki-M`，iPhone 17）皆 `BUILD SUCCEEDED`；NakiTests 全量 1154／0（= main 1143 + 11），`AuthGameErrorResponseTests` 5／5、`PluginSendGuardTests` 11／11（`rebased-test-full.log`）。
+- **未驗證**：App 內 live 行為，依用戶裁決先 live 驗證再合併 main。
