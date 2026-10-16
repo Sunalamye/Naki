@@ -1,7 +1,5 @@
 // Run: node scripts/plugin-v2-b2-regression.cjs
 // 送出守衛 N1／N2 的 spike（docs/plan/plugin-v2-b2.md §3–§4）。
-// naki-websocket.js 的 ws.send 接線改動要先經用戶確認（CLAUDE.md），所以本檔在記憶體裡套 PROPOSED_WIRING 再載入；
-// 確認後把同一段改動寫進檔案，這裡的替換就會因為找不到舊字串而失敗，屆時刪掉 PROPOSED_WIRING。
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -10,100 +8,7 @@ const { test } = require('node:test');
 const root = path.resolve(__dirname, '..');
 const source = name => fs.readFileSync(path.join(root, 'command/Resources/JavaScript', name), 'utf8');
 
-const PROPOSED_WIRING = [
-  [`        ws.addEventListener('message', function(event) {
-            handleMessage(ws, wsId, event.data, 'receive', isMajsoul);`,
-   `        ws.addEventListener('message', function(event) {
-            if (localEvents.has(event)) return;   // 本地回應：Swift 那份由 respondLocal 顯式送過
-            handleMessage(ws, wsId, event.data, 'receive', isMajsoul);`],
-  [`            return originalSend(handleMessage(ws, wsId, data, 'send', isMajsoul) || data);`,
-   `            // 守衛擋下（block）時一律不送出：交付失敗也不退回 originalSend
-            const out = handleMessage(ws, wsId, data, 'send', isMajsoul);
-            if (out && out.block) return respondLocal(ws, wsId, out);
-            return originalSend(out || data);`],
-  [`            return direction === 'send' && out instanceof Uint8Array ? out : undefined;
-        } catch (e) {
-            console.error('[Naki WS] 插件 dispatch 錯誤:', e);`,
-   `            return direction === 'send' && (out instanceof Uint8Array || (out && out.block)) ? out : undefined;
-        } catch (e) {
-            console.error('[Naki WS] 插件 dispatch 錯誤:', e);
-            // 派發本身出錯：守衛方法（或有守衛者時認不出的封包）仍要擋下
-            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, wsId);`],
-  [`                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes);
-`, `                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes);
-                if (rewritten && rewritten.block) return rewritten;
-`],
-  [`                const rewritten = dispatchToPlugins(direction, wsId, info, view);
-`, `                const rewritten = dispatchToPlugins(direction, wsId, info, view);
-                if (rewritten && rewritten.block) return rewritten;
-`],
-  [`        } catch (e) {
-            console.error('[Naki WS] 處理訊息錯誤:', e);
-        }
-    }`, `        } catch (e) {
-            console.error('[Naki WS] 處理訊息錯誤:', e);
-            // 派發前出錯：守衛方法（或已污染時認不出的封包）仍要擋下
-            if (direction === 'send' && window.__nakiPlugins && window.__nakiPlugins.failSafe) {
-                return window.__nakiPlugins.failSafe(data, wsId);
-            }
-        }
-    }`],
-  [`        messageTypes[direction][dataType]++;
-`, `        messageTypes[direction][dataType]++;
-        // 大廳連線上有守衛者時，無法同步辨識的送出一律拒送（Blob 等）
-        if (direction === 'send' && (dataType === 'Blob' || dataType === 'Other')
-            && window.__nakiPlugins && window.__nakiPlugins.refuseOpaqueSend && window.__nakiPlugins.refuseOpaqueSend(wsId)) {
-            return { block: true, reason: 'opaque' };
-        }
-`],
-  [`            wsConnections.delete(ws);
-        });`, `            wsConnections.delete(ws);
-            if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
-        });`],
-  [`    const messageTypes = {`,
-   `    // 本地回應（守衛擋下；日後 respondLocally 共用）。
-    // Swift 成對交付：原 REQUEST 與 RESPONSE 放在同一則 bridge 訊息（localResponse 欄位），兩份都編碼成功才送；
-    // postMessage 失敗時兩份一起不見，不會只到一半（審查第三輪第 3 條）。遊戲在 ws.send 回傳後才收到另一份複本，
-    // Naki listener 略過它；交付後以擋下當時的連線、msgId、原方法與自己的快照結案。
-    const localEvents = new WeakSet();
-    function respondLocal(ws, wsId, verdict) {
-        let response = null;
-        try {
-            response = verdict.response ? verdict.response.slice() : null;
-            if (verdict.request && response) {
-                const reqB64 = arrayBufferToBase64(verdict.request.slice().buffer);
-                const resB64 = arrayBufferToBase64(response.slice().buffer);
-                if (reqB64 && resB64) {
-                    sendToSwift('websocket_message', { socketId: wsId, direction: 'send', data: reqB64, type: 'binary',
-                        size: verdict.request.byteLength, localResponse: resB64 });
-                }
-            }
-        } catch (e) { console.error('[Naki WS] 本地交易送 Swift 失敗（兩份都沒送）:', e); }
-        if (!response) return;
-        try {
-            const forGame = response.slice();
-            setTimeout(function () {
-                try {
-                    const ev = new MessageEvent('message', { data: forGame.buffer });
-                    localEvents.add(ev);
-                    ws.dispatchEvent(ev);
-                } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
-                try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response); }
-                catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
-            }, 0);
-        } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
-    }
-
-    const messageTypes = {`]
-];
-function wired() {
-  return PROPOSED_WIRING.reduce((src, [from, to]) => {
-    assert.equal(src.split(from).length, 2, 'PROPOSED_WIRING 找不到唯一的原字串：' + from.trim().slice(0, 60));
-    return src.replace(from, to);
-  }, source('naki-websocket.js'));
-}
-
-function page(wiring = wired(), { breakBase64 = false, swiftFails = () => false, realCore = false, postFails = () => false } = {}) {
+function page(wiring = source('naki-websocket.js'), { breakBase64 = false, swiftFails = () => false, realCore = false, postFails = () => false } = {}) {
   const swift = [];
   class MessageEvent { constructor(type, init) { this.type = type; this.data = init.data; } }
   class Socket {
@@ -298,13 +203,6 @@ test('zero plugins and no taint: the original object goes out and Swift gets it 
   assert.equal(t.game.length, 1);
 });
 
-test('without the proposed wiring the verdict is ignored (fail-open) — the ws.send change is required for N1/N2', () => {
-  const t = page(source('naki-websocket.js'));
-  guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
-  t.lobby.send(request(110, SKIN));
-  assert.equal(t.lobby.sent.length, 1);
-});
-
 test('N2: an internal dispatch error on a guarded request blocks it instead of falling back to sending', async () => {
   const t = page();
   guardPlugin(t.c);
@@ -356,7 +254,7 @@ test('R2 (Astra 2): a guard hook returning a Promise or thenable never approves,
 });
 
 test('R3 (Astra 3): once blocked, an encoding failure on the way to Swift cannot turn it back into a send', async () => {
-  const t = page(wired(), { breakBase64: true });
+  const t = page(source('naki-websocket.js'), { breakBase64: true });
   guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
   t.lobby.send(request(150, SKIN));
   await tick();
@@ -517,7 +415,7 @@ test('R302 (Astra2 1): untainted guard, bridge error before dispatch and guard l
 });
 
 test('R3c (Astra2 3): if the local REQUEST cannot reach Swift, its RESPONSE is not sent to Swift either', async () => {
-  const t = page(wired(), { swiftFails: (type, d) => type === 'websocket_message' && d.direction === 'send' });
+  const t = page(source('naki-websocket.js'), { swiftFails: (type, d) => type === 'websocket_message' && d.direction === 'send' });
   guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
   t.lobby.send(request(310, SKIN));
   await tick();
@@ -636,7 +534,7 @@ test('R4-2 (Astra3 2): a local closure on socket A does not eat socket B\'s pend
 
 test('R4-3 (Astra3 3): with the real core sendToSwift, a failed postMessage leaves Swift with nothing, never half a pair', async () => {
   for (const failDir of ['send', 'receive']) {
-    const t = page(wired(), { realCore: true, postFails: m => m.type === 'websocket_message' && m.data.direction === failDir });
+    const t = page(source('naki-websocket.js'), { realCore: true, postFails: m => m.type === 'websocket_message' && m.data.direction === failDir });
     guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
     t.lobby.send(request(410, SKIN));
     await tick();
@@ -913,7 +811,7 @@ test('R6-3 residual (Astra5 3): a first Lobby request sent as Blob on an unknown
 
 test('R6-4 (Astra5 5): a FastTest whose type byte an observer corrupts is refused by failSafe on a lobby, sent on a game connection', async () => {
   for (const onLobby of [true, false]) {
-    const t = page(wired(), { breakBase64: true });
+    const t = page(source('naki-websocket.js'), { breakBase64: true });
     guardPlugin(t.c);
     t.c.__nakiPlugins.setGrant('obs', { capabilities: ['observe'], methods: [OP] });
     t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) { ctx.bytes[0] = 9; } });

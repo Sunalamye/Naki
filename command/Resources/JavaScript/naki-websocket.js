@@ -108,6 +108,7 @@
 
         // 監聽訊息
         ws.addEventListener('message', function(event) {
+            if (localEvents.has(event)) return;   // 本地回應：Swift 那份由 respondLocal 顯式送過
             handleMessage(ws, wsId, event.data, 'receive', isMajsoul);
         });
 
@@ -133,6 +134,7 @@
                 isMajsoul: isMajsoul
             });
             wsConnections.delete(ws);
+            if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
         });
 
         // 監聽錯誤
@@ -148,7 +150,10 @@
         const originalSend = ws.send.bind(ws);
         ws.send = function(data) {
             // rewriteSend（L3）換掉時改送新 bytes；沒換就是原物件，Naki 自送（isNaki）永遠沒換
-            return originalSend(handleMessage(ws, wsId, data, 'send', isMajsoul) || data);
+            // 守衛擋下（block）時一律不送出：交付失敗也不退回 originalSend
+            const out = handleMessage(ws, wsId, data, 'send', isMajsoul);
+            if (out && out.block) return respondLocal(ws, wsId, out);
+            return originalSend(out || data);
         };
 
         return ws;
@@ -395,10 +400,45 @@
                 bytes: bytes,
                 mutable: mutable !== false
             });
-            return direction === 'send' && out instanceof Uint8Array ? out : undefined;
+            return direction === 'send' && (out instanceof Uint8Array || (out && out.block)) ? out : undefined;
         } catch (e) {
             console.error('[Naki WS] 插件 dispatch 錯誤:', e);
+            // 派發本身出錯：守衛方法（或有守衛者時認不出的封包）仍要擋下
+            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, wsId);
         }
+    }
+
+    // 本地回應（守衛擋下；日後 respondLocally 共用）。
+    // Swift 成對交付：原 REQUEST 與 RESPONSE 放在同一則 bridge 訊息（localResponse 欄位），兩份都編碼成功才送；
+    // postMessage 失敗時兩份一起不見，不會只到一半（審查第三輪第 3 條）。遊戲在 ws.send 回傳後才收到另一份複本，
+    // Naki listener 略過它；交付後以擋下當時的連線、msgId、原方法與自己的快照結案。
+    const localEvents = new WeakSet();
+    function respondLocal(ws, wsId, verdict) {
+        let response = null;
+        try {
+            response = verdict.response ? verdict.response.slice() : null;
+            if (verdict.request && response) {
+                const reqB64 = arrayBufferToBase64(verdict.request.slice().buffer);
+                const resB64 = arrayBufferToBase64(response.slice().buffer);
+                if (reqB64 && resB64) {
+                    sendToSwift('websocket_message', { socketId: wsId, direction: 'send', data: reqB64, type: 'binary',
+                        size: verdict.request.byteLength, localResponse: resB64 });
+                }
+            }
+        } catch (e) { console.error('[Naki WS] 本地交易送 Swift 失敗（兩份都沒送）:', e); }
+        if (!response) return;
+        try {
+            const forGame = response.slice();
+            setTimeout(function () {
+                try {
+                    const ev = new MessageEvent('message', { data: forGame.buffer });
+                    localEvents.add(ev);
+                    ws.dispatchEvent(ev);
+                } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
+                try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response); }
+                catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
+            }, 0);
+        } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
     }
 
     const messageTypes = {
@@ -412,6 +452,11 @@
             : ArrayBuffer.isView(data) ? 'TypedArray'
             : data instanceof Blob ? 'Blob' : typeof data === 'string' ? 'String' : 'Other';
         messageTypes[direction][dataType]++;
+        // 大廳連線上有守衛者時，無法同步辨識的送出一律拒送（Blob 等）
+        if (direction === 'send' && (dataType === 'Blob' || dataType === 'Other')
+            && window.__nakiPlugins && window.__nakiPlugins.refuseOpaqueSend && window.__nakiPlugins.refuseOpaqueSend(wsId)) {
+            return { block: true, reason: 'opaque' };
+        }
 
         // 記錄選線要用的資訊。
         //
@@ -432,6 +477,7 @@
                 const pluginBytes = new Uint8Array(data);
                 nakiNicknameMask.observe(pluginBytes, direction);
                 const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes);
+                if (rewritten && rewritten.block) return rewritten;
                 // ArrayBuffer：轉成 Base64（pluginBytes 是 data 的 view，插件若就地改過這裡編碼的是改後的；
                 // rewriteSend 整包換掉時編碼新 bytes，Swift 與伺服器看到同一份）
                 const sent = rewritten || data;
@@ -450,6 +496,7 @@
                 const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
                 nakiNicknameMask.observe(view, direction);
                 const rewritten = dispatchToPlugins(direction, wsId, info, view);
+                if (rewritten && rewritten.block) return rewritten;
                 const sent = rewritten || view;
                 sendToSwift('websocket_message', {
                     socketId: wsId,
@@ -494,6 +541,10 @@
             }
         } catch (e) {
             console.error('[Naki WS] 處理訊息錯誤:', e);
+            // 派發前出錯：守衛方法（或已污染時認不出的封包）仍要擋下
+            if (direction === 'send' && window.__nakiPlugins && window.__nakiPlugins.failSafe) {
+                return window.__nakiPlugins.failSafe(data, wsId);
+            }
         }
     }
 
