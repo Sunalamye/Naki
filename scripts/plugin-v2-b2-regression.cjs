@@ -28,7 +28,7 @@ const PROPOSED_WIRING = [
         } catch (e) {
             console.error('[Naki WS] 插件 dispatch 錯誤:', e);
             // 派發本身出錯：守衛方法（或有守衛者時認不出的封包）仍要擋下
-            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, info ? info.url : '', wsId);`],
+            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, wsId);`],
   [`                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes);
 `, `                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes);
                 if (rewritten && rewritten.block) return rewritten;
@@ -44,7 +44,7 @@ const PROPOSED_WIRING = [
             console.error('[Naki WS] 處理訊息錯誤:', e);
             // 派發前出錯：守衛方法（或已污染時認不出的封包）仍要擋下
             if (direction === 'send' && window.__nakiPlugins && window.__nakiPlugins.failSafe) {
-                return window.__nakiPlugins.failSafe(data, info && info.url, wsId);
+                return window.__nakiPlugins.failSafe(data, wsId);
             }
         }
     }`],
@@ -52,10 +52,14 @@ const PROPOSED_WIRING = [
 `, `        messageTypes[direction][dataType]++;
         // 大廳連線上有守衛者時，無法同步辨識的送出一律拒送（Blob 等）
         if (direction === 'send' && (dataType === 'Blob' || dataType === 'Other')
-            && window.__nakiPlugins && window.__nakiPlugins.refuseOpaqueSend && window.__nakiPlugins.refuseOpaqueSend((wsConnections.get(ws) || {}).url)) {
+            && window.__nakiPlugins && window.__nakiPlugins.refuseOpaqueSend && window.__nakiPlugins.refuseOpaqueSend(wsId)) {
             return { block: true, reason: 'opaque' };
         }
 `],
+  [`            wsConnections.delete(ws);
+        });`, `            wsConnections.delete(ws);
+            if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
+        });`],
   [`    const messageTypes = {`,
    `    // 本地回應（守衛擋下；日後 respondLocally 共用）。
     // Swift 成對交付：原 REQUEST 與 RESPONSE 放在同一則 bridge 訊息（localResponse 欄位），兩份都編碼成功才送；
@@ -103,8 +107,9 @@ function page(wiring = wired(), { breakBase64 = false, swiftFails = () => false,
   const swift = [];
   class MessageEvent { constructor(type, init) { this.type = type; this.data = init.data; } }
   class Socket {
-    constructor(url) { this.url = url; this.readyState = 1; this.listeners = []; this.sent = []; this.onmessage = null; }
-    addEventListener(k, f) { if (k === 'message') this.listeners.push(f); }
+    constructor(url) { this.url = url; this.readyState = 1; this.listeners = []; this.closers = []; this.sent = []; this.onmessage = null; }
+    addEventListener(k, f) { if (k === 'message') this.listeners.push(f); if (k === 'close') this.closers.push(f); }
+    close() { this.readyState = 3; this.closers.forEach(f => f({ code: 1000, reason: '' })); }
     send(d) { this.sent.push(d); }
     dispatchEvent(ev) { this.listeners.forEach(f => f(ev)); if (this.onmessage) this.onmessage(ev); return true; }
     receive(u8) { this.dispatchEvent(new MessageEvent('message', { data: u8.buffer.slice(0) })); }
@@ -233,13 +238,14 @@ test('without pollution, disabling a guard plugin releases its guard', () => {
   const req = request(70, SKIN);
   t.lobby.send(req);
   assert.equal(t.lobby.sent[0], req);
-  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()), { tainted: {}, log: [] });
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()), { tainted: {}, log: [], roles: { [t.c.__nakiWebSocket.getMajsoulConnections()[0].id]: 'lobby' } });
 });
 
 test('game-gateway rewrites do not pollute; non-guard plugins never pollute', () => {
   const t = page();
   guardPlugin(t.c);
   const g = new t.c.WebSocket('wss://route-4.maj-soul.com/game-gateway');
+  g.send(request(79, '.lq.FastTest.authGame'));
   g.send(request(80, INFO));
   g.receive(response(80, [8, 1]));
   assert.equal(t.events('tainted').length, 0);
@@ -380,8 +386,9 @@ test('R4b: with no guard plugin, Blob sends still go out (no behavior change for
 test('R4c: a registered but untainted guard plugin also refuses Blob sends', () => {
   const t = page();
   guardPlugin(t.c);
+  t.lobby.send(request(161, BEAT));
   t.lobby.send(new t.c.Blob([request(162, SKIN)]));
-  assert.deepEqual(sentIds(t), []);
+  assert.deepEqual(sentIds(t), [161]);
   assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.map(e => e.outcome), ['refused_opaque']);
 });
 
@@ -687,4 +694,263 @@ test('R4-1g (Astra3 1): non-FastTest traffic on the game connection (.lq.Route.h
   g.send(request(406, '.lq.Route.heartbeat'));
   await tick();
   assert.deepEqual(sentOn(g), [406]);
+});
+
+
+// ---- 審查第五輪（Astra 第四輪 1–3）：角色由協定握手鎖定，不看 URL ----
+const ROUTE = '.lq.Route.requestConnection', HB = '.lq.Route.heartbeat', AUTH = '.lq.FastTest.authGame', PREP = '.lq.Lobby.prepareLogin';
+const roleOf = (t, ws) => (plain(t.c.__nakiPlugins.guardState()).roles || {})[t.c.__nakiWebSocket.getMajsoulConnections().find(c => c.ws === ws).id];
+
+test('R5-1a (Astra4 1): a game connection whose URL contains /gateway elsewhere is locked as game by authGame and never guarded', async () => {
+  for (const url of ['wss://route-4.maj-soul.com/game-gateway?next=/gateway', 'wss://gateway.maj-soul.com/game-gateway']) {
+    const t = page();
+    guardPlugin(t.c);
+    pollute(t);
+    brokenGuard(t.c);
+    const g = new t.c.WebSocket(url);
+    g.send(request(500, ROUTE));
+    g.send(request(501, AUTH));
+    g.send(request(502, HB));
+    await tick();
+    assert.deepEqual(sentOn(g), [500, 501, 502], url);
+    assert.equal(roleOf(t, g), 'game', url);
+  }
+});
+
+test('R5-1b (Astra4 1): with a healthy guard, a Blob on a game connection with /gateway in its URL still goes out', () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  const g = new t.c.WebSocket('wss://gateway.maj-soul.com/game-gateway');
+  g.send(request(510, ROUTE));
+  g.send(request(511, AUTH));
+  const blob = new t.c.Blob([request(512, HB)]);
+  g.send(blob);
+  assert.equal(g.sent[2], blob);
+});
+
+test('R5-1c (Astra4 1): a backup lobby that only sends prepareLogin is locked as lobby whatever its URL, and guarded', async () => {
+  for (const url of ['wss://route-4.majsoul.com/Gateway', 'wss://route-4.majsoul.com/%67ateway', 'wss://route-4.maj-soul.com/gateway']) {
+    const t = page();
+    guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
+    const b = new t.c.WebSocket(url);
+    b.send(request(520, ROUTE));
+    b.send(request(521, PREP));
+    b.send(request(522, HB));
+    b.send(request(523, SKIN));
+    await tick();
+    assert.deepEqual(sentOn(b), [520, 521, 522], url);
+    assert.equal(roleOf(t, b), 'lobby', url);
+  }
+});
+
+test('R5-1d: the first .lq.Lobby.* request locks lobby before the guard decision on that same request', async () => {
+  const t = page();
+  guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
+  const u = new t.c.WebSocket('wss://route-4.majsoul.com/ws');
+  u.send(request(530, ROUTE));
+  assert.equal(roleOf(t, u), undefined, '.lq.Route.* does not lock');
+  u.send(request(531, SKIN));
+  await tick();
+  assert.deepEqual(sentOn(u), [530]);
+  assert.equal(roleOf(t, u), 'lobby');
+});
+
+test('R5-1e: a locked role never changes — FastTest on a lobby stays lobby, Lobby on a game stays game', () => {
+  const t = page();
+  guardPlugin(t.c);
+  t.lobby.send(request(540, BEAT));
+  t.lobby.send(request(541, OP));
+  assert.equal(roleOf(t, t.lobby), 'lobby');
+  const g = gameSocket(t.c);
+  g.send(request(542, AUTH));
+  g.send(request(543, BEAT));
+  assert.equal(roleOf(t, g), 'game');
+});
+
+test('R5-1f: an unparsable send on a connection whose role is still unknown goes out (fail-open); on a lobby it is refused', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  const u = new t.c.WebSocket('wss://route-5.maj-soul.com/gateway');
+  u.send(request(550, ROUTE));
+  const junk = new Uint8Array([9, 9, 9]);
+  u.send(junk);
+  assert.equal(u.sent[1], junk);
+  t.lobby.send(new Uint8Array([9, 9, 9]));
+  await tick();
+  assert.deepEqual(sentIds(t), [10]);
+});
+
+test('R5-1g: closing a connection clears its role', () => {
+  const t = page();
+  t.c.__nakiPlugins.setGrant('obs', { capabilities: ['observe'], methods: [BEAT] });
+  t.c.__nakiPlugins.register({ id: 'obs', onSend() {} });
+  t.lobby.send(request(560, BEAT));
+  const id = t.c.__nakiWebSocket.getMajsoulConnections().find(c => c.ws === t.lobby).id;
+  assert.equal(plain(t.c.__nakiPlugins.guardState()).roles[id], 'lobby');
+  t.lobby.close();
+  assert.equal(plain(t.c.__nakiPlugins.guardState()).roles[id], undefined);
+});
+
+test('R5-1h: roles are locked even with zero plugins, so a guard enabled later already knows the lobby', async () => {
+  const t = page();
+  t.lobby.send(request(570, ROUTE));
+  t.lobby.send(request(571, BEAT));
+  guardPlugin(t.c);
+  t.lobby.send(new t.c.Blob([request(572, SKIN)]));
+  assert.deepEqual(sentIds(t), [570, 571]);
+});
+
+test('R5-2a (Astra4 2): a FastTest request on the lobby whose chain throws goes out, with no guard verdict', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  t.c.__nakiPlugins.setGrant('broken', { capabilities: ['observe'], methods: { indexOf() { throw new Error('bad grant'); } } });
+  t.c.__nakiPlugins.register({ id: 'broken', onSend() {} });
+  t.lobby.send(request(580, OP));
+  await tick();
+  assert.deepEqual(sentIds(t), [10, 580]);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log, []);
+});
+
+test('R5-2b (Astra4 2): FastTest traffic never reads sendGuard, even when an observer rewrites its method in place', () => {
+  for (const onLobby of [true, false]) {
+    const t = page();
+    let reads = 0;
+    t.c.__nakiPlugins.setGrant('g', { capabilities: ['observe'], methods: [SKIN], get sendGuard() { reads++; return [SKIN]; } });
+    assert.equal(t.c.__nakiPlugins.register({ id: 'g', onSend() {} }), true);
+    t.c.__nakiPlugins.setGrant('obs', { capabilities: ['observe'], methods: [OP] });
+    t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) { ctx.bytes[5 + OP.length - 1] ^= 1; } });
+    const ws = onLobby ? t.lobby : gameSocket(t.c);
+    ws.send(request(590, onLobby ? BEAT : AUTH));
+    const before = reads;
+    ws.send(request(591, OP));
+    assert.equal(reads, before, onLobby ? 'lobby' : 'game');
+    assert.equal(ws.sent.length, 2);
+  }
+});
+
+test('R5-3 (Astra4 3): when guard lookup keeps throwing on the lobby, only guardable and unparsable requests are refused', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  t.c.__nakiPluginGrants[ID].sendGuard.indexOf = () => { throw new Error('lookup broke'); };
+  const FAI = '.lq.Lobby.fetchAccountInfo', SUM = '.lq.Lobby.startUnifiedMatch';
+  [[600, HB], [601, BEAT], [602, FAI], [603, SUM], [604, SKIN], [605, TITLE]].forEach(([id, m]) => t.lobby.send(request(id, m)));
+  t.lobby.send(new Uint8Array([9, 9, 9]));
+  await tick();
+  assert.deepEqual(sentIds(t), [10, 600, 601, 602, 603]);
+  assert.deepEqual(t.game.slice(-2), [errorResponse(604), errorResponse(605)]);
+});
+
+test('R5-3b (Astra4 3): the same narrowing holds on the bridge-error path', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  t.c.__nakiPluginGrants[ID].sendGuard.indexOf = () => { throw new Error('lookup broke'); };
+  t.c.__nakiHideNames.observe = () => { throw new Error('observer broke'); };
+  t.lobby.send(request(610, BEAT));
+  t.lobby.send(request(611, SKIN));
+  await tick();
+  assert.deepEqual(sentIds(t), [10, 610]);
+  assert.deepEqual(t.game.slice(-1), [errorResponse(611)]);
+});
+
+
+// ---- 審查第五輪（Astra 第五輪 1–6）：保證範圍的殘餘反例與獨立變異的鎖 ----
+const settle = async (until, n = 20) => { for (let i = 0; i < n && !until(); i++) await tick(); };
+
+test('R6-1 residual (Astra5 1): with no open lobby, sendRaw falls back to the game connection, so a coexisting sendRequest goes out unguarded', async () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  guardPlugin(t.c);
+  pollute(t);
+  t.c.__nakiPlugins.disable(ID);
+  let inject;
+  t.c.__nakiPlugins.setGrant('inj', { capabilities: ['observe', 'injectSend'], methods: [OP] });
+  t.c.__nakiPlugins.register({ id: 'inj', onSend(ctx) { inject = ctx.sendRequest; } });
+  const g = gameSocket(t.c);
+  g.send(request(700, AUTH));
+  g.send(request(701, OP));
+  t.lobby.close();
+  const r = inject(SKIN, new t.c.Uint8Array([8, 1]));
+  assert.equal(r.ok, true);
+  assert.deepEqual(sentOn(g), [700, 701, r.msgId]);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log, []);
+});
+
+test('R6-2 residual (Astra5 2): an in-place rewrite outside ctx.replace on an unknown Route request or a lobby FastTest request goes out unguarded', async () => {
+  for (const [first, method] of [[null, ROUTE], [BEAT, OP]]) {
+    const t = page();
+    guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
+    t.c.__nakiPlugins.setGrant('obs', { capabilities: ['observe'], methods: [method] });
+    t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) { ctx.bytes.set(request(ctx.msgId, SKIN, [8, 1])); } });
+    const ws = first ? t.lobby : new t.c.WebSocket('wss://route-6.maj-soul.com/gateway');
+    if (first) ws.send(request(709, first));
+    ws.send(request(710, method, [8, 1, 8, 1]));
+    await tick();
+    const out = ws.sent.slice(-1)[0];
+    assert.deepEqual(Array.from(new Uint8Array(out.buffer ? out.buffer : out)), Array.from(request(710, SKIN, [8, 1])), method);
+    assert.equal(roleOf(t, ws), first ? 'lobby' : undefined, method);
+  }
+});
+
+test('R6-3 residual (Astra5 3): a first Lobby request sent as Blob on an unknown connection goes out; the async copy locks lobby only afterwards', async () => {
+  const t = page();
+  guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
+  const u = new t.c.WebSocket('wss://route-6.maj-soul.com/gateway');
+  u.send(request(720, ROUTE));
+  const blob = new t.c.Blob([request(721, SKIN)]);
+  u.send(blob);
+  assert.equal(u.sent[1], blob);
+  await settle(() => roleOf(t, u) === 'lobby');
+  assert.equal(roleOf(t, u), 'lobby');
+  u.send(request(722, SKIN));
+  await tick();
+  assert.equal(u.sent.length, 2, 'once locked, the synchronous guarded request is blocked');
+});
+
+test('R6-4 (Astra5 5): a FastTest whose type byte an observer corrupts is refused by failSafe on a lobby, sent on a game connection', async () => {
+  for (const onLobby of [true, false]) {
+    const t = page(wired(), { breakBase64: true });
+    guardPlugin(t.c);
+    t.c.__nakiPlugins.setGrant('obs', { capabilities: ['observe'], methods: [OP] });
+    t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) { ctx.bytes[0] = 9; } });
+    const ws = onLobby ? t.lobby : gameSocket(t.c);
+    ws.send(request(730, onLobby ? BEAT : AUTH));
+    ws.send(request(731, OP));
+    await tick();
+    assert.equal(ws.sent.length, onLobby ? 1 : 2, onLobby ? 'lobby' : 'game');
+  }
+});
+
+test('R6-5: failSafe never changes a locked role — a Lobby request on a game connection hit by a bridge error still goes out', async () => {
+  const t = page();
+  guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
+  const g = gameSocket(t.c);
+  g.send(request(740, AUTH));
+  t.c.__nakiHideNames.observe = () => { throw new Error('observer broke'); };
+  g.send(request(741, SKIN));
+  await tick();
+  assert.deepEqual(sentOn(g), [740, 741]);
+  assert.equal(roleOf(t, g), 'game');
+});
+
+test('R6-6 (Astra5 6, D27): an internal error after an unguarded in-place rewrite restores and sends the original non-guardable request', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  t.c.__nakiPlugins.setGrant('obs', { capabilities: ['observe'], methods: [HEAT] });
+  t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) { Buffer.from(TITLE).forEach((x, i) => { ctx.bytes[5 + i] = x; }); } });
+  let reads = 0;
+  t.c.__nakiPlugins.setGrant('late', { methods: [HEAT], priority: 10,
+    get capabilities() { if (reads++ < 1) return ['observe']; throw new Error('bad grant'); } });
+  assert.equal(t.c.__nakiPlugins.register({ id: 'late', onSend() {} }), true);
+  const req = request(750, HEAT);
+  const original = Array.from(req);
+  t.lobby.send(req);
+  await tick();
+  assert.deepEqual(sentIds(t), [750]);
+  assert.deepEqual(Array.from(new Uint8Array(t.lobby.sent[0])), original);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log, []);
 });

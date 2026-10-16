@@ -1,7 +1,7 @@
 # 插件 v2：送出守衛（N1、N2）與 PV2-B2 實作筆記
 
 **設計**：`docs/plan/plugin-v2-b2.md`
-**分支**：`pv2-b2-design`（worktree `Naki-wt-pv2b2`，基準 main `4761f6e`，未 commit）
+**分支**：`pv2-b2-design`（worktree `Naki-wt-pv2b2`，基準 main `4761f6e`；wip `ccd1e0b` 與第五輪 commit，未合併、未 rebase）
 **log**：主 repo `.swfd/logs/pv2-b2-design/`
 
 ## 範圍
@@ -37,14 +37,23 @@
 | D14 | 「改寫成守衛方法」在 `replace` 階段拒絕，而不是依原方法型別合成錯誤 | 拒絕改寫，原請求照送 | 原方法未守衛，照送不違反 I2；依任意原型別合錯誤需要 schema（PV2-C） |
 | D15 | （已撤回，見 D19）成對交付的反方向以「不可能」處理 | — | 論證錯誤：core 吞掉 `postMessage` 例外，不等於送達 |
 | D16 | thenable 回傳 fulfil 時計為成功 | 計為成功 | hook 本身沒有失敗；只是守衛不接受非同步放行 |
-| D17 | 用戶裁決（2026-10-15）：守衛只作用在已確認的大廳連線（`/gateway`）；對局連線與 `.lq.FastTest.*` 在守衛查找前繞過。第四輪審查若仍有【擋】，解鎖 v1 暫停 | 照裁決 | 審查第三輪第 1 條：D13 的拒送擴及對局動作 |
+| D17 | 用戶裁決（2026-10-15）：守衛只作用在已確認的大廳連線（`/gateway`；判定方式已由 D25 改為握手鎖定）；對局連線與 `.lq.FastTest.*` 在守衛查找前繞過。第四輪審查若仍有【擋】，解鎖 v1 暫停 | 照裁決 | 審查第三輪第 1 條：D13 的拒送擴及對局動作 |
 | D18 | D13 改寫：大廳上已知非守衛方法遇內部錯誤時還原原 bytes 照送；只有守衛方法或「無法辨識且有守衛者」才拒送 | 照主線指示 | 拒送範圍只留在無法判斷的情況 |
 | D19 | D15 撤回；成對交付改為單一 bridge 訊息（`localResponse` 欄位），Swift 兩份都解得開才處理 | 單一訊息 | Astra 以正式 `sendToSwift` 重現兩種半套；core 吞掉 `postMessage` 例外，JS 無從確認送達 |
 | D20 | 為了成對處理，`WebSocketInterceptor.handleWebSocketMessage` 再改：抽出 `handleReceived`；`majsoulBridge` 改 `private(set)` 供測試 | 最小改動 | 原子處理必須在 Swift 端；測試需要讀 `lastParsed` |
 | D21 | 就地改寫成守衛方法：撤回並計插件失敗，照原樣送出（不再擋下） | 照審查第三輪第 5 條 | 擋下且無回應會讓心跳之類的請求失敗 |
 | D22 | Naki 身分只看 msgId 的缺口另開工作包，本輪只證明在守衛範圍內的後果是多擋 | 照主線指示 | 見設計 §4.6 |
-| D23 | 大廳上守衛查找持續拋錯時，大廳所有非 FastTest 請求（含心跳）都被拒送 | 接受，記為已知風險 | 主線規則「已確認大廳連線上無法辨識才拒送」的直接結果；只有插件 grant 壞掉才會發生 |
+| D23 | （已由 D27 改寫）大廳上守衛查找持續拋錯時，大廳所有非 FastTest 請求（含心跳）都被拒送 | 接受，記為已知風險 | 主線規則「已確認大廳連線上無法辨識才拒送」的直接結果；只有插件 grant 壞掉才會發生 |
 | D8 | PV2-B2 拆成 B2a（變長 replace＋respondLocally）與選做的 B2b（drop＋injectReceive） | 先做有消費者的 | 解鎖插件不需要 drop 與 injectReceive（`unlock-plugin.md` N4）；少一個主路徑改動 |
+| D25 | 用戶裁決（2026-10-17）：連線角色由協定握手鎖定，URL 不參與。第一個 `.lq.Lobby.*` 請求 ⇒ lobby、第一個 `.lq.FastTest.*` ⇒ game、`.lq.Route.*` 不改、鎖定後不變、關閉清除；只有 lobby 進守衛 | unknown 與 game fail-open；鎖定放在 `dispatch` 第一步，早於零插件早退與守衛判定；`failSafe` 也鎖定；unknown 上解析失敗的請求與 Blob 照送 | 取捨：解析 URL 比對 pathname 仍是形狀假設，而 live 已證實第二個請求揭露角色。代價是設計 §1.4 的保證範圍限定（D28–D32）。零插件時每條連線多解析到鎖定為止（通常兩筆），換來之後才啟用的守衛不漏認大廳 |
+| D26 | 第四輪第 2 條：FastTest 與非 lobby 連線在 `dispatch` 開頭就走現行鏈；`runChain` 的就地改寫檢查改由呼叫端旗標決定（只有 `guardedSend` 傳 true），污染判定改看角色 | 完全不讀守衛狀態 | 取捨：lobby 上的 FastTest 被就地改成守衛方法時不再撤回，記為保證範圍限定（設計 §1.4 第 2、4 項；「屬 U4」已由 D29 撤回）。live 未見 lobby 連線上的 FastTest |
+| D27 | 第四輪第 3 條（D23 縮窄；只看原方法見 D33）：lobby 上守衛查找拋錯時，只拒送原方法或改寫後方法在 `GUARDABLE_METHODS` 者與解析不出者；其他還原原 bytes 照送 | 照 Astra 建議與主線指示；判斷只用閉包常數與 parser | 取捨：守衛壞掉期間守衛方法仍全拒（換裝失敗），心跳、探針、排隊、匹配恢復。不開外送缺口：插件能守衛的方法只在名單內，放行的都不是可守衛方法（設計 §1.3；I2 論證已由 D31 改寫） |
+| D28 | 第五輪第 1 條：`sendRaw` 無大廳候選時退回 game，共存插件的 `sendRequest` 可外送守衛方法 | 採納為保證範圍限定（設計 §1.4 第 1 項），不改程式 | `naki-websocket.js` 不得改（用戶既有裁決），無法在 `sendRaw` 層證明不可能。取捨：解鎖插件自己不注入，限定「頁面上沒有其他 `injectSend` 插件」比在 JS 加連線角色檢查少動送出主路徑 |
+| D29 | 第五輪第 2 條：不經 `ctx.replace` 的就地改寫不檢查 | 採納為保證範圍限定：保證只涵蓋遵守 `ctx.replace` 契約的插件；撤回「屬 U4」 | 第四輪第 2 條要求現行鏈不讀守衛狀態，兩者衝突時保留對局可用性。誤用（快取封包）也可能觸發，所以寫進確認稿，不以惡意帶過 |
+| D30 | 第五輪第 3 條：unknown 連線上的第一個 Lobby Blob 照送，非同步副本才鎖 lobby | 採納為文件限定；不採程式修法（unknown 上有守衛者時拒送 Blob） | 程式修法違反用戶裁決「unknown fail-open」，且若客戶端真改用 Blob，lobby 上的 Blob 全拒、大廳已不可用，修法救不回保證。live 未見 Blob；`diagnostics().send.Blob` 可觀測。空窗證明與 §4.5 全稱句改為限同步可解析 |
+| D31 | 第五輪第 4 條：D27 的名單不能單獨證明 I2 | 採納：I2 對名單外方法改依解鎖設計 §3.7 三條件 | 名單只代表可宣告守衛，`useBagItem` 等同為 `ResCommon` 的方法照送；D27 不比守衛健康時多放行 |
+| D32 | 第五輪第 5 條：D26 的繞過限定封包形態 | 採納為文件限定，不改程式 | 改成「lobby 上原方法是 FastTest 一律照送」要在 `failSafe` 保留原方法狀態，多一條跨呼叫狀態；live 未見 lobby FastTest（YAGNI） |
+| D33 | 第五輪第 6 條補變異時發現：D27 的「改寫後方法」檢查只會多擋。查找出錯時送出的是還原後的原 bytes，改寫後的方法不會外送 | 改為只看原方法（測試 `R6-6`） | 雙側檢查讓「非守衛請求被就地改成未受守衛的可守衛方法、之後內部出錯」時，原請求被拒且無回應；放寬不開外送缺口 |
 
 ## 驗證紀錄
 
@@ -104,4 +113,33 @@
 ## D24：解鎖 v1 暫停（2026-10-15，依 D17 用戶裁決執行）
 第四輪 Astra 審查（`.swfd/logs/pv2-b2-review/astra-review4.md`）仍有 1 條【擋】：`isLobbyUrl` 以子字串判定，`/game-gateway?next=/gateway`、hostname 含 gateway 的對局連線會被納入守衛並拒送。依 D17「第四輪仍有【擋】則解鎖 v1 暫停」，本工作包停在 spike，不套接線 patch、不合併。
 狀態：spike 與四輪審查保留在分支 pv2-b2-design；第三輪 6 條中 5 條已修、1 條部分。恢復時的待辦：URL 解析後以已確認 pathname 判定角色（第四輪 1）、FastTest 繞過涵蓋舊鏈例外與鏈後檢查（第四輪 2）、D23 縮窄為只拒送 GUARDABLE_METHODS 與無法解析者（第四輪 3）、D22 Naki 身分缺口。
+恢復：2026-10-17 用戶裁決照「協定握手鎖定角色」繼續（見下方第五輪）。
 取捨：四輪擋數 7→2→2→1，每輪修好上一輪又在更外圍找到新缺口；守衛位在 Naki 送出主路徑，誤判直接傷對局可用性，為本機外觀插件承擔此風險不划算，故遵守事先設下的停損點，不臨時加輪。
+
+## 審查第五輪（Astra 第四輪 3 條，2026-10-17）
+
+**用戶裁決（2026-10-17）**：解鎖守衛照「協定握手鎖定角色」繼續，送第五輪審查；不做整體架構抽象化；D22 維持另開工作包。
+
+回應：`plugin-v2-b2-review-response.md`「第四輪」。3 條全採納，0 反駁。
+
+| 項目 | 結果 | log |
+|---|---|---|
+| JS 反例修前 | 11 條 not ok（R5-1a～g、R5-2a、R5-2b、R5-3、R5-3b）；R5-1h 修前已綠，以變異 M3 補紅 | `round5-red-js.log` |
+| 修後 | node 55／55；`PluginSendGuardTests` 11／11 | `round5-green-js.log`、`round5-green-swift.log` |
+| 既有 node | 29／29（naki-plugins `94fa197`）、21／21 | `round5-plugin-regression.log`、`round5-plugin-v2-regression.log` |
+| 變異 | 8／8 被抓（scratch 複本執行，worktree 未動） | `round5-mutation-js.log` |
+| 接線 patch | 重產，`git apply --check` 通過，53 行增、2 行刪；套用後與記憶體接線逐 byte 相同；`naki-websocket.js` 本檔未改 | `proposed-ws-send-wiring.patch`、`round5-patch-check.log` |
+| 全量 | NakiTests 1149 個、0 failures（與第四輪同；本輪未改 Swift；分支基底落後 main） | `round5-test-full.log` |
+
+## 審查第五輪 b（Astra 第五輪 6 條應修，2026-10-17）
+
+Astra 第五輪：0【擋】、6【應修】、0【建議】；總評可進入「向用戶確認接線與 Swift 配對改動」，確認稿須帶入適用範圍。回應：`plugin-v2-b2-review-response.md`「第五輪」。6 條全採納，0 反駁。
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 修前紅 | `R6-6` not ok（D33）；R6-1～5 鎖現行行為，修前即綠 | `round5b-red-js.log` |
+| 修後 | node 61／61；`PluginSendGuardTests` 11／11 | `round5b-green-js.log`、`round5b-green-swift.log` |
+| 既有 node | 29／29、21／21 | `round5b-plugin-regression.log`、`round5b-plugin-v2-regression.log` |
+| 變異 | 13／13 被抓（N1–N5 新增；M1–M8 重跑） | `round5b-mutation-js.log` |
+| 接線 patch | 未改；`git apply --check` 通過 | `round5b-patch-check.log` |
+| 全量 | 未重跑（未改 Swift），沿用 1149／0 | `round5-test-full.log` |

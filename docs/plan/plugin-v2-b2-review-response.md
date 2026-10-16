@@ -340,3 +340,134 @@ Astra 核對第二輪第 1–7 條：5 條已修，2 條部分（第 2、3 條�
 
 - 第 2 條：由新 2 補齊 JS 端。
 - 第 3 條：由新 3 改為單一訊息。
+
+# 第四輪（Astra 第四輪審查，`.swfd/logs/pv2-b2-review/astra-review4.md`）
+
+Astra 核對第三輪第 1–6 條：4 條已修，2 條部分（第 1、4 條）。另有新發現 3 條：擋 1、應修 1、建議 1。本輪證據為 `round5-*.log`。
+
+**用戶裁決（2026-10-17）**：解鎖守衛照「協定握手鎖定角色」繼續，送第五輪審查；不做整體架構抽象化；D22 維持另開工作包。已寫入設計 §0 與 notes。
+
+## 統計
+
+| 類別 | 數量 | 條目 |
+|---|---|---|
+| 採納 | 3 | 新 1、2、3 |
+| 反駁 | 0 | — |
+
+新 1、新 2 屬安全與可用性的擋與應修，只能採納。新 3 是 Astra 判為 over-guard 的建議，經檢查縮窄後不開外送缺口，採納。
+
+## 逐條
+
+### 新 1【擋】URL 子字串判定仍會把對局連線納入守衛 — 採納
+
+- **處理方式**：不改成「解析 URL 比對 pathname」，而是依用戶裁決改為協定握手鎖定角色（D25）。理由：pathname 仍是對 URL 形狀的假設，大小寫與編碼別名要另訂規則；live 已證實每條連線第二個請求就揭露角色。
+- **設計**：§0、§1.3「前提」、新增 §1.4（規則、空窗證明、unknown 上解析失敗照送的理由與風險、殘餘）、§3.6、§4.1、§4.5、§6.2。
+- **spike**：
+  - `isLobbyUrl` 刪除，所有呼叫點改以 socketId 查角色：`dispatch` 分流、`refuseOpaqueSend(socketId)`、`failSafe(data, socketId)`、`replace` 的改寫成守衛方法檢查、污染判定。
+  - 新增閉包內的 `roles`、`lockRole`。鎖定在 `dispatch` 第一步，早於零插件早退與守衛判定；`failSafe` 也先鎖定。
+  - 新增 `closed(socketId)`；`guardState()` 多回 `roles`。
+  - 接線 patch：`failSafe` 與 `refuseOpaqueSend` 改傳 `wsId`，`close` listener 呼叫 `closed`。
+- **測試**：
+  - `R5-1a`：`/game-gateway?next=/gateway` 與 `gateway.maj-soul.com/game-gateway` 經 `authGame` 鎖成 game，查找拋錯時 `heartbeat` 照送。
+  - `R5-1b`：守衛健康時，同類 URL 的對局連線 Blob 照送。
+  - `R5-1c`：只做 `prepareLogin` 的備援大廳，URL 為 `/Gateway`、`/%67ateway`、`/gateway` 都鎖成 lobby 並受守衛。
+  - `R5-1d`：同一筆 Lobby 請求先鎖定、再判定。
+  - `R5-1e`：鎖定後不變。
+  - `R5-1f`：unknown 上解析不出照送，lobby 上拒送。
+  - `R5-1g`：關閉清除角色。
+  - `R5-1h`：零插件也鎖定。
+- **紅→綠**：R5-1a～g 在 `round5-red-js.log` 為 not ok，在 `round5-green-js.log` 為 ok。R5-1h 修前已綠，紅的證據是變異 M3。
+- **變異**：M1（角色改回 URL）、M2（unknown 當 lobby）、M3（鎖定移到判定之後）、M7（不通知關閉）、M8（`failSafe` 不鎖定）全被抓。
+- **殘餘**：設計 §1.4 三項，照規則接受，記為已知風險。
+
+### 新 2【應修】FastTest 提早返回仍會回流守衛 catch 與鏈後檢查 — 採納
+
+- **設計**：§1.3「擋下的決定之前」、§1.4 殘餘第二項、notes D26。
+- **spike**：
+  - FastTest 與非 lobby 連線在 `dispatch` 開頭就走 `runChain(raw, env, null, false)`，不進 `guardedSend`。`plainChain` 刪除。
+  - `runChain` 的就地改寫檢查改由第四個參數決定，只有 `guardedSend` 傳 true；現行鏈不讀 `sendGuard`。
+  - 鏈拋出的例外照 main 交給 `naki-websocket` 的 catch；`failSafe` 對 FastTest 與非 lobby 直接照送。
+- **測試**：
+  - `R5-2a`：Astra 的反例。大廳上的 `inputOperation`，另一插件的 `methods.indexOf` 拋錯，照送且 `guardState().log` 為空。
+  - `R5-2b`：observer 就地改動 FastTest 的 method，大廳與對局連線上 `sendGuard` 讀取次數都不變。
+- **紅→綠**：兩條紅轉綠。變異 M4（FastTest 不提早返回）、M6（就地改寫檢查改回看角色）被抓。
+- **取捨**：完全繞過的代價是 lobby 上 FastTest 被就地改成守衛方法時不再撤回。live 未見 lobby 連線上的 FastTest，記為殘餘。
+
+### 新 3【建議】D23 可縮小拒送範圍 — 採納
+
+- **設計**：§1.3「擋下的決定之前」、§9 第 3c 項、notes D27（D23 標為已改寫）。
+- **spike**：`guardedSend` 的 catch 在守衛未定且原方法與改寫後方法都不在 `GUARDABLE_METHODS` 時，還原原 bytes 照送；否則擋下。`failSafe` 的 catch 同規則。解析不出的請求維持「有守衛者才擋」。
+- **不開外送缺口的理由**：插件能宣告的守衛方法只在 `GUARDABLE_METHODS` 內，放行的請求都不是可守衛方法；實際送出的是原 bytes。判斷只用閉包常數與 parser，不讀出錯的 grant。
+- **測試**：
+  - `R5-3`：以 Astra 的手法把既有 `sendGuard` 陣列的 `indexOf` 改壞。`heartbeat`、`loginBeat`、`fetchAccountInfo`、`startUnifiedMatch` 照送；`changeCharacterSkin`、`useTitle` 拒送並收到錯誤回應；解析不出的拒送。
+  - `R5-3b`：派發前 bridge 出錯的路徑，同規則。
+- **紅→綠**：兩條紅轉綠。變異 M5（D27 撤回）被抓。
+
+## 第三輪第 1、4 條的「部分」
+
+- 第 1 條：URL 誤分類由新 1 改為握手鎖定；FastTest 例外回流由新 2 處理。
+- 第 4 條：依用戶裁決（2026-10-17）D22 維持另開工作包，本輪不動。
+
+# 第五輪（Astra 第五輪審查，`.swfd/logs/pv2-b2-review/astra-review5.md`）
+
+Astra 核對第四輪第 1–3 條：第 1、3 條已修，第 2 條部分（對應新 5）。新發現 6 條，全是應修；總評可進入「向用戶確認接線與 Swift 配對改動」，確認稿須帶入適用範圍。本輪證據為 `round5b-*.log`。
+
+## 統計
+
+| 類別 | 數量 | 條目 |
+|---|---|---|
+| 採納（程式修改） | 1 | 新 6（補變異時發現 D27 雙側檢查只會多擋，改為只看原方法） |
+| 採納（保證範圍限定，寫進設計與確認稿） | 4 | 新 1、2、3、5 |
+| 採納（文件論證修正） | 1 | 新 4 |
+| 反駁 | 0 | — |
+
+新 1、2、3 是外送類，只能採納；三者都無法證明情境不可能，所以採納為保證範圍限定。
+
+## 逐條
+
+### 新 1【應修】`sendRaw` 無大廳候選時退回 game — 採納（保證範圍限定，D28）
+
+- **無法反駁的依據**：`naki-websocket.js` 的 `sendRaw` 在 Lobby 方法的候選為空時退回全部連線（`pick.length > 0 ? pick : conns`），可能選到 game。這個檔不得改，所以不能在 `sendRaw` 層排除。
+- **設計**：§1.4「保證範圍」第 1 項。解鎖插件的保證只在「頁面上沒有其他 `injectSend` 插件」時成立，確認稿須揭露。
+- **測試**：`R6-1` 重現 Astra 的情境並鎖住現行行為：污染後停用守衛、關閉大廳，共存插件的 `sendRequest(changeCharacterSkin)` 從 game 外送，守衛紀錄為空。
+
+### 新 2【應修】殘餘二不能歸為惡意 — 採納（保證範圍限定，D29）
+
+- **設計**：§1.4「保證範圍」第 2 項。保證只涵蓋遵守 `ctx.replace` 契約的插件，撤回「屬 U4」。快取封包誤用列為推測的非惡意成因。
+- **不改程式的理由**：第四輪第 2 條要求現行鏈不讀守衛狀態。若對 unknown 連線的 Route、lobby 連線的 FastTest 加就地改寫檢查，就要回到現行鏈讀 `sendGuard`。
+- **測試**：`R6-2`：unknown 連線的 Route、lobby 連線的 FastTest 被就地改成完整 `changeCharacterSkin` 後外送；unknown 連線的角色不變。
+
+### 新 3【應修】Blob 空窗 — 採納（文件限定，不採程式修法，D30）
+
+- **評估的程式修法**：`refuseOpaqueSend` 在 unknown 連線、頁面有守衛者時也拒送。
+- **不採的理由**：
+  - 它違反用戶裁決「unknown fail-open」。鎖定前的任何 Blob 都會被拒，包含對局握手。
+  - 它救不回保證。若客戶端真的改用 Blob，lobby 上的 Blob 在有守衛者時全部拒送，大廳已不可用。所以「客戶端送 TypedArray」本來就是整個守衛的前提，不是本項獨有。
+  - live 未見 Blob，且 `__nakiWebSocket.diagnostics().send.Blob` 可觀測。
+- **設計**：§1.4 空窗證明限定為「同步可解析的原 REQUEST」；「保證範圍」第 3 項寫明非同步副本稍後才鎖 lobby、不補拒送；§4.5 的全稱句改為只涵蓋 lobby 連線。
+- **測試**：`R6-3`：首筆 Lobby Blob 在 unknown 連線照送，非同步副本鎖成 lobby 後，同步的守衛方法照常擋下。
+
+### 新 4【應修】D27 的名單不能單獨證明 I2 — 採納（文件論證修正，D31）
+
+- **設計**：§1.3 的 D27 段改寫。名單只說明哪些方法可以宣告守衛。名單外方法（例如與 `changeCharacterSkin` 同為 `ResCommon` 的 `useBagItem`）的 I2，改依解鎖設計 `unlock-plugin.md` §3.7 的三個條件：不改背包與商店回應、攔不住的入口以縮小功能處理、live 出現表外方法時停用 F4–F9。另寫明 D27 不比守衛健康時多放行任何方法。本設計不單獨宣稱 I2。
+
+### 新 5【應修】D26 的繞過須限定封包形態 — 採納（文件限定，D32）
+
+- **設計**：§1.4「保證範圍」第 4 項。已鎖 game 的連線不受守衛拒送。lobby 上只有同步可辨識、未被改壞的 FastTest 繞過守衛；被改壞的 FastTest 若之後 bridge 出錯會被 `failSafe` 拒送；lobby 上的 FastTest Blob 由 `refuseOpaqueSend` 拒送。
+- **不改程式的理由**：讓「lobby 上原方法是 FastTest 一律照送」要把原方法狀態帶進 `failSafe`，多一條跨呼叫狀態。live 未見 lobby 上的 FastTest（YAGNI）。
+- **測試**：`R6-4` 鎖住兩種結局：同一個 observer 把 FastTest 的 type byte 改壞，並讓編碼失敗，lobby 上拒送、game 上照送。
+
+### 新 6【應修】M3 沒有零插件紅證據 — 採納（補變異，並修一處程式，D33）
+
+- **變異**：`round5b-mutation-js.log`，13／13 被抓。
+  - N1 零插件直接返回：`R5-1h` 紅。這補上 M3 缺的零插件紅證據。
+  - N2 `failSafe` 改變既有角色：被新測試 `R6-5`、`R6-4` 抓到。
+  - N3 D27 改回雙側、N4 照送前漏還原：被 `R6-6` 抓到。
+  - N5 鎖定後仍可改變角色：被 `R6-5` 抓到。
+  - M1–M8 在新樹上重跑，全被抓。
+- **程式**：寫 N3 的測試時發現，D27 的「改寫後方法」檢查只會多擋。查找出錯時送出的是還原後的原 bytes，改寫後的方法不會外送。改為只看原方法。`R6-6` 修前紅、修後綠。
+- **殘餘反例**：R6-1～R6-4 鎖住新 1、2、3、5 的現行行為。對應的保證範圍限定寫在設計 §1.4。
+
+## 第四輪第 2 條的「部分」
+
+由新 5 以文件限定封包形態補齊（D32）。

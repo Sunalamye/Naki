@@ -75,8 +75,23 @@
     // 插件注入的 (連線, msgId) -> 發起插件 id（回應路由，§7.7b）
     var injectedMsgIds = new Map();
 
-    // 守衛只作用在已確認的大廳連線（/gateway，不是 /game-gateway）。對局連線與 .lq.FastTest.* 不進任何守衛路徑。
-    function isLobbyUrl(url) { return typeof url === 'string' && url.indexOf('/gateway') !== -1; }
+    // 連線角色由協定握手鎖定，URL 不參與（審查第四輪第 1 條）：每條連線第一個請求是 .lq.Route.requestConnection，
+    // 第二個才揭露角色（大廳 oauth2Login／prepareLogin，對局 authGame；live 2026-10-17）。
+    // 第一個 .lq.Lobby.* 請求 ⇒ lobby，第一個 .lq.FastTest.* ⇒ game，.lq.Route.* 不改；鎖定後不變，關閉才清。
+    // 只有 lobby 進守衛。守衛方法都是 .lq.Lobby.*，而它本身就會先鎖定 lobby，所以未定角色的空窗漏不出守衛方法。
+    // 角色只存在本閉包，插件改不到；守衛查找壞掉（grant 可被插件改）不影響角色判定。
+    var roles = new Map();
+    function lockRole(socketId, env) {
+        if (!env || env.type !== TYPE_REQUEST || typeof env.method !== 'string' || roles.has(socketId)) return;
+        if (env.method.indexOf('.lq.Lobby.') === 0) roles.set(socketId, 'lobby');
+        else if (isFastTest(env)) roles.set(socketId, 'game');
+    }
+    function isLobby(socketId) { return roles.get(socketId) === 'lobby'; }
+    function isFastTest(env) { return !!env && typeof env.method === 'string' && env.method.indexOf('.lq.FastTest.') === 0; }
+    function isGuardable(bytes) {
+        var env = parseEnvelope(bytes);
+        return !!env && GUARDABLE_METHODS.indexOf(env.method) !== -1;
+    }
 
     // ---- 送出守衛（N1／N2，docs/plan/plugin-v2-b2.md §3–§4）----
     // 已污染：插件 id -> 守衛方法 Set。只增不減，活在本閉包裡：disable、setGrant、自動停用、熱重載都碰不到，
@@ -246,41 +261,32 @@
             socketId: raw.wsId, msgId: msgId, method: origMethod };
     }
 
-    // send 方向的唯一入口。對局連線（以及大廳上的 .lq.FastTest.*）在守衛查找之前就走現行鏈，行為與 main 相同。
-    // 大廳上，守衛方法只有三種結局：原樣送出、本地成功（respondLocally，PV2-B2）、本地錯誤。
-    // 辨識、跑鏈、鏈後判定都在 try 內（第二輪第 1 條）。出錯時：已知是守衛方法 ⇒ 擋下；已知不是 ⇒ 還原原 bytes 照送；
-    // 辨識本身失敗 ⇒ 頁面上有守衛者才擋下（第三輪第 1 條）。
-    function guardedSend(raw) {
-        if (!isLobbyUrl(raw.url)) return plainChain(raw);
-        var origObj = raw.bytes, original = origObj.slice(), env = null, guard = null, identified = false;
+    // 只收已鎖定為大廳、非 FastTest 的送出（dispatch 先分流）。守衛方法只有三種結局：原樣送出、本地成功（respondLocally，PV2-B2）、本地錯誤。
+    // 跑鏈與鏈後判定在 try 內（第二輪第 1 條）；無法解析的在 try 前就依有無守衛者決定。出錯時只擋守衛方法與
+    // 原方法在 GUARDABLE_METHODS 者；其他還原原 bytes 照送（第四輪第 3 條）。實際送出的是原 bytes，所以只看原方法；
+    // 這個判斷只用本閉包的常數與 parser，不碰出錯的 grant。
+    function guardedSend(raw, env) {
+        var origObj = raw.bytes, original = origObj.slice(), guard = null;
+        if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
         try {
-            env = parseEnvelope(origObj);
-            if (env && env.method && env.method.indexOf('.lq.FastTest.') === 0) return plainChain(raw, env);
-            guard = env && env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
-            identified = !!env;
-            if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
+            guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
             if (guard && isNakiMsgId(env.msgId)) {
                 return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'naki_traffic', guard.ids);
             }
-            var out = runChain(raw, env, guard);
+            var out = runChain(raw, env, guard, true);
             if (!guard) return out;
             var reason = guardFailure(guard) || (!sameBytes(original, raw.bytes) ? 'rewritten' : null);
             if (reason) return blockSend(raw, origObj, original, env.msgId, env.method, env.method, reason, guard.ids);
             recordGuard(env.msgId, env.method, 'sent', null, guard.ids, raw.wsId);
             return out;
         } catch (e) {
-            if (guard) return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'dispatch_error', guard.ids);
-            if (identified || !guardActive()) {
+            if (!guard && !isGuardable(original)) {
                 restore(raw, origObj, original);
                 return undefined;
             }
-            return blockSend(raw, origObj, original, env ? env.msgId : null, env && env.method, env && env.method, 'guard_error', []);
+            return blockSend(raw, origObj, original, env.msgId, env.method, env.method,
+                guard ? 'dispatch_error' : 'guard_error', guard ? guard.ids : []);
         }
-    }
-
-    function plainChain(raw, env) {
-        env = env || parseEnvelope(raw.bytes);
-        return env ? runChain(raw, env, null) : undefined;
     }
 
     function restore(raw, origObj, original) {
@@ -380,7 +386,7 @@
                     return false;
                 }
                 // 不得改寫成另一個守衛方法：遊戲等的是原方法的回應型別，擋下時合不出正確的錯誤（第二輪第 4 條）
-                if (after.method !== env.method && isLobbyUrl(raw.url) && guardFor(after.method)) {
+                if (after.method !== env.method && isLobby(raw.wsId) && guardFor(after.method)) {
                     noteFailure(grant.__id, 'replace', new Error('rewriteSend 不得改寫成守衛方法 ' + after.method + '，已放棄'));
                     return false;
                 }
@@ -501,7 +507,8 @@
         return allow.indexOf(method) === -1;
     }
 
-    function runChain(raw, env, guard) {
+    // lobby：由 guardedSend 呼叫（大廳上的非 FastTest 送出）才為 true；現行鏈不讀任何守衛狀態
+    function runChain(raw, env, guard, lobby) {
         diagnostics.parsed++;
         rememberIfRequest(env, raw.direction, raw.wsId);
         var method = resolveMethod(env, raw.direction, raw.wsId);
@@ -568,7 +575,7 @@
                     if (isGuard) guard.approved.push(entry.spec.id);
                 }
                 // 大廳上就地改寫成另一個守衛方法：當成這個 hook 失敗，撤回改動，原請求照常送（第三輪第 5 條）
-                if (raw.direction === 'send' && raw.bytes === before && snapshot && isLobbyUrl(raw.url)
+                if (lobby && raw.bytes === before && snapshot
                     && !sameBytes(snapshot, raw.bytes)) {
                     var now = parseEnvelope(raw.bytes);
                     if (now && now.method && now.method !== method && guardFor(now.method)) {
@@ -577,7 +584,7 @@
                 }
                 // 守衛插件改了大廳回應（等長或日後的變長）⇒ 已污染，直到頁面重載
                 if (raw.direction === 'receive' && snapshot && (entry.grant.sendGuard || []).length
-                    && isLobbyUrl(raw.url) && !sameBytes(snapshot, raw.bytes)) {
+                    && isLobby(raw.wsId) && !sameBytes(snapshot, raw.bytes)) {
                     taint(entry.spec.id, entry.grant);
                 }
             } catch (e) {
@@ -647,19 +654,23 @@
         // 守衛方法的 REQUEST 被擋下時回 { block:true, reason, response }：呼叫端不得送出，改把 response 交給遊戲與 Swift。
         dispatch: function (raw) {
             diagnostics.dispatches++;
-            if (!raw || !raw.bytes || (registry.size === 0 && tainted.size === 0)) return;
-
+            if (!raw || !raw.bytes) return;
+            var send = raw.direction === 'send';
+            // 沒有插件也鎖定角色（每條連線只解析到鎖定為止），之後才啟用的守衛一開始就認得大廳
+            var env = send && !roles.has(raw.wsId) ? parseEnvelope(raw.bytes) : undefined;
+            if (send) lockRole(raw.wsId, env);
+            if (registry.size === 0 && tainted.size === 0) return;
+            if (env === undefined) env = parseEnvelope(raw.bytes);
+            // 對局、未定角色、大廳上的 FastTest：現行鏈原樣，例外與鏈後檢查都不經守衛（第四輪第 2 條）。
             // Blob 的非同步副本已送出，守衛無從判定，只觀察
-            if (raw.direction === 'send' && raw.mutable !== false) return guardedSend(raw);
-            var env = parseEnvelope(raw.bytes);
-            if (!env) return;
-            return runChain(raw, env, null);
+            if (send && raw.mutable !== false && isLobby(raw.wsId) && !isFastTest(env)) return guardedSend(raw, env);
+            return env ? runChain(raw, env, null, false) : undefined;
         },
 
         // 有守衛者（已污染或已註冊 sendGuard）時拒送無法同步辨識的送出（Blob 等，審查第 4 條）。
         // 呼叫端不得送出，也沒有 msgId 可回應。
-        refuseOpaqueSend: function (url) {
-            if (!isLobbyUrl(url)) return false;
+        refuseOpaqueSend: function (socketId) {
+            if (!isLobby(socketId)) return false;
             var ids = Array.from(tainted.keys());
             registry.forEach(function (entry, id) {
                 if ((entry.grant.sendGuard || []).length && ids.indexOf(id) === -1) ids.push(id);
@@ -670,29 +681,33 @@
             return true;
         },
 
-        // naki-websocket 的送出路徑出錯時問這裡。只管已確認的大廳連線，其他連線一律照舊送出。
-        // 大廳上：守衛方法擋下；已知非守衛方法照送；辨識失敗時有守衛者才擋下。回 undefined ＝照舊送出。自己不得拋錯。
-        failSafe: function (data, url, socketId) {
-            if (!isLobbyUrl(url)) return;
-            var b = null, original = null, env = null, raw = null, identified = false;
+        // naki-websocket 的送出路徑出錯時問這裡。只管已鎖定為大廳的連線，其他連線與 FastTest 一律照舊送出。
+        // 大廳上：守衛方法擋下；已知非守衛方法照送；查找出錯時只擋 GUARDABLE_METHODS；無法解析時有守衛者才擋下。
+        // 回 undefined ＝照舊送出。自己不得拋錯。
+        failSafe: function (data, socketId) {
+            var b = null, original = null, env = null, ids = [];
             try {
                 b = data instanceof ArrayBuffer ? new Uint8Array(data)
                     : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
                 original = b.slice();
-                raw = { bytes: b, wsId: socketId };
                 env = parseEnvelope(original);
-                if (env && env.method && env.method.indexOf('.lq.FastTest.') === 0) return;
-                var guard = env && env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
-                identified = !!env;
-                if (guard) return blockSend(raw, b, original, env.msgId, env.method, env.method, 'bridge_error', guard.ids);
-                if (identified || !guardActive()) return;
+                lockRole(socketId, env);
+                if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return;
+                if (env) {
+                    var guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
+                    if (!guard) return;
+                    ids = guard.ids;
+                }
             } catch (e) {
-                if (identified || !guardActive()) return;
+                if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return;
             }
             var empty = new Uint8Array(0);
-            return blockSend(raw || { bytes: empty, wsId: socketId }, b || empty, original || empty,
-                null, null, null, 'bridge_error', []);
+            return blockSend({ bytes: b || empty, wsId: socketId }, b || empty, original || empty,
+                env ? env.msgId : null, env && env.method, env && env.method, 'bridge_error', ids);
         },
+
+        // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
+        closed: function (socketId) { roles.delete(socketId); },
 
         // 本地回應交給遊戲之後呼叫：清 msgId 對照，插件注入的請求把本地結果交回發起插件（審查第 8 條）。
         // msgId 與原方法來自擋下當時的判定，bytes 是交付前另存的快照（第二輪第 5 條）。不跑改寫鏈、不送 Swift。
@@ -751,11 +766,13 @@
             return out;
         },
 
-        // 送出守衛現況（唯讀複本）：已污染插件與其守衛方法、最近 256 筆守衛方法的結局
+        // 送出守衛現況（唯讀複本）：已污染插件與其守衛方法、最近 256 筆守衛方法的結局、連線角色
         guardState: function () {
             var t = {};
+            var r = {};
             tainted.forEach(function (set, id) { t[id] = Array.from(set); });
-            return JSON.parse(JSON.stringify({ tainted: t, log: guardLog }));
+            roles.forEach(function (role, id) { r[id] = role; });
+            return JSON.parse(JSON.stringify({ tainted: t, log: guardLog, roles: r }));
         },
 
         // ---- 熱插拔（runtime enable/disable，免 reload）----

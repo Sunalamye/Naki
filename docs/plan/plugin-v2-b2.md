@@ -1,18 +1,23 @@
 # 插件系統 v2：送出守衛（N1、N2）與 PV2-B2 變長原語
 
 **資料日期**：2026-10-15
-**狀態**：設計已提議，未拍板。審查第一輪（Astra 14 條）與第二輪（新發現 7 條）已改，見 `plugin-v2-b2-review-response.md`。第三輪起 spike 也改了 `LiqiParser` 的配對狀態（§1.2），與接線一樣，合併前要經主線向用戶確認。N1／N2 有最小 spike（分支 `pv2-b2-design`，基準 main `4761f6e`，未 commit）：`naki-plugins.js` 的守衛判定、污染狀態、錯誤回應建構、本地回應結案，加 `PluginRegistry.swift` 的 `sendGuard` 欄位。`naki-websocket.js` 的接線**未改**，以 patch 提出（§3.6，待用戶確認）。PV2-B2 四個原語只有設計。
+**狀態**：設計已提議，未拍板。審查第一輪（Astra 14 條）與第二輪（新發現 7 條）已改，見 `plugin-v2-b2-review-response.md`。第五輪（2026-10-17）改以協定握手鎖定連線角色（§1.4）。第三輪起 spike 也改了 `LiqiParser` 的配對狀態（§1.2），與接線一樣，合併前要經主線向用戶確認。N1／N2 有最小 spike（分支 `pv2-b2-design`，基準 main `4761f6e`，落後 main，見 §9）：`naki-plugins.js` 的守衛判定、污染狀態、錯誤回應建構、本地回應結案，加 `PluginRegistry.swift` 的 `sendGuard` 欄位。`naki-websocket.js` 的接線**未改**，以 patch 提出（§3.6，待用戶確認）。PV2-B2 四個原語只有設計。
 **決策紀錄**：`docs/plan/plugin-v2-b2-implementation-notes.md`（含 Deviations）。
 **上位文件**：`docs/plan/plugin-v2.md`（§4 原語與順序、§4.3 respondLocally、§4.4 rewriteSend、§4.5 不變條件、§9 probe、§12.3 protobuf 保真）、`docs/plugin-system-design.md` §11 #6（Phase 4 gate）、`docs/plugin-api-v1.md`（現行契約）。本文件不推翻任何拍板。
 **需求來源**：naki-plugins repo 分支 `local-unlock-v01` 的 `docs/plan/unlock-plugin.md` §3.5–3.7、§8.2（N1–N6）。
 
 ---
 
-## 0. 用戶裁決（2026-10-15）
+## 0. 用戶裁決
 
-- **守衛收窄到只守大廳連線，再修一輪；第四輪審查若仍有【擋】，解鎖 v1 暫停。**
-- 範圍：N1 守衛與 N2 失敗拒送（含 `failSafe`、`refuseOpaqueSend`）只作用在已確認的大廳連線（url 含 `/gateway`，不是 `/game-gateway`）。對局連線與所有 `.lq.FastTest.*` 在守衛查找之前就繞過，行為與 main 相同；任何內部錯誤都不得擋下對局連線或 Naki 自送的對局動作（§1.3）。
-- Naki 自送身分只看 msgId 是既存缺口，另開工作包；本輪只證明它在守衛範圍內的後果（§4.7）。
+**2026-10-17**：解鎖守衛照「協定握手鎖定角色」繼續，送第五輪審查。不做整體架構抽象化。D22（Naki 自送身分只看 msgId）維持另開工作包。
+
+- 範圍判定改為連線角色（§1.4）：N1 守衛與 N2 失敗拒送（含 `failSafe`、`refuseOpaqueSend`）只作用在協定握手鎖定為 lobby 的連線，URL 不參與。
+- game 與 unknown 連線、所有 `.lq.FastTest.*` 在 `dispatch` 開頭就走現行鏈，行為與 main 相同。任何內部錯誤都不得擋下它們，也不得擋下 Naki 自送的對局動作（§1.3）。
+
+**2026-10-15**：守衛收窄到只守大廳連線，再修一輪；第四輪審查若仍有【擋】，解鎖 v1 暫停。第四輪仍有 1 條【擋】（URL 子字串判定），依此暫停（notes D24），2026-10-17 由上一條裁決恢復。
+
+- Naki 自送身分只看 msgId 是既存缺口，另開工作包；本輪只證明它在守衛範圍內的後果（§4.6）。
 
 ---
 
@@ -42,12 +47,12 @@
 
 ```
 ws.send(data)
-  前提：以下守衛步驟只在已確認的大廳連線上發生。對局連線（/game-gateway）在第 3 步一開頭就走現行鏈；
-        大廳上的 .lq.FastTest.* 解析後也立刻走現行鏈。failSafe、refuseOpaqueSend 都先看連線（§0）。
-  0. Blob 等無法同步辨識的送出：大廳連線上有守衛者時 refuseOpaqueSend ⇒ 拒送（§4.5）
+  前提：以下守衛步驟只在角色已鎖定為 lobby 的連線上發生（§1.4）。dispatch 先鎖定角色再分流：game、unknown 連線
+        與任何連線上的 .lq.FastTest.* 直接走現行鏈，鏈內例外與鏈後檢查都不經守衛。failSafe、refuseOpaqueSend 都先看角色。
+  0. Blob 等無法同步辨識的送出：lobby 連線上有守衛者時 refuseOpaqueSend ⇒ 拒送（§4.5）
   1. attributeSend(原始 data)                         不變
   2. nakiNicknameMask.observe                         不變（這裡或之後出錯 ⇒ failSafe 仍擋守衛方法）
-  3. dispatch → guardedSend（辨識、跑鏈、鏈後判定全在 try 內；拋錯時只要頁面上有守衛者就擋下）
+  3. dispatch → 鎖定角色 → guardedSend（跑鏈與鏈後判定在 try 內；拋錯時只擋可守衛方法，見下文）
        先複製完整原 REQUEST（original），守衛者為空 ⇒ 照現行鏈；鏈結果的最終 method 若是守衛方法 ⇒ 擋下
        否則：isNaki ⇒ 直接擋下；跑鏈，記錄每個守衛者的 放行／拋錯／非同步，再判定（§4.2）
      dispatch 本身或 handleMessage 在派發前出錯 ⇒ failSafe（同樣規則，自己不拋錯）
@@ -77,18 +82,65 @@ ws.send(data)
 - 交給 Swift 的是 hook 執行前的完整快照，不是 hook 改過的 bytes（審查第 7 條）。
 - 遊戲在 `ws.send` 回傳**之後**才收到回應（`setTimeout 0`）。理由見 `plugin-v2.md` §4.3：遊戲可能在 `send` 回傳後才登記回應等待（推測，未驗證）。
 - 擋下的決定作出後，記錄、編碼、送 Swift、建構回應、交付任一步失敗，都不會退回送出（審查第 3 條）：`blockSend` 不拋錯；`handleMessage` 拿到 block 就回傳；`respondLocal` 的編碼與送 Swift（同一個 try）、排程、交付、結案各有 try，`ws.send` 拿到 block 後只呼叫 `respondLocal`、不會再走到 `originalSend`。
-- 擋下的決定之前（辨識、跑鏈、鏈後判定）拋錯（審查第二輪第 1 條、第三輪第 1 條）：
-  - 對局連線與 `.lq.FastTest.*`：不進守衛路徑，任何錯誤照現行 fail-open 送出（測試 `R4-1a`、`R4-1b`、`R4-1e`、`R4-1f`、`R4-1g`）。
-  - 大廳、已知是守衛方法：擋下（`dispatch_error`）。
-  - 大廳、已知**不是**守衛方法（守衛查找成功且為空）：還原原始 bytes，照現行契約送出（D13 改寫，測試 `R4-1d`）。
-  - 大廳、無法辨識（解析或守衛查找拋錯，或封包解析不出）：頁面上有守衛者（`guardActive`，查找本身出錯也算有）才擋下（`guard_error`），不合成回應（方法未知）；沒有守衛者照送。
-  - `dispatchToPlugins` 與 `handleMessage` 的 catch 都改呼叫 `failSafe(data, url, socketId)`，規則相同（測試 `R301`、`R302`）。
-  - 代價：大廳上若守衛查找持續拋錯，大廳所有非 FastTest 請求（含心跳）都會被拒送。只有插件 grant 壞掉才會發生，屬可觀測的插件故障（`guardState().log` 的 `guard_error`）。
+- 擋下的決定之前（辨識、跑鏈、鏈後判定）拋錯（審查第二輪第 1 條、第三輪第 1 條、第四輪第 2、3 條）：
+  - game、unknown 連線與 `.lq.FastTest.*`：在 `dispatch` 開頭就走現行鏈，不進 `guardedSend` 的 try。鏈拋出的例外照 main 由 `naki-websocket` 的 catch 接住，`failSafe` 依角色與方法照送（測試 `R4-1a`、`R4-1b`、`R4-1e`、`R4-1f`、`R4-1g`、`R5-1a`、`R5-2a`）。現行鏈的「就地改寫成守衛方法」檢查只在 `guardedSend` 呼叫的鏈上做，所以這些流量完全不讀 `sendGuard`（`R5-2b`）。
+  - lobby、已知是守衛方法：擋下（`dispatch_error`）。
+  - lobby、守衛查找拋錯：原方法或改寫後的方法在 `GUARDABLE_METHODS` ⇒ 擋下（`guard_error`；原方法可守衛時合成錯誤回應）。其他已解析的請求還原原始 bytes 照送（D27，測試 `R5-3`、`R4-1d`）。
+  - lobby、封包解析不出：頁面上有守衛者（`guardActive`，查找本身出錯也算有）才擋下（`guard_error`），不合成回應；沒有守衛者照送（`R5-1f`）。
+  - `dispatchToPlugins` 與 `handleMessage` 的 catch 都改呼叫 `failSafe(data, socketId)`，規則相同；`failSafe` 也先鎖定角色（`R3b`、`R302`、`R5-3b`）。
+  - D27 只看原方法：實際送出的是還原後的原 bytes，改寫後的方法不會外送（D33，測試 `R6-6`）。判斷只用閉包內的常數名單與 parser，不讀出錯的 grant。
+  - D27 與 I2 的關係（D31）：名單只說明「哪些方法可以宣告守衛」，不證明名單外的方法不會引用未擁有物品。例如 `useBagItem` 與 `changeCharacterSkin` 同為 `ResCommon`，查找出錯時照送。D27 本身不比「守衛健康時」多放行任何方法：名單外的方法在守衛健康時本來就不經守衛。I2 對名單外方法成立，要靠解鎖設計（naki-plugins `local-unlock-v01` 的 `unlock-plugin.md` §3.7）的三個條件：插件不改背包與商店回應、攔不住的入口以縮小功能處理、live 驗收出現表外方法時停用 F4–F9。本設計不單獨宣稱 I2。
+  - 代價：守衛查找壞掉期間，守衛方法仍全數拒送（換裝失敗），直到頁面重載或插件修好。心跳、`fetchAccountInfo`、`startUnifiedMatch` 等照送。
 - 一般插件看不到守衛合成的 RESPONSE（它不經改寫鏈）。發起請求的插件（`sendRequest`）經 `onInjectResponse` 收到，`ctx.local === true`、`ctx.method` 是原方法（審查第 8 條、第二輪第 5 條）。結案用擋下當時記下的連線、msgId 與原方法，bytes 是交付前另存的快照；遊戲改動它收到的那份不影響結案（測試 `R5b`）。結局另記在 `__nakiPlugins.guardState().log` 與 Swift log。
 
 **receive（B2，§5.2）**：Naki listener 改 capture 註冊；變長 `replace` 時 `stopImmediatePropagation`，Swift 收到新 bytes 一次，遊戲收到合成事件；`drop` 時兩者都收不到。等長或不改時與現行相同。
 
 **inject（B2，§5.4）**：先 `sendToSwift`，再合成事件交給遊戲，Naki listener 略過。
+
+### 1.4 連線角色鎖定（第五輪，D25）
+
+**live 依據**（2026-10-17，測試帳號，主 repo `.swfd/logs/unlock-handshake-20261017/`）：每條連線第一個請求是 `.lq.Route.requestConnection`，第二個才揭露角色。`/gateway` 是 `.lq.Lobby.oauth2Login`（登入）或 `.lq.Lobby.prepareLogin`（備援，之後只有 `.lq.Route.heartbeat`）；`/game-gateway` 是 `.lq.FastTest.authGame`。對局結束後的重連序列相同。
+
+**規則**（`naki-plugins.js` 的 `roles`、`lockRole`；與 `pendingMethods` 同在閉包，以 socketId 為鍵）：
+
+| 事件 | 角色 |
+|---|---|
+| 新連線 | unknown（不在 `roles`） |
+| 第一個解析成功的 `.lq.Lobby.*` REQUEST | lobby |
+| 第一個 `.lq.FastTest.*` REQUEST | game |
+| `.lq.Route.*`、RESPONSE、解析失敗 | 不變 |
+| 已鎖定之後的任何請求 | 不變 |
+| 連線關閉（接線呼叫 `closed(socketId)`） | 清除 |
+
+- 只有 lobby 進守衛路徑；unknown 與 game 走現行鏈（fail-open）。URL 不參與任何判定。
+- 鎖定是 `dispatch` 的第一步，早於「零插件就返回」。沒有插件時，每條連線也只解析到鎖定為止；之後才啟用的守衛一開始就認得大廳（`R5-1h`）。`failSafe` 同樣先鎖定，所以派發前出錯的第一個 Lobby 請求也適用（變異 M8）。
+- 角色只活在閉包裡，插件碰不到。守衛查找依賴的 grant 可能被插件改壞，但不影響角色判定。
+
+**證明：鎖定前的空窗漏不出守衛方法（限同步可解析的原 REQUEST）**
+
+適用範圍：遊戲或插件以 ArrayBuffer／TypedArray 送出、`parseEnvelope` 解得開、且送出的 bytes 就是鏈開始時的原 REQUEST。Blob 只能非同步解析，不在範圍內（保證範圍第 3 項）。
+
+1. 守衛方法 ⊆ `GUARDABLE_METHODS`（`register` 驗證），全部是 `.lq.Lobby.*`。
+2. `dispatch` 對 send 方向先解析並 `lockRole`，**之後**才判斷角色。守衛方法的 REQUEST 送進 unknown 連線時，同一次呼叫裡先把連線鎖成 lobby，再以 lobby 的規則判定自己。測試 `R5-1d`：`requestConnection` 之後直接送 `changeCharacterSkin`，守衛 hook 拋錯 ⇒ 擋下。變異 M3（鎖定移到判定之後）有 12 條測試失敗。
+3. 連線已是 lobby 時直接適用。已是 game 時見下方「保證範圍」第 5 項。
+4. 因此 unknown 連線上走現行鏈的只有 `.lq.Route.*`、RESPONSE、解析不出的 bytes、Blob。前三者不是守衛方法，後兩者見下。
+
+**unknown 連線上解析失敗的請求照現行鏈送出**
+
+- 理由：遊戲自己的封包 Naki 向來解得開，unknown 只存在於握手前兩個請求之間。若拒送，握手前任何解析問題都會讓大廳或對局連不上，違反 §0 的 fail-open。
+- 風險：Naki 解析不出、伺服器卻解得開的守衛方法若出現在 unknown 連線上，會原樣送出。插件改寫產生的 bytes 不會落到這裡：`rewriteSend` 只掛在 `.lq.Lobby.*` 請求上，那筆請求已把連線鎖成 lobby，改寫結果由 lobby 的鏈後檢查處理（`rewritten`、`isWellFormed`）。
+
+**保證範圍（第五輪審查後改寫，D28–D32）**
+
+守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。以下情境不在保證內，確認稿須逐條揭露；不以 U4（惡意插件）帶過，因為誤用也可能觸發：
+
+1. **`sendRaw` 退回對局連線**（D28，測試 `R6-1`）：沒有開著的大廳連線時，`sendRaw` 對 Lobby 方法的候選是空集合，退回全部連線（`naki-websocket.js` 的 `sendRaw`，`pick.length > 0 ? pick : conns`），可能選到 game 連線。共存插件的 `ctx.sendRequest(守衛方法)` 會回 `ok:true` 並從 game 外送，守衛紀錄為空。解鎖插件自己不注入（`unlock-plugin.md`），所以它的保證只在「頁面上沒有其他 `injectSend` 插件」時成立。
+2. **不經 `ctx.replace` 的就地改寫**（D29，測試 `R6-2`）：插件直接改 `ctx.bytes`，在現行鏈上不檢查。unknown 連線的 `.lq.Route.*`、lobby 連線的 `.lq.FastTest.*` 被改成完整守衛方法時會外送，角色也不因此改變。快取封包誤用是推測的非惡意成因。保證只涵蓋遵守 `ctx.replace` 契約的插件；lobby 上非 FastTest 請求的就地改寫仍由 §4.1 撤回。
+3. **Blob 空窗**（D30，測試 `R6-3`）：unknown 連線上以 Blob 送出的第一個 Lobby 請求照送；非同步副本稍後才把連線鎖成 lobby，不補做拒送。之後同步送出的守衛方法照常受守衛。觸發只需客戶端改用 Blob 送出，不需要惡意插件。前提是客戶端送 TypedArray：若客戶端改用 Blob，lobby 上的 Blob 在有守衛者時全部拒送，大廳本來就不可用，所以這是整個守衛的前提，不是本項獨有。可觀測：`__nakiWebSocket.diagnostics().send.Blob`。
+4. **D26 的繞過限定封包形態**（D32，測試 `R6-4`）：已鎖 game 的連線不受守衛拒送。lobby 上只有同步可辨識、未被改壞的 FastTest 繞過守衛；被 observer 改壞成無法解析的 FastTest，若之後 bridge 出錯，`failSafe` 依改後 bytes 判為無法解析而拒送；lobby 上的 FastTest Blob 由 `refuseOpaqueSend` 拒送。live 未見 lobby 上的 FastTest。
+5. **已鎖 game 的連線上出現 `.lq.Lobby.*` 請求**：照規則不改角色、不守衛（`R5-1e`）。來源只可能是上面第 1 項的 `sendRaw` 退回，或遊戲本身（live 未見）。
+6. **unknown 連線上 Naki 解析不出、伺服器解得開的守衛方法**：照送（上方「unknown 連線上解析失敗」）。
+7. 角色在連線關閉時清除，只靠接線呼叫 `closed`。沒呼叫時只是記憶體不回收；socketId 每頁單調遞增、不重用，不影響判定（變異 M7 只讓 `R5-1g` 失敗）。
 
 ---
 
@@ -177,19 +229,20 @@ ws.send(data)
 
 ### 3.6 `naki-websocket.js` 接線（提議，待用戶確認）
 
-CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定：「動到 `ws.send` 接線前……先向用戶確認」。spike 因此**沒有改檔**，改動以 patch 提出：`.swfd/logs/pv2-b2-design/proposed-ws-send-wiring.patch`（第四輪重產，`git apply --check` 通過）。node 測試在記憶體裡套同一段改動（`scripts/plugin-v2-b2-regression.cjs` 的 `PROPOSED_WIRING`），所以測試驗的是套用 patch 後的行為。內容：
+CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定：「動到 `ws.send` 接線前……先向用戶確認」。spike 因此**沒有改檔**，改動以 patch 提出：`.swfd/logs/pv2-b2-design/proposed-ws-send-wiring.patch`（第五輪重產，`git apply --check` 通過；套用後與測試在記憶體套用的接線逐 byte 相同）。node 測試在記憶體裡套同一段改動（`scripts/plugin-v2-b2-regression.cjs` 的 `PROPOSED_WIRING`），所以測試驗的是套用 patch 後的行為。內容：
 
 1. `ws.send`：`handleMessage` 回 `{ block:true }` 時不呼叫 `originalSend`，改 `respondLocal(ws, wsId, verdict)`。
-2. `dispatchToPlugins`：send 方向也把 `{ block:true }` 原樣交回；catch 在 send 方向改回 `failSafe(bytes, url, socketId)`（審查第二輪第 1 條；非大廳連線一律照送）。
+2. `dispatchToPlugins`：send 方向也把 `{ block:true }` 原樣交回；catch 在 send 方向改回 `failSafe(bytes, socketId)`（審查第二輪第 1 條；角色不是 lobby 一律照送）。
 3. `handleMessage`：
-   - 開頭：Blob／Other 的送出，`refuseOpaqueSend(這條連線的 url)` 為真就回 block（§4.5；只在大廳）。
+   - 開頭：Blob／Other 的送出，`refuseOpaqueSend(wsId)` 為真就回 block（§4.5；只在 lobby 連線）。
    - 兩個 binary 分支：拿到 block 立刻回傳，不編碼、不送 Swift（審查第 3 條）。
-   - `catch`：send 方向改回 `failSafe(data, url, socketId)`，規則見 §1.3。
+   - `catch`：send 方向改回 `failSafe(data, socketId)`，規則見 §1.3。
 4. 新增 `localEvents`（WeakSet）與 `respondLocal`：
    - 進來時複製 response 的精確範圍；request、response 都先編碼（審查第 12 條）。
    - 成對送 Swift：兩份都編碼成功才送，而且是同一則 `websocket_message`（`direction:'send'`，回應放在 `localResponse`；第三輪第 3 條）。
    - 遊戲那份另複製一次，下一個 task 交付；之後以擋下當時的連線、msgId、原方法與自己的快照呼叫 `__nakiPlugins.localResponse`（第二輪第 5 條、第三輪第 2 條）。
    - 編碼與送 Swift（同一個 try）、排程、交付、結案各有 try。Naki 的 message listener 第一行略過 `localEvents` 內的事件。
+5. `close` listener：呼叫 `__nakiPlugins.closed(wsId)` 清除該連線的角色（§1.4）。
 
 **不套這段 patch，N1／N2 在 App 裡完全不生效**：`dispatchToPlugins` 只認 `Uint8Array`，`{ block:true }` 會被當成「沒改」而送出原 bytes。node 測試 `without the proposed wiring the verdict is ignored (fail-open)` 鎖住這個事實，避免誤以為 spike 已經生效。零插件、零污染時這段 patch 是惰性的（測試 `zero plugins and no taint`）。
 
@@ -204,7 +257,7 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 - 原 method 沒有守衛者時照現行鏈執行，但不得變成守衛方法（審查第 5 條、第二輪第 4 條）：
   - `rewriteSend` 的 `ctx.replace` 若會把 method 換成守衛方法，當場拒絕（回 `false`），原 REQUEST 照常送出（測試 `R4d`、`R5`）。
   - 就地改 bytes 改成守衛方法：當成那個 hook 拋錯，撤回它的改動並計一次插件失敗，原本無守衛的 REQUEST 照常送出（第三輪第 5 條，測試 `R4-5`）。不再擋下，心跳之類的請求不會因插件誤用而沒有回應。
-  - 以上只在大廳連線上檢查；對局連線不做守衛查找。
+  - 以上只在 `guardedSend` 跑的鏈上檢查（lobby 連線的非 FastTest 請求）；game、unknown 連線與 FastTest 不做守衛查找（§1.4）。
 - 守衛者為空、也沒有被改寫進守衛方法時，fail-open 不變。
 
 ### 4.2 判定（單一契約，`guardedSend`＋`guardFailure`）
@@ -250,9 +303,9 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 
 ### 4.5 無法同步辨識的送出（Blob 等）
 
-- **策略**：只要有守衛者（任一插件已污染，或已註冊且宣告 `sendGuard`），**已確認大廳連線**上的 Blob 與其他非 binary、非字串的送出一律拒送（`refuseOpaqueSend(url)`）。對局連線的 Blob 照常送出（測試 `R4-1c`）。不送出、不送 Swift、不合成回應（沒有 msgId 可配對）。字串照舊送出：Liqi 是 binary，text frame 不可能是 Liqi REQUEST。
+- **策略**：只要有守衛者（任一插件已污染，或已註冊且宣告 `sendGuard`），**角色為 lobby 的連線**上的 Blob 與其他非 binary、非字串的送出一律拒送（`refuseOpaqueSend(socketId)`）。game 與 unknown 連線的 Blob 照常送出（測試 `R4-1c`、`R5-1b`）。不送出、不送 Swift、不合成回應（沒有 msgId 可配對）。字串照舊送出：Liqi 是 binary，text frame 不可能是 Liqi REQUEST。
 - **對遊戲的影響**：被拒的那一筆，伺服器與 Swift 都收不到，遊戲也收不到回應，可能停在等待狀態。目前的證據是 Unity 送 TypedArray（`naki-websocket.js` 註解）。所以預期影響為零，但沒有 live 證據；live 讀 `__nakiWebSocket.diagnostics().send.Blob` 與 `guardState().log` 的 `refused_opaque` 筆數可以看到是否發生。
-- **適用範圍比審查要求寬**：審查要求「有任何污染時」拒送；這裡連「已註冊、未污染」也拒送（Deviation D9），讓守衛方法在任何守衛者存在時都不會經 Blob 繞過 N2，§7.3 的換稱號測試才能宣稱不外送。
+- **適用範圍比審查要求寬**：審查要求「有任何污染時」拒送；這裡連「已註冊、未污染」也拒送（Deviation D9），讓守衛方法在 lobby 連線上不會經 Blob 繞過 N2。unknown 連線上的第一個 Lobby Blob 不在此列（§1.4 保證範圍第 3 項），§7.3 的換稱號測試只在大廳已鎖定後成立。
 - 沒有守衛者的頁面行為不變（測試 `R4b`）。
 - Blob 的非同步觀察副本（`mutable: false`）不進守衛判定，只觀察，不會留下錯誤的 `local_error` 紀錄。
 
@@ -336,6 +389,7 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 
 | 選擇 | 採用 | 放棄的方案與理由 |
 |---|---|---|
+| 連線角色 | 協定握手鎖定（第一個 Lobby／FastTest 請求，§1.4） | URL 子字串：hostname、query 會誤中（第四輪第 1 條）；解析 URL 比對 pathname：仍是對 URL 形狀的假設，大小寫與編碼別名要另訂規則，而 live 已證實第二個請求就揭露角色 |
 | 污染狀態的位置 | `naki-plugins.js` 閉包 | Swift 端：送出判定要同步，Swift 否決不了；`window` 全域：插件可改寫 |
 | 守衛判定時點 | 鏈跑完後一次判定 | 每個 hook 後判定：要處理鏈中途停止與後續改寫，規則更多 |
 | 錯誤回應的 payload | 只寫 `Error{code}` | 依方法組完整 Res：要 schema，PV2-C 之前做不到，而且遊戲只需要知道失敗 |
@@ -366,6 +420,22 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 - 修前紅：`round4-red-js.log`（7 條反例：R4-1a、R4-1b、R4-1c、R4-1d、R4-2、R4-3、R4-5）。
 - 修後綠：`round4-green-js.log`、`round4-green-swift.log`。R4-1e、R4-1f、R4-1g 是修後才加的，紅的證據是對應變異 K2、K3、K1。
 - 變異：`round4-mutation-js.log`（10／10 被抓）、`round4-mutation-swift-S1.log`（成對訊息的回應不處理）、`round4-mutation-swift-S2.log`（回應解不開仍處理 REQUEST），兩個 Swift 變異都被抓。
+
+### 6.3e 審查第五輪（Astra 第四輪三條）的驗證
+
+- 修前紅：`round5-red-js.log`，11 條反例 not ok（R5-1a～g、R5-2a、R5-2b、R5-3、R5-3b）。R5-1h 修前就綠：舊判定恰好以 URL 認得 `/gateway`。它鎖的是「零插件也鎖定」，紅的證據是變異 M3。
+- 修後綠：`round5-green-js.log`（55／55）。既有 `round5-plugin-regression.log`（29／29，naki-plugins `94fa197`）、`round5-plugin-v2-regression.log`（21／21）。
+- 既有測試調整兩條，都是讓連線先握手：`game-gateway rewrites do not pollute` 先送 `authGame`，`R4c` 先送 `loginBeat`。理由是 URL 不再參與，未握手的連線依規則是 unknown。
+- 變異：`round5-mutation-js.log`，8／8 被抓。M1 角色改回 URL、M2 unknown 當 lobby、M3 鎖定移到判定之後、M4 FastTest 不提早返回、M5 D27 撤回、M6 就地改寫檢查改回看角色、M7 接線不通知關閉、M8 `failSafe` 不鎖定。
+- Swift：`round5-green-swift.log`（`PluginSendGuardTests` 11／11）、`round5-test-full.log`（NakiTests 1149 個、0 failures，與第四輪相同；本輪未改 Swift）。
+- 接線 patch：`round5-patch-check.log`。
+
+### 6.3f 審查第五輪 b（Astra 第五輪六條）的驗證
+
+- 程式改動只有一處：D27 改為只看原方法（D33）。修前紅：`round5b-red-js.log`（`R6-6` not ok）。R6-1～R6-5 鎖的是現行行為與保證範圍，修前即綠；紅的證據是變異。
+- 修後綠：`round5b-green-js.log`（61／61）、`round5b-plugin-regression.log`（29／29）、`round5b-plugin-v2-regression.log`（21／21）、`round5b-green-swift.log`（`PluginSendGuardTests` 11／11）。
+- 變異：`round5b-mutation-js.log`，13／13 被抓。本輪獨立變異 N1 零插件直接返回（`R5-1h` 紅，補第五輪 M3 缺的零插件紅證據）、N2 `failSafe` 改變既有角色、N3 D27 改回雙側、N4 照送前漏還原、N5 鎖定後仍可改變角色；M1–M8 在新樹上重跑。
+- 接線未改，patch 未重產：`round5b-patch-check.log`。全量 NakiTests 未重跑（未改 Swift），沿用 `round5-test-full.log`。
 
 ### 6.4 驗證分級
 
@@ -461,9 +531,11 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 2. 本地回應延到 `setTimeout 0` 是否必要、是否足夠（遊戲何時登記回應等待），需 live。
 3. Swift 對合成 RESPONSE 的配對：`LiqiParser`／`MajsoulBridge` 層有 XCTest，且以連線隔離；WebKit `postMessage` 順序是推論。`WebSocketInterceptor` 傳 `socketId` 的那兩行沒有單測（只經編譯與全量測試）。
 3b. 連線維度配對對真實流量的影響：遊戲的 RESPONSE 一定回到送出 REQUEST 的那條連線（WebSocket RPC），但 live 未驗；bridge 訊息缺 `socketId` 時以 -1 處理，同一條連線的訊息一致。
-3c. 大廳上守衛查找持續拋錯時，大廳非 FastTest 請求（含心跳）都會被拒送且不回應（§1.3），對遊戲的影響未驗證。
+3c. lobby 上守衛查找持續拋錯時，守衛方法與解析不出的請求被拒送，其他照送（D27，§1.3）。對遊戲的影響未 live 驗證。
 3d. 遊戲 msgId 落在 Naki 號碼時大廳換裝被多擋（§4.6），未 live 觀察。
 4. 遊戲送出是否從不走 Blob（§4.5），需 live。
 5. 大廳合成事件只對 heartbeat 驗過；業務回應屬 N3。
 6. 對局 (b) 畫面未驗證（§7）。
 7. 接線 patch 未套用；在套用前 N1／N2 在 App 內不生效（§3.6）。`LiqiParser` 的連線維度配對已在 spike 內，合併前同樣需要用戶確認。
+8. 守衛的保證範圍（§1.4）：`sendRaw` 退回對局連線、不經 `ctx.replace` 的就地改寫、Blob 空窗、lobby 上 FastTest 的封包形態限定。確認稿須逐條揭露；I2 的成立另依解鎖設計 §3.7（§1.3 D27）。握手序列 live 只觀察過一次登入與一次對局重連；對局中途斷線重連的第二個請求是否仍為 `authGame`、大廳換裝請求落在哪條 `/gateway`，都未驗證。
+9. 分支基底落後 main（main 已到 `fd74f63`），本包未 rebase。NakiTests 1149 只能與第四輪對照，合併前要在 main 上重跑。
