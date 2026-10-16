@@ -342,6 +342,9 @@ class MajsoulBridge {
                                         reason: "accountId \(accountId) 不在 seatList \(seatList) 中，"
                                             + "無法決定自家座位 → 不建立 Bot")
                 }
+            } else if let code = msgData["error"] as? Int {
+                // 沒有 seatList 且帶 error：伺服器拒絕（例如對局已結束後的重送），不是協定漂移，不掛 blocking fault
+                bridgeLog("[MajsoulBridge] 伺服器拒絕 authGame，code \(code)")
             } else {
                 // 只 log 一行不夠：start_game 不發、整局靜默不工作，
                 // 畫面上完全看不出來（側欄仍顯示「已連線」）。

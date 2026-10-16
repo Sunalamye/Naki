@@ -876,6 +876,10 @@ class LiqiParser {
             liqiLog("[LiqiParser] authGame field \(block.fieldId), wireType \(block.wireType), size \(block.data.count)")
 
             switch block.fieldId {
+            case 1: // error（.lq.Error：1=code）
+                let code = parseProtobufBlocks(block.data).first { $0.fieldId == 1 }
+                    .flatMap { parseVarint($0.data, offset: 0)?.0 }
+                result["error"] = code ?? 0
             case 2: // players (repeated PlayerGameView) - 每個玩家依座位順序排列
                 players.append(parsePlayerGameView(block.data))
             case 3: // seat_list（repeated uint32）— ⭐ 座位的權威來源
@@ -905,7 +909,7 @@ class LiqiParser {
             result["seatList"] = seatList
             result["seatListConfidence"] = LiqiParseConfidence.exact.rawValue
             liqiLog("[LiqiParser] ⭐ seatList（field 3, exact）: \(seatList)")
-        } else {
+        } else if result["error"] == nil {
             let accountIds = players.compactMap { $0["accountId"] as? Int }
             if !accountIds.isEmpty {
                 result["seatList"] = accountIds
