@@ -306,13 +306,37 @@ Swift 變異：JS 名單拿掉 `NotifyGameTerminate`，一致性測試變紅（�
 
 | # | 問題 | 狀態 |
 |---|---|---|
-| 1 | WebKit `error` 是否同步 | 需 live（L1） |
-| 2 | 大廳沒有 probe 樣本 | 需 live（L2、L3），放給使用者前必補 |
+| 1 | WebKit `error` 是否同步 | live 已驗：同步，見 §9.1 L1 |
+| 2 | 大廳沒有 probe 樣本 | live 已補：NOTIFY 與 RESPONSE 各 3 次以上、drop 4 次，見 §9.1 L2、L3。四個允許用例本身仍無樣本 |
 | 3 | 變長 replace 是否升 L3 | 已定：維持 L2，另加 `reshapeReceive` 明確選用 |
 | 4 | RESPONSE 永不 drop | 已定：不加替代 |
 | 5 | `injectReceive` 插隊 | 已定：弱順序契約（§2.3） |
-| 6 | `respondLocal` 不看 binaryType | 本輪不改，需 live（L7） |
+| 6 | `respondLocal` 不看 binaryType | live 已驗：大廳與對局都只收到 ArrayBuffer，缺口不必修，見 §9.1 L7 |
 | 7 | 全頁或單插件鎖死 | 已定：全頁，記候選改寫者 |
 | 8 | drop 造成 Swift 分叉 | 已處理：以 Swift 消費端補齊名單並加一致性測試 |
 | 9 | 長度不等語意變更 | 已處理：`reshapeReceive` 選用，未選用維持 v1 |
-| 10 | capture 主路徑樣本不足 | 需 live（L4、L5、L6）；差異已改寫成 §1.2 的型別表 |
+| 10 | capture 主路徑樣本不足 | live 已驗：L4、L5、L6 綠，見 §9.1 |
+
+### 9.1 live 結果（2026-10-17）
+
+HEAD `1f8c2cb` 的 Debug build（JS 與 worktree 逐檔相同，`isReshapeForbidden` 為 function），測試帳號，友人房四人東＋人機。測試插件 `naki-plugin-p4-live` 宣告 `rewriteReceive`、`reshapeReceive`、`dropReceive`，行為由 localStorage 設定切換，結束已刪。證據在 worktree 的 `.swfd/logs/p4-live/`（未納入 git）。
+
+**gate：L1–L7 全綠。** L2 有一項偏差，見表下。
+
+| # | 結果 | 證據 |
+|---|---|---|
+| L1 | 綠。`lockedRightAfterDispatch` 為 true、`sawWindowError` 為 true，`reshapeFaults` 一筆 `synthetic_dispatch_error`，帶 `.lq.NotifyRoomPlayerUpdate` 與候選 `naki-plugin-p4-live`。同一頁後續三則變長 replace 回 `false`。WebKit 在 `dispatchEvent` 回傳前同步送出 `error` | `01-L1-after.json` |
+| L2 | 綠。RESPONSE `fetchAccountInfoExtra` 3 次（14034→14032），NOTIFY `NotifyRoomPlayerUpdate` 4 次（+2／+3），全部回 `true`；`attempted` 與 `delivered` 皆 7、`faults` 0、未鎖；大廳兩條連線 OPEN；資料頁顯示與改寫前相同；`/game/state` 前後無差異；Swift 照常解析改寫後的 NOTIFY | `02-L2-*.json`、`02-L2-profile-*.png` |
+| L3 | 綠。L3 開關經插件頁確認對話開啟，drop `NotifyRoomPlayerUpdate` 4 次：`dropped` 4、`faults` 0；這段 Swift log 沒有該 NOTIFY，`NotifyRoomGameStart` 照常到；進場手牌 13 張，之後四局開局照常。開關已關回 | `03-L3-*.json`、`03-L3-ws-window.log` |
+| L4 | 綠。本次 session 7 局錄影（225 決策），HEAD `--save`、main `91841ba` build `--baseline`，指紋完全一致、0 錯誤 | `04-L4-*-run.log`、`04-L4-head-fingerprint.txt` |
+| L5 | 綠。零插件三局，皆自然終局。`reshape` 全 0、未鎖、`reshapeFaults` 空，`receive.ArrayBuffer` 33→1882。異常訊號只有既有的 `ActionMJStart` 警告與兩次「700ms 無回音重送」；Naki log 無 error／fault | `05-L5-*.json`、`05-L5-anomalies.txt` |
+| L6 | 綠。name-hider 啟用一局，四家名字遮住（`targets` 1）。測試插件等長 replace 6 次全回 `true`，`reshape.attempted` 0 | `06-L6-*.json`、`06-L6-ingame-2.png` |
+| L7 | 綠。全程大廳（`/gateway`）與對局（`/game-gateway`）的 `receive.Blob` 為 0，只收到 ArrayBuffer，`respondLocal` 給 ArrayBuffer 與實況一致 | 各快照 `receive` 欄位 |
+
+偏差與觀察：
+
+- **L2 用 `fetchAccountInfoExtra` 而不是 `fetchAccountInfo`，改寫內容語意不變**。L0 普查時遊戲在登入、開自己資料頁、宿舍都沒有自送 `fetchAccountInfo`、`fetchCharacterInfo`、`fetchAccountCharacterInfo`、`fetchAllCommonViews`（登入只送彙總的 `fetchInfo`）。改寫是去掉空的 field 1（RESPONSE）與補未知 field 15（NOTIFY），沒有改顯示欄位，所以「畫面反映」只證明遊戲照常解碼並顯示，**沒有證明改了顯示值會反映到畫面**。四個允許用例的 live 樣本仍待解鎖類插件補。
+- 大廳閒置 2 分鐘只有 `.lq.Route.heartbeat`（禁改名單），沒有可用的大廳 NOTIFY。NOTIFY 樣本都來自 `room_quick_test` 推送的 `NotifyRoomPlayerUpdate`（每次 4 則）。
+- L5 第三局遊戲自己進場後 2 秒被 `bot_sync` 關線，跳「連接異常」，按確認後自動接回並打完。這是操作時序造成的，不是 HEAD 的行為。
+- 角色顯示在重載前後不同（二階堂美樹、一姬），log 沒有任何換裝或換角色請求，是客戶端顯示輪換。
+

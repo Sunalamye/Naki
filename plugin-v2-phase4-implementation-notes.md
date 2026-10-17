@@ -82,3 +82,16 @@
 ### Deviations（第三輪）
 
 14. **反例以假 dispatcher 旗標模擬「只有 Naki 的 stop 失效」**。`nostop` 模式忽略所有 stop，無法表達遊戲的 stop 有效。只加一個測試用旗標，不改產品碼，盲區只寫進文件與測試，不加偵測架構（Astra 建議不必新增監控）。
+
+## live 驗收（2026-10-17）
+
+L1–L7 全綠，逐項結果與證據路徑在設計 §9.1。Naki 程式碼沒改。環境已還原：測試插件目錄刪除、L3 開關關回、偏好設定與執行前備份相同、`/Applications/Naki.app` 2.18.0 回到 8765。
+
+### Deviations（live）
+
+15. **測試插件用一份 manifest 涵蓋全部項目**。計畫寫「依項目換 manifest」。換 manifest 要重掃插件目錄，重載頁面又會清掉 L1 的臨時 patch。改成宣告 `rewriteReceive`、`reshapeReceive`、`dropReceive`，methods 列全部大廳方法與 NOTIFY，每項的行為由 localStorage 設定決定。L1、L2、L6 期間 L3 開關是關的，`dropReceive` 不起作用。
+16. **L2 的 RESPONSE 改用 `fetchAccountInfoExtra`，改寫內容語意不變**。派工指定 `fetchAccountInfo` 的顯示欄位，但遊戲在登入、資料頁、宿舍都沒有自送四個允許用例。選較保守的一側：不對允許用例以外的方法改顯示值，只做去掉空 field 1 的變長重派。因此「改了顯示值會反映到畫面」仍未驗證。
+17. **L4 方向反過來**。計畫是 main `--save`、HEAD `--baseline`。先跑 HEAD 再建 main，所以 HEAD `--save`、main `--baseline`。比的是同一批錄影的兩份指紋，方向不影響結論。
+18. **L5 不跑 `soak-test.sh`，改手動三局**。腳本是長時間前景迴圈，派工限制前景 10 分鐘。改成 `room_quick_test`＋`bot_sync`，每 30 秒輪詢 bridge log 的 `end_game`，每次不超過 9 分鐘；異常訊號用腳本同一個 regex 掃。終局後帳號留在友人房（1105），照腳本收尾的做法先送 `room_leave`。
+19. **開資料頁與宿舍用 CGEvent 點擊 canvas**。System Events 的 click 沒送到 Unity。只開唯讀畫面，沒有點任何會送出寫入請求的按鈕。log 確認期間只有 fetch 類請求。
+
