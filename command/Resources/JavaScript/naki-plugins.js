@@ -82,25 +82,37 @@
     // 插件注入用 msgId 區段 64000–65500（Naki 自送收窄為 60000–63999）。
     // 遊戲計數器會進這個號段（pair-source）：輪用時跳過未答的注入、各連線未答的遊戲請求，以及各連線遊戲最後號碼之後 GAME_AHEAD 個。
     // 遊戲請求另記，不靠 pendingMethods（零消耗者不登記、FIFO 會淘汰）：不論有沒有插件都記。遊戲＝沒有 sendRaw 送出者，
-    // 不看 D22 身分。送出判決確定外送後才記；沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
+    // 不看 D22 身分。記帳分兩段：派發一進入就保留號碼（同步 hook 內的注入要避開，第四輪第 15 條），判決外送後才提交進未答容量；
+    // 提交後 failSafe 才擋下時，整個還原提交前的未答與失準（第四輪第 16 條）。沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
     // 每連線未答上限 GAME_INFLIGHT_LIMIT，超過就失準，該連線關閉前一律拒發（msgid_busy）；不可用號碼占滿號段也回 msgid_busy
     var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500, GAME_AHEAD = 256, GAME_INFLIGHT_LIMIT = 256;
     var pluginMsgId = PLUGIN_MSGID_FIRST;
     var gameSends = new Map();   // socketId -> { last, inflight: Set, lost }
+    var gameDispatching = [];    // 派發中的遊戲請求 { msgId }
+    var gameUndo = null;         // 最近一次提交前的未答與失準：只給同一筆送出的 failSafe 還原
     function gameSent(socketId, msgId) {
         var g = gameSends.get(socketId);
         if (!g) gameSends.set(socketId, g = { last: msgId, inflight: new Set(), lost: false });
+        var undo = { socketId: socketId, msgId: msgId, g: g, inflight: Array.from(g.inflight), lost: g.lost };
         g.last = msgId;
         g.inflight.delete(msgId);
         g.inflight.add(msgId);
         if (g.inflight.size > GAME_INFLIGHT_LIMIT) { g.lost = true; g.inflight.delete(g.inflight.values().next().value); }
+        return undo;
     }
     function gameDone(socketId, msgId) { var g = gameSends.get(socketId); if (g) g.inflight.delete(msgId); }
-    function noteGameSend(socketId, b) { if (b.length >= 3 && b[0] === TYPE_REQUEST) gameSent(socketId, b[1] | (b[2] << 8)); }
+    function revertGameSend(undo, socketId, msgId) {
+        if (!undo || undo.socketId !== socketId || undo.msgId !== msgId || gameSends.get(socketId) !== undo.g) return;
+        undo.g.inflight = new Set(undo.inflight);
+        undo.g.lost = undo.lost;
+    }
+    function requestMsgId(b) { return b && b.length >= 3 && b[0] === TYPE_REQUEST ? b[1] | (b[2] << 8) : null; }
+    function noteGameSend(socketId, b) { var id = requestMsgId(b); return id == null ? null : gameSent(socketId, id); }
     function nextPluginMsgId() {
         var busy = new Set(), lasts = [], lost = false;
         injectedMsgIds.forEach(function (v, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
         gameSends.forEach(function (g) { lost = lost || g.lost; lasts.push(g.last); g.inflight.forEach(function (id) { busy.add(id); }); });
+        gameDispatching.forEach(function (d) { busy.add(d.msgId); lasts.push(d.msgId); });
         if (lost) return null;
         for (var n = PLUGIN_MSGID_LAST - PLUGIN_MSGID_FIRST + 1; n > 0; n--) {
             var v = pluginMsgId;
@@ -336,8 +348,9 @@
         var response = null;
         try {
             // 擋下的請求不上 wire，它在鏈首登記的配對當場撤銷；本地結案不再刪配對，遊戲回呼內新送的同 msgId 請求才保得住（第十輪第 1 條）
-            // 注入被擋不撤銷同鍵配對：那是遊戲的（第三輪第 9 條）。遊戲被擋撤回已提交的未答（派發後 failSafe 才擋的情況）
-            if (msgId != null && !raw.injected) { pendingMethods.delete(msgKey(raw.wsId, msgId)); gameDone(raw.wsId, msgId); }
+            // 注入被擋不撤銷同鍵配對：那是遊戲的（第三輪第 9 條）。遊戲未答不在這裡動：派發後 failSafe 才擋的由 failSafe 整個還原，
+            // 先前同號、真的已外送的未答留著（第四輪第 16 條）
+            if (msgId != null && !raw.injected) pendingMethods.delete(msgKey(raw.wsId, msgId));
             restore(raw, origObj, original);
             recordGuard(msgId, method, 'local_error', reason, ids, raw.wsId);
             pluginLog(ids.join(','), '守衛擋下 ' + method + ' msgId=' + msgId + '（' + reason + '），改回本地錯誤');
@@ -604,7 +617,7 @@
                 liveTokens.add(token);
                 injecting = { bytes: envBytes };
                 try { r = (ws && ws.sendRaw) ? ws.sendRaw(b64, token) : { success: false, reason: 'no_sendRaw' }; }
-                finally { injecting = prev; }
+                finally { injecting = prev; liveTokens.delete(token); }
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
@@ -1031,10 +1044,15 @@
         // raw = { direction:'send'|'receive', wsId:Number, url:String, bytes:Uint8Array, sender }
         // 回傳：send 方向被 rewriteSend 換掉時回新的 Uint8Array（呼叫端改送它），其餘一律 undefined。
         // 守衛方法的 REQUEST 被擋下時回 { block:true, reason, response }：呼叫端不得送出，改把 response 交給遊戲與 Swift。
-        // 遊戲送出在判決確定外送後才記入未答（被擋的不算，第三輪第 12 條）；派發拋錯時由 failSafe 記
+        // 遊戲送出：派發期間保留號碼，判決確定外送後才記入未答（被擋的不算，第三輪第 12 條）；派發拋錯時由 failSafe 記
         dispatch: function (raw) {
-            var result = dispatchRaw(raw);
-            if (raw && raw.direction === 'send' && raw.sender === undefined && !(result && result.block)) noteGameSend(raw.wsId, raw.bytes);
+            gameUndo = null;
+            var game = !!raw && raw.direction === 'send' && raw.sender === undefined && !!raw.bytes;
+            var mark = game && requestMsgId(raw.bytes) != null ? { msgId: requestMsgId(raw.bytes) } : null;
+            if (mark) gameDispatching.push(mark);
+            try { var result = dispatchRaw(raw); }
+            finally { if (mark) gameDispatching.splice(gameDispatching.indexOf(mark), 1); }
+            if (game && !(result && result.block)) gameUndo = noteGameSend(raw.wsId, raw.bytes);
             return result;
         },
 
@@ -1060,6 +1078,8 @@
         failSafe: function (data, socketId, sender) {
             var b = null, original = null, env = null, ids = [];
             var injected = liveTokens.has(sender);   // 這次注入：配對在注入登記，不寫 pendingMethods
+            var undo = gameUndo;   // 派發剛提交的遊戲未答：這裡擋下就還原
+            gameUndo = null;
             // 照送：遊戲的才登記配對並記入未答（派發已記過的同號只會刷新）
             function sendOriginal() {
                 try { if (env && !injected) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ }
@@ -1081,8 +1101,10 @@
                 if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return sendOriginal();
             }
             var empty = new Uint8Array(0);
-            return blockSend({ bytes: b || empty, wsId: socketId, injected: injected }, b || empty, original || empty,
+            var verdict = blockSend({ bytes: b || empty, wsId: socketId, injected: injected }, b || empty, original || empty,
                 env ? env.msgId : null, env && env.method, env && env.method, 'bridge_error', ids);
+            if (sender === undefined) revertGameSend(undo, socketId, env ? env.msgId : null);
+            return verdict;
         },
 
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手

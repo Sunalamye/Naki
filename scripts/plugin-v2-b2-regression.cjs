@@ -3039,6 +3039,109 @@ test('PS-22 (r3 12): a game request already counted by the dispatch but then blo
   assert.equal(inject(FST).msgId, 64000);
 });
 
+test('PS-23 (r4 15): an injection fired inside the onSend hook of game INFO#64000 never takes 64000 — guarded and unguarded', async () => {
+  for (const guarded of [false, true]) {
+    const label = guarded ? 'guarded' : 'unguarded';
+    const t = page();
+    if (guarded) guard11(t);
+    const { inject } = injector11(t);
+    let r = null;
+    t.c.__nakiPlugins.setGrant('hook15', { capabilities: ['observe'], methods: [INFO] });
+    t.c.__nakiPlugins.register({ id: 'hook15', onSend() { if (!r) r = inject(SKIN); } });
+    t.lobby.send(request(64000, INFO));
+    await tick();
+    assert.equal(r.ok, true, label);
+    assert.equal(r.msgId > 64256, true, label + ': the number in dispatch and the next ' + 256 + ' after it are skipped: ' + r.msgId);
+    assert.equal(sentOn(t.lobby).filter(id => id === 64000).length, 1, label + ': only the game INFO used 64000');
+    if (guarded) {
+      assert.deepEqual(lastGuard(t), [[r.msgId, 'local_error', 'naki_traffic']]);
+      assert.deepEqual(t.game.slice(-1), [errorResponse(r.msgId)], 'the local error carries the injection number only');
+    }
+  }
+});
+
+test('PS-24 (r4 16): on top of 256 unanswered game requests, a request counted by the dispatch but then blocked by failSafe rolls the overflow back — injections never turn msgid_busy and the oldest unanswered number stays avoided', async () => {
+  let armed = 0;
+  const t = page(source('naki-websocket.js'), { encode: d => { if (armed && --armed === 0) throw new Error('encode failed'); return Buffer.from(d).toString('base64'); } });
+  guard11(t);
+  const { inject } = injector11(t);
+  for (let i = 0; i < 256; i++) t.lobby.send(request(64000 + i, BEAT));
+  armed = 1;
+  t.lobby.send(request(64256, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64256, 'local_error', 'bridge_error']]);
+  const r = inject(FST);
+  assert.equal(r.ok, true, JSON.stringify(plain(r)));
+  assert.equal(r.msgId >= 64256, true, 'all 256 unanswered numbers, the oldest included, stay avoided: ' + r.msgId);
+  for (let i = 0; i < 256; i++) t.lobby.receive(response(64000 + i, [8, 1]));
+  assert.equal(inject(FST).ok, true);
+});
+
+test('PS-27 (r4 16): a dispatch that throws leaves no rollback record behind — failSafe blocking the resend cannot undo the earlier request that really went out', () => {
+  const t = page();
+  guard11(t);
+  const { inject } = injector11(t);
+  const id = idOf(t, t.lobby);
+  for (let i = 0; i <= 256; i++) t.lobby.send(request(64000 + i, BEAT));
+  assert.equal(inject(FST).reason, 'msgid_busy', '257 unanswered overflow the record');
+  const bytes = request(64256, SKIN, [8, 1]);
+  const raw = { direction: 'send', url: '', mutable: true, bytes, get wsId() { throw new Error('dispatch broke'); } };
+  assert.throws(() => t.c.__nakiPlugins.dispatch(raw));
+  assert.equal(t.c.__nakiPlugins.failSafe(bytes, id).block, true);
+  assert.equal(inject(FST).reason, 'msgid_busy', 'the overflow from the request that went out stays');
+});
+
+test('PS-28 (r4 16): a game request blocked locally on a number its earlier request still awaits leaves that earlier request in flight — injections keep avoiding it', async () => {
+  const t = page();
+  const { inject } = injector11(t);
+  guardPlugin(t.c, { behave: () => { throw new Error('no'); } });
+  t.lobby.send(request(64000, BEAT));
+  t.lobby.send(request(64000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64000, 'local_error', 'hook_threw']]);
+  assert.notEqual(inject(FST).msgId, 64000);
+});
+
+test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  const ws = t.c.__nakiWebSocket, orig = ws.sendRaw;
+  let captured;
+  ws.sendRaw = function (b, s) { captured = s; return orig.call(this, b, s); };
+  const r = inject(FST);
+  ws.sendRaw = orig;
+  t.lobby.receive(response(r.msgId, [8, 1]));
+  assert.deepEqual(answers, [[r.msgId, FST]]);
+  assert.equal(pendingPairs(t), 0);
+  assert.equal(ws.sendRaw(b64(request(64400, FST)), captured).success, true);
+  assert.equal(pendingInjections(t), 0);
+  assert.equal(pendingPairs(t), 1, 'the replay pairs like any sendRaw');
+  t.lobby.receive(response(64400, [8, 1]));
+  assert.deepEqual(answers, [[r.msgId, FST]], 'no injection answer for the replay');
+  assert.equal(pendingPairs(t), 0);
+});
+
+test('PS-26 (r4 18): an outer wrapper that loses the token (new Uint8Array view, slice copy, sendRaw without the token) turns the injection into plain traffic — its pairing stays after the RESPONSE, while the D22 identity and the injection answer stay intact', () => {
+  const wraps = {
+    view: t => { const o = t.lobby.send.bind(t.lobby); t.lobby.send = d => o(d instanceof ArrayBuffer ? new Uint8Array(d) : d); },
+    slice: t => { const o = t.lobby.send.bind(t.lobby); t.lobby.send = d => o(d instanceof ArrayBuffer ? d.slice(0) : d); },
+    dropToken: t => { const ws = t.c.__nakiWebSocket, o = ws.sendRaw; ws.sendRaw = b => o.call(ws, b); },
+  };
+  for (const [label, wrap] of Object.entries(wraps)) {
+    const t = page();
+    const { answers, inject } = injector11(t);
+    wrap(t);
+    assert.equal(pendingPairs(t), 0, label);
+    const r = inject(FST);
+    assert.equal(r.ok, true, label);
+    assert.equal(pendingPairs(t), 1, label + ': the injection landed in the shared table');
+    assert.equal(t.c.__nakiWebSocket.isNakiSent(r.msgId, idOf(t, t.lobby)), true, label + ': D22 identity is independent of the token');
+    t.lobby.receive(response(r.msgId, [8, 1]));
+    assert.deepEqual(answers, [[r.msgId, FST]], label);
+    assert.equal(pendingPairs(t), 1, label + ': the pairing stays after the RESPONSE');
+  }
+});
+
 test('GG11-1c (Astra10 1): the bridge failure path keeps the original pairing when the guard lookup itself throws inside failSafe, and on a game connection', async () => {
   {
     let armed = false;
