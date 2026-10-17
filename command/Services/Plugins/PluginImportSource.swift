@@ -319,7 +319,7 @@ nonisolated enum PluginImportSource {
                 try data.write(to: staging.appendingPathComponent(name))
                 receipts[name] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
             }
-            // install-receipt.json：出處紀錄（不是完整性驗證）。PluginRegistry 掃描時忽略它。
+            // install-receipt.json：出處紀錄（不是完整性驗證）。掃描時只讀 `sourceURL` 供顯示。
             var receipt: [String: Any] = [
                 "sourceURL": imported.sourceURL,
                 "updateSource": imported.updateSource,

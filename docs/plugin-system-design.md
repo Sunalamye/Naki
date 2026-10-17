@@ -347,7 +347,7 @@ Naki 目前完全不從檔案系統讀 JS（§0 #11），這是全新的能力�
 
 #### install-receipt.json
 
-落地時寫進 `Plugins/<id>/`（`PluginRegistry` 掃描時忽略它）：來源 URL（redirect 後最終值）、gist revision（若適用）、每檔 sha256、匯入時間。**這是出處紀錄，不是完整性驗證**——與 §6.1「無簽章、無雜湊驗證」不矛盾：receipt 記「當時裝了什麼」，不宣稱「作者可信」。
+落地時寫進 `Plugins/<id>/`（掃描時只讀 `sourceURL` 供顯示）：來源 URL（redirect 後最終值）、gist revision（若適用）、每檔 sha256、匯入時間。**這是出處紀錄，不是完整性驗證**——與 §6.1「無簽章、無雜湊驗證」不矛盾：receipt 記「當時裝了什麼」，不宣稱「作者可信」。詳情頁讀其中的 `sourceURL`（僅 http／https）顯示來源，並可在 Finder 顯示插件目錄；沒有 receipt 的手動安裝插件顯示「手動安裝」。
 
 #### 更新
 

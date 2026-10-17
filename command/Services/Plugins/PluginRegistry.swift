@@ -193,6 +193,8 @@ nonisolated struct PluginDescriptor: Sendable {
     /// entry JS 的原始碼（只有有效插件才有）
     let entrySource: String?
     let failure: PluginLoadFailure?
+    /// install-receipt 記的出處（僅 http／https）；手動放入的插件為 nil
+    var sourceURL: URL?
 
     var isValid: Bool { manifest != nil && failure == nil }
 
@@ -265,6 +267,22 @@ nonisolated enum PluginRegistry {
 
     /// 讀單一插件目錄並驗證（不執行任何插件程式碼）。
     static func load(directory: URL) -> PluginDescriptor {
+        var descriptor = parse(directory: directory)
+        descriptor.sourceURL = receiptSourceURL(in: directory)
+        return descriptor
+    }
+
+    private static func receiptSourceURL(in directory: URL) -> URL? {
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent("install-receipt.json")),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let text = json["sourceURL"] as? String,
+              let url = URL(string: text),
+              let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              url.host != nil else { return nil }
+        return url
+    }
+
+    private static func parse(directory: URL) -> PluginDescriptor {
         let dirName = directory.lastPathComponent
         let manifestURL = directory.appendingPathComponent("plugin.json")
 

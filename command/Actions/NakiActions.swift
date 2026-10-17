@@ -998,6 +998,8 @@ struct NakiActions {
   var setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction
   /// 移除插件（刪目錄 + 熱停用 + 重掃）
   var removePlugin: RemovePluginAction
+  /// 在 Finder 顯示插件目錄（macOS）
+  var revealPluginDirectory: RevealPluginDirectoryAction
   /// 從 URL 抓插件供預覽（不安裝）
   var fetchPluginImport: FetchPluginImportAction
   /// 安裝（匯入／更新）插件
@@ -1055,6 +1057,7 @@ extension NakiActions {
     self.setPluginEnabled = SetPluginEnabledAction()
     self.setPluginsMayModifyOutbound = SetPluginsMayModifyOutboundAction()
     self.removePlugin = RemovePluginAction()
+    self.revealPluginDirectory = RevealPluginDirectoryAction()
     self.fetchPluginImport = FetchPluginImportAction()
     self.installPlugins = InstallPluginsAction()
     self.checkPluginUpdates = CheckPluginUpdatesAction()
@@ -1306,6 +1309,32 @@ struct RemovePluginAction {
   #endif
 
   func callAsFunction(_ id: String) { perform(id) }
+}
+
+// MARK: - 在 Finder 顯示插件目錄
+
+/// 在 Finder 選取插件目錄。iOS 沒有 Finder，`live` 不做事。
+struct RevealPluginDirectoryAction {
+
+  private nonisolated(unsafe) let perform: (URL) -> Void
+
+  private init(perform: @escaping (URL) -> Void) {
+    self.perform = perform
+  }
+
+  static let live = RevealPluginDirectoryAction(perform: { url in
+    #if os(macOS)
+      NSWorkspace.shared.activateFileViewerSelecting([url])
+    #endif
+  })
+
+  nonisolated init() { self.perform = { _ in } }
+
+  #if DEBUG
+    init(stub: @escaping (URL) -> Void) { self.init(perform: stub) }
+  #endif
+
+  func callAsFunction(_ directory: URL) { perform(directory) }
 }
 
 // MARK: - 全自動開始

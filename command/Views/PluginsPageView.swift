@@ -289,6 +289,26 @@ struct PluginsPageView: View {
         .padding(.vertical, PanelLayout.Spacing.s2)
     }
 
+    /// 來源：receipt 的連結（或「手動安裝」）＋插件目錄（macOS 可在 Finder 顯示，iOS 唯讀路徑）。
+    private func sourceRow(_ d: PluginDescriptor) -> some View {
+        HStack(spacing: PanelLayout.Spacing.s6) {
+            Text("來源").font(.caption).foregroundStyle(.secondary)
+            if let url = d.sourceURL {
+                Link(url.host.map { $0 + url.path } ?? url.absoluteString, destination: url)
+                    .font(.caption).lineLimit(1).help(url.absoluteString)
+            } else {
+                Text("手動安裝").font(.caption).foregroundStyle(.secondary)
+            }
+            #if os(macOS)
+            Button("在 Finder 中顯示") { naki.actions.revealPluginDirectory(d.directory) }
+                .buttonStyle(.link).font(.caption)
+            #else
+            Text(d.directory.pathComponents.suffix(2).joined(separator: "/"))
+                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+            #endif
+        }
+    }
+
     /// 右欄：選中插件的完整詳情（header + 操作 + 設定 + 原始碼）。
     @ViewBuilder
     private func pluginDetail(_ d: PluginDescriptor) -> some View {
@@ -312,6 +332,7 @@ struct PluginsPageView: View {
                         Text(desc).font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    sourceRow(d)
                 }
 
                 Divider()

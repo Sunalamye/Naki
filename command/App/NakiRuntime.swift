@@ -573,6 +573,7 @@ final class NakiRuntime {
             setPluginEnabled: SetPluginEnabledAction(runtime: self),
             setPluginsMayModifyOutbound: SetPluginsMayModifyOutboundAction(runtime: self),
             removePlugin: RemovePluginAction(runtime: self),
+            revealPluginDirectory: .live,
             fetchPluginImport: .live,
             installPlugins: InstallPluginsAction(runtime: self),
             checkPluginUpdates: CheckPluginUpdatesAction(runtime: self),
