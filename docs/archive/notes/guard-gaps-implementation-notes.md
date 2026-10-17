@@ -111,3 +111,31 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 | 變異 | 23／23 被殺；新增 P1～P7，其中 P1、P2 是 Astra 兩個反例的變異形式 | `r3-mutation.log` |
 | `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r3-swift-targeted.log` |
 | 全量 NakiTests（一次） | 1181／0，無 test host 重啟 | `r3-test-full.log` |
+
+## 第四輪（Astra 第三輪審查：1【擋】1【應修】1【建議】，主線全採納；rebase main）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review3.md`。Deviations 11、12 主線採納。
+
+先 `git rebase main`（`ffe0670`）。JS 無文字衝突；ADR 尾端新增章節衝突，兩段都保留（main 的「已知限制不得只列不測」在前，guard-gaps 裁決在後）。main 把 `pluginLog` 改成回傳是否送達，本包沒有用到回傳值。rebase 後重跑四套全綠：b2 100、v2 21、p4 24、plugin-regression 38（`r4-rebased-*.log`）。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 擋 1 | 驗證後的記帳仍執行插件程式碼：reject 值的 `message` getter、第 10 次的 `onDisable` 改保留的 bytes 成 SKIN，外送與 Swift 都是 SKIN | 每個 hook 在驗證（或撤回）完成時取送出快照，記帳放在快照之後，記帳完一律把 `raw.bytes` 參照、內容、`drop` 還原成快照。`noteFailure` 的錯誤訊息只讀一次並設防。快照、撤回、還原改用載入時取得的原生 `slice`／`set`（`GG4-1`～`GG4-5b`） |
+| 應修 2 | §1.4 第 2 項混淆「派發後 buffer 被改」與「本次外送被改」 | 改寫成三段：本次外送內容（派發內無可改時點）、派發後改保留參照（不影響已提交資料，WebSocket `send` 提交語義）、另列「遊戲重用 buffer」前提 |
+| 建議 3 | sink 只留參照 | 測試 Socket 的 `send` 在入口複製成 `committed`，與 `sent` 參照分開；收進 getter／cleanup 反例、完全相同 bytes 撞號（`GG4-6`）、雙 thenable 兩種順序（`GG4-7`）、延後 resolve 重設失敗計數（`GG4-8`） |
+
+### 第四輪 Deviations
+
+13. **送出快照以「記帳後還原到快照」實作，不回傳新 buffer。** 主線要求之後的外送路徑只用快照。回傳新 buffer 會改變送出物件的同一性（既有測試鎖「原物件送出」），也要動 `naki-websocket.js`。鏈結束到原生 `send`、送 Swift 編碼之間不執行插件程式碼，所以把內容還原成快照，與只用快照外送等價。
+14. **一併修掉的既有缺口。** 同步 `throw` 一個 `message` getter 會改 bytes 的物件，在 `65a7865` 之前就能繞過撤回（撤回在 `noteFailure` 之前）。快照機制同時涵蓋（`GG4-1b`）。
+15. **原生方法擷取只防實例覆寫。** 插件改 `Uint8Array.prototype` 屬同 realm 的惡意行為，沿用 U4，不宣稱防範。
+
+### 第四輪驗證（log：主 repo `.swfd/logs/guard-gaps/r4-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在 rebase 後未改的 `2e32b99` JS | 7 紅（`GG4-1`～`GG4-5b`）；`GG4-6`～`GG4-8` 鎖既有行為，修前即綠 | `r4-red-b2-on-2e32b99.log` |
+| 變異 | 29／29 被殺；新增 Q1～Q6，Q6 一度存活，補 `GG4-5b` 後被殺 | `r4-mutation.log` |
+| 修後 node 四套 | b2 110／0、v2 21／0、p4 24／0、plugin-regression 38／0 | `r4-green-*.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r4-swift-targeted.log` |
+| 全量 NakiTests（一次，基底 main `ffe0670`） | 1183／0，無 test host 重啟（main 比上一輪多 2 個測試） | `r4-test-full.log` |

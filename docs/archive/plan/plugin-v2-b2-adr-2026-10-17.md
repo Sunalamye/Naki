@@ -96,3 +96,5 @@ Astra 第一輪（主 repo `.swfd/logs/guard-gaps-review/astra-review1.md`）：
 
 Astra 第二輪（`astra-review2.md`）：2【擋】1【應修】1【建議】，主線全採納。兩個擋是第二輪引入的回歸（`65a7865` 不會發生）：thenable 的 `then` 在驗證之後才執行、可同步改回守衛方法；注入標記可被注入前的同號派發用掉。修法：先接管 thenable 再驗證；注入以 msgId＋bytes 綁定，不再「用掉」。
 
+Astra 第三輪（`astra-review3.md`）：1【擋】1【應修】1【建議】，主線全採納（根治而非再補一層驗證）。擋 1：驗證之後的失敗記帳仍執行插件程式碼（錯誤的 `message` getter、第 10 次的 `onDisable`），可把保留的 bytes 改成守衛方法外送。修法：每個 hook 驗證完成即定案送出快照，記帳後還原成快照；快照、撤回、還原用原生 `slice`／`set`。§1.4 第 2 項區分「本次外送內容」與「派發後改保留參照」，並另列「遊戲重用 buffer」前提。同日 rebase 到 main `ffe0670`，本 ADR 尾端兩段裁決並存。
+

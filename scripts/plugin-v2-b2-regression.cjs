@@ -12,10 +12,15 @@ function page(wiring = source('naki-websocket.js'), { breakBase64 = false, swift
   const swift = [];
   class MessageEvent { constructor(type, init) { this.type = type; this.data = init.data; } }
   class Socket {
-    constructor(url) { this.url = url; this.readyState = 1; this.listeners = []; this.closers = []; this.sent = []; this.onmessage = null; }
+    constructor(url) { this.url = url; this.readyState = 1; this.listeners = []; this.closers = []; this.sent = []; this.committed = []; this.onmessage = null; }
     addEventListener(k, f) { if (k === 'message') this.listeners.push(f); if (k === 'close') this.closers.push(f); }
     close() { this.readyState = 3; this.closers.forEach(f => f({ code: 1000, reason: '' })); }
-    send(d) { this.sent.push(d); }
+    // sent 留參照（物件同一性斷言用）；committed 在入口複製，是原生 send 提交當下的內容（送出快照斷言用）
+    send(d) {
+      this.sent.push(d);
+      const b = d instanceof ArrayBuffer ? new Uint8Array(d) : ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : null;
+      this.committed.push(b ? Array.from(b) : d);
+    }
     dispatchEvent(ev) { this.listeners.forEach(f => f(ev)); if (this.onmessage) this.onmessage(ev); return true; }
     receive(u8) { this.dispatchEvent(new MessageEvent('message', { data: u8.buffer.slice(0) })); }
   }
@@ -1140,6 +1145,151 @@ test('GG3-4c (Astra2 4): a near-miss method from one hook completed into TITLE b
     g.send(request(931, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]));
     assert.equal(methodOf(g.sent[1]), NEAR, nearFirst ? 'near first' : 'fix first');
   }
+});
+
+// ---- guard-gaps 第四輪（Astra guard-gaps 第三輪 1–3 條）：送出快照 ----
+const OPREQ = id => request(id, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]);
+const swiftSends = t => t.toSwift('send');
+function gameWith(t, id, grant, spec) {
+  t.c.__nakiPlugins.setGrant(id, { capabilities: ['observe'], methods: [OP], ...grant });
+  assert.equal(t.c.__nakiPlugins.register({ id, ...spec }), true);
+  const g = gameSocket(t.c);
+  g.send(request(950, AUTH));
+  return g;
+}
+
+test('GG4-1 (Astra3 1 A): a rejection whose message getter rewrites the kept bytes into SKIN does not change what is committed or sent to Swift', () => {
+  const t = page();
+  let kept;
+  const g = gameWith(t, 'mg', {}, { onSend(ctx) {
+    kept = ctx.bytes;
+    const err = { get message() { kept.set(sameLength(SKIN, kept.length, 951)); return 'getter'; } };
+    return { then(resolve, reject) { reject(err); } }; } });
+  const req = OPREQ(951);
+  const original = Array.from(req);
+  g.send(req);
+  assert.deepEqual(g.committed[1], original);
+  assert.deepEqual(swiftSends(t).slice(-1), [original]);
+});
+
+test('GG4-1b: a synchronous throw whose message getter rewrites the bytes after the revert is undone as well', () => {
+  const t = page();
+  const g = gameWith(t, 'mg2', {}, { onSend(ctx) {
+    const kept = ctx.bytes;
+    throw { get message() { kept.set(sameLength(SKIN, kept.length, 952)); return 'getter'; } }; } });
+  const req = OPREQ(952);
+  const original = Array.from(req);
+  g.send(req);
+  assert.deepEqual(g.committed[1], original);
+  assert.deepEqual(swiftSends(t).slice(-1), [original]);
+});
+
+test('GG4-2 (Astra3 1 B): onDisable on the tenth failure rewriting the kept bytes into SKIN does not change that send', () => {
+  const t = page();
+  let kept;
+  const g = gameWith(t, 'od', {}, {
+    onSend(ctx) { kept = ctx.bytes; return { then(resolve, reject) { reject(new Error('no')); } }; },
+    onDisable() { kept.set(sameLength(SKIN, kept.length, 970)); } });
+  const originals = [];
+  for (let i = 0; i < 10; i++) { const req = OPREQ(961 + i); originals.push(Array.from(req)); g.send(req); }
+  assert.deepEqual(plain(t.c.__nakiPlugins.list()), [], 'disabled on the tenth');
+  assert.deepEqual(g.committed.slice(1), originals);
+  assert.deepEqual(swiftSends(t).slice(-10), originals);
+});
+
+test('GG4-3: during bookkeeping, ctx.replace by the hook is discarded too', () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  let ctxRef;
+  t.c.__nakiPlugins.setGrant('rp', { capabilities: ['observe', 'rewriteSend'], methods: [INFO] });
+  t.c.__nakiPlugins.register({ id: 'rp', onSend(ctx) {
+    ctxRef = ctx;
+    throw { get message() { ctxRef.replace(request(ctxRef.msgId, TITLE, [8, 1])); return 'getter'; } }; } });
+  const g = gameSocket(t.c);
+  g.send(request(980, AUTH));
+  const req = request(981, INFO);
+  g.send(req);
+  assert.equal(g.sent[1], req, 'the original object goes out');
+  assert.deepEqual(g.committed[1], Array.from(request(981, INFO)));
+});
+
+test('GG4-4: a throwing message getter does not break failure accounting (ten auto-disable)', () => {
+  const t = page();
+  const g = gameWith(t, 'tg', {}, { onSend() { throw { get message() { throw new Error('getter boom'); } }; } });
+  for (let i = 0; i < 10; i++) g.send(OPREQ(990 + i));
+  assert.equal(g.committed.length, 11);
+  assert.deepEqual(plain(t.c.__nakiPlugins.list()), []);
+});
+
+test('GG4-5: overriding set on ctx.bytes does not stop the revert of an in-place rewrite into TITLE', () => {
+  const t = page();
+  const g = gameWith(t, 'ov', {}, { onSend(ctx) {
+    ctx.bytes.set = () => {};
+    sameLength(TITLE, ctx.bytes.length, ctx.msgId).forEach((x, i) => { ctx.bytes[i] = x; }); } });
+  const req = OPREQ(1001);
+  const original = Array.from(req);
+  g.send(req);
+  assert.deepEqual(g.committed[1], original);
+});
+
+test('GG4-5b: an earlier hook overriding slice on the shared buffer cannot hide a later in-place rewrite into TITLE', () => {
+  const t = page();
+  t.c.__nakiPlugins.setGrant('sl', { capabilities: ['observe'], methods: [OP], priority: 0 });
+  t.c.__nakiPlugins.register({ id: 'sl', onSend(ctx) { const len = ctx.bytes.length, id = ctx.msgId; ctx.bytes.slice = () => sameLength(TITLE, len, id); } });
+  t.c.__nakiPlugins.setGrant('rw', { capabilities: ['observe'], methods: [OP], priority: 1 });
+  t.c.__nakiPlugins.register({ id: 'rw', onSend(ctx) { sameLength(TITLE, ctx.bytes.length, ctx.msgId).forEach((x, i) => { ctx.bytes[i] = x; }); } });
+  const g = gameSocket(t.c);
+  g.send(request(1002, AUTH));
+  const req = OPREQ(1003);
+  const original = Array.from(req);
+  g.send(req);
+  assert.deepEqual(g.committed[1], original);
+});
+
+test('GG4-6 (Astra3 3): identical-bytes collision before the injected dispatch blocks both, per Deviation 11', async () => {
+  const { t, g, inject } = fallbackPage();
+  const g2 = gameSocket(t.c);
+  g2.send(request(704, AUTH));
+  let busy = false;
+  for (const [ws, other] of [[g, g2], [g2, g]]) {
+    const orig = ws.send.bind(ws);
+    ws.send = d => { if (!busy && d instanceof ArrayBuffer) { busy = true; other.send(new Uint8Array(bytesOf(d))); busy = false; } return orig(d); };
+  }
+  const r = inject(SKIN);
+  await tick();
+  assert.equal([...g.committed, ...g2.committed].filter(b => Array.isArray(b) && (b[1] | (b[2] << 8)) === r.msgId).length, 0);
+  assert.deepEqual(guardLog(t).map(e => e.slice(2)), [['local_error', 'tainted_fallback'], ['local_error', 'tainted_fallback']]);
+});
+
+test('GG4-7 (Astra3 3): two thenable hooks, one legal and one rewriting into TITLE, in both orders keep the legal change only', () => {
+  for (const legalFirst of [true, false]) {
+    const t = page();
+    t.c.__nakiPlugins.setGrant('legal', { capabilities: ['observe'], methods: [OP], priority: legalFirst ? 0 : 1 });
+    t.c.__nakiPlugins.register({ id: 'legal', onSend(ctx) { return { then(res) { ctx.bytes[ctx.bytes.length - 1] ^= 1; res(); } }; } });
+    t.c.__nakiPlugins.setGrant('bad', { capabilities: ['observe'], methods: [OP], priority: legalFirst ? 1 : 0 });
+    t.c.__nakiPlugins.register({ id: 'bad', onSend(ctx) { return { then(res) { ctx.bytes.set(sameLength(TITLE, ctx.bytes.length, ctx.msgId)); res(); } }; } });
+    const g = gameSocket(t.c);
+    g.send(request(1010, AUTH));
+    const req = OPREQ(1011);
+    const expected = Array.from(req); expected[expected.length - 1] ^= 1;
+    g.send(req);
+    assert.deepEqual(g.committed[1], expected, legalFirst ? 'legal first' : 'bad first');
+  }
+});
+
+test('GG4-8 (Astra3 3): a later-resolving Promise resets the failure count, so 9 + 9 failures do not disable', async () => {
+  const t = page();
+  let mode = 'throw';
+  const g = gameWith(t, 'lr', {}, { onSend() {
+    if (mode === 'throw') throw new Error('no');
+    return new Promise(r => setTimeout(r, 0)); } });
+  for (let i = 0; i < 9; i++) g.send(OPREQ(1020 + i));
+  mode = 'ok';
+  g.send(OPREQ(1029));
+  await tick(); await tick();
+  mode = 'throw';
+  for (let i = 0; i < 9; i++) g.send(OPREQ(1030 + i));
+  assert.deepEqual(plain(t.c.__nakiPlugins.list()).map(e => e.id), ['lr']);
 });
 
 test('R6-4 (Astra5 5): a FastTest whose type byte an observer corrupts is refused by failSafe on a lobby, sent on a game connection', async () => {

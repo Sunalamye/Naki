@@ -428,7 +428,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
   - **`ctx.isTainted()`**：回傳自己是否已污染。曾污染的插件重新註冊後仍為 `true`，即使新的 grant 不再宣告 `sendGuard`。
   - **污染不可解除，頁面重載才清**：停用、熱重載、自動停用、`setGrant` 都不會解除。
   - **`ctx.sendRequest` 退回對局連線**：沒有開著的大廳連線時，Lobby 方法可能落到對局連線。這個方法有守衛者時（已污染或已註冊宣告 `sendGuard`）照樣擋下，與大廳上相同：回 `ok:true`，之後 `onInjectResponse` 收到 `ctx.local === true` 的錯誤回應。
-  - **送出方向不得就地改 `ctx.bytes`**：送出改寫只能經 `rewriteSend` 的 `ctx.replace`。大廳以外的連線上，不論就地改或經 `ctx.replace`，把請求改成可守衛方法（換裝、稱號、角色類），或改動既有可守衛方法的內容，都會撤回這個 hook 的改動並計一次該 hook 失敗；前面插件的合法改寫保留。hook 回傳 thenable 時，`then` 同步做的改寫一併檢查；違規那一次 thenable 的結果不再另計。連續 10 次會自動停用。大廳上照舊：就地改成另一個有守衛者的方法會撤回，`replace` 成守衛方法當下回 `false`，改動有守衛者的方法本身會擋下並改回本地錯誤。
+  - **送出方向不得就地改 `ctx.bytes`**：送出改寫只能經 `rewriteSend` 的 `ctx.replace`。大廳以外的連線上，不論就地改或經 `ctx.replace`，把請求改成可守衛方法（換裝、稱號、角色類），或改動既有可守衛方法的內容，都會撤回這個 hook 的改動並計一次該 hook 失敗；前面插件的合法改寫保留。hook 回傳 thenable 時，`then` 同步做的改寫一併檢查；違規那一次 thenable 的結果不再另計。檢查完的內容就是本次送出的內容：之後在錯誤處理、`onDisable` 等時機改 `ctx.bytes` 或呼叫 `ctx.replace`，都不會影響這一筆。連續 10 次會自動停用。大廳上照舊：就地改成另一個有守衛者的方法會撤回，`replace` 成守衛方法當下回 `false`，改動有守衛者的方法本身會擋下並改回本地錯誤。
   - **角色未定的連線上的 Blob**：頁面上有守衛者時拒送，與大廳相同。只有已確定是對局的連線照送。若遊戲只在對局握手改用 Blob，對局連線會一直連不上。要停用宣告 `sendGuard` 的插件；已污染時還要重載頁面。
   - 沒有 `api.taint`：`register` 沒有回傳每個插件專屬的物件，全域 `__nakiPlugins` 不能辨識呼叫者。`guardState()` 是診斷用，不屬於契約，插件不得依賴。
 - **`injectReceive`**：只有設計，未實作。設計採弱順序：只保證排在當前這則之後交付，中間可能插進其他網路訊息。

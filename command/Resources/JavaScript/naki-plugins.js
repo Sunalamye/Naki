@@ -32,6 +32,9 @@
     var parseEnvelope = (window.__nakiCore && window.__nakiCore.parseEnvelope)
         || function () { return null; };
 
+    // 送出快照用的原生方法：插件可能改掉 ctx.bytes 這個實例的 set／slice
+    var u8set = Uint8Array.prototype.set, u8slice = Uint8Array.prototype.slice;
+
     var TYPE_NOTIFY = 1;
     var TYPE_REQUEST = 2;
     var TYPE_RESPONSE = 3;
@@ -153,12 +156,15 @@
 
     // 只在需要時報一次某插件的內部錯誤，避免對局時間軸被洗版
     function noteFailure(id, hook, err) {
-        diagnostics.lastError = { id: id, message: String(err && err.message || err) };
+        // 錯誤訊息只讀一次，讀取本身拋錯也不中斷記帳（getter 是插件程式碼）
+        var message;
+        try { message = String(err && err.message ? err.message : err); } catch (x) { message = '（錯誤訊息無法讀取）'; }
+        diagnostics.lastError = { id: id, message: message };
         var f = failures.get(id) || {};
         var n = (f[hook] || 0) + 1;
         f[hook] = n;
         failures.set(id, f);
-        pluginLog(id, hook + ' 拋錯（第 ' + n + ' 次）：' + (err && err.message ? err.message : err));
+        pluginLog(id, hook + ' 拋錯（第 ' + n + ' 次）：' + message);
         if (n >= FAILURE_LIMIT) {
             var entry = registry.get(id);
             registry.delete(id);
@@ -287,7 +293,7 @@
     // 原方法在 GUARDABLE_METHODS 者；其他還原原 bytes 照送（第四輪第 3 條）。實際送出的是原 bytes，所以只看原方法；
     // 這個判斷只用本閉包的常數與 parser，不碰出錯的 grant。
     function guardedSend(raw, env) {
-        var origObj = raw.bytes, original = origObj.slice(), guard = null;
+        var origObj = raw.bytes, original = u8slice.call(origObj), guard = null;
         if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
         try {
             guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
@@ -321,12 +327,12 @@
             if (!guard) return undefined;
             ids = guard.ids;
         } catch (e) { ids = []; }
-        return blockSend(raw, raw.bytes, raw.bytes.slice(), env.msgId, env.method, env.method, 'tainted_fallback', ids);
+        return blockSend(raw, raw.bytes, u8slice.call(raw.bytes), env.msgId, env.method, env.method, 'tainted_fallback', ids);
     }
 
     function restore(raw, origObj, original) {
         raw.bytes = origObj;
-        if (origObj.length === original.length) origObj.set(original);
+        if (origObj.length === original.length) u8set.call(origObj, original);
     }
 
     function rememberIfRequest(env, direction, socketId) {
@@ -644,13 +650,14 @@
             if (typeof fn !== 'function') continue;
             var ctx = makeCtx(raw, env, method, isNaki, entry.grant);
             var before = raw.bytes;
-            var snapshot = raw.mutable === false ? null : before.slice();
+            var snapshot = raw.mutable === false ? null : u8slice.call(before);
             var isGuard = !!guard && guard.ids.indexOf(entry.spec.id) !== -1;
             var state = { judged: false, failed: false, early: null };
+            var thenable = false, failure = null;
             try {
                 diagnostics.hooks++;
                 var ret = fn(ctx);   // 改寫只能經 ctx.replace（見 makeCtx）；回傳 Promise／thenable 不算放行（審查第 2 條）
-                var thenable = !!ret && typeof ret.then === 'function';
+                thenable = !!ret && typeof ret.then === 'function';
                 if (thenable) {
                     if (isGuard) guard.async.push(entry.spec.id);
                     settle(ret, entry.spec.id, hook, state);
@@ -670,20 +677,33 @@
                     && isLobby(raw.wsId) && (raw.drop || !sameBytes(snapshot, raw.bytes))) {
                     taint(entry.spec.id, entry.grant);
                 }
-                // 驗證都過了才記成功：先記會把違規前的連續失敗歸零（第二輪第 4 條）；thenable 的結果出來才記（第二輪第 6 條）
-                judge(state, entry.spec.id, hook, false);
-                if (!thenable) {
-                    noteSuccess(entry.spec.id, hook);
-                    if (isGuard) guard.approved.push(entry.spec.id);
-                }
             } catch (e) {
                 // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）。守衛方法另由 guardedSend 改為不送出
                 raw.bytes = before;
                 raw.drop = false;
-                if (snapshot) before.set(snapshot);
-                if (isGuard) guard.threw.push(entry.spec.id);
-                judge(state, entry.spec.id, hook, true);
-                noteFailure(entry.spec.id, hook, e);
+                if (snapshot) u8set.call(before, snapshot);
+                failure = { error: e };
+            }
+            // 送出快照：驗證（或撤回）完成的這一刻定案本次內容。之後的記帳會執行插件程式碼（thenable 結果、錯誤的 message getter、
+            // 自動停用的 onDisable），改 ctx.bytes、replace、drop 都不影響本次外送，記帳後一律還原成快照（第四輪第 1 條）
+            var committed = raw.bytes, committedDrop = raw.drop, frozen = snapshot ? u8slice.call(committed) : null;
+            try {
+                if (failure) {
+                    if (isGuard) guard.threw.push(entry.spec.id);
+                    judge(state, entry.spec.id, hook, true);
+                    noteFailure(entry.spec.id, hook, failure.error);
+                } else {
+                    // 驗證都過了才記成功：先記會把違規前的連續失敗歸零（第二輪第 4 條）；thenable 的結果出來才記（第二輪第 6 條）
+                    judge(state, entry.spec.id, hook, false);
+                    if (!thenable) {
+                        noteSuccess(entry.spec.id, hook);
+                        if (isGuard) guard.approved.push(entry.spec.id);
+                    }
+                }
+            } finally {
+                raw.bytes = committed;
+                raw.drop = committedDrop;
+                if (frozen && !sameBytes(frozen, committed)) u8set.call(committed, frozen);
             }
             if (raw.drop || raw.bytes !== before || (snapshot && !sameBytes(snapshot, raw.bytes))) by.push(entry.spec.id);
             if (raw.drop) break;   // drop 短路：後續插件不再收到
@@ -840,7 +860,7 @@
             try {
                 b = data instanceof ArrayBuffer ? new Uint8Array(data)
                     : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-                original = b.slice();
+                original = u8slice.call(b);
                 env = parseEnvelope(original);
                 lockRole(socketId, env);
                 if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return;
