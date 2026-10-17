@@ -2196,3 +2196,225 @@ test('GG7-6b (Astra6 4): overriding set on the receive ctx.bytes does not change
   assert.deepEqual(t.game.slice(-1), [Array.from(response(1315, [8, 9]))]);
   assert.deepEqual(t.toSwift('receive').slice(-1), [Array.from(response(1315, [8, 9]))]);
 });
+
+// 實際 local-unlock 插件的整合：沿用 naki-plugins 的 Naki 整合測試 harness（NAKI_ROOT 指向本 worktree），不另寫一份
+const UNLOCK_TEST = path.join(process.env.NAKI_PLUGINS_DIR || path.resolve(root, '../naki-plugins'), 'tests/local-unlock-naki.cjs');
+function unlockHarness() {
+  const Module = require('node:module');
+  const prev = process.env.NAKI_ROOT;
+  process.env.NAKI_ROOT = root;
+  try {
+    const m = new Module(UNLOCK_TEST, module);
+    m.filename = UNLOCK_TEST;
+    m.paths = Module._nodeModulePaths(path.dirname(UNLOCK_TEST));
+    m._compile(fs.readFileSync(UNLOCK_TEST, 'utf8').replace("const { test } = require('node:test');", 'const test = () => {};')
+      + '\nmodule.exports = { page, request, response, CHARS, SKIN, charInfo };', UNLOCK_TEST);
+    return m.exports;
+  } finally { if (prev === undefined) delete process.env.NAKI_ROOT; else process.env.NAKI_ROOT = prev; }
+}
+
+// ---- guard-gaps 第八輪（Astra guard-gaps 第七輪 1–5 條）：放行綁定實例與污染版本、成功記帳等終判、固定身分、守衛退出、結構檢查 ----
+const lastGuard = t => guardLog(t).slice(-1).map(e => [e[1], e[2], e[3]]);
+
+test('GG8-1 (Astra7 1): an approval given before the guard gets tainted in the same request is void — a later hook re-entering a lobby receive, on the same or another lobby connection, blocks this request', async () => {
+  for (const where of ['same', 'other']) {
+    const t = page();
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    guardPlugin(t.c);
+    const other = where === 'other' ? new t.c.WebSocket('wss://route-4.maj-soul.com/gateway') : t.lobby;
+    other.send(request(1400, INFO));
+    observer7(t, 'late8', [SKIN], () => { other.receive(response(1400, [8, 1])); }, 200);
+    t.lobby.send(request(1401, SKIN, [8, 1]));
+    await tick();
+    assert.equal(t.events('tainted').length, 1, where);
+    assert.equal(t.lobby.sent.some(d => new Uint8Array(d)[1] === (1401 & 0xff)), false, where);
+    assert.deepEqual(lastGuard(t), [[1401, 'local_error', 'not_on_chain']], where);
+  }
+});
+
+test('GG8-2 (Astra7 1): a guard disabled and re-registered under the same id mid-chain voids the old approval; the next request runs the new onSend', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  let calls = 0;
+  observer7(t, 'swap8', [SKIN], () => {
+    if (calls) return;
+    t.c.__nakiPlugins.disable(ID);
+    t.c.__nakiPlugins.setGrant(ID, { capabilities: ['observe'], methods: [SKIN], sendGuard: [SKIN] });
+    assert.equal(t.c.__nakiPlugins.register({ id: ID, onSend() { calls++; } }), true);
+  }, 200);
+  t.lobby.send(request(1402, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(sentIds(t), []);
+  assert.deepEqual(lastGuard(t), [[1402, 'local_error', 'not_on_chain']]);
+  assert.equal(calls, 0);
+  t.lobby.send(request(1403, SKIN, [8, 1]));
+  assert.equal(calls, 1);
+  assert.deepEqual(sentIds(t), [1403]);
+});
+
+test('GG8-3 (Astra7 1): with the real local-unlock plugin, a late hook that delivers the rewritten fetchCharacterInfo blocks skin change 2301 as well as 2302', { skip: fs.existsSync(UNLOCK_TEST) ? false : 'naki-plugins 不在旁邊' }, async () => {
+  const u = unlockHarness();
+  const t = u.page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  t.lobby.ws.send(u.request(2300, u.CHARS));
+  t.c.__nakiPlugins.setGrant('late-receive', { capabilities: ['observe'], methods: [u.SKIN], priority: 200 });
+  t.c.__nakiPlugins.register({ id: 'late-receive', onSend() { t.lobby.ws.receive(u.response(2300, u.charInfo)); } });
+  await t.skin(2301);
+  await t.skin(2302);
+  assert.deepEqual(t.lobby.ws.sent.map(b => b[1] | b[2] << 8), [1, 2300]);
+  assert.deepEqual(t.guardLog().map(e => [e.msgId, e.outcome]), [[2301, 'local_error'], [2302, 'local_error']]);
+});
+
+test('GG8-4 (Astra7 2): twelve chain-end violations in a row by one plugin count 1..10 and auto-disable it at the tenth, with or without a thenable', () => {
+  for (const asThenable of [false, true]) {
+    const t = page();
+    observer7(t, 'oa8', [OAUTH7], ctx => { ctx.bytes[ctx.bytes.length - 1] ^= 1; if (asThenable) return Promise.resolve(); });
+    for (let i = 0; i < 12; i++) t.lobby.send(request(1410 + i, OAUTH7, [8, 1]));
+    const counts = t.events('log').filter(e => e.data.id === 'oa8').map(e => (/第 (\d+) 次/.exec(e.data.msg) || [])[1]).filter(Boolean).map(Number);
+    assert.deepEqual(counts, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], String(asThenable));
+    assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'oa8'), false, String(asThenable));
+    assert.deepEqual(t.lobby.committed, Array.from({ length: 12 }, (_, i) => Array.from(request(1410 + i, OAUTH7, [8, 1]))), String(asThenable));
+  }
+});
+
+test('GG8-5 (Astra7 3): blame and auto-disable use the id fixed at register — an author renaming its spec.id to a victim gets disabled itself', () => {
+  const t = page();
+  let victimDisabled = 0;
+  observer7(t, 'victim8', [BEAT], () => {});
+  t.c.__nakiPlugins.disable('victim8');
+  t.c.__nakiPlugins.setGrant('victim8', { capabilities: ['observe'], methods: [BEAT] });
+  assert.equal(t.c.__nakiPlugins.register({ id: 'victim8', onSend() {}, onDisable() { victimDisabled++; } }), true);
+  t.c.__nakiPlugins.setGrant('author8', { capabilities: ['observe'], methods: [OAUTH7] });
+  const spec = { id: 'author8', onSend(ctx) { spec.id = 'victim8'; ctx.bytes[ctx.bytes.length - 1] ^= 1; return { then() {} }; } };
+  assert.equal(t.c.__nakiPlugins.register(spec), true);
+  for (let i = 0; i < 10; i++) t.lobby.send(request(1430 + i, OAUTH7, [8, 1]));
+  const ids = plain(t.c.__nakiPlugins.list()).map(p => p.id);
+  assert.equal(ids.includes('author8'), false);
+  assert.equal(ids.includes('victim8'), true);
+  assert.equal(victimDisabled, 0);
+});
+
+test('GG8-6 (Astra7 4): the only untainted guard leaving mid-chain (itself or disabled by a later hook) releases the guard for this request — the original goes out, no dispatch_error', async () => {
+  for (const who of ['self', 'later']) {
+    const t = page();
+    guardPlugin(t.c, { behave: () => { if (who === 'self') t.c.__nakiPlugins.disable(ID); } });
+    observer7(t, 'touch8', [SKIN], ctx => { ctx.bytes[ctx.bytes.length - 1] ^= 1; if (who === 'later') t.c.__nakiPlugins.disable(ID); }, 200);
+    const req = request(1440, SKIN, [8, 1]);
+    t.lobby.send(req);
+    await tick();
+    assert.equal(t.lobby.sent[0], req, who);
+    assert.deepEqual(t.lobby.committed[0], Array.from(request(1440, SKIN, [8, 1])), who);
+    assert.deepEqual(lastGuard(t), [[1440, 'sent', 'guard_left']], who);
+  }
+});
+
+test('GG8-7 (Astra7 4): with another guard still present, one guard leaving mid-chain leaves the decision to the rest — approval sends, a missing approval blocks', async () => {
+  for (const restApproves of [true, false]) {
+    const t = page();
+    guardPlugin(t.c, { behave: () => { t.c.__nakiPlugins.disable(ID); } });
+    t.c.__nakiPlugins.setGrant('g8', { capabilities: ['observe'], methods: [SKIN], sendGuard: [SKIN], priority: restApproves ? 200 : -1 });
+    assert.equal(t.c.__nakiPlugins.register({ id: 'g8', onSend() { if (!restApproves) throw new Error('no'); } }), true);
+    t.lobby.send(request(1441, SKIN, [8, 1]));
+    await tick();
+    assert.deepEqual(sentIds(t), restApproves ? [1441] : [], String(restApproves));
+    assert.deepEqual(lastGuard(t), restApproves ? [[1441, 'sent', null]] : [[1441, 'local_error', 'hook_threw']], String(restApproves));
+  }
+});
+
+test('GG8-8 (Astra7 5): an equal-length receive replace that breaks the payload length (2 → 127) is false and leaves the original, with or without reshapeReceive', () => {
+  for (const reshape of [false, true]) {
+    const t = page();
+    const results = [];
+    t.c.__nakiPlugins.setGrant('wf8', { capabilities: ['observe', 'rewriteReceive'].concat(reshape ? ['reshapeReceive'] : []), methods: [INFO] });
+    t.c.__nakiPlugins.register({ id: 'wf8', onReceive(ctx) { const b = ctx.bytes.slice(); b[6] = 127; results.push(ctx.replace(b)); } });
+    t.lobby.send(request(1450, INFO));
+    const original = response(1450, [8, 1]);
+    t.lobby.receive(original);
+    assert.deepEqual(results, [false], String(reshape));
+    assert.deepEqual(t.game.slice(-1), [Array.from(original)], String(reshape));
+    assert.deepEqual(t.toSwift('receive').slice(-1), [Array.from(original)], String(reshape));
+  }
+});
+
+test('GG8-9 (Astra7 5): after a legal replace, a later in-place change that breaks the payload length is reverted and counted; the legal replace goes out', () => {
+  for (const onLobby of [true, false]) {
+    const t = page();
+    const results = replacer(t, ctx => ctx.replace(info6(ctx.msgId, 9)));
+    observer7(t, 'brk8', [INFO], ctx => { ctx.bytes[6 + INFO.length] = 127; }, 1);
+    const ws = onLobby ? t.lobby : gameSocket(t.c);
+    if (!onLobby) ws.send(request(1451, AUTH));
+    ws.send(info6(1452));
+    assert.deepEqual(results, [true]);
+    assert.deepEqual(ws.committed.slice(-1), [Array.from(info6(1452, 9))], onLobby ? 'lobby' : 'game');
+    assert.equal(failedHook(t, 'brk8'), true, onLobby ? 'lobby' : 'game');
+  }
+});
+
+test('GG8-10 (Astra7 3): a thenable result that arrives after its plugin was disabled and re-registered under the same id is not charged to the new instance', async () => {
+  const t = page();
+  let reject;
+  observer7(t, 'th8', [BEAT], () => new Promise((_, r) => { reject = r; }));
+  t.lobby.send(request(1460, BEAT));
+  t.c.__nakiPlugins.disable('th8');
+  observer7(t, 'th8', [BEAT], () => {});
+  reject(new Error('late'));
+  await tick();
+  assert.equal(t.events('log').some(e => e.data.id === 'th8' && /拋錯/.test(e.data.msg)), false);
+});
+
+test('GG8-11 (Astra7 1/2): plugin code run by post-verdict bookkeeping (an onDisable registering a TITLE guard) cannot let a replace into TITLE out — the chain end checks again', () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  let n = 0;
+  t.c.__nakiPlugins.setGrant('x8', { capabilities: ['observe', 'rewriteSend'], methods: [FST7] });
+  t.c.__nakiPlugins.register({ id: 'x8',
+    onSend(ctx) {
+      if (++n < 10) throw new Error('warm-up');
+      ctx.replace(request(ctx.msgId, TITLE, [8, 9]));
+      return { then(_, rej) { rej(new Error('late reject')); } };
+    },
+    onDisable() {
+      t.c.__nakiPlugins.setGrant('tg8', { capabilities: ['observe'], methods: [TITLE], sendGuard: [TITLE] });
+      t.c.__nakiPlugins.register({ id: 'tg8', onSend() {} });
+    } });
+  for (let i = 0; i < 9; i++) t.lobby.send(fst7(1470 + i));
+  t.lobby.send(fst7(1479));
+  assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'tg8'), true, 'onDisable ran during bookkeeping');
+  assert.deepEqual(t.lobby.committed.slice(-1), [Array.from(fst7(1479))]);
+  assert.equal(t.toSwift('send').some(b => methodOf(Uint8Array.from(b)) === TITLE), false);
+});
+
+test('GG8-12: an in-place type or msgId change is reverted at its own hook end, so an earlier hook\'s legal change still goes out', () => {
+  for (const [what, edit] of [['msgId', b => { b[1] ^= 1; }], ['type', b => { b[0] = 1; }]]) {
+    const t = page();
+    observer7(t, 'ok8', [INFO], ctx => { ctx.bytes[N6 - 1] = 9; });
+    observer7(t, 'bad8', [INFO], ctx => { edit(ctx.bytes); }, 1);
+    t.lobby.send(info6(1480));
+    assert.deepEqual(t.lobby.committed[0], Array.from(info6(1480, 9)), what);
+    assert.equal(t.events('log').some(e => /鏈尾終判/.test(e.data.msg)), false, what);
+    assert.equal(failedHook(t, 'bad8'), true, what);
+  }
+});
+
+test('GG8-13: a repeated ctx.taint() that changes nothing keeps the guard\'s approval — the already tainted guard calling it in onSend still lets an approved request out', () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  guardPlugin(t.c, { behave: ctx => { assert.equal(ctx.taint(), true); } });
+  pollute(t);
+  t.lobby.send(request(1490, SKIN, [8, 1]));
+  assert.deepEqual(sentIds(t), [10, 1490]);
+  assert.deepEqual(lastGuard(t), [[1490, 'sent', null]]);
+});
+
+test('GG8-14: an untainted guard auto-disabled by its tenth throw still blocks that tenth request (hook_threw), not released as guard_left', async () => {
+  for (const kind of ['throw', 'thenable']) {
+    const t = page();
+    guardPlugin(t.c, { behave: () => { if (kind === 'throw') throw new Error('boom'); t.c.__nakiPlugins.disable(ID); return new Promise(() => {}); } });
+    const n = kind === 'throw' ? 10 : 1;
+    for (let i = 0; i < n; i++) t.lobby.send(request(1500 + i, SKIN, [8, 1]));
+    await tick();
+    assert.deepEqual(sentIds(t), [], kind);
+    assert.deepEqual(lastGuard(t), [[1500 + n - 1, 'local_error', kind === 'throw' ? 'hook_threw' : 'async_hook']], kind);
+    assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === ID), false, kind);
+  }
+});

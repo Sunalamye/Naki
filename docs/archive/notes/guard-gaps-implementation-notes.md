@@ -7,7 +7,7 @@
 | 項 | 判斷 | 依據 |
 |---|---|---|
 | (a) `sendRaw` 退回對局，共存插件 `sendRequest` 外送守衛方法 | 可修 | `sendRaw` 同步呼叫包裝過的 `ws.send`，會在同一個呼叫堆疊回到 `dispatch`。插件層在 `sendRequest` 期間記下 msgId，就能在 `dispatch` 認出注入，不必改選線 |
-| (b) 不經 `ctx.replace` 的就地改寫 | 可修（第七輪起：就地改不得換 type／msgId／method，鏈尾另以目前狀態終判） | 送出方向沒有就地的 `replace`（`rewriteSend` 換 buffer），所以「物件沒換、內容變了」就是不經契約。判斷只用閉包常數 `GUARDABLE_METHODS`，不讀 `sendGuard`，第四輪第 2 條不衝突 |
+| (b) 不經 `ctx.replace` 的就地改寫 | 可修（第七輪起：就地改不得換 type／msgId／method，鏈尾另以目前狀態終判；第八輪起放行綁定註冊實例與污染版本、就地改要過結構檢查） | 送出方向沒有就地的 `replace`（`rewriteSend` 換 buffer），所以「物件沒換、內容變了」就是不經契約。判斷只用閉包常數 `GUARDABLE_METHODS`，不讀 `sendGuard`，第四輪第 2 條不衝突 |
 | (c) 角色未定時的第一筆 Blob | 可修，有代價 | Blob 無法同步解析。插件層拿不到 `originalSend`，延後送出會打亂順序。改為比照 lobby 規則拒送 |
 
 ## 做法
@@ -286,4 +286,47 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 - 鏈中才出現的守衛者會讓當筆守衛方法改回本地錯誤，即使內容沒改。實務上熱啟用由 Swift 的 `evaluateJavaScript` 觸發，不會在同步派發中途發生；同步 receive 重入污染只在插件於 `onSend` 裡同步派發 receive 時出現，live 未見。
 - 就地改登入、憑證類禁改方法的 payload，從照送改為整筆退回並計失敗。naki-plugins 回歸 39／0，未見依賴。
+- WebKit、live 未驗證（I2）。
+
+## 第八輪（Astra 第七輪審查：1【擋】4【應修】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review7.md`。Deviations 26–34 主線採納。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 擋 1 | 守衛先放行，之後同一筆送出中被污染（後 hook 同步 receive、另一條大廳連線），或同 id 停用再註冊，舊放行仍有效；實際 local-unlock 插件 2301 外送、2302 才擋 | registry 實例帶遞增 `token`，`taint` 改變污染狀態時遞增版本。放行紀錄是 `{ id, token, version }`，`version` 在 hook 執行前取。`guardFailure` 核對目前實例與版本，任一不符即 `not_on_chain`（`GG8-1` 同／異連線、`GG8-2` 重新註冊後下一筆跑新 `onSend`、`GG8-3` 實際插件 2301 與 2302 都擋） |
+| 應修 2 | 鏈尾違規前先 `noteSuccess` 歸零，永遠是第 1 次，不會自動停用 | 送出鏈的成功（含 thenable 的判定）延後到鏈尾判決之後；違規者 `judge` 記失敗、thenable 結果不再算（`GG8-4`，含 thenable，第 10 次停用） |
+| 應修 3 | 最後改動者取自插件可改的 `spec.id`，能停用別人 | `register` 只讀一次 `spec.id`，存在 registry 實例的 `id`；鏈、歸責、停用、`onDisable` 的 log 都用它（`GG8-5`）。晚到的 thenable 結果只算給當時的實例（`GG8-10`） |
+| 應修 4 | 唯一未污染守衛在鏈中停用，重算讀到 null 拋錯，誤擋成 `dispatch_error` | 重算後沒有守衛者、且開頭的守衛者沒有拋錯或 thenable：本筆解除守衛，送原請求，記 `sent`／`guard_left`（`GG8-6`）。還有其他守衛者：其餘依放行判定（`GG8-7`） |
+| 應修 5 | 等長 receive `replace` 把 payload 長度 2 改 127 仍回 true；A 合法 replace 後 B 就地破壞長度照送 | 兩條路都加 `isWellFormed`：receive 回 `false` 並還原，就地改撤回並計失敗（`GG8-8`、`GG8-9`）。FastTest／Route 合法同方法改寫的既有測試不變 |
+
+### 第八輪 Deviations
+
+35. **污染版本只在污染狀態改變時遞增。** 主線寫「每次 taint 遞增」。已污染的守衛者在自己的 `onSend` 再呼叫 `ctx.taint()`、方法集合沒變時，遞增會讓它自己這一筆的放行作廢，違反契約「重複呼叫沒有副作用」。改為第一次污染或多了守衛方法才遞增（`GG8-13`，變異 `V15`）。Astra 的反例都是第一次污染，照樣擋下。
+36. **放行用的污染版本在 hook 執行前取。** 守衛者自己的 hook 裡同步觸發 receive、讓自己第一次被污染，這次放行也作廢。比在記帳時取保守（變異 `V3`）。
+37. **開頭的守衛者拋錯或回 thenable 後全部退出，仍然擋。** 主線寫「唯一守衛自停用或被停用 ⇒ 本筆解除守衛」。守衛者拋錯在 N2 就是擋下的理由，第 10 次拋錯會自動停用，若照解除處理，第 10 次的拋錯反而變成照送。只有正常返回後退出才解除（`GG8-14`，變異 `V16`）。
+38. **解除守衛時送遊戲原請求，插件的改動不送。** 照主線「照送原請求」。
+39. **成功記帳只對送出鏈延後。** receive 鏈沒有鏈尾判決，維持原本「驗證完成即記帳、記帳後還原」。
+40. **鏈尾記帳之後再判一次。** 記帳會執行插件程式碼，例如 thenable 早到的 rejection 累計到第 10 次時的 `onDisable`，它能在判決之後註冊守衛者。第二次判定不過時只退回原內容並寫 log，不再記帳，之後不再有插件程式碼執行（`GG8-11`）。
+41. **`finalViolation` 不加 `isWellFormed`。** 每個 hook 結束時，就地改已驗結構，`replace` 已由 `sendViolation` 驗過，鏈尾再驗是等價的死碼。試加後該變異存活，已移除。
+42. **實際 local-unlock 插件整合放在 b2 回歸。** 沿用 naki-plugins 的 `tests/local-unlock-naki.cjs` harness，不另寫一份；找不到 naki-plugins 時略過，路徑可用 `NAKI_PLUGINS_DIR` 指定（`GG8-3`）。naki-plugins 自己的整合測試另跑一次。
+43. **`T3`、`T9` 一度存活。** 鏈尾也查 type／msgId，單一插件時兩層結果相同。`GG8-12` 斷言違規在 hook 層撤回、保留前面插件的合法改動，而且沒有鏈尾終判紀錄。
+
+### 第八輪驗證（log：主 repo `.swfd/logs/guard-gaps/r8-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第七輪 HEAD `eccac35` 的 JS | 10 紅：`GG8-1`～`GG8-6`、`GG8-8`～`GG8-10`、`GG8-14`。`GG8-7`、`GG8-11`～`GG8-13` 修前即綠，用來固定行為 | `r8-red-b2-on-eccac35.log` |
+| rebase | main 仍是 `92dbe39`，分支已在其上 | |
+| 變異（b2＋v2＋p4，扣基線；`NAKI_PLUGINS_DIR` 指向 naki-plugins，`GG8-3` 不略過） | 61／63 被殺。新增 V1～V13、V15、V16 全殺；存活的 `T7`、`U10` 為既有等價變異 | `r8-mutation.log` |
+| node 五套 | b2 150／0（0 略過）、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r8-green-*.log` |
+| naki-plugins `local-unlock-naki.cjs`（NAKI_ROOT＝本 worktree） | 9／0 | `r8-green-local-unlock-naki.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 19／0 | `r8-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1184／0，無 test host 重啟 | `r8-test-full.log` |
+| `git diff main --check` | 無警告 | |
+
+### 第八輪未驗證與風險
+
+- 同一筆送出中守衛者被污染或重新註冊時，這一筆改回本地錯誤，即使內容沒改。live 上污染由大廳回應改寫觸發，與換裝請求同步交錯的機率低，未見。
+- 未污染守衛者在一筆送出中途停用時，這一筆送遊戲原請求，不送其他插件的改動。
 - WebKit、live 未驗證（I2）。

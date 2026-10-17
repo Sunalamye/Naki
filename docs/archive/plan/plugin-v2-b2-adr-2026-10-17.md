@@ -103,3 +103,5 @@ Astra 第四輪（`astra-review4.md`）：2【擋】2【應修】，主線全採
 Astra 第五輪（`astra-review5.md`）：1【擋】1【建議】，主線全採納。擋 1：送出 `ctx.replace` 以 `new Uint8Array(newBytes)` 包裝插件的 `ArrayBuffer`／SAB／resizable，與插件共用記憶體；入口驗過後插件改成 SKIN 或改 msgId，hook 結束因 `replaced` 跳過守衛檢查，照樣外送。修法：入口先以宿主 `hostCopy` 物化，只收 TypedArray，驗證與採用同一份；hook 結束一律完整重驗。receive 變長 `replace` 一併先物化。建議 2 的入口型別矩陣以測試固定，表列在 notes 第六輪。
 
 Astra 第六輪（`astra-review6.md`）：2【擋】2【應修】1【建議】，主線全採納，撤回 notes Deviation 22、24。擋 2（主裁決）：就地改不得換 method，換 method 只能經 `replace` 走完整 `rewriteSend` 規則；同時消除應修 3 的回應配對過期。擋 1：鏈尾對最終候選以目前狀態終判（送出禁改名單、type／msgId、守衛規則），不過就整筆退回遊戲原內容並記在最後改動的 hook；大廳上鏈中才出現的守衛者（註冊或經同步 receive 重入污染）未在鏈上放行，視同 `not_on_chain` 擋下。應修 4：receive 等長 `replace` 先物化，以實際長度選路。建議 5：本 ADR 保證範圍段與設計 §1.4 第 4 項更正。
+
+Astra 第七輪（`astra-review7.md`）：1【擋】4【應修】，主線全採納，notes Deviation 26–34 採納。擋 1：守衛的放行沒有綁定狀態，守衛者在同一筆送出中被污染（含另一條大廳連線、實際 local-unlock 插件的 2301）或同 id 重新註冊後，舊放行仍有效。修法：放行綁定註冊實例代號與污染版本，鏈尾不符即 `not_on_chain`。應修：成功記帳等本筆鏈尾判定（鏈尾違規可累計到自動停用）；歸責用 register 時固定的 id；未污染守衛者在鏈中全部退出時本筆解除守衛、送原請求；就地改與等長 receive `replace` 補結構檢查。
