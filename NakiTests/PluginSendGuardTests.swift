@@ -133,6 +133,19 @@ final class PluginSendGuardTests: XCTestCase {
         XCTAssertEqual(handler.majsoulBridge.lastParsed?["method"] as? String, beat)
     }
 
+    func testLogSaysBlockedForGuardedLocalExchangeAndSentOtherwise() async {
+        let handler = WebSocketMessageHandler()
+        var blocked = message(request(313, skin), "send", socketId: 1, localResponse: guardError(313).base64EncodedString())
+        blocked["reason"] = "not_on_chain"
+        handler.dispatch(type: "websocket_message", data: blocked)
+        handler.dispatch(type: "websocket_message", data: message(request(314, beat, []), "send", socketId: 2))
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        let lines = LogManager.shared.entries.map(\.message)
+        XCTAssertTrue(lines.contains("[WS] socket 1 Blocked request: \(skin) (not_on_chain)"))
+        XCTAssertTrue(lines.contains("[WS] socket 2 Sent request: \(beat)"))
+        XCTAssertFalse(lines.contains("[WS] socket 1 Sent request: \(skin)"))
+    }
+
     func testUndecodableLocalResponseDropsTheWholeExchange() {
         let handler = WebSocketMessageHandler()
         handler.dispatch(type: "websocket_message", data: message(request(305, skin), "send", socketId: 1, localResponse: "%%%"))

@@ -554,7 +554,11 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
             // 發送的消息是請求，需要解析以跟蹤 msgId
             if let parsed = majsoulBridge.observeOutgoing(binaryData, socketId: socketId),
                let method = parsed["method"] as? String {
-                wsLog("[WS] socket \(socketId) Sent request: \(method)")
+                if localResponse != nil {
+                    wsLog("[WS] socket \(socketId) Blocked request: \(method) (\(data["reason"] as? String ?? "unknown"))")
+                } else {
+                    wsLog("[WS] socket \(socketId) Sent request: \(method)")
+                }
             }
             if let localResponse { handleReceived(localResponse, socketId: socketId) }
             return
