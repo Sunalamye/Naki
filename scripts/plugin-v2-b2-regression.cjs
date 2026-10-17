@@ -1108,6 +1108,84 @@ test('devLog: true only when delivered; bridge failure or throwing toString retu
   assert.equal(ok, 500, 'failed attempts did not consume the quota');
 });
 
+function sealPage(opts) {
+  const t = page(undefined, opts);
+  const p = t.c.__nakiPlugins;
+  p.setGrant('s', { capabilities: ['observe'], methods: [] });
+  t.events('log').length = 0;
+  return { t, p, logs: () => t.events('log').map(e => e.data.msg) };
+}
+
+test('devLogSeal: host writes the seal line with the delivered count; later devLog/devLogSeal fail closed and send nothing', () => {
+  const { p, logs } = sealPage();
+  p.devLog('s', 'a'); p.devLog('s', 'b');
+  assert.equal(p.devLogSeal('s', { run: 'r1' }), true);
+  const last = logs().pop();
+  assert.deepEqual(JSON.parse(last), { kind: 'seal', plugin: 's', count: 2, meta: { run: 'r1' } });
+  const n = logs().length;
+  assert.equal(p.devLog('s', 'late'), false);
+  assert.equal(p.devLogSeal('s', {}), false, 'second seal refused');
+  assert.equal(logs().length, n, 'nothing sent after seal');
+});
+
+test('devLogSeal: unknown id, non-plain or oversized meta return false and send nothing', () => {
+  const { p, logs } = sealPage();
+  assert.equal(p.devLogSeal('ghost', {}), false);
+  assert.equal(p.devLogSeal(7, {}), false);
+  for (const bad of [undefined, null, 'x', 1, [], [1], new Date(), new Map(), { a: 'x'.repeat(600) }, { get a() { throw new Error('x'); } }]) {
+    assert.equal(p.devLogSeal('s', bad), false);
+  }
+  assert.equal(logs().length, 0);
+  assert.equal(p.devLogSeal('s', { a: 'x'.repeat(480) }), true, 'under 512 bytes still sealed after failed attempts');
+});
+
+test('devLogSeal: meta limit counts UTF-8 bytes', () => {
+  const { p } = sealPage();
+  assert.equal(p.devLogSeal('s', { a: '雀'.repeat(200) }), false, '600+ bytes');
+  assert.equal(p.devLogSeal('s', { a: '雀'.repeat(100) }), true);
+});
+
+test('devLogSeal: count only includes lines the bridge delivered', () => {
+  let down = false;
+  const { p, logs } = sealPage({ swiftFails: () => down });
+  p.devLog('s', '1');
+  down = true; p.devLog('s', '2'); p.devLog('s', '3');
+  down = false; p.devLog('s', '4');
+  assert.equal(p.devLogSeal('s', {}), true);
+  assert.equal(JSON.parse(logs().pop()).count, 2);
+});
+
+test('devLogSeal: failed delivery does not seal', () => {
+  let down = false;
+  const { p } = sealPage({ swiftFails: () => down });
+  down = true;
+  assert.equal(p.devLogSeal('s', {}), false);
+  down = false;
+  assert.equal(p.devLog('s', 'ok'), true);
+  assert.equal(p.devLogSeal('s', {}), true);
+});
+
+test('devLogSeal: does not use the 500-line quota, seal is per plugin', () => {
+  const { p, logs } = sealPage();
+  p.setGrant('o', { capabilities: ['observe'], methods: [] });
+  for (let i = 0; i < 500; i++) assert.equal(p.devLog('s', 'l' + i), true);
+  assert.equal(p.devLog('s', 'over'), false);
+  assert.equal(p.devLogSeal('s', {}), true, 'seal works at quota');
+  assert.equal(JSON.parse(logs().pop()).count, 500);
+  assert.equal(p.devLog('o', 'other plugin unaffected'), true);
+});
+
+test('devLogSeal: beginBootstrap resets seal state and counts', () => {
+  const { p, logs } = sealPage();
+  p.devLog('s', 'x');
+  assert.equal(p.devLogSeal('s', {}), true);
+  assert.equal(p.devLog('s', 'y'), false);
+  assert.equal(p.beginBootstrap(), true);
+  assert.equal(p.devLog('s', 'z'), true);
+  assert.equal(p.devLogSeal('s', { n: 1 }), true);
+  assert.equal(JSON.parse(logs().pop()).count, 1);
+});
+
 test('devLog: no webkit bridge at all returns false', () => {
   const t = page(undefined, { realCore: true });
   t.c.webkit = undefined;

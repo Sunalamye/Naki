@@ -308,6 +308,7 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 - 這是宿主標記，不是頁面側推論：Naki 在注入 script 前後各呼叫一次內部的開始／結束標記，每頁只成功一輪，熱啟用路徑不經過它。
 - 權限邊界同 §8：標記與其他 `__nakiPlugins` 成員在同一 realm，惡意插件仍能繞過。這個值用於「防誤用」（例如測試專用插件拒絕在不可信的載入來源執行），不是安全邊界。
 - `window.__nakiPlugins.devLog(pluginId, line)`：任何時候可呼叫，寫進宿主 log，管道與前綴格式同 `ctx.log`。只收已註冊，或持有宿主下發 grant 的 `pluginId`（含載入中、熱啟用 `register` 之前）；其他回 `false` 並丟棄。每插件每頁最多 500 行，超過回 `false`。回 `true` 代表 `sendToSwift` 確認已交給宿主；bridge 缺席、拋錯、`sendToSwift` 回 false，或 `line` 的 `toString` 拋例外，一律回 `false`，且不佔 500 行配額。
+- `window.__nakiPlugins.devLogSeal(pluginId, meta)`：為插件本頁的 `devLog` 紀錄加上宿主見證的尾封。條件同 `devLog`；`meta` 必須是純物件（原型為 `null` 或 `Object.prototype`；陣列、Map、Date、class 實例一律拒絕），JSON 序列化後不得超過 512 bytes（UTF-8），否則回 `false`。成功時以與 `devLog` 同一管道送出一行，內容由宿主組成 `{"kind":"seal","plugin":<id>,"count":<本頁已成功交付的 devLog 行數>,"meta":<meta>}`，`count` 無法由插件指定；落檔前綴同 `ctx.log`（`[Plugin] <id>：<json>`）。回 `true` 才算封存。封存後該插件本頁的 `devLog` 與 `devLogSeal` 一律回 `false` 且不送出；seal 不佔 500 行配額；`beginBootstrap` 成功時重設封存與計數（每頁一輪）。封存只防「頁尾被截斷或事後補寫」的誤用，同 §8 不防惡意同 realm 程式。
 - 內部標記的繞過（同屬 §8 信任邊界內的刻意繞過）：頁面沒有啟用插件、或注入 script 語法錯時，開始標記從未被呼叫，之後任何同 realm 程式呼叫 `beginBootstrap()` 都能取得 `'document-start'`；插件跳出 try 使結束標記不執行同理。`loadSource` 因此不是安全證明。
 - 兩者都不屬於 hook 契約的一部分，僅供載入期與早期診斷使用。
 
