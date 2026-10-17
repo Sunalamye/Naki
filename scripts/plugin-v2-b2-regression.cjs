@@ -27,7 +27,7 @@ function page(wiring = source('naki-websocket.js'), { breakBase64 = false, swift
   // realCore：保留 naki-core 正式的 sendToSwift，只替換底層 postMessage
   c.webkit = { messageHandlers: { websocketBridge: { postMessage(m) { if (postFails(m)) throw new Error('postMessage failed'); swift.push({ type: m.type, data: m.data }); } } } };
   vm.runInContext(source('naki-core.js'), c);
-  if (!realCore) c.__nakiCore.sendToSwift = (type, data) => { if (swiftFails(type, data)) throw new Error('bridge down'); swift.push({ type, data }); };
+  if (!realCore) c.__nakiCore.sendToSwift = (type, data) => { if (swiftFails(type, data)) throw new Error('bridge down'); swift.push({ type, data }); return true; };
   if (breakBase64) c.__nakiCore.arrayBufferToBase64 = () => { throw new Error('encode failed'); };
   vm.runInContext(wiring, c);
   vm.runInContext(source('naki-plugins.js'), c);
@@ -1091,4 +1091,25 @@ test('devLog: capped at 500 lines per plugin per page, other plugins unaffected'
   assert.equal(p.devLog('a', 'more'), false);
   assert.equal(p.devLog('b', 'fine'), true);
   assert.equal(t.events('log').filter(e => e.data.id === 'a').length, 500);
+});
+
+test('devLog: true only when delivered; bridge failure or throwing toString returns false and costs no quota', () => {
+  let down = false;
+  const t = page(undefined, { swiftFails: () => down });
+  const p = t.c.__nakiPlugins;
+  p.setGrant('d', { capabilities: ['observe'], methods: [] });
+  down = true;
+  for (let i = 0; i < 600; i++) assert.equal(p.devLog('d', 'x'), false, 'bridge throws');
+  down = false;
+  assert.equal(p.devLog('d', { toString() { throw new Error('boom'); } }), false, 'toString throws');
+  let ok = 0;
+  for (let i = 0; i < 520; i++) if (p.devLog('d', 'l' + i)) ok++;
+  assert.equal(ok, 500, 'failed attempts did not consume the quota');
+});
+
+test('devLog: no webkit bridge at all returns false', () => {
+  const t = page(undefined, { realCore: true });
+  t.c.webkit = undefined;
+  t.c.__nakiPlugins.setGrant('d', { capabilities: ['observe'], methods: [] });
+  assert.equal(t.c.__nakiPlugins.devLog('d', 'x'), false);
 });

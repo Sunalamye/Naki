@@ -307,7 +307,8 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 - `window.__nakiPlugins.loadSource`：唯讀屬性。只有在**宿主注入階段**（Naki 以 document-start user script 串接所有啟用插件源碼，頁面載入時一起執行）載入的插件，於其頂層程式碼執行期間讀到 `'document-start'`；其餘任何時刻（熱啟用、停用後重新註冊、`register` 之後的 hook 內）一律 `'hot'`。要判斷自己的載入來源，請在頂層同步讀取並自行保存。
 - 這是宿主標記，不是頁面側推論：Naki 在注入 script 前後各呼叫一次內部的開始／結束標記，每頁只成功一輪，熱啟用路徑不經過它。
 - 權限邊界同 §8：標記與其他 `__nakiPlugins` 成員在同一 realm，惡意插件仍能繞過。這個值用於「防誤用」（例如測試專用插件拒絕在不可信的載入來源執行），不是安全邊界。
-- `window.__nakiPlugins.devLog(pluginId, line)`：任何時候可呼叫，寫進宿主 log，管道與前綴格式同 `ctx.log`。只收已註冊，或持有宿主下發 grant 的 `pluginId`（含載入中、熱啟用 `register` 之前）；其他回 `false` 並丟棄。每插件每頁最多 500 行，超過回 `false`。回 `true` 代表已交給宿主。
+- `window.__nakiPlugins.devLog(pluginId, line)`：任何時候可呼叫，寫進宿主 log，管道與前綴格式同 `ctx.log`。只收已註冊，或持有宿主下發 grant 的 `pluginId`（含載入中、熱啟用 `register` 之前）；其他回 `false` 並丟棄。每插件每頁最多 500 行，超過回 `false`。回 `true` 代表 `sendToSwift` 確認已交給宿主；bridge 缺席、拋錯、`sendToSwift` 回 false，或 `line` 的 `toString` 拋例外，一律回 `false`，且不佔 500 行配額。
+- 內部標記的繞過（同屬 §8 信任邊界內的刻意繞過）：頁面沒有啟用插件、或注入 script 語法錯時，開始標記從未被呼叫，之後任何同 realm 程式呼叫 `beginBootstrap()` 都能取得 `'document-start'`；插件跳出 try 使結束標記不執行同理。`loadSource` 因此不是安全證明。
 - 兩者都不屬於 hook 契約的一部分，僅供載入期與早期診斷使用。
 
 ### 授權防誤用，不防惡意插件

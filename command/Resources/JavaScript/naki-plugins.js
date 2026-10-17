@@ -143,8 +143,8 @@
 
     function pluginLog(id, msg) {
         try {
-            sendToSwift('plugin_event', { id: id, kind: 'log', msg: String(msg) });
-        } catch (e) { /* log 不該反過來弄壞 dispatch */ }
+            return sendToSwift('plugin_event', { id: id, kind: 'log', msg: String(msg) }) === true;
+        } catch (e) { return false; /* log 不該反過來弄壞 dispatch */ }
     }
 
     // 只在需要時報一次某插件的內部錯誤，避免對局時間軸被洗版
@@ -682,12 +682,13 @@
         },
 
         // 拿到 ctx.log 之前就能寫宿主 log（同一管道、同一前綴）。只收已註冊或持有宿主 grant 的 id，每插件每頁 500 行。
+        // 回 true＝sendToSwift 確認已交給宿主；bridge 缺席／拋錯／line.toString 拋錯＝false 且不佔配額。
         devLog: function (pluginId, line) {
             if (typeof pluginId !== 'string' || !(registry.has(pluginId) || grantFor(pluginId))) return false;
             var n = devLogCounts.get(pluginId) || 0;
             if (n >= DEV_LOG_LIMIT) return false;
+            if (!pluginLog(pluginId, line)) return false;
             devLogCounts.set(pluginId, n + 1);
-            pluginLog(pluginId, line);
             return true;
         },
 

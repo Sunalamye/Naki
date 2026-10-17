@@ -10,4 +10,5 @@
 ## Deviations
 - `devLog` 的「正在載入」判定用「持有宿主 grant」而非另設載入旗標：載入中（含熱啟用 `register` 之前）的插件必有 grant，且停用即清 grant，語意等價且不需第二個狀態；未知 id 仍丟棄。
 - 沒有為 begin／end 加防偽簽章：同 realm 無法防惡意插件（契約 §8），改以「每頁一輪」避免熱插件重入 document-start。
-- 注入 script 若有插件語法錯，整段不解析、begin 也不會跑，狀態維持 idle，其後熱啟用仍回 `'hot'`（安全方向）。
+- 頁面無啟用插件，或注入 script 語法錯時，begin 從未被呼叫，狀態維持 idle；之後任何同 realm 程式呼叫 `beginBootstrap()` 可取得 `'document-start'`。跳出 try 讓 end 不執行同理。兩者皆屬 §8 信任邊界內的刻意繞過，`loadSource` 不是安全證明。
+- 第二輪：`pluginLog` 回傳 `sendToSwift` 的真實投遞結果，`devLog` 失敗不佔配額；測試用的 `sendToSwift` 假件改回傳 true 以貼近真實實作。
