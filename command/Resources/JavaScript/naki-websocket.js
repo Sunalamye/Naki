@@ -632,13 +632,12 @@
                 // Blob 只能異步展開；拿到的是副本，已經來不及改遊戲真正收到的 event.data，
                 // 所以這條只允許 observe，不提供 rewriteReceive。
                 const arrivedAtSeq = nakiSentSeq;
-                const watermark = direction === 'receive' && window.__nakiPlugins && window.__nakiPlugins.watermark ? window.__nakiPlugins.watermark() : undefined;
                 // 展開是非同步：連線若已釋放（close／error）就丟棄，不重建已清掉的配對、角色與記帳
                 data.arrayBuffer().then(function(buffer) {
                     if (!wsConnections.has(ws)) return;
                     const view = new Uint8Array(buffer);
                     if (direction === 'receive') markNakiAnswered(wsId, view, arrivedAtSeq);   // 記帳處讀不到 Blob，展開後補標記
-                    dispatchToPlugins(direction, wsId, info, view, false, false, sender, undefined, { watermark: watermark });
+                    dispatchToPlugins(direction, wsId, info, view, false, false, sender, undefined, { watermark: direction === 'receive' ? arrivedAtSeq : undefined });
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);
                 });
@@ -681,6 +680,8 @@
             return JSON.parse(JSON.stringify(Object.assign({ reshape: reshapeStats, reshapeLocked: reshapeLocked, reshapeFaults: reshapeFaults }, messageTypes)));
         },
         isNakiSent: isNakiSent,
+        // D22 登記與插件層可消耗紀錄共用的遞增序號（pair-source 第九輪）
+        nextSeq: function () { return ++nakiSentSeq; },
         // 獲取連接信息
         getConnections: function() {
             const result = [];

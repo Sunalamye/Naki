@@ -3443,6 +3443,75 @@ test('PS-48 (r8 33): the deferred dispatch of a Blob send throws (an observer wh
   assert.equal(untrusted(t), 1);
 });
 
+test('PS-50 (r9 34): an old BEAT RESPONSE Blob expanding after INFO#64000 was answered and an injection took 64000 does not claim the injection — the real FST RESPONSE still reaches onInjectResponse and does not clear a later game INFO on the same number', async () => {
+  for (const consumers of [true, false]) {
+    const label = consumers ? 'with consumers' : 'zero-consumer branch';
+    const t = page();
+    const { answers, inject } = injector11(t);
+    t.lobby.send(request(64000, BEAT));
+    const held = heldBlob(t, response(64000, [8, 1]));
+    t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
+    t.lobby.send(request(64000, INFO));
+    t.lobby.receive(response(64000, [8, 2]));
+    const r = inject(FST);
+    assert.equal(r.msgId, 64000, label);
+    if (!consumers) t.c.__nakiPlugins.disable('inj11');
+    held.open();
+    await tick(); await tick();
+    assert.equal(pendingInjections(t), 1, label + ': the injection is still registered');
+    assert.deepEqual(plain(answers), [], label + ': the old BEAT content never reached onInjectResponse');
+    if (!consumers) continue;
+    t.lobby.send(request(64000, INFO));
+    t.lobby.receive(response(64000, [8, 3]));
+    assert.deepEqual(plain(answers), [[64000, FST]], label);
+    assert.equal(pendingInjections(t), 0, label);
+    assert.deepEqual(gameDiag(t), [1, 0], label + ': the later game INFO is still unanswered');
+  }
+});
+
+test('PS-51 (r9 35): an old BEAT RESPONSE Blob expanding after an ambiguity mark was created does not consume the mark — the real INFO RESPONSE stays Naki traffic without replace', async () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  const seen = [];
+  t.c.__nakiPlugins.setGrant('obs35', { capabilities: ['observe', 'rewriteReceive'], methods: [INFO], priority: 300, observeNakiTraffic: true });
+  t.c.__nakiPlugins.register({ id: 'obs35', onReceive(ctx) { seen.push([ctx.bytes[ctx.bytes.length - 1], ctx.isNaki, typeof ctx.replace === 'function']); } });
+  t.lobby.send(request(64000, BEAT));
+  const held = heldBlob(t, response(64000, [8, 1]));
+  t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
+  t.lobby.send(request(64000, INFO));
+  t.lobby.receive(response(64000, [8, 2]));
+  const r = inject(FST);
+  assert.equal(r.msgId, 64000);
+  for (let id = 60100; id < 60356; id++) t.c.__nakiWebSocket.sendRaw(b64(request(id, BEAT)));
+  assert.equal(t.c.__nakiWebSocket.isNakiSent(64000, idOf(t, t.lobby)), false, 'the injection D22 entry was evicted');
+  t.lobby.send(request(64000, INFO));
+  t.lobby.receive(response(64000, [8, 3]));
+  assert.deepEqual(plain(answers), [[64000, FST]]);
+  held.open();
+  await tick(); await tick();
+  t.lobby.receive(response(64000, [8, 4]));
+  assert.deepEqual(plain(seen).slice(-1), [[4, true, false]], 'the real INFO RESPONSE is observe-only Naki traffic');
+});
+
+test('PS-52 (r9 34, ambiguity): an injection RESPONSE arriving as a Blob and expanding after the game sent INFO on the same number claims the injection but marks no ambiguity — the real INFO RESPONSE goes to the general chain with replace', async () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  const seen = [];
+  t.c.__nakiPlugins.setGrant('obs52', { capabilities: ['observe', 'rewriteReceive'], methods: [INFO], priority: 300, observeNakiTraffic: true });
+  t.c.__nakiPlugins.register({ id: 'obs52', onReceive(ctx) { seen.push([ctx.bytes[ctx.bytes.length - 1], ctx.isNaki, typeof ctx.replace === 'function']); } });
+  const r = inject(FST);
+  assert.equal(r.msgId, 64000);
+  for (let id = 60100; id < 60356; id++) t.c.__nakiWebSocket.sendRaw(b64(request(id, BEAT)));
+  const held = heldBlob(t, response(64000, [8, 1]));
+  t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
+  t.lobby.send(request(64000, INFO));
+  held.open();
+  await tick(); await tick();
+  assert.deepEqual(plain(answers), [[64000, FST]]);
+  t.lobby.receive(response(64000, [8, 2]));
+  assert.deepEqual(plain(seen), [[2, false, true]], 'the game INFO RESPONSE is the game\'s own');
+});
+
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
   const t = page();
   const { answers, inject } = injector11(t);

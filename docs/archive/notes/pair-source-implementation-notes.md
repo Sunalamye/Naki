@@ -423,10 +423,62 @@ PS11（擋下不消耗遊戲未答）隨 `blockSend` 的 `gameDone` 移除；它
 
 ### 第八輪 Deviations
 
-1. **水位不套用在注入登記與歧義標記**：注入配號會避開遊戲未答與未答注入，水位以下的同號注入不會在 Blob 抵達後新建。歧義標記只在注入回應時建立，同理。
-2. **延後回應遇到較新配對時方法對不回**：BEAT 的回應若晚於同號 INFO 送出才展開，BEAT 的配對已被 INFO 覆寫，這則回應以無方法派發。這是 D22 同鍵覆寫的既有限制，本輪只保證不消耗 INFO。
+1. **（已被第九輪撤回）水位不套用在注入登記與歧義標記**：Astra 第八輪第 34 條證明避號前提不成立：注入可在 Blob 抵達後、展開前取得同號。原說明：注入配號會避開遊戲未答與未答注入，水位以下的同號注入不會在 Blob 抵達後新建。歧義標記只在注入回應時建立，同理。
+2. **延後回應遇到較新配對時方法對不回**：BEAT 的回應若晚於同號 INFO 送出才展開，BEAT 的配對已被 INFO 覆寫，這則回應以無方法派發。這是 D22 同鍵覆寫的既有限制，本輪只保證不消耗 INFO。（第九輪補明：無方法派發＝鏈為空，不派任何一般 hook，也無 `replace`。但第八輪時它仍會先消耗同鍵歧義鍵與注入登記；第九輪改為「未匹配延後回應」統一處理，不再消耗任何紀錄。）
 
 ### 第八輪已知風險
 
 - 水位只涵蓋接收方向的 Blob。同步派發的 RESPONSE 不帶水位，依現行順序消耗。
+- 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。
+
+## 第九輪（Astra 第八輪 34～35 條；主線裁決：水位統一套所有可消耗紀錄）
+
+審查原文：主 repo `.swfd/logs/pair-source-review/astra-review8.md`。main 仍在 `13abe49`，不需 rebase。第八輪 Deviation 1 撤回，Deviation 2 補明。
+
+### 做了什麼
+
+- `naki-websocket.js`：
+  - 新增 `nextSeq()`，遞增 D22 的 `nakiSentSeq`。
+  - 接收 Blob 的水位改用既有的 `arrivedAtSeq`，與 D22 已答標記同一個值。移除插件層的 `watermark()`。
+- `naki-plugins.js`：
+  - 所有可消耗紀錄都以 `nextSeq()` 蓋序號：遊戲提交、配對、注入代號（`token.seq`）、歧義鍵（`ambiguousPairs` 改為 Map）。沒有 websocket 時退回本地計數，只在不載入 websocket 的 harness 出現。
+  - `injectionFor(key, wm)`、`pairWaiting(key, wm)`、`consumeAmbiguous(socketId, key, wm)` 三個函式各自包含水位判定。`dispatchRaw` 的遊戲未答消耗、零消耗者分支與 `runChain` 都經由它們。
+  - 未匹配延後回應在 `runChain` 走到方法為 null，鏈為空，不派任何 hook。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 34 | 注入登記蓋序號，延後回應只認領抵達前的；零消耗者分支同樣 | PS-50（兩路）、PS-52 |
+| 擋 35 | 歧義鍵蓋序號，消耗與水位判定在同一函式 | PS-51 |
+| Dev 2 補明 | 無方法派發＝不派 hook；改為未匹配延後回應統一處理 | PS-50、PS-51 |
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-50、PS-51 套在 `185b94e` 的 JS | 2 紅，皆為行為紅：注入登記被舊 Blob 認領（1→0）、真 INFO 回應取得改寫權 | `r9-red-on-185b94e.log` |
+| PS-52 | 實作後補，殺變異 PS66 | — |
+| 實作後 | b2 227／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r9-final-*.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| 本輪新增 PS63～PS67 | 5/5 殺 | `r9-mutate-new.log` |
+| 全量 0–151 | 149/151；存活只有 U10、T7 | `r9-mutate-full.log` |
+
+替換字串隨程式更新：BB1、BB2、BB4、PS6、PS10、PS13、PS18、PS21、PS22、PS58、PS60。PS59 與新增的 PS67 改動同一行，刪除 PS59。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r9-test-targeted.log`），全量 `NakiTests` 1184／0（`r9-test-full.log`）。
+
+### 第九輪 Deviations
+
+1. **D22 身分查詢不帶水位**：`isNakiSent` 曾加上第四參數 `maxSeq`，後來移除，因為觀察不到差異。延後回應要走到 `isNaki` 判定，必須先匹配到抵達前的配對或注入；而同鍵在抵達後若有新的 D22 登記，`sendRaw` 的派發一定先覆寫或撤銷那筆配對，回應就成了未匹配。D22 的已答標記原本就用 `arrivedAtSeq`。
+2. **未匹配延後回應沒有另寫分支**：主線要求「只給 observeNakiTraffic 觀察」。它的方法為 null，而所有 observer 都以方法白名單過濾，所以實際上沒有任何 hook 收到它。另寫提早 return 是等價程式，會留下存活變異，所以不寫。
+3. **整條連線的歧義不看水位**：容量溢出後整條連線都算歧義，延後回應也一律算歧義（只觀察），不消耗任何東西，較保守。
+
+### 第九輪已知風險
+
+- 水位只涵蓋接收方向的 Blob；同步派發的 RESPONSE 依現行順序消耗。
 - 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。
