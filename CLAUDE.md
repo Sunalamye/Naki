@@ -334,6 +334,7 @@ build/test** 為準；文件只用來解釋「為什麼是這樣」。改了行�
 
 - 文件歸檔：工作包 notes 放 `docs/archive/notes/`，設計與 ADR 放 `docs/archive/plan/`，審查回應放 `docs/archive/review/`，一次性審查報告放 `docs/archive/audit/`。`docs/` 第一層只留 current truth（協定、架構、契約、索引）。repo 根不放 notes 與截圖。
 - live 驗收只用測試帳號；允許的外部副作用只有登入、`room_quick_test`、`bot_sync`、`game_vote_game_end`、`room_leave` 與對局中的自動打牌。不送表情、不換裝、不送任何未擁有物品的請求（插件設計 I2）。
+- 例外（用戶 2026-10-17 裁決）：為了 live 驗證守衛與修正，允許送**帳號已擁有且目前裝備中**的同值換裝／稱號請求（no-op，伺服器狀態不變），以及測試帳號自己送一個表情；仍不得送任何未擁有物品的請求。「已知限制」能測就測、能修就修，不得只列在 release note。
 - 要跑開發版 app 做 live 時：`osascript -e 'quit app "Naki"'` 關掉使用者的 `/Applications/Naki.app`，由開發版接手 8765；結束必重新啟動 `/Applications/Naki.app` 並以 `/status` 核對版本。
 - 插件目錄 `~/Library/Application Support/Naki/Plugins/`：手放不觸發 rescan，要重啟 app 或用插件頁；啟用停用用插件頁開關（AXPress），不得 `defaults write`。live 用的測試插件結束必刪。
 - 使用者設定檔是 `~/Library/Preferences/org.39c154f25912233a.akagi.plist`；`defaults` 要用**檔案路徑形式**（`defaults read/delete <path>`），用域名會被殘留 container 誤導成空。
