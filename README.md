@@ -309,7 +309,7 @@ iPhone 是同一份設定的單頁捲動版（四段，「開發者」預設折�
 JavaScript 拿不到遊戲內部物件。所以 Naki 一律走**協定層**：
 狀態從 WebSocket 封包解析，動作自己組 protobuf 送出。
 
-協定欄位定義取自**遊戲自己公開的資源檔** `res/proto/liqi.json`，不是反組譯客戶端得來的。
+協定欄位定義取自遊戲官方 Unity 資源包的 protobuf descriptor（`scripts/extract-liqi.py` 抽出），不是反組譯客戶端得來的。
 
 畫面高亮則是攔截 WebGL 繪圖呼叫，從 atlas UV 辨識牌種，再暫改該次 draw 的顏色參數；
 它不依賴螢幕座標。不過目前只確認 hook 有執行，尚未用 screenshot regression 證明每次都命中正確牌與按鈕。

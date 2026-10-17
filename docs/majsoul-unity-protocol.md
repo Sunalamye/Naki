@@ -131,7 +131,7 @@ Naki 載入雀魂頁面時可設 User-Agent 與額外 header（`MajsoulRequestBu
 fa234be58831ccfccf0bea108f5897f2f77f302df4a38a76e3b45f914436fa25
 ```
 
-舊檔來自 CDN 的 `res/proto/liqi.json`，那是 Laya 時代的遺留檔，已不再更新。新舊差異見 `.swfd/logs/liqi-refresh/liqi-diff.md`。Naki 用到的 RPC、error 欄位位置與插件守衛名單的欄位號都沒有變動。`scripts/check-liqi-drift.sh` 以同一條管線重抽後比對。
+舊檔來自 CDN 的 `res/proto/liqi.json`，那是 Laya 時代的遺留檔，已不再更新。新舊差異摘要：RPC 439→443（+14 活動類、−10 amuletActivity*），型別 1319→1390，Naki 用到的欄位無變動；完整 diff 在本機 `.swfd/logs/liqi-refresh/`。`scripts/check-liqi-drift.sh` 以同一條管線重抽後比對。
 
 ### 連線選擇
 

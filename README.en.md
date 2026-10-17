@@ -278,7 +278,7 @@ Swift services
 GameStore ↔ SwiftUI views / MCP tools
 ```
 
-The Unity WebGL client keeps game logic in WebAssembly rather than exposing the old JavaScript game objects. Naki therefore reads state from WebSocket messages and constructs protocol messages for actions. Protocol field definitions come from the game's published `res/proto/liqi.json` resource.
+The Unity WebGL client keeps game logic in WebAssembly rather than exposing the old JavaScript game objects. Naki therefore reads state from WebSocket messages and constructs protocol messages for actions. Protocol field definitions come from the protobuf descriptors in the game's official Unity asset bundles (extracted by `scripts/extract-liqi.py`), not from disassembling the client.
 
 Tile highlighting hooks WebGL draw calls, identifies tile types from atlas UV coordinates, and temporarily changes draw colors. It does not depend on fixed screen coordinates. The hook is implemented, but screenshot-regression coverage has not established correct targeting for every tile and button.
 
