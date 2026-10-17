@@ -34,6 +34,8 @@ struct LiqiRawSendResult {
     let success: Bool
     /// 成功時為 `socket=… bytes=…`；失敗時為 JS 回報的 reason 或本地錯誤
     let detail: String?
+    /// JS 實際送出的連線（D22：配發器以它綁定登記）
+    var socketId: Int? = nil
 
     static func failure(_ reason: String) -> LiqiRawSendResult {
         LiqiRawSendResult(success: false, detail: reason)
@@ -116,6 +118,7 @@ final class LiqiActionSender {
         let result = LiqiSendResult(method: spec.method, msgId: msgId,
                                     byteCount: bytes.count, success: raw.success,
                                     detail: raw.detail)
+        if raw.success, let socketId = raw.socketId { LiqiMsgIdAllocator.shared.bind(msgId, socketId: socketId) }
         if !raw.success && Self.failedBeforeSending(raw.detail) { LiqiMsgIdAllocator.shared.revoke(msgId) }
         lastResult = result
         logHandler?("[Liqi] \(result.logLine)")

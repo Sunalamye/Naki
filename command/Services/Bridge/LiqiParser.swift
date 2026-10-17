@@ -191,10 +191,11 @@ class LiqiParser {
     /// RESPONSE 帶 `account_id` 的登入方法（`ResLogin` 形狀）。bridge 以此判斷「這則回應該不該交給 parser 取 accountId」。
     static let loginResponseMethods: Set<String> = [".lq.Lobby.login", ".lq.Lobby.oauth2Login", ".lq.Lobby.emailLogin"]
 
-    /// 這筆請求是不是 Naki（自送或插件注入）發的，而非遊戲自己。
-    nonisolated static func isNakiSent(msgId: Int) -> Bool {
+    /// 這筆請求是不是 Naki（自送或插件注入）發的，而非遊戲自己。自送以 (連線, msgId) 登記判斷（D22）；
+    /// 插件號段 Swift 沒有登記可查，仍整段排除：寧可少學一次遊戲的 sid，也不學插件猜的值。
+    nonisolated static func isNakiSent(msgId: Int, socketId: Int) -> Bool {
         guard let id = UInt16(exactly: msgId) else { return false }
-        return LiqiMsgIdAllocator.shared.isIssued(id)
+        return LiqiMsgIdAllocator.shared.isIssued(id, socketId: socketId)
             || (LiqiMsgIdAllocator.pluginRangeStart...LiqiMsgIdAllocator.pluginRangeEnd).contains(id)
     }
 
@@ -214,7 +215,7 @@ class LiqiParser {
         // 全被記進觀察表。Naki 自送的以配發器登記判斷（遊戲自己的 msgId 跑久了也會進
         // 60000+，不能看號段）；插件區段（JS 自配發，不在登記表）仍以號段排除。
         if method == LiqiRequestBuilder.startUnifiedMatchMethod,
-           !Self.isNakiSent(msgId: msgId) {
+           !Self.isNakiSent(msgId: msgId, socketId: socketId) {
             let sid = parseStringField(payload, field: 1) ?? ""
             let version = parseStringField(payload, field: 2) ?? ""
             if !sid.isEmpty {
@@ -263,6 +264,7 @@ class LiqiParser {
 
         var result: [String: Any] = [
             "id": msgId,
+            "socketId": socketId,
             "type": "response",
             "method": methodName
         ]
@@ -272,7 +274,7 @@ class LiqiParser {
         }
 
         // 遊戲自己的段位場請求被拒（`Error.code` 非 0）：不會有對局開出來。空 error 或 code 0 不算被拒
-        if methodName == LiqiRequestBuilder.startUnifiedMatchMethod, !Self.isNakiSent(msgId: msgId) {
+        if methodName == LiqiRequestBuilder.startUnifiedMatchMethod, !Self.isNakiSent(msgId: msgId, socketId: socketId) {
             let record = LiqiResponseRecord(msgId: msgId, method: methodName,
                                             fields: result["data"] as? [String: Any] ?? [:], receivedAt: Date())
             if let code = record.errorCode, code != 0 {

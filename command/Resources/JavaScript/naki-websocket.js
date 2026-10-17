@@ -343,15 +343,21 @@
     window.__nakiHideNames = nakiNicknameMask;
 
 
-    // Naki 自送登記（bridge D9）：遊戲自己的 msgId 跑久了也會進 60000+，號段猜不準。
-    // 只記最近 256 筆送出；被淘汰的 id 之後再出現，一律當成遊戲自己的。
-    const nakiSentIds = new Set();
-    function rememberNakiSent(bytes) {
+    // Naki 自送登記（bridge D9、D22）：遊戲自己的 msgId 跑久了也會進 60000+，號段猜不準；
+    // 遊戲的計數器跨連線遞增，所以以 (連線, msgId) 為鍵。只記最近 256 筆，被淘汰的一律當成遊戲自己的。
+    const nakiSent = new Map();
+    function rememberNakiSent(socketId, bytes) {
         if (bytes[0] !== 2 || bytes.length < 3) return;
-        const msgId = bytes[1] | (bytes[2] << 8);
-        nakiSentIds.delete(msgId);
-        nakiSentIds.add(msgId);
-        if (nakiSentIds.size > 256) nakiSentIds.delete(nakiSentIds.values().next().value);
+        const msgId = bytes[1] | (bytes[2] << 8), key = socketId + ':' + msgId;
+        nakiSent.delete(key);
+        nakiSent.set(key, msgId);
+        if (nakiSent.size > 256) nakiSent.delete(nakiSent.keys().next().value);
+    }
+    // 不給連線時回答「任一條連線上有沒有」（頁面 API 相容）
+    function isNakiSent(msgId, socketId) {
+        if (socketId != null) return nakiSent.has(socketId + ':' + msgId);
+        for (const id of nakiSent.values()) if (id === msgId) return true;
+        return false;
     }
 
     /// 從送出的 REQUEST 認出方法名，記錄這條線是 lobby 線還是對局線
@@ -362,7 +368,7 @@
                        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
             if (!b || b.length < 6 || b[0] !== 2 || b[3] !== 0x0a) return;
             const msgId = b[1] | (b[2] << 8);
-            if (nakiSentIds.has(msgId)) return;   // Naki 自己送的，不能當證據
+            if (isNakiSent(msgId, info.id)) return;   // Naki 自己送的，不能當證據
             const len = b[4];
             let m = '';
             for (let i = 0; i < len; i++) m += String.fromCharCode(b[5 + i]);
@@ -554,7 +560,7 @@
 
     window.__nakiWebSocket = {
         diagnostics: function () { return JSON.parse(JSON.stringify(messageTypes)); },
-        isNakiSent: function (msgId) { return nakiSentIds.has(msgId); },
+        isNakiSent: isNakiSent,
         // 獲取連接信息
         getConnections: function() {
             const result = [];
@@ -649,20 +655,12 @@
                 return { success: false, reason: 'no_game_gateway_connection' };
             }
 
-            // 先登記再送：包過的 send 會同步跑 attributeSend 與插件 dispatch
-            rememberNakiSent(bytes);
-
             // 優先選「遊戲自己在上面送過同類請求」的那條——那是登入完成的證據。
             // 退而求其次才看「最近收到過訊息」，最後才是建立順序。
-            const proven = candidatesProvenFor(pick.length > 0 ? pick : conns, isGameMethod);
-            if (proven) {
-                try { proven.ws.send(bytes.buffer); } catch (e) {
-                    return { success: false, reason: 'send_failed: ' + e.message };
-                }
-                return { success: true, bytes: bytes.length, socketId: proven.id, pickedBy: 'proven' };
-            }
+            const candidates = pick.length > 0 ? pick : conns;
+            const proven = candidatesProvenFor(candidates, isGameMethod);
 
-            // 選「最近收到過伺服器訊息」的那條，而不是最後建立的那條。
+            // 沒有 proven 時選「最近收到過伺服器訊息」的那條，而不是最後建立的那條。
             //
             // 雀魂可能同時開著兩條 /gateway，但登入握手只在其中一條上做過；
             // 送到另一條伺服器會回 error 1004（連唯讀的 fetchAccountInfo 也一樣）。
@@ -671,16 +669,19 @@
             //
             // 「最近收到過東西」是有事實根據的訊號：伺服器只會在活著的 session 上
             // 推訊息。平手時才退回原本的順序。
-            const candidates = pick.length > 0 ? pick : conns;
-            const conn = candidates.slice().sort(function (a, b) {
+            const conn = proven || candidates.slice().sort(function (a, b) {
                 return (b.lastRecvAt || 0) - (a.lastRecvAt || 0);
             })[0];
+
+            // 選定連線後、送出前登記：包過的 send 會同步跑 attributeSend 與插件 dispatch
+            rememberNakiSent(conn.id, bytes);
             try {
                 conn.ws.send(bytes.buffer);
             } catch (e) {
                 console.error('[Naki WS] sendRaw 失敗:', conn.id, e);
                 return { success: false, reason: 'send_failed: ' + e.message };
             }
+            if (proven) return { success: true, bytes: bytes.length, socketId: conn.id, pickedBy: 'proven' };
 
             console.log('[Naki WS] sendRaw:', conn.id, bytes.length, 'bytes');
             return { success: true, bytes: bytes.length, socketId: conn.id, pickedBy: 'recency',

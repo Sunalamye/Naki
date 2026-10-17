@@ -202,7 +202,7 @@ nonisolated final class LiqiResponseStore: @unchecked Sendable {
         let data = parsed["data"] as? [String: Any] ?? [:]
 
         if type == "response", let msgId = parsed["id"] as? Int,
-           let id16 = UInt16(exactly: msgId), allocator.claim(id16) {
+           let id16 = UInt16(exactly: msgId), allocator.claim(id16, socketId: parsed["socketId"] as? Int) {
             recordResponse(msgId: msgId, method: method, fields: data)
             return true
         }

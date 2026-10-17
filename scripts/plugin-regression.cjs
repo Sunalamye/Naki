@@ -251,7 +251,7 @@ test('D9 page send is the game\'s own at any msgId: lobby evidence, visible to p
     assert.deepEqual(watcher, [[msgId, false], [msgId, false]]); assert.deepEqual(general, [msgId, msgId]);
   }
 });
-test('D9 plugin send: registered via sendRaw; plugin range stays Naki without registration', () => {
+test('D9/D22 plugin send: registered via sendRaw; the plugin range alone is not Naki', () => {
   const { c, ws, general, watcher, lobbySendAt } = traffic(); let notify;
   c.__nakiPluginsMayModifyOutbound = true;
   c.__nakiPlugins.setGrant('injector', { capabilities: ['observe', 'injectSend'], methods: ['.lq.NotifyFoo'] });
@@ -261,7 +261,7 @@ test('D9 plugin send: registered via sendRaw; plugin range stays Naki without re
   assert.equal(c.__nakiWebSocket.isNakiSent(64000), true); assert.equal(lobbySendAt(), 0);
   ws.send(request(64001, LOBBY));
   assert.ok(lobbySendAt() > 0, 'unregistered id is the game\'s own for line selection');
-  assert.deepEqual(watcher, [[64000, true], [64001, true]]); assert.deepEqual(general, []);
+  assert.deepEqual(watcher, [[64000, true], [64001, false]]); assert.deepEqual(general, [64001]);
 });
 test('D9 registry keeps the latest 256 sends; re-sending refreshes; evicted ids count as the game\'s', () => {
   const { c, ws, watcher } = traffic(); const sent = id => c.__nakiWebSocket.sendRaw(b64(request(id, LOBBY)));
@@ -272,4 +272,18 @@ test('D9 registry keeps the latest 256 sends; re-sending refreshes; evicted ids 
   assert.equal(c.__nakiWebSocket.isNakiSent(60005), false, 'oldest evicted after 256 newer sends');
   assert.equal(c.__nakiWebSocket.isNakiSent(60006), true, 're-send moved it to the newest slot');
   assert.equal(c.__nakiWebSocket.isNakiSent(60100), false); assert.equal(c.__nakiWebSocket.isNakiSent(60101), true);
+});
+test('D22 registry is per connection: the same msgId on another socket is the game\'s own', () => {
+  const { c, ws, general, watcher, socket } = traffic();
+  assert.equal(c.__nakiWebSocket.sendRaw(b64(request(60005, LOBBY))).success, true);
+  const other = socket('wss://game.example/gateway');
+  const [a, b] = c.__nakiWebSocket.getMajsoulConnections().map(x => x.id);
+  assert.equal(c.__nakiWebSocket.isNakiSent(60005, a), true);
+  assert.equal(c.__nakiWebSocket.isNakiSent(60005, b), false);
+  assert.equal(c.__nakiWebSocket.isNakiSent(60005), true, 'no socket given: any connection');
+  other.send(request(60005, LOBBY)); other.listeners.message({ data: response(60005).buffer });
+  assert.ok(c.__nakiWebSocket.getMajsoulConnections()[1].lastLobbySendAt > 0, 'lobby evidence on the other socket');
+  assert.deepEqual(watcher, [[60005, true], [60005, false], [60005, false]]); assert.deepEqual(general, [60005, 60005]);
+  ws.listeners.message({ data: response(60005).buffer });
+  assert.deepEqual(watcher.at(-1), [60005, true]);
 });

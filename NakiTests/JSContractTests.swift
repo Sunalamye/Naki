@@ -136,6 +136,9 @@ final class JSContractTests: XCTestCase {
         XCTAssertNil(page.exception)
 
         XCTAssertEqual(NakiWebSocketScript.sendResult(from: sent).success, true, "送出失敗：\(sent ?? "nil")")
+        let socketId = NakiWebSocketScript.sendResult(from: sent).socketId ?? -1
+        XCTAssertEqual(page.evaluateScript("window.__nakiWebSocket.isNakiSent(61000, \(socketId))")?.toBool(), true)
+        XCTAssertEqual(page.evaluateScript("window.__nakiWebSocket.isNakiSent(61000, \(socketId + 1))")?.toBool(), false)
         XCTAssertEqual(page.evaluateScript("window.__nakiWebSocket.isNakiSent(61000)")?.toBool(), true)
         XCTAssertEqual(page.evaluateScript("window.__nakiWebSocket.isNakiSent(61001)")?.toBool(), false)
         XCTAssertEqual(page.evaluateScript("ws.sent.length")?.toInt32(), 1, "假連線要真的收到那一筆")

@@ -222,8 +222,8 @@ nonisolated final class LiqiMsgIdAllocator: @unchecked Sendable {
 
     private let lock = NSLock()
     private var current: UInt16
-    /// 已配發、尚未收到回應的 msgId（舊到新）
-    private var issued: [UInt16] = []
+    /// 已配發、尚未收到回應的 msgId（舊到新）。socketId 在 JS 回報送出的連線後才綁定（D22）
+    private var issued: [(msgId: UInt16, socketId: Int?)] = []
 
     /// - Parameter start: 起始值；超出 `rangeStart...rangeEnd` 會被夾回區段內
     init(start: UInt16 = LiqiMsgIdAllocator.rangeStart) {
@@ -235,19 +235,26 @@ nonisolated final class LiqiMsgIdAllocator: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let value = current
-        issued.removeAll { $0 == value }
-        issued.append(value)
+        issued.removeAll { $0.msgId == value }
+        issued.append((value, nil))
         if issued.count > Self.issuedLimit { issued.removeFirst() }
         current = (value >= LiqiMsgIdAllocator.rangeEnd) ? LiqiMsgIdAllocator.rangeStart : value &+ 1
         return value
     }
 
-    /// 認領一筆回應：msgId 是本配發器發出且尚未認領過才回 true（同一筆只認領一次）。
-    /// 遊戲自己的 msgId 跑久了也會進入 60000+，不能只看號段。
-    func claim(_ msgId: UInt16) -> Bool {
+    /// 綁定送出的連線：遊戲的 msgId 計數器跨連線遞增，之後只認這條連線上的同號
+    func bind(_ msgId: UInt16, socketId: Int) {
         lock.lock()
         defer { lock.unlock() }
-        guard let index = issued.firstIndex(of: msgId) else { return false }
+        if let index = issued.firstIndex(where: { $0.msgId == msgId }) { issued[index].socketId = socketId }
+    }
+
+    /// 認領一筆回應：msgId 是本配發器發出且尚未認領過才回 true（同一筆只認領一次）。
+    /// 遊戲自己的 msgId 跑久了也會進入 60000+，不能只看號段。
+    func claim(_ msgId: UInt16, socketId: Int? = nil) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let index = index(of: msgId, socketId: socketId) else { return false }
         issued.remove(at: index)
         return true
     }
@@ -256,14 +263,19 @@ nonisolated final class LiqiMsgIdAllocator: @unchecked Sendable {
     func revoke(_ msgId: UInt16) {
         lock.lock()
         defer { lock.unlock() }
-        issued.removeAll { $0 == msgId }
+        issued.removeAll { $0.msgId == msgId }
     }
 
     /// 是否為本配發器發出且尚未認領的 msgId。不消耗登記（與 `claim` 的差別）。
-    func isIssued(_ msgId: UInt16) -> Bool {
+    func isIssued(_ msgId: UInt16, socketId: Int? = nil) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return issued.contains(msgId)
+        return index(of: msgId, socketId: socketId) != nil
+    }
+
+    /// 尚未綁定（送出結果還沒回來）或沒給連線時不看連線，與 D22 前相同
+    private func index(of msgId: UInt16, socketId: Int?) -> Int? {
+        issued.firstIndex { $0.msgId == msgId && (socketId == nil || $0.socketId == nil || $0.socketId == socketId) }
     }
 
     /// 目前尚未配發出去的值（測試 / 診斷用，不會前進）

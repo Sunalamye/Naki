@@ -129,4 +129,17 @@ final class LiqiParserLearningTests: XCTestCase {
         XCTAssertFalse(log.contains(preview(secretPayload).prefix(30)), "憑證 hex 不得進 log")
         XCTAssertTrue(log.contains("method=\(LiqiRequestBuilder.loginBeatMethod), dataSize="), "method 與長度仍記")
     }
+
+    /// D22：Naki 在別條連線用過同號，不影響遊戲自己這條線上的學習
+    func testGameStartUnifiedMatchOnAnotherSocketIsLearnedDespiteSameMsgId() {
+        isolateSharedObservedMatchSids(self)
+        let issued = LiqiMsgIdAllocator.shared.next()
+        defer { LiqiMsgIdAllocator.shared.revoke(issued) }
+        LiqiMsgIdAllocator.shared.bind(issued, socketId: 3)
+        let start = LiqiRequestBuilder.startUnifiedMatch(matchSid: "ranked")
+        _ = LiqiParser().parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: issued)), socketId: 4)
+        XCTAssertEqual(ObservedMatchSids.shared.observations.map(\.sid), ["ranked"])
+        _ = LiqiParser().parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: issued)), socketId: 3)
+        XCTAssertEqual(ObservedMatchSids.shared.observations.count, 1, "Naki 自己這條線上的不學")
+    }
 }

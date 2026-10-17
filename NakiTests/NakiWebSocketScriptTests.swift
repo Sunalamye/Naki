@@ -63,6 +63,13 @@ final class NakiWebSocketScriptTests: XCTestCase {
     XCTAssertEqual(result.detail, "no_open_majsoul_connection")
   }
 
+  /// D22：成功時帶出 JS 實際選到的連線，供配發器綁定
+  @MainActor
+  func testSendResultCarriesSocketId() {
+    XCTAssertEqual(NakiWebSocketScript.sendResult(from: #"{"success":true,"bytes":3,"socketId":7}"#).socketId, 7)
+    XCTAssertNil(NakiWebSocketScript.sendResult(from: #"{"success":true,"bytes":3}"#).socketId)
+  }
+
   /// 失敗但沒給 reason：不可以變成空字串，否則 log 上看不出發生過什麼
   @MainActor
   func testSendResultFailureWithoutReasonHasFallback() {

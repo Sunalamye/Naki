@@ -75,7 +75,7 @@ enum NakiWebSocketScript {
     if dict["success"] as? Bool == true {
       let bytes = dict["bytes"] as? Int ?? -1
       let socketId = dict["socketId"].map { "\($0)" } ?? "?"
-      return LiqiRawSendResult(success: true, detail: "socket=\(socketId) bytes=\(bytes)")
+      return LiqiRawSendResult(success: true, detail: "socket=\(socketId) bytes=\(bytes)", socketId: dict["socketId"] as? Int)
     }
     return .failure(dict["reason"] as? String ?? "unknown_reason")
   }

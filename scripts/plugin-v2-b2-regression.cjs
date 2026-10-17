@@ -852,3 +852,23 @@ test('R6-6 (Astra5 6, D27): an internal error after an unguarded in-place rewrit
   assert.deepEqual(Array.from(new Uint8Array(t.lobby.sent[0])), original);
   assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log, []);
 });
+
+test('D22: a game request whose msgId runs into the plugin range is guarded normally, not naki_traffic', () => {
+  const t = page();
+  guardPlugin(t.c);
+  for (const id of [64000, 64010, 65500]) t.lobby.send(request(id, SKIN, [8, 1]));
+  assert.deepEqual(sentIds(t), [64000, 64010, 65500]);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.map(e => [e.msgId, e.outcome]),
+    [[64000, 'sent'], [64010, 'sent'], [65500, 'sent']]);
+});
+
+test('D22: a Naki msgId sent on the game connection does not mark the same msgId on the lobby', () => {
+  const t = page();
+  guardPlugin(t.c);
+  const gameWs = new t.c.WebSocket('wss://route-4.maj-soul.com/game-gateway');
+  const r = t.c.__nakiWebSocket.sendRaw(Buffer.from(request(60003, '.lq.FastTest.inputOperation')).toString('base64'));
+  assert.equal(r.success, true); assert.equal(gameWs.sent.length, 1);
+  t.lobby.send(request(60003, SKIN, [8, 1]));
+  assert.deepEqual(sentIds(t), [60003]);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.map(e => [e.msgId, e.outcome]), [[60003, 'sent']]);
+});

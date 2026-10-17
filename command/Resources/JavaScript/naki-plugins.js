@@ -194,10 +194,10 @@
         return ids.length ? { method: method, ids: ids, approved: [], threw: [], async: [] } : null;
     }
 
-    function isNakiMsgId(msgId) {
+    // Naki 與插件都經 sendRaw 送出、以 (連線, msgId) 登記；插件號段本身不算（D22：遊戲 msgId 會跑進號段）
+    function isNakiMsgId(msgId, socketId) {
         var ws = window.__nakiWebSocket;
-        return msgId != null && ((msgId >= PLUGIN_MSGID_FIRST && msgId <= PLUGIN_MSGID_LAST)
-            || !!(ws && ws.isNakiSent && ws.isNakiSent(msgId)));
+        return msgId != null && !!(ws && ws.isNakiSent && ws.isNakiSent(msgId, socketId));
     }
 
     // 守衛者全部有效放行才回 null。已污染者的放行另外要求：仍守衛這個方法、L3 開著（審查第 1 條）
@@ -270,7 +270,7 @@
         if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
         try {
             guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
-            if (guard && isNakiMsgId(env.msgId)) {
+            if (guard && isNakiMsgId(env.msgId, raw.wsId)) {
                 return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'naki_traffic', guard.ids);
             }
             var out = runChain(raw, env, guard, true);
@@ -513,8 +513,7 @@
         rememberIfRequest(env, raw.direction, raw.wsId);
         var method = resolveMethod(env, raw.direction, raw.wsId);
         diagnostics.lastMethod = method;
-        // Naki 自送看 sendRaw 的登記；插件號段另計（websocket 模組缺席時只剩號段）
-        var isNaki = isNakiMsgId(env.msgId);
+        var isNaki = isNakiMsgId(env.msgId, raw.wsId);
 
         // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
         // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
