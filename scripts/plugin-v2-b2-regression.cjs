@@ -950,3 +950,65 @@ test('D22-4: a locally answered Naki guarded request that is re-sent stays pendi
   assert.deepEqual(sentIds(t), [10]);
 });
 
+
+// ---- ctx.taint() / ctx.isTainted()：插件主動污染自己 ----
+function taintOnReceive(c, { grant = {}, out = [] } = {}) {
+  c.__nakiPlugins.setGrant(ID, { capabilities: ['observe'], methods: [SKIN, INFO], sendGuard: [SKIN], ...grant });
+  return c.__nakiPlugins.register({ id: ID,
+    onReceive(ctx) { if (ctx.method === INFO) { out.push(ctx.isTainted()); out.push(ctx.taint()); out.push(ctx.isTainted()); } },
+    onSend() {} });
+}
+
+test('ctx.taint(): a guard plugin taints itself without rewriting; same set, same event, L3 off blocks, disable keeps it', async () => {
+  const t = page();
+  const out = [];
+  taintOnReceive(t.c, { out });
+  pollute(t);
+  assert.deepEqual(out, [false, true, true]);
+  assert.equal(t.events('tainted').length, 1);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, { [ID]: [SKIN] });
+  t.c.__nakiPluginsMayModifyOutbound = false;
+  t.lobby.send(request(200, SKIN));
+  await tick();
+  assert.deepEqual(sentIds(t), [10]);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.map(e => e.reason), ['outbound_disabled']);
+  t.c.__nakiPlugins.disable(ID);
+  t.lobby.send(request(201, SKIN));
+  await tick();
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.slice(-1).map(e => e.reason), ['not_on_chain']);
+  taintOnReceive(t.c, { out: [] });
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, { [ID]: [SKIN] }, 're-enable stays tainted');
+  assert.equal(t.events('tainted').length, 1, 'no second event');
+});
+
+test('ctx.taint(): repeated calls stay idempotent', () => {
+  const t = page();
+  const out = [];
+  taintOnReceive(t.c, { out });
+  pollute(t);
+  t.lobby.send(request(11, INFO));
+  t.lobby.receive(response(11, [8, 1]));
+  assert.equal(t.events('tainted').length, 1);
+  assert.deepEqual(out, [false, true, true, true, true, true]);
+});
+
+test('ctx.taint(): without sendGuard returns false, taints nothing, sends unaffected', () => {
+  const t = page();
+  const out = [];
+  taintOnReceive(t.c, { grant: { sendGuard: undefined }, out });
+  pollute(t);
+  assert.deepEqual(out, [false, false, false]);
+  assert.equal(t.events('tainted').length, 0);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, {});
+  const req = request(210, SKIN);
+  t.lobby.send(req);
+  assert.equal(t.lobby.sent[1], req, 'original object still goes out');
+});
+
+test('ctx.taint(): a guard plugin tainting from game-gateway onSend is tainted', () => {
+  const t = page();
+  t.c.__nakiPlugins.setGrant(ID, { capabilities: ['observe'], methods: [SKIN, '.lq.FastTest.authGame'], sendGuard: [SKIN] });
+  t.c.__nakiPlugins.register({ id: ID, onSend(ctx) { if (ctx.method === '.lq.FastTest.authGame') ctx.taint(); } });
+  new t.c.WebSocket('wss://route-4.maj-soul.com/game-gateway').send(request(79, '.lq.FastTest.authGame'));
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, { [ID]: [SKIN] });
+});

@@ -327,7 +327,14 @@
             bytes: raw.bytes,
             payload: env.payload,
             isNaki: isNaki,
-            log: function (msg) { pluginLog(grant.__id, msg); }
+            log: function (msg) { pluginLog(grant.__id, msg); },
+            // 主動污染自己：只對宣告 sendGuard 的插件有效，走與大廳改寫相同的 taint；不可解除，頁面重載才清
+            taint: function () {
+                if (!(grant.sendGuard || []).length) return false;
+                taint(grant.__id, grant);
+                return true;
+            },
+            isTainted: function () { return tainted.has(grant.__id); }
         };
         // Phase 2 起才有 settings；沒宣告就不掛這個屬性（與契約 §6 一致）
         if (grant.settings && typeof grant.settings === 'object') {
