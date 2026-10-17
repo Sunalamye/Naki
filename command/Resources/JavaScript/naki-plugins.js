@@ -164,30 +164,31 @@
         } catch (e) { return false; /* log 不該反過來弄壞 dispatch */ }
     }
 
-    // 只在需要時報一次某插件的內部錯誤，避免對局時間軸被洗版
-    function noteFailure(id, hook, err) {
-        // 錯誤訊息只讀一次，讀取本身拋錯也不中斷記帳（getter 是插件程式碼）
-        var message;
+    // 只在需要時報一次某插件的內部錯誤，避免對局時間軸被洗版。
+    // 記帳綁註冊實例（entry），不以 id 查表：實例已被停用或同 id 換掉時整筆丟棄，不算給新實例（第九輪第 2 條）
+    function noteFailure(entry, hook, err) {
+        // 錯誤訊息只讀一次，讀取本身拋錯也不中斷記帳（getter 是插件程式碼，可能換掉實例，所以讀完才核對）
+        var message, id = entry.id;
         try {
             var m = err && err.message;   // getter 只觸發一次
             message = String(m ? m : err);
         } catch (x) { message = '（錯誤訊息無法讀取）'; }
         diagnostics.lastError = { id: id, message: message };
+        if (!current(entry)) return;
         var f = failures.get(id) || {};
         var n = (f[hook] || 0) + 1;
         f[hook] = n;
         failures.set(id, f);
         pluginLog(id, hook + ' 拋錯（第 ' + n + ' 次）：' + message);
         if (n >= FAILURE_LIMIT) {
-            var entry = registry.get(id);
             registry.delete(id);
             cleanup(entry);
             pluginLog(id, '連續失敗達 ' + FAILURE_LIMIT + ' 次，本頁面生命週期內停用');
         }
     }
 
-    function noteSuccess(id, hook) {
-        var f = failures.get(id);
+    function noteSuccess(entry, hook) {
+        var f = current(entry) && failures.get(entry.id);
         if (f) f[hook] = 0;
     }
 
@@ -198,8 +199,8 @@
     function settle(thenable, entry, hook, state) {
         function done(ok, e) {
             if (!state.judged) { state.early = { ok: ok, e: e }; return; }
-            if (state.failed || !current(entry)) return;
-            if (ok) noteSuccess(entry.id, hook); else noteFailure(entry.id, hook, e);
+            if (state.failed) return;
+            if (ok) noteSuccess(entry, hook); else noteFailure(entry, hook, e);
         }
         try { thenable.then(function () { done(true); }, function (e) { done(false, e); }); }
         catch (e) { done(false, e); }
@@ -207,8 +208,8 @@
     function judge(state, entry, hook, failed) {
         state.judged = true;
         state.failed = failed;
-        if (!failed && state.early && current(entry)) {
-            if (state.early.ok) noteSuccess(entry.id, hook); else noteFailure(entry.id, hook, state.early.e);
+        if (!failed && state.early) {
+            if (state.early.ok) noteSuccess(entry, hook); else noteFailure(entry, hook, state.early.e);
         }
     }
 
@@ -314,7 +315,13 @@
     // 跑鏈與鏈後判定在 try 內（第二輪第 1 條）；無法解析的在 try 前就依有無守衛者決定。出錯時只擋守衛方法與
     // 原方法在 GUARDABLE_METHODS 者；其他還原原 bytes 照送（第四輪第 3 條）。實際送出的是原 bytes，所以只看原方法；
     // 這個判斷只用本閉包的常數與 parser，不碰出錯的 grant。
+    // 回應配對在守衛判決之後才提交，依最後真的上 wire 的內容（擋下、解除守衛、退回原內容時都是原請求）（第九輪第 1 條）
     function guardedSend(raw, env) {
+        var result = guardedVerdict(raw, env);
+        pairWith(raw.wsId, raw.bytes);
+        return result;
+    }
+    function guardedVerdict(raw, env) {
         var origObj = raw.bytes, original = u8slice.call(origObj), guard = null;
         if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
         try {
@@ -368,6 +375,12 @@
         if (origObj.length === original.length) u8set.call(origObj, original);
     }
 
+    // 依實際上 wire 的 bytes 登記回應配對（msgId → method）
+    function pairWith(socketId, bytes) {
+        var e = parseEnvelope(bytes);
+        if (e && e.type === TYPE_REQUEST && e.msgId != null && e.method) pendingMethods.set(msgKey(socketId, e.msgId), e.method);
+    }
+
     function rememberIfRequest(env, direction, socketId) {
         if (direction === 'send' && env.type === TYPE_REQUEST && env.msgId != null && env.method) {
             pendingMethods.set(msgKey(socketId, env.msgId), env.method);
@@ -387,7 +400,8 @@
         return null;
     }
 
-    function makeCtx(raw, env, method, isNaki, grant) {
+    function makeCtx(raw, env, method, isNaki, entry) {
+        var grant = entry.grant;
         var ctx = {
             direction: raw.direction,
             socketId: raw.wsId,
@@ -427,7 +441,7 @@
                 try { next = hostCopy(newBytes); } catch (e) { return false; }
                 // 長度不等：宣告 reshapeReceive 才走 Phase 4 整包替換（攔原事件、重派合成事件），否則照 v1 回 false。等長仍就地改
                 if (taLength.call(next) !== taLength.call(raw.bytes)) {
-                    return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, grant, next);
+                    return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, entry, next);
                 }
                 var original = hostCopy(raw.bytes);
                 u8set.call(raw.bytes, next);
@@ -438,10 +452,10 @@
                 if (!after || !isWellFormed(raw.bytes) || after.type !== env.type || after.msgId !== env.msgId
                     || afterMethod !== method || isForbiddenMethod(afterMethod, grant)) {
                     u8set.call(raw.bytes, original);
-                    noteFailure(grant.__id, 'replace', new Error('改寫換掉了 method 或觸及禁改名單，已還原'));
+                    noteFailure(entry, 'replace', new Error('改寫換掉了 method 或觸及禁改名單，已還原'));
                     return false;
                 }
-                noteSuccess(grant.__id, 'replace');
+                noteSuccess(entry, 'replace');
                 return true;
             };
         }
@@ -472,16 +486,16 @@
                 try { next = hostCopy(newBytes); } catch (e) { return false; }
                 var after = sendViolation(next, env.msgId) ? null : parseEnvelope(next);
                 if (!after) {
-                    noteFailure(grant.__id, 'replace', new Error('rewriteSend 不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已放棄'));
+                    noteFailure(entry, 'replace', new Error('rewriteSend 不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已放棄'));
                     return false;
                 }
                 // 不得改寫成另一個守衛方法：遊戲等的是原方法的回應型別，擋下時合不出正確的錯誤（第二輪第 4 條）
                 if (after.method !== env.method && isLobby(raw.wsId) && guardFor(after.method)) {
-                    noteFailure(grant.__id, 'replace', new Error('rewriteSend 不得改寫成守衛方法 ' + after.method + '，已放棄'));
+                    noteFailure(entry, 'replace', new Error('rewriteSend 不得改寫成守衛方法 ' + after.method + '，已放棄'));
                     return false;
                 }
                 raw.bytes = next;
-                noteSuccess(grant.__id, 'replace');
+                noteSuccess(entry, 'replace');
                 pluginLog(grant.__id, 'rewriteSend ' + method + ' → ' + after.method + '（' + next.length + ' bytes）');
                 return true;
             };
@@ -574,16 +588,16 @@
 
     // 整包替換 receive：type、msgId 不變；NOTIFY 的 method 不變，RESPONSE 不得帶 method（field 1 可省，Naki 按欄位號取 payload）
     // next 是 replace 入口已物化的宿主副本（第六、七輪），插件拿不到
-    function reshapeReceive(raw, env, method, grant, next) {
+    function reshapeReceive(raw, env, method, entry, next) {
         if (!raw.reshape || isReshapeForbidden(method)) return false;
         var after = parseEnvelope(next);
         if (!after || !isWellFormed(next) || after.type !== env.type || after.msgId !== env.msgId
             || (env.type === TYPE_RESPONSE ? !!after.method : after.method !== method)) {
-            noteFailure(grant.__id, 'replace', new Error('變長 replace 不合規（type／msgId／method 變了或 envelope 不完整），已放棄'));
+            noteFailure(entry, 'replace', new Error('變長 replace 不合規（type／msgId／method 變了或 envelope 不完整），已放棄'));
             return false;
         }
         raw.bytes = next;
-        noteSuccess(grant.__id, 'replace');
+        noteSuccess(entry, 'replace');
         return true;
     }
 
@@ -662,11 +676,11 @@
             injectedMsgIds.delete(injectedKey);
             var origin = registry.get(originId);
             if (origin && typeof origin.spec.onInjectResponse === 'function') {
-                var rctx = makeCtx(raw, env, method, isNaki, origin.grant);
+                var rctx = makeCtx(raw, env, method, isNaki, origin);
                 rctx.inResponseTo = env.msgId;
                 rctx.timedOut = false;
-                try { origin.spec.onInjectResponse(rctx); noteSuccess(originId, 'onInjectResponse'); }
-                catch (e) { noteFailure(originId, 'onInjectResponse', e); }
+                try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
+                catch (e) { noteFailure(origin, 'onInjectResponse', e); }
             }
             return;   // 注入回應不進一般鏈
         }
@@ -706,7 +720,7 @@
             if (typeof fn !== 'function') continue;
             var before = copy ? hostCopy(cur) : raw.bytes;
             if (copy) raw.bytes = before;
-            var ctx = makeCtx(raw, env, method, isNaki, entry.grant);
+            var ctx = makeCtx(raw, env, method, isNaki, entry);
             var snapshot = copy || raw.mutable === false ? null : u8slice.call(before);
             var isGuard = !!guard && guard.ids.indexOf(entry.id) !== -1;
             var approval = { id: entry.id, token: entry.token, version: versionOf(entry.id) };   // hook 執行前的版本
@@ -767,14 +781,14 @@
                 if (failure) {
                     if (isGuard) guard.threw.push(entry.id);
                     judge(state, entry, hook, true);
-                    noteFailure(entry.id, hook, failure.error);
+                    noteFailure(entry, hook, failure.error);
                 } else if (copy) {
                     passed.push({ entry: entry, hook: hook, state: state, thenable: thenable, isGuard: isGuard, approval: approval });
                 } else {
                     // 驗證都過了才記成功：先記會把違規前的連續失敗歸零（第二輪第 4 條）；thenable 的結果出來才記（第二輪第 6 條）
                     judge(state, entry, hook, false);
                     if (!thenable) {
-                        noteSuccess(entry.id, hook);
+                        noteSuccess(entry, hook);
                         if (isGuard) guard.approved.push(approval);
                     }
                 }
@@ -812,11 +826,11 @@
                 if (charged && p.isGuard) guard.threw.push(p.entry.id);
                 judge(p.state, p.entry, p.hook, charged);
                 if (charged || p.thenable) return;
-                noteSuccess(p.entry.id, p.hook);
+                noteSuccess(p.entry, p.hook);
                 if (p.isGuard) guard.approved.push(p.approval);
             });
             if (bad) {
-                try { noteFailure(last.id, 'onSend', new Error('鏈尾終判：' + bad + '，整筆退回原內容')); } catch (x) { /* 退回不受記帳影響 */ }
+                try { noteFailure(last, 'onSend', new Error('鏈尾終判：' + bad + '，整筆退回原內容')); } catch (x) { /* 退回不受記帳影響 */ }
             } else if (last && !sameBytes(cur, original) && finalViolation(cur, type, msgId, method, lobby)) {
                 cur = original;
                 env = parseEnvelope(original);
@@ -826,8 +840,8 @@
         // 送出：內容沒變就送原物件（插件從未拿到它）；變了就送宿主快照 cur
         if (copy) raw.bytes = cur;
         if (raw.bytes === original || (copy && sameBytes(cur, original))) { raw.bytes = original; return undefined; }
-        // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致
-        if (env && env.method) pendingMethods.set(msgKey(raw.wsId, env.msgId), env.method);
+        // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致。大廳鏈由 guardedSend 在守衛判決後提交（第九輪第 1 條）
+        if (!lobby) pairWith(raw.wsId, raw.bytes);
         return raw.bytes;
     }
 
@@ -907,7 +921,8 @@
             }
             // 把 id 綁進 grant 供 ctx.log 使用（不動原物件語意）
             grant.__id = id;
-            registry.set(id, { id: id, token: ++registerSeq, spec: spec, grant: grant });
+            var entry = { id: id, token: ++registerSeq, spec: spec, grant: grant };
+            registry.set(id, entry);
             failures.set(id, {});
             pluginLog(id, 'registered（capabilities=' + (grant.capabilities || []).join(',') + '）');
 
@@ -918,7 +933,7 @@
                 try {
                     spec.onRecommendations(makeRecommendationCtx(grant, window.__nakiRecommendations));
                 } catch (e) {
-                    noteFailure(id, 'onRecommendations', e);
+                    noteFailure(entry, 'onRecommendations', e);
                 }
             }
             return true;
@@ -1012,12 +1027,12 @@
             if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
             var env = parseEnvelope(bytes) || { type: TYPE_RESPONSE, msgId: msgId, method: null, payload: null };
             var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: bytes, mutable: false },
-                env, method || null, true, origin.grant);
+                env, method || null, true, origin);
             rctx.inResponseTo = msgId;
             rctx.timedOut = false;
             rctx.local = true;
-            try { origin.spec.onInjectResponse(rctx); noteSuccess(originId, 'onInjectResponse'); }
-            catch (e) { noteFailure(originId, 'onInjectResponse', e); }
+            try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
+            catch (e) { noteFailure(origin, 'onInjectResponse', e); }
         },
 
         // 推薦不是 WebSocket hook 的副產品：它要等 Swift / Mortal 推論完成才存在。
@@ -1030,9 +1045,9 @@
                 try {
                     diagnostics.recommendationHooks++;
                     entry.spec.onRecommendations(makeRecommendationCtx(entry.grant, recs, context));
-                    noteSuccess(id, 'onRecommendations');
+                    noteSuccess(entry, 'onRecommendations');
                 } catch (e) {
-                    noteFailure(id, 'onRecommendations', e);
+                    noteFailure(entry, 'onRecommendations', e);
                 }
             });
         },

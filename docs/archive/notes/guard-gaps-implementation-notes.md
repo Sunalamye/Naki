@@ -330,3 +330,38 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 - 同一筆送出中守衛者被污染或重新註冊時，這一筆改回本地錯誤，即使內容沒改。live 上污染由大廳回應改寫觸發，與換裝請求同步交錯的機率低，未見。
 - 未污染守衛者在一筆送出中途停用時，這一筆送遊戲原請求，不送其他插件的改動。
 - WebKit、live 未驗證（I2）。
+
+## 第九輪（Astra 第八輪審查：2【應修】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review8.md`。Deviations 35–43 主線採納。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 應修 1 | 唯一守衛自停用後 `replace` 把 SKIN 換成 loginBeat：wire 退回原 SKIN（`guard_left`），RESPONSE 卻派給 loginBeat 插件 | 大廳鏈的 `runChain` 不再自己登記配對；`guardedSend` 在判決之後，依 `raw.bytes`（擋下、解除守衛、退回原內容時都已還原成原請求）呼叫 `pairWith` 提交。非大廳鏈沒有守衛判決，維持鏈尾提交（`GG9-1`） |
+| 應修 2 | 記帳以 id 查表：舊實例延後的成功清掉新實例的計數、舊實例的鏈尾違規算給新實例、晚到 rejection 的 `message` getter 換實例後算給新實例 | `noteFailure`／`noteSuccess` 改收註冊實例，讀完錯誤訊息後才核對 `registry.get(id) === entry`，不符就丟棄；停用也只停那個實例。所有呼叫端（鏈、`replace`、`onInjectResponse`、`onRecommendations`、thenable）都傳實例（`GG9-2`、`GG9-2b`） |
+| 建議 3 | 契約「由其餘守衛者照常判定」沒交代退出前已否決的情況 | 契約補例外；`GG9-3` 鎖住拋錯與 thenable 兩種，修前即綠 |
+
+### 第九輪 Deviations
+
+44. **配對以判決後的 `raw.bytes` 為準，不另算。** 擋下（`blockSend`）、`guard_left` 與例外路徑都先把 `raw.bytes` 還原成遊戲原物件，放行時 `raw.bytes` 是要送的快照，所以一個出口統一提交，不在每個分支各寫一次。
+45. **被擋下的請求沒有另補配對測試。** 擋下時本地錯誤回應經 `respondLocal` 交付，那條路先刪掉該 msgId 的配對，之後不會再有同 msgId 的伺服器回應，配對對不對外部觀察不到。原計畫的 `GG9-1b` 因此撤掉，改由 `GG9-1` 的「解除守衛」與「沒有守衛」兩情境驗。
+46. **實例核對放在 `noteFailure`／`noteSuccess` 裡，不只放在鏈上。** 主線點名鏈尾與 thenable。放在記帳函式本身，`replace`、`onInjectResponse`、`onRecommendations` 也一併受保護，第八輪 thenable 入口的個別核對就不需要了。第八輪變異 `V12` 因此不再適用，由 `W3`、`W4` 取代。
+47. **`runChain` 在大廳上也登記配對的變異是等價的。** `guardedSend` 判決後一定會用同一個 key 覆寫，所以不列入變異。
+
+### 第九輪驗證（log：主 repo `.swfd/logs/guard-gaps/r9-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第八輪 HEAD `78b14a3` 的 JS | 3 紅：`GG9-1`、`GG9-2`、`GG9-2b`。`GG9-3` 修前即綠，用來固定建議 3 的行為 | `r9-red-b2-on-78b14a3.log` |
+| rebase | main 仍是 `92dbe39`，分支已在其上 | |
+| 變異（b2＋v2＋p4，扣基線，`NAKI_PLUGINS_DIR` 指向 naki-plugins） | 64／66 被殺。新增 W1、W3、W4、W5 全殺；存活的 `T7`、`U10` 為既有等價變異 | `r9-mutation.log` |
+| node 五套 | b2 154／0（0 略過）、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r9-green-*.log` |
+| naki-plugins `local-unlock-naki.cjs` | 9／0 | `r9-green-local-unlock-naki.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 19／0 | `r9-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1184／0，無 test host 重啟 | `r9-test-full.log` |
+| `git diff main --check` | 無警告 | |
+
+### 第九輪未驗證與風險
+
+- 舊實例的記帳整筆丟棄，包括 log。插件停用或重新註冊前一刻的失敗不會出現在 log。
+- WebKit、live 未驗證（I2）。

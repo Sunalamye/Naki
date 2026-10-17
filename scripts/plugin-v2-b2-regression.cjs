@@ -2418,3 +2418,93 @@ test('GG8-14: an untainted guard auto-disabled by its tenth throw still blocks t
     assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === ID), false, kind);
   }
 });
+
+// ---- guard-gaps 第九輪（Astra guard-gaps 第八輪 1–3 條）：回應配對等守衛判決、記帳綁註冊實例、退出守衛的否決 ----
+function responders9(t) {
+  const got = { skin: 0, beat: 0 };
+  t.c.__nakiPlugins.setGrant('skinR9', { capabilities: ['observe'], methods: [SKIN], priority: 500 });
+  t.c.__nakiPlugins.register({ id: 'skinR9', onReceive() { got.skin++; } });
+  t.c.__nakiPlugins.setGrant('beatR9', { capabilities: ['observe'], methods: [BEAT], priority: 500 });
+  t.c.__nakiPlugins.register({ id: 'beatR9', onReceive() { got.beat++; } });
+  return got;
+}
+
+test('GG9-1 (Astra8 1): the only guard leaves, then a replace turns SKIN into loginBeat — the wire carries the original SKIN and its RESPONSE goes to the SKIN plugin; with no guard at all both follow loginBeat', async () => {
+  for (const guarded of [true, false]) {
+    const t = page();
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    if (guarded) guardPlugin(t.c, { behave: () => { t.c.__nakiPlugins.disable(ID); } });
+    t.c.__nakiPlugins.setGrant('rw9', { capabilities: ['observe', 'rewriteSend'], methods: [SKIN], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'rw9', onSend(ctx) { assert.equal(ctx.replace(request(ctx.msgId, BEAT)), true); } });
+    const got = responders9(t);
+    t.lobby.send(request(1600, SKIN, [8, 1]));
+    await tick();
+    const label = guarded ? 'guard left' : 'no guard';
+    assert.equal(methodOf(Uint8Array.from(t.lobby.committed[0])), guarded ? SKIN : BEAT, label);
+    if (guarded) assert.deepEqual(lastGuard(t), [[1600, 'sent', 'guard_left']], label);
+    t.lobby.receive(response(1600, [8, 1]));
+    assert.deepEqual(got, guarded ? { skin: 1, beat: 0 } : { skin: 0, beat: 1 }, label);
+  }
+});
+
+test('GG9-2 (Astra8 2): accounting is bound to the registered instance — an old instance\'s deferred success or chain-end violation never touches a replacement under the same id', () => {
+  const FIRE = '.lq.Lobby.fetchServerTime';
+  const countsOf = t => t.events('log').filter(e => e.data.id === 'a9').map(e => (/onSend 拋錯（第 (\d+) 次）/.exec(e.data.msg) || [])[1]).filter(Boolean).map(Number);
+  const swap = (t, after) => {
+    t.c.__nakiPlugins.disable('a9');
+    t.c.__nakiPlugins.setGrant('a9', { capabilities: ['observe'], methods: [FIRE] });
+    assert.equal(t.c.__nakiPlugins.register({ id: 'a9', onSend() { throw new Error('new A'); } }), true);
+    if (after) after();
+  };
+  {
+    // 舊 A 成功（延後到鏈尾），鏈中被換掉、新 A 連錯 9 次：鏈尾不清新 A 的計數，第 10 次停用
+    const t = page();
+    observer7(t, 'a9', [OAUTH7], () => {});
+    observer7(t, 'b9', [OAUTH7], () => swap(t, () => { for (let i = 0; i < 9; i++) t.lobby.send(request(1610 + i, FIRE)); }), 1);
+    t.lobby.send(request(1609, OAUTH7, [8, 1]));
+    t.lobby.send(request(1619, FIRE));
+    assert.deepEqual(countsOf(t), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'deferred success');
+    assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'a9'), false, 'deferred success');
+  }
+  {
+    // 舊 A 鏈尾違規，鏈中被換掉：違規不算給新 A
+    const t = page();
+    observer7(t, 'a9', [OAUTH7], ctx => { ctx.bytes[ctx.bytes.length - 1] ^= 1; });
+    observer7(t, 'b9', [OAUTH7], () => swap(t), 1);
+    t.lobby.send(request(1620, OAUTH7, [8, 1]));
+    assert.deepEqual(countsOf(t), [], 'chain-end violation');
+    t.lobby.send(request(1621, FIRE));
+    assert.deepEqual(countsOf(t), [1], 'chain-end violation');
+  }
+});
+
+test('GG9-2b (Astra8 2): a late rejection whose message getter swaps the instance is not charged to the new one', async () => {
+  const t = page();
+  let reject;
+  observer7(t, 'a9', [BEAT], () => new Promise((_, r) => { reject = r; }));
+  t.lobby.send(request(1630, BEAT));
+  const err = { get message() {
+    t.c.__nakiPlugins.disable('a9');
+    t.c.__nakiPlugins.setGrant('a9', { capabilities: ['observe'], methods: [BEAT] });
+    t.c.__nakiPlugins.register({ id: 'a9', onSend() { throw new Error('new A'); } });
+    return 'old A';
+  } };
+  reject(err);
+  await tick();
+  assert.equal(t.events('log').some(e => e.data.id === 'a9' && /old A/.test(e.data.msg)), false);
+  t.lobby.send(request(1631, BEAT));
+  assert.equal(t.events('log').some(e => e.data.id === 'a9' && /onSend 拋錯（第 1 次）：new A/.test(e.data.msg)), true);
+});
+
+test('GG9-3 (Astra8 3): a guard that throws or returns a thenable and then leaves still vetoes this request even if the remaining guard approves', async () => {
+  for (const kind of ['throw', 'thenable']) {
+    const t = page();
+    guardPlugin(t.c, { behave: () => { t.c.__nakiPlugins.disable(ID); if (kind === 'throw') throw new Error('veto'); return new Promise(() => {}); } });
+    t.c.__nakiPlugins.setGrant('g9', { capabilities: ['observe'], methods: [SKIN], sendGuard: [SKIN], priority: 200 });
+    assert.equal(t.c.__nakiPlugins.register({ id: 'g9', onSend() {} }), true);
+    t.lobby.send(request(1640, SKIN, [8, 1]));
+    await tick();
+    assert.deepEqual(sentIds(t), [], kind);
+    assert.deepEqual(lastGuard(t), [[1640, 'local_error', kind === 'throw' ? 'hook_threw' : 'async_hook']], kind);
+  }
+});
