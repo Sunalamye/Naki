@@ -43,3 +43,25 @@
 
 - 設計 §8 的 L1–L7 全部（live）。
 - `reshapeReceive` 的 manifest 錯誤字串沒有加翻譯；catalog 查不到時原樣顯示。
+
+## Astra 第二輪（0 擋 1 應修 3 建議，主線裁決全採納）
+
+原文 `.swfd/logs/p4-review/astra-review2.md`。第一輪 1–9 條核對：1、2、4–7、9 已修；3、8 部分（live 未跑；哨兵敘述過滿，即本輪應修 1）。
+
+| # | 等級 | 問題 | 處理 | 證據 |
+|---|---|---|---|---|
+| 1 | 應修 | 哨兵只能偵測原事件抵達哨兵的失效，文件寫得過滿 | 採納。設計 §1.1、§5 限縮為「只偵測原事件抵達哨兵」，列出盲區一（原事件 stop 無效，但後註冊的遊戲 capture handler 以有效 stop 阻斷）與盲區二（哨兵未註冊或自身失效沒有獨立偵測）。補反例測試。notes 寫明舊 harness「保留第一個 listener」不當順序證據，順序證據只來自 P4 多 listener harness 與 live L4–L6 | node 反例 `known blind spot: ...`：遊戲 capture handler 收兩份、`faults` 0、不鎖、後續 replace 仍成功；設計 §5「哨兵」、§7；notes D11 |
+| 2 | 建議 | D10 應稱為已記錄的降級交付 | 採納為文件。D10 改名；寫明鎖定只停後續變長 replace／drop，不重同步、不停遊戲與自動操作；`delivered` 不代表解碼成功，驗收要與 `faults` 一起看 | 設計 §5 表與 kill-switch 段；契約段；notes D10 |
+| 3 | 建議 | 名單反查是有限掃描 | 採納為文件。敘述限縮為「兩檔字面值＋三組常數的明確盤點」，不宣稱日後新增消費端必被擋。Lobby 未封鎖的 `fetchCharacterInfo`、`fetchAccountCharacterInfo`、`fetchAccountInfo`、`fetchAllCommonViews` 列為允許變長的合法用例 | 設計 §4 |
+| 4 | 建議 | Swift validate 不是授權邊界 | 採納為文件。契約段與設計 §2.1 寫明 grant／L3 與插件同 realm，validate 是選用條件不是隔離邊界，沿用既有信任模型 | 契約段 Phase 4；設計 §2.1 |
+
+### 驗證（第三輪）
+
+| 項目 | 結果 |
+|---|---|
+| `plugin-v2-p4-regression` | 24／24 |
+| JSContract、NakiWebSocketScript | 20／0（`.swfd/logs/p4/r3-targeted-tests.log`） |
+
+### 仍未驗證
+
+- 設計 §8 的 L1–L7 全部（live）。盲區一在實際 WebKit 是否會出現也未驗證。

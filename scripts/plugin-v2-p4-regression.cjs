@@ -35,7 +35,7 @@ function page(mode = 'capture', { url = 'wss://route-2.maj-soul.com/gateway', no
       const list = mode === 'order' ? this.listeners.slice()
         : this.listeners.filter(l => l.capture).concat(this.listeners.filter(l => !l.capture));
       for (const l of list) {
-        if (ev.stopped && mode !== 'nostop') break;
+        if ((ev.stopped && mode !== 'nostop') || ev.gameStopped) break;
         try { l.fn.call(this, ev); } catch (e) { errorListeners.forEach(f => f({ error: e })); }
       }
       return true;
@@ -311,6 +311,23 @@ test('nostop dispatcher: the duplicate cannot be prevented, but the sentinel rec
   const next = t.recv(notify(NOTE, [2]));
   assert.deepEqual(results, [true, false]);
   assert.equal(t.game[2], next);
+});
+
+test('known blind spot: if only Naki\'s stop fails and a later game capture handler stops the original, the sentinel never runs', () => {
+  const t = page('nostop');
+  const results = [];
+  plugin(t.c, 'p', { onReceive: ctx => { results.push(ctx.replace(notify(NOTE, [1, 2, 3]))); } });
+  const lateCapture = [];
+  let original = null;
+  t.ws.addEventListener('message', e => { lateCapture.push(e); if (e === original) e.gameStopped = true; }, true);
+  original = new t.c.MessageEvent('message', { data: notify(NOTE, [1]).buffer });
+  t.ws.dispatchEvent(original);
+  assert.deepEqual(lateCapture.map(e => e === original), [false, true], 'the game capture handler gets both copies');
+  assert.deepEqual(t.game.map(e => e === original), [false]);
+  assert.equal(t.stats().reshape.faults, 0);
+  assert.equal(t.stats().reshapeLocked, false);
+  t.recv(notify(NOTE, [2]));
+  assert.deepEqual(results, [true, true], 'not locked: reshaping continues');
 });
 
 test('taint: a guard plugin that replaces (variable length) or drops lobby traffic is tainted until reload', () => {

@@ -400,6 +400,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
   - method 不在下方禁改名單。不成立時回 `false`。
   - 新 bytes 每個欄位在界內；type、msgId 不變；NOTIFY 的 method 不變且非空；RESPONSE 不得帶非空 method，field 1 可省。不成立時回 `false`，計一次 `replace` 失敗。
   - 等長仍是就地改，與 v1 相同。
+  - Swift 的 manifest 驗證是選用條件，不是隔離邊界。grant 與 L3 開關跟插件在同一個 realm，可被直接改寫，沿用 §8 的信任模型。
 - **遷移**：沒有宣告 `reshapeReceive` 的既有插件，長度不等的 `replace` 仍回 `false`，行為與 v1 相同，不必改。要用新語意的插件加上 `reshapeReceive`，並把「回 `false` 時的替代處理」保留給禁改名單與不合規的情況。
 - **`ctx.drop()`**（`dropReceive`，L3）：只有 NOTIFY 有。每次呼叫檢查總開關，關著回 `false`。成功後遊戲與 Naki 都收不到這則，後續插件也收不到。
 - **禁改名單**（變長 `replace` 與 `drop` 共用，`rewriteAllow` 解不開，以全名比對）：來源是 Naki 的 Swift 端會據以改牌局、帳號或匹配狀態的訊息。
@@ -409,7 +410,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
   - method 對不回的 RESPONSE
   - `isNaki` 流量照舊沒有 `replace`、`drop`。
 - **hook 拋錯**：鏈回到該 hook 進入前的狀態。它這次的整包替換、就地改寫與 `drop` 都撤回；先前插件成功的改寫保留並照常交付。只有它一個插件時，等於原事件照常交付。
-- **交付故障與頁面鎖死**：改寫後的交付若在攔下原事件之後失敗（Swift 拒收、派發拋錯、派發期間有 listener 拋錯、原事件攔不住），本頁面之後不再提供變長 `replace` 與 `drop`，頁面重載才恢復，停用插件也不會解除。log 出現插件 id `naki` 的一行，列出故障種類、method、msgId 與候選改寫者。候選不等於元兇。
+- **交付故障與頁面鎖死**：改寫後的交付若在攔下原事件之後失敗（Swift 拒收、派發拋錯、派發期間有 listener 拋錯、原事件攔不住），本頁面之後不再提供變長 `replace` 與 `drop`，頁面重載才恢復，停用插件也不會解除。鎖定只停這兩個原語，不重同步、不停遊戲與自動操作。Swift 拒收時遊戲仍收到改寫後的版本，這是已記錄的降級交付。log 出現插件 id `naki` 的一行，列出故障種類、method、msgId 與候選改寫者。候選不等於元兇。
 - **送出守衛**：宣告 `sendGuard` 的插件在大廳連線上變長改寫或 `drop` 一則，與等長改寫一樣會污染到頁面重載。
 - **`injectReceive`**：只有設計，未實作。設計採弱順序：只保證排在當前這則之後交付，中間可能插進其他網路訊息。
 

@@ -35,7 +35,7 @@ probe 的事實（`plugin-v2.md` §9.6，第二輪）：
 Naki 在 `new WebSocket()` 包裝器裡註冊兩個 `message` listener，時點都是建構當下：
 
 1. **主 listener**，capture。依 (d)，WebKit 在 target 上先跑 capture，capture 之間照註冊順序，所以它永遠第一。
-2. **哨兵**，非 capture，排在所有非 capture 之首。它只做一件事：若看到已被攔下的原事件，代表 `stopImmediatePropagation` 沒生效，記故障並鎖死（§5）。
+2. **哨兵**，非 capture，排在所有非 capture 之首。它只偵測一種失效：已被攔下的原事件**抵達哨兵**，代表 `stopImmediatePropagation` 沒生效，記故障並鎖死。偵測範圍與盲區見 §5「哨兵」。
 
 ### 1.2 與 main 的差異（型別 × 遊戲註冊方式）
 
@@ -92,6 +92,7 @@ Naki 在 `new WebSocket()` 包裝器裡註冊兩個 `message` listener，時點�
 - **等長**：`rewriteReceive`，就地改，與 v1 相同，不碰事件。
 - **長度不等**：需要 `rewriteReceive`＋**`reshapeReceive`**。沒宣告 `reshapeReceive` 的插件照 v1 回 `false`，控制流程不變。
   - `reshapeReceive` 是明確選用。`PluginManifest.validate` 認得它：只宣告 `reshapeReceive` 不宣告 `rewriteReceive` 視為 manifest 無效。grant 原樣下發到 JS。
+  - Swift validate 是**選用條件，不是隔離邊界**。grant 與 L3 開關在 JS 同 realm 可寫，插件可直接改 grant 或經 `setGrant` 重新註冊而不經 validate。沿用既有信任模型（`plugin-api-v1.md` §8）。
   - 等級仍是 L2（Astra 表態 #3：長度不是可靠的分級界線）。
 - 長度不等時，以下全部成立才回 `true`：
   - 這則是 ArrayBuffer 原事件，頁面未鎖死。
@@ -141,10 +142,10 @@ hook 拋錯時，鏈**回到該 hook 進入前的狀態**。先前成功的插�
 | 編碼失敗 | 建構期 | fail-open，`fallback` +1，不鎖 |
 | 合成事件建不出來 | 建構期 | 同上 |
 | 攔不下原事件（呼叫拋錯） | 建構期 | 同上 |
-| bridge 拒收 | 交付期 | 故障 `bridge_rejected`，鎖死；合成事件仍交付；不算 delivered |
+| bridge 拒收 | 交付期 | **已記錄的降級交付**：故障 `bridge_rejected`，鎖死；合成事件仍交付給遊戲；不算 delivered |
 | `dispatchEvent` 拋錯 | 交付期 | 故障 `dispatch_threw`，鎖死；不重送原事件；不算 delivered |
 | 合成派發期間有 listener 拋錯 | 交付期 | 故障 `synthetic_dispatch_error`，鎖死 |
-| 攔下後原事件仍被派發 | 交付後 | 故障 `stop_ineffective`，鎖死。這一則遊戲已收到兩份，無法挽回 |
+| 攔下後原事件抵達哨兵 | 交付後 | 故障 `stop_ineffective`，鎖死。這一則遊戲已收到兩份，無法挽回 |
 
 ---
 
@@ -176,7 +177,11 @@ hook 拋錯時，鏈**回到該 hook 進入前的狀態**。先前成功的插�
 
 另加兩個前綴：全部 `.lq.FastTest.*`（對局 RESPONSE，例如 `inputOperation`，是自動打牌的依據）與全部 `.lq.Route.*`（連線層）。結構上另外排除 `isNaki` 流量，以及 method 對不回的 RESPONSE。
 
-**一致性測試**：`JSContractTests.testReshapeForbiddenListCoversEverySwiftConsumedMethod` 從 `MajsoulBridge.swift`、`LiqiParser.swift` 抽出所有 `".lq.…"` 字面值，再加上 `loginResponseMethods`、`startUnifiedMatchMethod`、`broadcastMethod`，逐一呼叫 JS 的 `__nakiPlugins.isReshapeForbidden`，缺一即紅。Swift 日後新增消費端時會被擋下。
+**一致性測試**：`JSContractTests.testReshapeForbiddenListCoversEverySwiftConsumedMethod` 從 `MajsoulBridge.swift`、`LiqiParser.swift` 抽出所有 `".lq.…"` 字面值，再加上 `loginResponseMethods`、`startUnifiedMatchMethod`、`broadcastMethod`，逐一呼叫 JS 的 `__nakiPlugins.isReshapeForbidden`，缺一即紅。
+
+這是**兩檔字面值＋三組常數的明確盤點**，不是語意分析。其他檔案的常數引用、動態拼接的 method，或以前綴判斷涵蓋的方法都抽不到。所以不宣稱日後新增的 Swift 消費端必被擋下；新增時要同步更新名單或測試的掃描範圍。
+
+**允許變長的合法用例**：名單沒有封鎖全部 Lobby。`.lq.Lobby.fetchCharacterInfo`、`fetchAccountCharacterInfo`、`fetchAccountInfo`、`fetchAllCommonViews` 不是 Swift 消費端，刻意允許變長 replace，這是解鎖類插件的目標用例。
 
 等長改寫仍沿用 v1 的禁改名單與 `rewriteAllow`，本輪不動。
 
@@ -216,7 +221,19 @@ hook 拋錯時，鏈**回到該 hook 進入前的狀態**。先前成功的插�
 | 頁面鎖死（本包） | 任何一種故障發生一次就鎖 | 之後不再提供變長 `replace`／`drop`，頁面重載才解。停用某個插件不解鎖（Astra 表態 #7）。送一行 log，插件 id `naki`，帶 kind、method、msgId、候選改寫者 |
 | 自動停用（已存在） | 某 hook 連續失敗 10 次 | 該插件本頁面停用 |
 
-鎖死無法修復已經分叉的那一則，只能防止下一則。
+鎖死無法修復已經分叉的那一則，只能防止下一則。鎖死**只停後續的變長 replace／drop**：不重同步 Swift，不停遊戲，不停等長改寫，也不停自動操作。
+
+**已記錄的降級交付（bridge 拒收）**：遊戲收到新 bytes，Swift 沒收到任一版本。選這條是為了不重送原事件、也不讓遊戲卡在等 RESPONSE。
+
+**驗收要把計數一起看**：`sendToSwift` 回 `true` 只代表 `postMessage` 沒有同步拋錯；`delivered` 也不代表遊戲解碼成功。listener 拋錯時可能同時 `delivered` +1、`faults` +1。判定交付正常要看 `delivered` 等於嘗試次數**且** `faults` 為 0。
+
+**哨兵**：
+
+- 只偵測「已攔下的原事件抵達哨兵」。正常的合成事件不在 `stoppedEvents`，不會誤鎖。
+- **已知盲區一**：原事件的 stop 無效，而遊戲在 Naki 之後註冊的 capture handler 又以有效的 stop 阻斷原事件。那個 handler 收到合成與原事件兩份，哨兵沒執行，`faults` 為 0、不鎖。node 反例測試鎖住這個行為。實際 WebKit 是否出現此條件未驗證。
+- **已知盲區二**：哨兵沒註冊成功或自身失效時，沒有獨立的偵測。
+- 零插件主路徑多一次 listener 呼叫與一次 WeakMap 查找，沒有多複製 bytes。
+- 順序證據只來自 P4 的多 listener harness 與 live L4–L6。舊 harness 改成「保留第一個 listener」只為讓舊案例照常執行，它略過了哨兵，**不能當順序證據**。
 
 ---
 
@@ -233,10 +250,10 @@ receive 側的改寫不會送出任何東西。但變長 `replace`、`drop`、`i
 
 ## 7. 問題 6：測試策略
 
-**node**（`scripts/plugin-v2-p4-regression.cjs`，23 條）：
+**node**（`scripts/plugin-v2-p4-regression.cjs`，24 條）：
 
 - 假 dispatcher 三種：`capture`（WebKit 實測）、`order`（(d)=false）、`nostop`。
-- `nostop` **不是通過證據**。它只證明攔截失效時遊戲會收兩份，以及哨兵會記 `stop_ineffective` 並鎖死。
+- `nostop` **不是通過證據**。它只證明攔截失效時遊戲會收兩份，以及原事件抵達哨兵時會記 `stop_ineffective` 並鎖死。另有一條反例斷言盲區一：後註冊的遊戲 capture handler 阻斷原事件時，哨兵不執行、不鎖。
 - 故障注入三案：編碼失敗、bridge 拒收、dispatch 拋錯。每案斷言故障狀態、計數與「沒有記成交付」。
 - main 差異比較：同一串事件分別跑 main（`2d02a03`）與 HEAD 的 JS，比對遊戲收到的 bytes 與順序、Swift 序列、socket 送出物件。零插件與等長改寫兩組都逐一相同。事件串含 byteOffset 非 0 的 TypedArray 送出。
 - Blob：假 dispatcher 補 `FileReader`，斷言遊戲先收到原 Blob 事件、Swift 收到完整 bytes、插件沒有 `replace`／`drop`。
