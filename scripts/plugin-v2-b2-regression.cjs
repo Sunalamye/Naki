@@ -495,14 +495,15 @@ test('R4-1b (Astra3 1): guard lookup throwing never blocks a Naki-sent inputOper
   assert.deepEqual(sentOn(g), [60400]);
 });
 
-test('R4-1c (Astra3 1): with a healthy guard, a Blob on the game connection still goes out', () => {
+test('R4-1c (Astra3 1): with a healthy guard, a Blob on a connection locked as game still goes out', () => {
   const t = page();
   guardPlugin(t.c);
   pollute(t);
   const g = gameSocket(t.c);
+  g.send(request(401, '.lq.FastTest.authGame'));
   const blob = new t.c.Blob([request(402, OP)]);
   g.send(blob);
-  assert.equal(g.sent[0], blob);
+  assert.equal(g.sent[1], blob);
 });
 
 test('R4-1d (Astra3 1, D13 rewrite): on the lobby, a known non-guard method hit by an internal error is restored and sent', async () => {
@@ -760,26 +761,71 @@ test('R5-3b (Astra4 3): the same narrowing holds on the bridge-error path', asyn
 // ---- 審查第五輪（Astra 第五輪 1–6）：保證範圍的殘餘反例與獨立變異的鎖 ----
 const settle = async (until, n = 20) => { for (let i = 0; i < n && !until(); i++) await tick(); };
 
-test('R6-1 residual (Astra5 1): with no open lobby, sendRaw falls back to the game connection, so a coexisting sendRequest goes out unguarded', async () => {
+// guard-gaps：第五輪三條殘餘（D28–D30）改為修掉，原本鎖現行行為的 R6-1～R6-3 改鎖修後行為
+function injector(t, { methods = [OP], got = [] } = {}) {
+  let inject;
+  t.c.__nakiPlugins.setGrant('inj', { capabilities: ['observe', 'injectSend'], methods });
+  t.c.__nakiPlugins.register({ id: 'inj', onSend(ctx) { inject = ctx.sendRequest; },
+    onInjectResponse(ctx) { got.push({ msgId: ctx.inResponseTo, local: ctx.local, bytes: Array.from(ctx.bytes) }); } });
+  return () => inject;
+}
+function fallbackPage({ taint = true } = {}) {
   const t = page();
   t.c.__nakiPluginsMayModifyOutbound = true;
   guardPlugin(t.c);
-  pollute(t);
-  t.c.__nakiPlugins.disable(ID);
-  let inject;
-  t.c.__nakiPlugins.setGrant('inj', { capabilities: ['observe', 'injectSend'], methods: [OP] });
-  t.c.__nakiPlugins.register({ id: 'inj', onSend(ctx) { inject = ctx.sendRequest; } });
+  if (taint) { pollute(t); t.c.__nakiPlugins.disable(ID); }
+  const got = [];
+  const inject = injector(t, { got });
   const g = gameSocket(t.c);
   g.send(request(700, AUTH));
   g.send(request(701, OP));
   t.lobby.close();
-  const r = inject(SKIN, new t.c.Uint8Array([8, 1]));
-  assert.equal(r.ok, true);
-  assert.deepEqual(sentOn(g), [700, 701, r.msgId]);
-  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log, []);
+  return { t, g, got, inject: (m, p = [8, 1]) => inject()(m, new t.c.Uint8Array(p)) };
+}
+
+test('R6-1 (Astra5 1, guard-gaps a): with no open lobby, a coexisting sendRequest of a guarded method that falls back to the game connection is blocked as tainted_fallback', async () => {
+  const { t, g, got, inject } = fallbackPage();
+  const r = inject(SKIN);
+  assert.equal(r.ok, true, 'same outcome as on the lobby: accepted, then a local error');
+  await tick();
+  assert.deepEqual(sentOn(g), [700, 701]);
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[r.msgId, 'local_error', 'tainted_fallback']]);
+  assert.deepEqual(plain(got), [{ msgId: r.msgId, local: true, bytes: errorResponse(r.msgId) }]);
+  assert.equal(roleOf(t, g), 'game');
 });
 
-test('R6-2 residual (Astra5 2): an in-place rewrite outside ctx.replace on an unknown Route request or a lobby FastTest request goes out unguarded', async () => {
+test('guard-gaps a: the fallback block follows the lobby rule — an untainted registered guard also blocks; an unguarded method still goes out', async () => {
+  const { t, g, inject } = fallbackPage({ taint: false });
+  const blocked = inject(SKIN);
+  const free = inject(TITLE);
+  await tick();
+  assert.deepEqual(sentOn(g), [700, 701, free.msgId]);
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[blocked.msgId, 'local_error', 'tainted_fallback']]);
+});
+
+test('guard-gaps a: Naki self-send and the game\'s own requests on the game connection are not judged as injections', async () => {
+  const { t, g, inject } = fallbackPage();
+  const r = inject(SKIN);
+  t.c.__nakiWebSocket.sendRaw(b64(request(60020, SKIN)));
+  g.send(request(r.msgId, SKIN));
+  await tick();
+  assert.deepEqual(sentOn(g), [700, 701, 60020, r.msgId]);
+  assert.deepEqual(guardLog(t).map(e => e[3]), ['tainted_fallback']);
+});
+
+test('guard-gaps a: when guard lookup throws during a fallback injection, only GUARDABLE_METHODS are blocked', async () => {
+  const { t, g, inject } = fallbackPage();
+  t.c.__nakiPlugins.setGrant('broken', { methods: [TITLE], sendGuard: [TITLE] });
+  t.c.__nakiPlugins.register({ id: 'broken', onSend() {} });
+  t.c.__nakiPluginGrants.broken.sendGuard.indexOf = () => { throw new Error('lookup broke'); };
+  const guarded = inject(TITLE);
+  const plainLobby = inject('.lq.Lobby.fetchAccountInfo');
+  await tick();
+  assert.deepEqual(sentOn(g), [700, 701, plainLobby.msgId]);
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[guarded.msgId, 'local_error', 'tainted_fallback']]);
+});
+
+test('R6-2 (Astra5 2, guard-gaps b): an in-place rewrite outside ctx.replace into a guarded method on an unknown Route request or a lobby FastTest request is reverted and the original goes out', async () => {
   for (const [first, method] of [[null, ROUTE], [BEAT, OP]]) {
     const t = page();
     guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
@@ -787,27 +833,68 @@ test('R6-2 residual (Astra5 2): an in-place rewrite outside ctx.replace on an un
     t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) { ctx.bytes.set(request(ctx.msgId, SKIN, [8, 1])); } });
     const ws = first ? t.lobby : new t.c.WebSocket('wss://route-6.maj-soul.com/gateway');
     if (first) ws.send(request(709, first));
-    ws.send(request(710, method, [8, 1, 8, 1]));
+    const req = request(710, method, [8, 1, 8, 1]);
+    const original = Array.from(req);
+    ws.send(req);
     await tick();
     const out = ws.sent.slice(-1)[0];
-    assert.deepEqual(Array.from(new Uint8Array(out.buffer ? out.buffer : out)), Array.from(request(710, SKIN, [8, 1])), method);
+    assert.deepEqual(Array.from(new Uint8Array(out.buffer ? out.buffer : out)), original, method);
     assert.equal(roleOf(t, ws), first ? 'lobby' : undefined, method);
+    assert.equal(t.events('log').some(e => /就地改寫成守衛方法/.test(e.data.msg)), true, method);
   }
 });
 
-test('R6-3 residual (Astra5 3): a first Lobby request sent as Blob on an unknown connection goes out; the async copy locks lobby only afterwards', async () => {
+test('guard-gaps b: on a game connection an in-place rewrite into any GUARDABLE method is reverted without reading sendGuard; other in-place changes still go out', async () => {
+  const t = page();
+  let reads = 0;
+  t.c.__nakiPlugins.setGrant('g', { capabilities: ['observe'], methods: [SKIN], get sendGuard() { reads++; return [SKIN]; } });
+  t.c.__nakiPlugins.register({ id: 'g', onSend() {} });
+  t.c.__nakiPlugins.setGrant('obs', { capabilities: ['observe'], methods: [OP, '.lq.Lobby.useTitle'] });
+  t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) {
+    if (ctx.msgId === 761) ctx.bytes.set(request(761, TITLE, new Array(ctx.bytes.length - 5 - TITLE.length - 2).fill(8)));
+    else ctx.bytes[ctx.bytes.length - 1] ^= 1; } });
+  const g = gameSocket(t.c);
+  g.send(request(760, AUTH));
+  const before = reads;
+  const a = request(761, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1, 8, 1, 8, 1]);
+  const aOriginal = Array.from(a);
+  g.send(a);
+  const b = request(762, OP, [8, 1]);
+  const bChanged = Array.from(b); bChanged[bChanged.length - 1] ^= 1;
+  g.send(b);
+  const c = request(763, TITLE, [8, 1]);
+  const cOriginal = Array.from(c);
+  g.send(c);
+  await tick();
+  assert.equal(reads, before, 'no sendGuard read on the game connection');
+  const bytesOut = g.sent.slice(1).map(d => Array.from(new Uint8Array(d.buffer ? d.buffer : d)));
+  assert.deepEqual(bytesOut[0], aOriginal, 'rewrite into useTitle reverted');
+  assert.deepEqual(bytesOut[1], bChanged, 'a non-guardable in-place change is not this guard\'s business');
+  assert.deepEqual(bytesOut[2], cOriginal, 'a payload change to an existing Lobby request on game (§1.4 item 5) is reverted too');
+});
+
+test('R6-3 (Astra5 3, guard-gaps c): a Blob on a connection whose role is not yet known is refused while a guard is present', async () => {
   const t = page();
   guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
   const u = new t.c.WebSocket('wss://route-6.maj-soul.com/gateway');
   u.send(request(720, ROUTE));
   const blob = new t.c.Blob([request(721, SKIN)]);
   u.send(blob);
-  assert.equal(u.sent[1], blob);
-  await settle(() => roleOf(t, u) === 'lobby');
-  assert.equal(roleOf(t, u), 'lobby');
+  assert.equal(u.sent.length, 1, 'the Blob is not sent');
+  await tick();
+  assert.equal(roleOf(t, u), undefined, 'a refused Blob is not dispatched, so it does not lock a role');
+  assert.deepEqual(guardLog(t).map(e => e.slice(2)), [['refused_opaque', 'opaque_unknown_role']]);
   u.send(request(722, SKIN));
   await tick();
-  assert.equal(u.sent.length, 2, 'once locked, the synchronous guarded request is blocked');
+  assert.equal(u.sent.length, 1, 'the synchronous guarded request is blocked as before');
+});
+
+test('guard-gaps c: with no guard present a Blob on an unknown connection still goes out', async () => {
+  const t = page();
+  const u = new t.c.WebSocket('wss://route-6.maj-soul.com/gateway');
+  const blob = new t.c.Blob([request(723, SKIN)]);
+  u.send(blob);
+  assert.equal(u.sent[0], blob);
 });
 
 test('R6-4 (Astra5 5): a FastTest whose type byte an observer corrupts is refused by failSafe on a lobby, sent on a game connection', async () => {

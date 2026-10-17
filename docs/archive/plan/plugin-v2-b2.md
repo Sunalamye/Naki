@@ -118,29 +118,32 @@ ws.send(data)
 
 **證明：鎖定前的空窗漏不出守衛方法（限同步可解析的原 REQUEST）**
 
-適用範圍：遊戲或插件以 ArrayBuffer／TypedArray 送出、`parseEnvelope` 解得開、且送出的 bytes 就是鏈開始時的原 REQUEST。Blob 只能非同步解析，不在範圍內（保證範圍第 3 項）。
+適用範圍：遊戲或插件以 ArrayBuffer／TypedArray 送出、`parseEnvelope` 解得開、且送出的 bytes 就是鏈開始時的原 REQUEST。Blob 只能非同步解析，改由 `refuseOpaqueSend` 處理（guard-gaps c，見下方「保證範圍」）。就地改寫成守衛方法會在 hook 後撤回（guard-gaps b），所以送出的 bytes 仍是原 REQUEST。
 
 1. 守衛方法 ⊆ `GUARDABLE_METHODS`（`register` 驗證），全部是 `.lq.Lobby.*`。
 2. `dispatch` 對 send 方向先解析並 `lockRole`，**之後**才判斷角色。守衛方法的 REQUEST 送進 unknown 連線時，同一次呼叫裡先把連線鎖成 lobby，再以 lobby 的規則判定自己。測試 `R5-1d`：`requestConnection` 之後直接送 `changeCharacterSkin`，守衛 hook 拋錯 ⇒ 擋下。變異 M3（鎖定移到判定之後）有 12 條測試失敗。
 3. 連線已是 lobby 時直接適用。已是 game 時見下方「保證範圍」第 5 項。
-4. 因此 unknown 連線上走現行鏈的只有 `.lq.Route.*`、RESPONSE、解析不出的 bytes、Blob。前三者不是守衛方法，後兩者見下。
+4. 因此 unknown 連線上走現行鏈的只有 `.lq.Route.*`、RESPONSE、解析不出的 bytes。前兩者不是守衛方法，被就地改成守衛方法時撤回；解析不出的見下。unknown 上的 Blob 在有守衛者時拒送。
 
 **unknown 連線上解析失敗的請求照現行鏈送出**
 
 - 理由：遊戲自己的封包 Naki 向來解得開，unknown 只存在於握手前兩個請求之間。若拒送，握手前任何解析問題都會讓大廳或對局連不上，違反 §0 的 fail-open。
 - 風險：Naki 解析不出、伺服器卻解得開的守衛方法若出現在 unknown 連線上，會原樣送出。插件改寫產生的 bytes 不會落到這裡：`rewriteSend` 只掛在 `.lq.Lobby.*` 請求上，那筆請求已把連線鎖成 lobby，改寫結果由 lobby 的鏈後檢查處理（`rewritten`、`isWellFormed`）。
 
-**保證範圍（第五輪審查後改寫，D28–D32）**
+**保證範圍（第五輪審查後改寫，D28–D32；guard-gaps 2026-10-17 修掉 D28–D30）**
 
-守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。以下情境不在保證內，確認稿須逐條揭露；不以 U4（惡意插件）帶過，因為誤用也可能觸發：
+守衛保證：已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送。guard-gaps 另外補上三條，原本是本節第 1–3 項：
 
-1. **`sendRaw` 退回對局連線**（D28，測試 `R6-1`）：沒有開著的大廳連線時，`sendRaw` 對 Lobby 方法的候選是空集合，退回全部連線（`naki-websocket.js` 的 `sendRaw`，`pick.length > 0 ? pick : conns`），可能選到 game 連線。共存插件的 `ctx.sendRequest(守衛方法)` 會回 `ok:true` 並從 game 外送，守衛紀錄為空。解鎖插件自己不注入（`unlock-plugin.md`），所以它的保證只在「頁面上沒有其他 `injectSend` 插件」時成立。
-2. **不經 `ctx.replace` 的就地改寫**（D29，測試 `R6-2`）：插件直接改 `ctx.bytes`，在現行鏈上不檢查。unknown 連線的 `.lq.Route.*`、lobby 連線的 `.lq.FastTest.*` 被改成完整守衛方法時會外送，角色也不因此改變。快取封包誤用是推測的非惡意成因。保證只涵蓋遵守 `ctx.replace` 契約的插件；lobby 上非 FastTest 請求的就地改寫仍由 §4.1 撤回。
-3. **Blob 空窗**（D30，測試 `R6-3`）：unknown 連線上以 Blob 送出的第一個 Lobby 請求照送；非同步副本稍後才把連線鎖成 lobby，不補做拒送。之後同步送出的守衛方法照常受守衛。觸發只需客戶端改用 Blob 送出，不需要惡意插件。前提是客戶端送 TypedArray：若客戶端改用 Blob，lobby 上的 Blob 在有守衛者時全部拒送，大廳本來就不可用，所以這是整個守衛的前提，不是本項獨有。可觀測：`__nakiWebSocket.diagnostics().send.Blob`。
-4. **D26 的繞過限定封包形態**（D32，測試 `R6-4`）：已鎖 game 的連線不受守衛拒送。lobby 上只有同步可辨識、未被改壞的 FastTest 繞過守衛；被 observer 改壞成無法解析的 FastTest，若之後 bridge 出錯，`failSafe` 依改後 bytes 判為無法解析而拒送；lobby 上的 FastTest Blob 由 `refuseOpaqueSend` 拒送。live 未見 lobby 上的 FastTest。
-5. **已鎖 game 的連線上出現 `.lq.Lobby.*` 請求**：照規則不改角色、不守衛（`R5-1e`）。來源只可能是上面第 1 項的 `sendRaw` 退回，或遊戲本身（live 未見）。
-6. **unknown 連線上 Naki 解析不出、伺服器解得開的守衛方法**：照送（上方「unknown 連線上解析失敗」）。
-7. 角色在連線關閉時清除，只靠接線呼叫 `closed`。沒呼叫時只是記憶體不回收；socketId 每頁單調遞增、不重用，不影響判定（變異 M7 只讓 `R5-1g` 失敗）。
+- **插件注入退回非大廳連線**（原 D28，測試 `R6-1` 與三條 `guard-gaps a`）：`ctx.sendRequest` 呼叫 `sendRaw` 期間記下注入的 msgId。這筆請求經包裝的 `ws.send` 回到 `dispatch` 時，若連線不是 lobby、而且這個方法有守衛者，就以 `tainted_fallback` 擋下，與大廳上的 `naki_traffic` 同一規則：未污染的已註冊守衛者也算。插件看到的結果與大廳相同，`sendRequest` 回 `ok:true`，之後 `onInjectResponse` 收到 `ctx.local === true` 的錯誤回應。守衛查找出錯時只擋 `GUARDABLE_METHODS`。Naki 自送與遊戲自己的請求不經這個判定。`naki-websocket.js` 不改。
+- **不經 `ctx.replace` 的就地改寫**（原 D29，測試 `R6-2` 與 `guard-gaps b`）：送出方向沒有就地的 `replace`，所以 hook 後 bytes 物件沒換、內容變了，就是不經契約的改寫。非大廳連線上，改後能解析成 `GUARDABLE_METHODS` 的任一方法就當成 hook 失敗並撤回。判斷只用閉包常數，不讀 `sendGuard`，第四輪第 2 條（`R5-2b`）不受影響。大廳上維持 §4.1：改成另一個守衛方法時撤回，同方法改內容由鏈後 `rewritten` 擋下。撤回後送出的是原 bytes，不必再污染。
+- **Blob 空窗**（原 D30，測試 `R6-3` 與 `guard-gaps c`）：角色未定的連線比照 lobby，有守衛者時拒送 Blob，紀錄原因 `opaque_unknown_role`。被拒的 Blob 不派發，所以不鎖定角色。只有已鎖 game 的連線照送（`R4-1c`、`R5-1b`）。選擇與代價見 `docs/archive/notes/guard-gaps-implementation-notes.md`。
+
+以下情境仍不在保證內，確認稿須逐條揭露；不以 U4（惡意插件）帶過，因為誤用也可能觸發：
+
+1. **D26 的繞過限定封包形態**（D32，測試 `R6-4`）：已鎖 game 的連線不受守衛拒送。lobby 上只有同步可辨識、未被改壞的 FastTest 繞過守衛；被 observer 改壞成無法解析的 FastTest，若之後 bridge 出錯，`failSafe` 依改後 bytes 判為無法解析而拒送；lobby 上的 FastTest Blob 由 `refuseOpaqueSend` 拒送。live 未見 lobby 上的 FastTest。
+2. **已鎖 game 的連線上出現 `.lq.Lobby.*` 請求**：照規則不改角色、不守衛（`R5-1e`）。插件注入的已由上面第一條擋下，就地改寫成可守衛方法或改動既有可守衛方法的內容都會撤回。剩下的來源是 Naki 自送經 `sendRaw` 退回，或遊戲本身（live 未見）。Naki 的 Swift 端目前沒有送任何可守衛方法。
+3. **unknown 連線上 Naki 解析不出、伺服器解得開的守衛方法**：照送（上方「unknown 連線上解析失敗」）。就地改寫成這種 bytes 也不撤回，因為判斷依賴解析。
+4. 角色在連線關閉時清除，只靠接線呼叫 `closed`。沒呼叫時只是記憶體不回收；socketId 每頁單調遞增、不重用，不影響判定（變異 M7 只讓 `R5-1g` 失敗）。
 
 ---
 
@@ -303,9 +306,9 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 
 ### 4.5 無法同步辨識的送出（Blob 等）
 
-- **策略**：只要有守衛者（任一插件已污染，或已註冊且宣告 `sendGuard`），**角色為 lobby 的連線**上的 Blob 與其他非 binary、非字串的送出一律拒送（`refuseOpaqueSend(socketId)`）。game 與 unknown 連線的 Blob 照常送出（測試 `R4-1c`、`R5-1b`）。不送出、不送 Swift、不合成回應（沒有 msgId 可配對）。字串照舊送出：Liqi 是 binary，text frame 不可能是 Liqi REQUEST。
+- **策略**：只要有守衛者（任一插件已污染，或已註冊且宣告 `sendGuard`），**角色為 lobby 或尚未鎖定的連線**上的 Blob 與其他非 binary、非字串的送出一律拒送（`refuseOpaqueSend(socketId)`；unknown 自 guard-gaps c 起）。已鎖 game 的連線的 Blob 照常送出（測試 `R4-1c`、`R5-1b`）。不送出、不送 Swift、不合成回應（沒有 msgId 可配對）。字串照舊送出：Liqi 是 binary，text frame 不可能是 Liqi REQUEST。
 - **對遊戲的影響**：被拒的那一筆，伺服器與 Swift 都收不到，遊戲也收不到回應，可能停在等待狀態。目前的證據是 Unity 送 TypedArray（`naki-websocket.js` 註解）。所以預期影響為零，但沒有 live 證據；live 讀 `__nakiWebSocket.diagnostics().send.Blob` 與 `guardState().log` 的 `refused_opaque` 筆數可以看到是否發生。
-- **適用範圍比審查要求寬**：審查要求「有任何污染時」拒送；這裡連「已註冊、未污染」也拒送（Deviation D9），讓守衛方法在 lobby 連線上不會經 Blob 繞過 N2。unknown 連線上的第一個 Lobby Blob 不在此列（§1.4 保證範圍第 3 項），§7.3 的換稱號測試只在大廳已鎖定後成立。
+- **適用範圍比審查要求寬**：審查要求「有任何污染時」拒送；這裡連「已註冊、未污染」也拒送（Deviation D9），讓守衛方法在 lobby 連線上不會經 Blob 繞過 N2。unknown 連線上的 Blob 自 guard-gaps c 起同樣拒送（§1.4）。
 - 沒有守衛者的頁面行為不變（測試 `R4b`）。
 - Blob 的非同步觀察副本（`mutable: false`）不進守衛判定，只觀察，不會留下錯誤的 `local_error` 紀錄。
 
@@ -537,5 +540,5 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 5. 大廳合成事件只對 heartbeat 驗過；業務回應屬 N3。
 6. 對局 (b) 畫面未驗證（§7）。
 7. 接線 patch 未套用；在套用前 N1／N2 在 App 內不生效（§3.6）。`LiqiParser` 的連線維度配對已在 spike 內，合併前同樣需要用戶確認。
-8. 守衛的保證範圍（§1.4）：`sendRaw` 退回對局連線、不經 `ctx.replace` 的就地改寫、Blob 空窗、lobby 上 FastTest 的封包形態限定。確認稿須逐條揭露；I2 的成立另依解鎖設計 §3.7（§1.3 D27）。握手序列 live 只觀察過一次登入與一次對局重連；對局中途斷線重連的第二個請求是否仍為 `authGame`、大廳換裝請求落在哪條 `/gateway`，都未驗證。
+8. 守衛的保證範圍（§1.4）：lobby 上 FastTest 的封包形態限定、game 連線上 Naki 自送與遊戲自送的 Lobby 請求、unknown 上解析不出的守衛方法、角色清除只靠 `closed`。`sendRaw` 退回、就地改寫、Blob 空窗已由 guard-gaps 修掉。確認稿須逐條揭露；I2 的成立另依解鎖設計 §3.7（§1.3 D27）。握手序列 live 只觀察過一次登入與一次對局重連；對局中途斷線重連的第二個請求是否仍為 `authGame`、大廳換裝請求落在哪條 `/gateway`，都未驗證。
 9. 分支基底落後 main（main 已到 `fd74f63`），本包未 rebase。NakiTests 1149 只能與第四輪對照，合併前要在 main 上重跑。

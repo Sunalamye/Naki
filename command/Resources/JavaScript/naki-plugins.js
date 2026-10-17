@@ -76,6 +76,8 @@
     }
     // 插件注入的 (連線, msgId) -> 發起插件 id（回應路由，§7.7b）
     var injectedMsgIds = new Map();
+    // sendRequest 呼叫 sendRaw 期間的 msgId：sendRaw 同步經包裝的 ws.send 回到 dispatch，用它認出插件注入
+    var injectingMsgId = null;
 
     // 連線角色由協定握手鎖定，URL 不參與（審查第四輪第 1 條）：每條連線第一個請求是 .lq.Route.requestConnection，
     // 第二個才揭露角色（大廳 oauth2Login／prepareLogin，對局 authGame；live 2026-10-17）。
@@ -292,6 +294,21 @@
         }
     }
 
+    // 插件注入落到非大廳連線（sendRaw 沒有大廳候選時退回全部連線，D28）：比照大廳的 naki_traffic，
+    // 有守衛者就擋下。只在注入期間判定，遊戲與 Naki 自送不經這裡；查找出錯時只擋 GUARDABLE_METHODS
+    function injectedFallback(raw, env) {
+        var ids;
+        try {
+            var guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
+            if (!guard) return undefined;
+            ids = guard.ids;
+        } catch (e) {
+            if (GUARDABLE_METHODS.indexOf(env.method) === -1) return undefined;
+            ids = [];
+        }
+        return blockSend(raw, raw.bytes, raw.bytes.slice(), env.msgId, env.method, env.method, 'tainted_fallback', ids);
+    }
+
     function restore(raw, origObj, original) {
         raw.bytes = origObj;
         if (origObj.length === original.length) origObj.set(original);
@@ -434,8 +451,10 @@
                 try { b64 = uint8ToBase64(envBytes); }
                 catch (e) { return { ok: false, reason: 'encode_failed' }; }
 
-                var ws = window.__nakiWebSocket;
-                var r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' };
+                var ws = window.__nakiWebSocket, r, prev = injectingMsgId;
+                injectingMsgId = msgId;
+                try { r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' }; }
+                finally { injectingMsgId = prev; }
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
@@ -623,11 +642,13 @@
                     noteSuccess(entry.spec.id, hook);
                     if (isGuard) guard.approved.push(entry.spec.id);
                 }
-                // 大廳上就地改寫成另一個守衛方法：當成這個 hook 失敗，撤回改動，原請求照常送（第三輪第 5 條）
-                if (lobby && raw.bytes === before && snapshot
+                // 送出的就地改寫（不經 ctx.replace）成守衛方法：當成這個 hook 失敗，撤回改動，原請求照常送。
+                // 大廳上看守衛者（第三輪第 5 條）；其他連線只看閉包常數，不讀 sendGuard（第四輪第 2 條，guard-gaps b）
+                if (raw.direction === 'send' && raw.bytes === before && snapshot
                     && !sameBytes(snapshot, raw.bytes)) {
                     var now = parseEnvelope(raw.bytes);
-                    if (now && now.method && now.method !== method && guardFor(now.method)) {
+                    if (now && now.method && (lobby ? now.method !== method && guardFor(now.method)
+                        : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
                         throw new Error('就地改寫成守衛方法 ' + now.method + '，已撤回');
                     }
                 }
@@ -766,6 +787,10 @@
             if (send) lockRole(raw.wsId, env);
             if (registry.size === 0 && tainted.size === 0) return;
             if (env === undefined) env = parseEnvelope(raw.bytes);
+            if (send && env && env.msgId === injectingMsgId && !isLobby(raw.wsId)) {
+                var fallback = injectedFallback(raw, env);
+                if (fallback) return fallback;
+            }
             // 對局、未定角色、大廳上的 FastTest：現行鏈原樣，例外與鏈後檢查都不經守衛（第四輪第 2 條）。
             // Blob 的非同步副本已送出，守衛無從判定，只觀察
             if (send && raw.mutable !== false && isLobby(raw.wsId) && !isFastTest(env)) return guardedSend(raw, env);
@@ -773,15 +798,16 @@
         },
 
         // 有守衛者（已污染或已註冊 sendGuard）時拒送無法同步辨識的送出（Blob 等，審查第 4 條）。
+        // 角色未定的連線比照大廳（guard-gaps c）：Blob 無法同步解析，守衛方法本可在這裡先於鎖定外送；只有已鎖 game 的放行。
         // 呼叫端不得送出，也沒有 msgId 可回應。
         refuseOpaqueSend: function (socketId) {
-            if (!isLobby(socketId)) return false;
+            if (roles.get(socketId) === 'game') return false;
             var ids = Array.from(tainted.keys());
             registry.forEach(function (entry, id) {
                 if ((entry.grant.sendGuard || []).length && ids.indexOf(id) === -1) ids.push(id);
             });
             if (ids.length === 0) return false;
-            recordGuard(null, null, 'refused_opaque', 'opaque', ids);
+            recordGuard(null, null, 'refused_opaque', isLobby(socketId) ? 'opaque' : 'opaque_unknown_role', ids, socketId);
             pluginLog(ids.join(','), '已污染：拒送一筆無法同步辨識的送出');
             return true;
         },

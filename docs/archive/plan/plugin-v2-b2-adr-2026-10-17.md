@@ -31,7 +31,7 @@ plugin-v2-b2 61／61、plugin-regression 29／29、plugin-v2-regression 21／21�
 
 ## 保證範圍（設計 §1.4，確認稿必須逐條揭露）
 
-守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。七項不在保證內：sendRaw 退回對局、不經 `ctx.replace` 的就地改寫、Blob 空窗、lobby 上被改壞的 FastTest 會被拒送、已鎖 game 的連線上的 Lobby 請求不守衛、unknown 上 Naki 解析不出而伺服器解得開的守衛方法照送、角色清除只靠接線呼叫 `closed`。不宣稱 I2 全域成立。
+守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。原本七項不在保證內；sendRaw 退回對局、不經 `ctx.replace` 的就地改寫、Blob 空窗三項已於 2026-10-17 由 guard-gaps 修掉（見文末）。剩四項：lobby 上被改壞的 FastTest 會被拒送、已鎖 game 的連線上 Naki 自送或遊戲自送的 Lobby 請求不守衛、unknown 上 Naki 解析不出而伺服器解得開的守衛方法照送、角色清除只靠接線呼叫 `closed`。不宣稱 I2 全域成立。
 
 ## 下一個節點
 
@@ -82,3 +82,13 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 裁決：Naki 新增 `__nakiPlugins.devLogSeal(pluginId, meta)`，由宿主落檔一行 seal（count 由宿主計、插件不可偽造），封存後該頁 devLog 一律拒收。插件側驗收改依 seal 行；匯入順序改依宿主時間戳排序、不可證則拒驗。
 
 取捨：多一個宿主 API（小包 plugin-devlog-seal），換掉三個 localStorage 鍵與一整套可被繞過的頁面側證明；不選「操作者手動 quit App 當封存」是因為時序無法由紀錄本身證明。
+## 2026-10-17 後續裁決：保證範圍三條改為修掉（guard-gaps）
+
+用戶裁決「能修就修，不得只列限制」。D28–D30 三條改以程式修掉，只改 `naki-plugins.js`，`naki-websocket.js` 不動。設計細節在 `plugin-v2-b2.md` §1.4，判斷與 Deviations 在 `docs/archive/notes/guard-gaps-implementation-notes.md`。
+
+| 原條 | 修法 | 與先前裁決的關係 |
+|---|---|---|
+| D28 `sendRaw` 退回 | 注入期間記下 msgId；落到非大廳連線且方法有守衛者 ⇒ `tainted_fallback` 擋下，結果與大廳 `naki_traffic` 相同 | 不改 `naki-websocket.js`；Naki 自送不受影響 |
+| D29 就地改寫 | 非大廳連線上改成 `GUARDABLE_METHODS` 即撤回，只用閉包常數 | 不讀 `sendGuard`，第四輪第 2 條不受影響（`R5-2b` 綠） |
+| D30 Blob 空窗 | 角色未定的連線比照 lobby，有守衛者時拒送 Blob | 推翻原「unknown fail-open」的這一處；代價只在客戶端改用 Blob 時出現，那時大廳本來就不可用 |
+
