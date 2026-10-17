@@ -1,6 +1,6 @@
 # WP-B 數值與異常列動效 implementation notes
 
-依據：`docs/plan/ui-design-reference.md` §1 不變條件、§2.1、§3.6、§5 WP-B。基底 main `b913a08`，分支 `wp-b-motion`，未 commit。
+依據：`docs/archive/plan/ui-design-reference.md` §1 不變條件、§2.1、§3.6、§5 WP-B。基底 main `b913a08`，分支 `wp-b-motion`，未 commit。
 `LOG` = 主 repo `.swfd/logs/wp-b/`。
 
 ## 已修改

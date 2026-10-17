@@ -1,6 +1,6 @@
 # 插件 v2：送出守衛（N1、N2）與 PV2-B2 實作筆記
 
-**設計**：`docs/plan/plugin-v2-b2.md`
+**設計**：`docs/archive/plan/plugin-v2-b2.md`
 **分支**：`pv2-b2-design`（worktree `Naki-wt-pv2b2`，基準 main `4761f6e`；wip `ccd1e0b` 與第五輪 commit，未合併、未 rebase）
 **log**：主 repo `.swfd/logs/pv2-b2-design/`
 
@@ -70,7 +70,7 @@
 
 ## 審查第二輪（Astra 14 條，2026-10-15）
 
-回應：`docs/plan/plugin-v2-b2-review-response.md`。14 條全採納，0 反駁。
+回應：`docs/archive/review/plugin-v2-b2-review-response.md`。14 條全採納，0 反駁。
 
 | 項目 | 結果 | log |
 |---|---|---|

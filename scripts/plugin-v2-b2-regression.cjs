@@ -1,5 +1,5 @@
 // Run: node scripts/plugin-v2-b2-regression.cjs
-// 送出守衛 N1／N2 的 spike（docs/plan/plugin-v2-b2.md §3–§4）。
+// 送出守衛 N1／N2 的 spike（docs/archive/plan/plugin-v2-b2.md §3–§4）。
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');

@@ -31,7 +31,7 @@ final class NativeBotController {
     /// 恢復後檢查世代不符即丟棄本次結果，避免舊局的推論污染新局。
     private var generation = 0
 
-    // MARK: - 雲端推論（docs/cloud-inference-plan.md；引擎抽象見 MahjongBot.swift）
+    // MARK: - 雲端推論（docs/archive/plan/cloud-inference-plan.md；引擎抽象見 MahjongBot.swift）
     //
     // 2026-08-05 protocol 重構之後，雲端整段住在 `CloudBot` 裝飾器裡；
     // controller 只負責兩件事：createBot 時決定要不要包 CloudBot、

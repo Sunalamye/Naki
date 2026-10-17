@@ -2,7 +2,7 @@
 
 **日期**：2026-10-14
 **分支**：`plugin-v2-design`（worktree `Naki-wt-plugin-v2`，基於 main `0ef66df`），未 commit。
-**設計文件**：`docs/plan/plugin-v2.md`
+**設計文件**：`docs/archive/plan/plugin-v2.md`
 **log**：主 repo `.swfd/logs/plugin-v2-design/`
 
 ---

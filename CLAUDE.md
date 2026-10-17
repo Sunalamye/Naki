@@ -144,7 +144,7 @@ OptionalOperationList
   錯誤自我餵養（2026-08-09 踩過）。判斷是 **msgId 登記制**而非號段：遊戲自己的 msgId
   跑久了也會進 60000+，而且計數器跨連線遞增（D22）。配發器登記帶連線：`next()` 先登記為未綁定，
   `sendRaw` 回報連線後由 `LiqiActionSender.send` 呼叫 `LiqiMsgIdAllocator.bind`；已綁定的只認同一連線，
-  未綁定的任一連線都認（綁定前窗口，見 `docs/plan/d22-naki-identity.md` §8）。
+  未綁定的任一連線都認（綁定前窗口，見 `docs/archive/plan/d22-naki-identity.md` §8）。
   Naki 側＝`LiqiMsgIdAllocator.isIssued(msgId, socketId:)` 或插件號段（Swift 沒有插件登記，整段排除，
   只影響 `ObservedMatchSids`）；`LiqiResponseStore` 只收登記過的回應（`LiqiResponseStore.capture`
   以解析結果的 `socketId` 呼叫 `allocator.claim`，沒有插件號段判斷）。
@@ -223,7 +223,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 以下都有單測（NakiTests 1181 個、0 failures（2026-10-17，2.20.0 發版前全量，`.swfd/logs/release-v2.20.0/test-full.log`；前一次 1138 個，2026-10-15，2.19.0 發版前全量，`.swfd/logs/rel219/test-full.log`；再前一次 1130 個，2026-10-15，IRC 第二輪三包整合閘，`.swfd/logs/irc2-integrate/test-full.log`；再前一次 1091 個，2026-10-14，WP-F2 合併後，`.swfd/logs/wp-f2-takeover/fixup-nakitests.log`；再前一次 1074 個，irc-integrate b2d7d73；更早 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
 
-- **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
+- **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `docs/archive/notes/code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。
 - **Debug server**（`DebugServer.swift`）：Origin 與 Host 由 `NakiMCPRequestGuard` 單一入口檢查，非 loopback 回 403（沒有 Host header 放行）；chunked 或「無 Content-Length 卻帶 body」回 411（無 body 的 POST 照常）；每連線 30 秒內必須收齊 request。`execute_js` 有 `timeout`（預設 30、上限 60，`ExecuteJSTool`），逾時後頁面端 Promise 仍可能在跑。`/js` 回傳非 JSON 型別（Date 等）經 `JSONSanitizer` 轉字串，不再崩潰。403／411 已有單測在 loopback 高位 port 起真 server 驗過（`DebugServerFramingTests`）；逾時與 live server 仍未測。Origin 的 port 判斷已在 `NakiMCPRequestGuard`／`NakiMCPOriginPolicy` 就緒（帶 Origin 且 port 不等於實際綁定 port 時拒絕）；`DebugServer.handleRequest` 已傳 `boundPort: actualPort`（SV-05，WP-F2 合併時接線）：帶 Origin 且 port 不符回 403，live 驗證見 `.swfd/logs/wp-f2-takeover/live-origin-9999.txt`（Origin `http://localhost:9999` 回 403）。8765 被占用而改綁 8766 的路徑沒有 live 驗證。
 - **負分**：`LiqiWire.decodeSignedVarint` 讓 int32 欄位（scores）能解負數；`decodeVarint` 維持非負契約。
@@ -263,7 +263,7 @@ app target 開了 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`，`NakiTests` targ
 - 測試必須用隔離 suite，走現有的注入點：`L10n.defaults`、`SettingsStore(defaults:)`、`AutoPlayModeStore.defaults`（WP9c 加入，合併於 `5f78080`；本分支合併前的程式碼沒有它）。測試用 `.standard` 備份還原寫法仍是汙染來源。
 - test host 一啟動，`NakiApp` 的 `@State runtime = NakiRuntime()` 就在任何 `setUp` 之前建構，之後 ContentView 的自動檢查更新也會寫 `lastUpdateCheck`。所以預設落點整體走 `SettingsStore.standard`：test host 落 `naki.tests.host` suite（`TestHostDefaultsTests` 鎖住）；Debug 下 UI 測試以 launchEnvironment `NAKI_UI_TEST_DEFAULTS_SUITE`／`NAKI_UI_TEST_KEYCHAIN_SERVICE` 改落隔離 suite 與 Keychain service（WP-F1，`UITestIsolationTests` 鎖住）。`L10n.defaults`、`AutoPlayModeStore.defaults`、`ObservedMatchSids.shared`、ContentView 的 `@AppStorage` 都經它；AppKit 視窗 frame autosave 等框架自己的寫入不在此列。
 - `defaults read org.39c154f25912233a.akagi` 對此 app 會回 `Domain ... not found`（它解析到 `~/Library/Containers/org.39c154f25912233a.akagi/` 這個殘留目錄；App 本身不是 sandbox，實際檔案在 `~/Library/Preferences`）。查設定值要用 `plutil -p ~/Library/Preferences/org.39c154f25912233a.akagi.plist`。
-- 隔離 suite 結束時用 `removePersistentDomain`，但它**不刪檔**：`~/Library/Preferences` 會累積 `naki.tests.*` 空殼 plist。2026-10-13 依用戶指示由主線清除 235 個，備份在 `.swfd/logs/prefs-cleanup/`，host plist 保留。2026-10-17 累積到 11,700 個。現在隔離 suite 一律用 `removeIsolatedSuite(name)`（`NakiTests/IsolatedDefaults.swift`）：清 domain、刪該 suite 自己的 plist，整包結束再掃一次；只認 `naki.tests.`／`naki.test.` 前綴。最後幾個測試的 plist 仍會被 cfprefsd 的延遲寫入補回，一次全量約 0–6 個殘留，見 `test-defaults-leak-implementation-notes.md`。
+- 隔離 suite 結束時用 `removePersistentDomain`，但它**不刪檔**：`~/Library/Preferences` 會累積 `naki.tests.*` 空殼 plist。2026-10-13 依用戶指示由主線清除 235 個，備份在 `.swfd/logs/prefs-cleanup/`，host plist 保留。2026-10-17 累積到 11,700 個。現在隔離 suite 一律用 `removeIsolatedSuite(name)`（`NakiTests/IsolatedDefaults.swift`）：清 domain、刪該 suite 自己的 plist，整包結束再掃一次；只認 `naki.tests.`／`naki.test.` 前綴。最後幾個測試的 plist 仍會被 cfprefsd 的延遲寫入補回，一次全量約 0–6 個殘留，見 `docs/archive/notes/test-defaults-leak-implementation-notes.md`。
 
 `project.pbxproj` 裡的 `Naki-MTests` 是**孤兒 target**：它對應的 `Naki-MTests` 資料夾不存在、沒有任何原始檔、不在 `Naki.xcscheme` 或 `Naki-M.xcscheme` 裡，所以 `-only-testing` 找不到、也不會被跑。不要把它當成「iOS 單測」；本輪只記錄判定、不改 `project.pbxproj`；刪 target 或補測試要另案處理。
 
@@ -290,11 +290,11 @@ MCP 工具結果現在同時回 `structuredContent`（真的 JSON 物件）與 `
 - `docs/majsoul-config-tables.md`：由 live manifest fresh parse 的 config 附錄。
 - `docs/protocol/liqi.json`：協定欄位 schema。
 - `AUDIT.md`：當前驗證差距與完成判準，不是歷史日誌。
-- `docs/design-review-vs-akagi.md`：對照 Akagi v3 的**架構**檢討（2026-08-01）。
-- `docs/akagi-audit-p0-decisions.md`：掃 Akagi 89 個 issue 對照出的**具體 bug**與修法
+- `docs/archive/plan/design-review-vs-akagi.md`：對照 Akagi v3 的**架構**檢討（2026-08-01）。
+- `docs/archive/plan/akagi-audit-p0-decisions.md`：掃 Akagi 89 個 issue 對照出的**具體 bug**與修法
   取捨（2026-08-07），含兩個被推翻的判斷。
 - `docs/plugin-api-v1.md`、`docs/plugin-system-design.md`：插件 API 契約與設計；`isNaki` 語意與授權邊界以 `plugin-api-v1.md` 為準。
-- `docs/audit/intention-revealing-2026-10-14.md`：2026-10-14 Intention-Revealing Code 審查報告（144 條發現、處理結果、待用戶決策清單、延後清單）。
+- `docs/archive/audit/intention-revealing-2026-10-14.md`：2026-10-14 Intention-Revealing Code 審查報告（144 條發現、處理結果、待用戶決策清單、延後清單）。
 - `docs/README.md`：全部文件的索引；其中「歷史工作紀錄」一節的各 `*-implementation-notes.md` 不是 current truth。
 
 ## 文件與程式碼的一致性
@@ -327,3 +327,15 @@ build/test** 為準；文件只用來解釋「為什麼是這樣」。改了行�
 ## 驗收回報
 
 回報必須分開：已修改、已驗證、未驗證、已知風險。單測通過不能替代 WebView／server／視覺與 failure-path 驗收；沒有可重查 evidence 的推論不得寫成事實。
+
+## 工作包與 live 的 Naki 規則
+
+工作方式的通則在上一層 `../CLAUDE.md`；這裡只放 Naki 特有的。
+
+- 文件歸檔：工作包 notes 放 `docs/archive/notes/`，設計與 ADR 放 `docs/archive/plan/`，審查回應放 `docs/archive/review/`，一次性審查報告放 `docs/archive/audit/`。`docs/` 第一層只留 current truth（協定、架構、契約、索引）。repo 根不放 notes 與截圖。
+- live 驗收只用測試帳號；允許的外部副作用只有登入、`room_quick_test`、`bot_sync`、`game_vote_game_end`、`room_leave` 與對局中的自動打牌。不送表情、不換裝、不送任何未擁有物品的請求（插件設計 I2）。
+- 要跑開發版 app 做 live 時：`osascript -e 'quit app "Naki"'` 關掉使用者的 `/Applications/Naki.app`，由開發版接手 8765；結束必重新啟動 `/Applications/Naki.app` 並以 `/status` 核對版本。
+- 插件目錄 `~/Library/Application Support/Naki/Plugins/`：手放不觸發 rescan，要重啟 app 或用插件頁；啟用停用用插件頁開關（AXPress），不得 `defaults write`。live 用的測試插件結束必刪。
+- 使用者設定檔是 `~/Library/Preferences/org.39c154f25912233a.akagi.plist`；`defaults` 要用**檔案路徑形式**（`defaults read/delete <path>`），用域名會被殘留 container 誤導成空。
+- 單測前 `pgrep -x xcodebuild | wc -l`（macOS 沒有 `pgrep -c`）；≥1 就每 60 秒輪詢，兩個 worktree 同時全量會互相拖慢並污染 `naki.tests.*` 殘留計數。
+- 可守衛方法全是換裝類，守衛「真的擋下」無法在真伺服器 live 驗證；只宣稱單測與角色鎖定、不誤擋兩項 live 證據。

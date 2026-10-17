@@ -81,7 +81,7 @@ class LiqiParser {
     /// 所以遊戲自己送的與 Naki 自己送的（`LiqiMsgIdAllocator` 配發、含插件）都會登記在這裡；
     /// `LiqiResponseStore` 拿得到方法名正是因為如此。
     /// REQUEST 依「連線＋msgId」登記：RESPONSE 只會回到送出它的那條連線。不分連線時，
-    /// 另一條連線同 msgId 的本地回應（插件送出守衛）會消耗掉這條的登記（docs/plan/plugin-v2-b2.md §1.3）。
+    /// 另一條連線同 msgId 的本地回應（插件送出守衛）會消耗掉這條的登記（docs/archive/plan/plugin-v2-b2.md §1.3）。
     private struct PendingKey: Hashable { let socketId: Int; let msgId: Int }
     private var pendingRequests: [PendingKey: String] = [:]
 

@@ -1,7 +1,7 @@
 # ADR：送出守衛第五輪（協定握手鎖定連線角色）
 
 日期：2026-10-17。分支 `pv2-b2-design`，commit `54c1983`（未 push、未合併）。
-審查原文：主 repo `.swfd/logs/pv2-b2-review/astra-review5.md`。設計者回應：`docs/plan/plugin-v2-b2-review-response.md` 第五輪段。
+審查原文：主 repo `.swfd/logs/pv2-b2-review/astra-review5.md`。設計者回應：`docs/archive/review/plugin-v2-b2-review-response.md` 第五輪段。
 
 ## 用戶裁決
 

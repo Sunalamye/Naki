@@ -41,10 +41,10 @@ nonisolated struct PluginManifest: Decodable, Sendable, Equatable {
     let settings: [String: PluginSettingField]?
     /// 禁改名單解除（§8.2/§11 #5）：列出的 method 即使在禁改名單也放行 rewrite。
     let rewriteAllow: [String]?
-    /// 插件自帶的設定頁（v2 草案，docs/plan/plugin-v2.md §A）：插件目錄內單一 `.html` 檔名。
+    /// 插件自帶的設定頁（v2 草案，docs/archive/plan/plugin-v2.md §A）：插件目錄內單一 `.html` 檔名。
     /// 只讀寫 `settings` schema 宣告過的 key，所以宣告它就必須同時宣告 `settings`。
     let settingsUI: String?
-    /// 送出守衛（docs/plan/plugin-v2-b2.md §3）：這些 REQUEST 只有插件放行才原樣送出，否則由 Naki 回本地錯誤。
+    /// 送出守衛（docs/archive/plan/plugin-v2-b2.md §3）：這些 REQUEST 只有插件放行才原樣送出，否則由 Naki 回本地錯誤。
     /// 限 `.lq.Lobby.*` 且必須在 `methods` 內；送出禁改名單由 naki-plugins.js 在 register 時再擋。
     let sendGuard: [String]?
 }

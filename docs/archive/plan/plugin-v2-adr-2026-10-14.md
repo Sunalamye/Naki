@@ -1,7 +1,7 @@
 # ADR：插件系統 v2 設計定案（2026-10-14）
 
 **狀態**：已定案（設計），實作未開始。
-**設計文件**：`docs/plan/plugin-v2.md`；審查回應：`docs/plan/plugin-v2-review-response.md`；決策流水：`docs/plan/plugin-v2-implementation-notes.md`。
+**設計文件**：`docs/archive/plan/plugin-v2.md`；審查回應：`docs/archive/review/plugin-v2-review-response.md`；決策流水：`docs/archive/notes/plugin-v2-implementation-notes.md`。
 **設計者**：Opus 5.5 high。**審查**：Astra（codex `gpt-6-astra`，唯讀 sandbox）。**裁決**：主線。
 
 ## 背景
@@ -63,7 +63,7 @@
    HTTPS／GitHub 更新加入 `settingsUI` 時，下載包缺 HTML，`finalize` 卻接受，`install` 接著替換既有目錄；Registry 最後才拒載。  
    這不只是文件所寫的「fail-closed」：可用舊版已被替換。應在替換前驗完整資源，缺檔時保留舊版；本次僅源碼追查，未執行安裝。
 
-3. 【擋】Phase 4 probe 的計數不足以支持開工判定 — `docs/plan/plugin-v2.md:355`、`:365`、`:384`、`:410`  
+3. 【擋】Phase 4 probe 的計數不足以支持開工判定 — `docs/archive/plan/plugin-v2.md:355`、`:365`、`:384`、`:410`  
    已用假 socket 重現：`wrap()` 先呼叫 `state()`，攔截器實際比 Naki handler 早註冊，無法測出文件宣稱的「後註冊 capture 超前」。  
    而 `original` 到攔截器執行時才設定，先執行的 handler 即使收到原事件，也不會被計入 `original`。  
    應改成可識別原／合成事件的逐 handler 紀錄，保持 listener 移除語意；(c)「部分」仍不得算全綠。現腳本不能作為 Phase 4 通行證。
@@ -80,7 +80,7 @@
    已重現：改寫成 `logout`、`loginSuccess` 都被接受；repo schema 另有 `fastLogin`、`prepareLogin` 等入口未列入。  
    「只放行非關鍵大廳請求」比實際保障更廣。應盤點登入／session 方法並測改前、改後兩側，或收窄文件承諾；不必因此禁止所有大廳寫入。
 
-7. 【應修】`respondLocally` 缺少 Swift 回應配對來源 — `docs/plan/plugin-v2.md:154`、`:192`；`command/Services/Bridge/LiqiParser.swift:240`  
+7. 【應修】`respondLocally` 缺少 Swift 回應配對來源 — `docs/archive/plan/plugin-v2.md:154`、`:192`；`command/Services/Bridge/LiqiParser.swift:240`  
    設計要求被丟棄的 REQUEST 不送 Swift，卻要把合成 RESPONSE 交給 Swift；此時沒有對應 `pendingRequests`，parser 會走 unmatched 路徑。  
    必須先定義本地請求如何登記、清除及避免觸發真送出的學習副作用，再檢查「不改 Swift parser」是否仍可成立。
 
@@ -88,24 +88,24 @@
    同 id 更新時，View 身分不變；update 方法只換 handler，沒有載入新的 `pageURL` 或 HTML。  
    推測結果是舊控制項寫入新版 schema：可能被拒絕，也可能覆蓋同名欄位的新語意。應以頁面版本／內容身分重建，並處理舊頁未完成的寫入；WebKit 情境本次未驗證。
 
-9. 【應修】protobuf API 的資料保真契約仍不足 — `docs/plan/plugin-v2.md:484`、`:493`  
+9. 【應修】protobuf API 的資料保真契約仍不足 — `docs/archive/plan/plugin-v2.md:484`、`:493`  
    提供共用編解碼器的方向合理，但只寫「保留未知欄位」尚未涵蓋巢狀 message、同欄位 wire type 不符，以及 int64／uint64 的精確表示。  
    若採一般 JS Number 或在複製物件時遺失不可列舉的 `__unknown`，仍可能靜默改資料。應先固定這些語意與往返 fixture；26 個 Swift 訊息對照不能替代它們。
 
-10. 【應修】JSON 設定需要一致的解析與遷移規則 — `docs/plan/plugin-v2.md:509`；`command/Services/Web/PluginSettingsHost.swift:37`；`command/Services/Plugins/PluginRegistry.swift:343`  
+10. 【應修】JSON 設定需要一致的解析與遷移規則 — `docs/archive/plan/plugin-v2.md:509`；`command/Services/Web/PluginSettingsHost.swift:37`；`command/Services/Plugins/PluginRegistry.swift:343`  
     JSON 字串持久化與不做 JSON Schema 的取捨合理，但尚未定義舊型別轉換、損壞儲存值及超量 default 的處理。  
     現在設定頁會對錯型別覆寫值退回 default，grant 卻仍可能把錯型別交給插件。應共用解析規則，並讓容量限制涵蓋 default、讀回與寫入，避免兩端各看一份設定。
 
-11. 【應修】設定熱更新低估了失敗與並發語意 — `docs/plan/plugin-v2.md:521`、`:527`；`command/Services/Web/WebSession.swift:182`  
+11. 【應修】設定熱更新低估了失敗與並發語意 — `docs/archive/plan/plugin-v2.md:521`、`:527`；`command/Services/Web/WebSession.swift:182`  
     保留插件執行期狀態值得做，但目前存值後另開 Task 套用；bridge 成功不代表遊戲頁已套用。  
     新 hook 若拋錯，儲存值、grant 與插件內部狀態如何收斂仍未定義；連續更新也缺順序／過期處理驗收。  
     此外 WP-A 的熱更新與 WP-B1 都會改 `naki-plugins.js`，§10「檔案不重疊、可並行」須修正。
 
-12. 【應修】「修改前確認」不能改寫成「合併前確認」 — `docs/plan/plugin-v2-implementation-notes.md:46`；`CLAUDE.md`「不可違反的邊界」  
+12. 【應修】「修改前確認」不能改寫成「合併前確認」 — `docs/archive/notes/plugin-v2-implementation-notes.md:46`；`CLAUDE.md`「不可違反的邊界」  
     Deviations 明載 spike 已修改 `ws.send` 接線，卻把確認延至合併前；這與既有邊界的時點不同。  
     本次材料未提供修改前授權證據，應補上既有授權依據或明列程序偏離；單測通過不能替代授權。
 
-13. 【建議】釐清設定頁來源範圍，避免把網路封鎖升為必要防護 — `command/Services/Web/PluginSettingsHost.swift:100`、`:109`；`docs/plan/plugin-v2.md:268`  
+13. 【建議】釐清設定頁來源範圍，避免把網路封鎖升為必要防護 — `command/Services/Web/PluginSettingsHost.swift:100`、`:109`；`docs/archive/plan/plugin-v2.md:268`  
     handler 只驗 main frame，導覽卻允許目錄內其他文件；它們成為主頁後也可寫設定，並非只授權 manifest 指定的 HTML。此點是源碼判讀，未做 WebKit 驗證。  
     可明訂「同插件目錄主文件皆受信任」，或限定設定頁 URL；不要宣稱更窄的來源保障。  
     U4 下，全面封鎖網路應屬可選產品政策；它會限制遠端選項資料等正常用途，不宜成為 WP-A 的必做安全工程。

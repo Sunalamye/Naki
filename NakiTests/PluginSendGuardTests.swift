@@ -2,7 +2,7 @@
 //  PluginSendGuardTests.swift
 //  NakiTests
 //
-//  manifest `sendGuard`（docs/plan/plugin-v2-b2.md §3）：只收 methods 內的 .lq.Lobby.* 方法，並原樣進 grant。
+//  manifest `sendGuard`（docs/archive/plan/plugin-v2-b2.md §3）：只收 methods 內的 .lq.Lobby.* 方法，並原樣進 grant。
 //  守衛擋下時 Swift 收到的順序（原 REQUEST 緊接合成 RESPONSE）由 LiqiParser 正確配對。
 //  守衛本身的行為在 scripts/plugin-v2-b2-regression.cjs。
 //

@@ -197,7 +197,7 @@ AutoPlayEngine → AutoPlayDecisionResolver → AutoPlayActionExecutor
 | iOS | **不可能** | 平台限制（§0 #20）。這不是配置問題 |
 | macOS | 技術上可以，但要付代價 | `ENABLE_HARDENED_RUNTIME = YES`（`project.pbxproj:834`/`:866`）。載入非同 Team 簽章的 `.dylib`／`.bundle` 需要 `com.apple.security.cs.disable-library-validation`。repo 內 `Naki/akagi.entitlements` **有**這個 key，但**沒有任何 target 用 `CODE_SIGN_ENTITLEMENTS` 指向它**（§0 #9）——目前完全不生效。要用就得先接上，而接上等於對整個 App 放寬程式碼載入限制，還會讓公證變複雜 |
 
-`docs/pluggable-bots-plan.md`（2026-08-01）在「不做 bot 市集／自動安裝」一節已經對同一類問題做過同樣的判斷（「Naki **沒有開 App Sandbox**，自動下載並執行任意程式碼的風險太高」）。本設計沿用該結論。
+`docs/archive/plan/pluggable-bots-plan.md`（2026-08-01）在「不做 bot 市集／自動安裝」一節已經對同一類問題做過同樣的判斷（「Naki **沒有開 App Sandbox**，自動下載並執行任意程式碼的風險太高」）。本設計沿用該結論。
 
 **替代方案**：Swift 側的「插件」＝**跑在 Naki 外面的獨立程序**，透過既有 loopback DebugServer 訂閱事件。
 - 不需要任何 entitlement、不需要動態載入、不需要改簽章
@@ -888,7 +888,7 @@ GPL-3.0 §7 同一段還接著寫（已驗證，§0 #4c）：
   - README 與 LICENSE 由我於 2026-08-09 抓取 `main` 的 raw content
   - commit pin `b3933bbaf7d847fdc0c7b4509b07f9bcb3610ab0`（committer date 2026-07-16）、LICENSE 674 行、sha256 前綴 `3972dc9744f6499f`——由 teammate `gpl-30-license` 以本機 clone 取證，我未自行核對 SHA
 - GPL-3.0 全文：即上述 repo 的 `LICENSE`（§7 在 L388-390、§10 在 L463-464、§13 在 L552-560）
-- 相關既有文件：`docs/pluggable-bots-plan.md`（「不做 bot 市集／自動安裝」的既有決定與理由）、`docs/architecture-deep-dive.md`（現行架構）、`docs/majsoul-unity-protocol.md`（Unity／Liqi 事實）
+- 相關既有文件：`docs/archive/plan/pluggable-bots-plan.md`（「不做 bot 市集／自動安裝」的既有決定與理由）、`docs/architecture-deep-dive.md`（現行架構）、`docs/majsoul-unity-protocol.md`（Unity／Liqi 事實）
 
 ---
 

@@ -460,7 +460,7 @@ final class SettingsStore {
         }
     }
 
-    // MARK: - 雲端推論（docs/cloud-inference-plan.md）
+    // MARK: - 雲端推論（docs/archive/plan/cloud-inference-plan.md）
 
     /// 三個非機密欄位走 UserDefaults（與本檔既有 pattern 同款）；
     /// **API key 走 Keychain**（`CloudKeyStore`）——credential 不落入

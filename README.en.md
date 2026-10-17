@@ -250,7 +250,7 @@ On iPhone, the same settings are a single scrolling page with four sections (Dev
 
 The floating status message bar at the bottom of the table is **off by default**. It is intended for transient feedback and diagnostics. Persistent errors use a top banner and are not hidden by this setting.
 
-For optional macOS notifications about cloud failures, reconnects, or stalled action submission, see [`scripts/cloud-watch.sh`](scripts/cloud-watch.sh), which watches the event log in the background and posts macOS notifications. Cloud implementation and verification notes are tracked in [`AUDIT.md`](AUDIT.md) §20 and [`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md).
+For optional macOS notifications about cloud failures, reconnects, or stalled action submission, see [`scripts/cloud-watch.sh`](scripts/cloud-watch.sh), which watches the event log in the background and posts macOS notifications. Cloud implementation and verification notes are tracked in [`AUDIT.md`](AUDIT.md) §20 and [`docs/archive/plan/cloud-inference-plan.md`](docs/archive/plan/cloud-inference-plan.md).
 
 ---
 
@@ -400,7 +400,7 @@ Feature availability is not the same as complete end-to-end verification. [`AUDI
 - Three-player friendly rooms need three-player rules (2 red fives, 35000 start, 40000 return), otherwise the server answers error 1112. `room_quick_test` with `player_count=3` supplies them automatically.
 - North extraction: a freshly drawn north tile carries `moqie`. On disconnect, Naki stops immediately, marks the stall, and retries with backoff until reconnection.
 
-**Live verification (2026-10-09, three matches against bots):** the local engine's decisions, riichi, wins, pon, and north extraction (11 of 11, including a freshly drawn north) form a complete chain. **Not yet verified:** backoff and stall display after being kicked offline, an occasional resend on the dealer's first discard (three occurrences, cause unknown), and physical iOS devices. See [`AUDIT.md`](AUDIT.md) and [`sanma-implementation-notes.md`](sanma-implementation-notes.md).
+**Live verification (2026-10-09, three matches against bots):** the local engine's decisions, riichi, wins, pon, and north extraction (11 of 11, including a freshly drawn north) form a complete chain. **Not yet verified:** backoff and stall display after being kicked offline, an occasional resend on the dealer's first discard (three occurrences, cause unknown), and physical iOS devices. See [`AUDIT.md`](AUDIT.md) and [`docs/archive/notes/sanma-implementation-notes.md`](docs/archive/notes/sanma-implementation-notes.md).
 
 ---
 

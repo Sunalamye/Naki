@@ -1,6 +1,6 @@
 # 全程式碼復驗與變異測試 — implementation notes
 
-日期：2026-10-08。基準：`4e92764`（v2.14.0，工作樹乾淨）。前一輪：`code-audit-implementation-notes.md`（基準 `48add0a`）。
+日期：2026-10-08。基準：`4e92764`（v2.14.0，工作樹乾淨）。前一輪：`docs/archive/notes/code-audit-implementation-notes.md`（基準 `48add0a`）。
 
 ## 目標
 

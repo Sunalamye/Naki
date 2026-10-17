@@ -2,8 +2,8 @@
 
 **資料日期**：2026-10-15
 **狀態**：設計已提議，未拍板。審查第一輪（Astra 14 條）與第二輪（新發現 7 條）已改，見 `plugin-v2-b2-review-response.md`。第五輪（2026-10-17）改以協定握手鎖定連線角色（§1.4）。第三輪起 spike 也改了 `LiqiParser` 的配對狀態（§1.2），與接線一樣，合併前要經主線向用戶確認。N1／N2 有最小 spike（分支 `pv2-b2-design`，基準 main `4761f6e`，落後 main，見 §9）：`naki-plugins.js` 的守衛判定、污染狀態、錯誤回應建構、本地回應結案，加 `PluginRegistry.swift` 的 `sendGuard` 欄位。`naki-websocket.js` 的接線**未改**，以 patch 提出（§3.6，待用戶確認）。PV2-B2 四個原語只有設計。
-**決策紀錄**：`docs/plan/plugin-v2-b2-implementation-notes.md`（含 Deviations）。
-**上位文件**：`docs/plan/plugin-v2.md`（§4 原語與順序、§4.3 respondLocally、§4.4 rewriteSend、§4.5 不變條件、§9 probe、§12.3 protobuf 保真）、`docs/plugin-system-design.md` §11 #6（Phase 4 gate）、`docs/plugin-api-v1.md`（現行契約）。本文件不推翻任何拍板。
+**決策紀錄**：`docs/archive/notes/plugin-v2-b2-implementation-notes.md`（含 Deviations）。
+**上位文件**：`docs/archive/plan/plugin-v2.md`（§4 原語與順序、§4.3 respondLocally、§4.4 rewriteSend、§4.5 不變條件、§9 probe、§12.3 protobuf 保真）、`docs/plugin-system-design.md` §11 #6（Phase 4 gate）、`docs/plugin-api-v1.md`（現行契約）。本文件不推翻任何拍板。
 **需求來源**：naki-plugins repo 分支 `local-unlock-v01` 的 `docs/plan/unlock-plugin.md` §3.5–3.7、§8.2（N1–N6）。
 
 ---

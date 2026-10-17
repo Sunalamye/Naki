@@ -17,7 +17,7 @@
 - **新增**：現況沒有。
 - **SwiftUI 系統 API，worktree 尚未使用**：文件提到、但目前 `command/` 內 grep 不到的 Apple API。它們是建議寫法，不是現況。
 - **推測**：沒有實測證據的判斷。
-- **已裁決**：用戶 2026-10-13 的裁決結果，依據見 `docs/plan/ui-design-adr-2026-10-13.md`。
+- **已裁決**：用戶 2026-10-13 的裁決結果，依據見 `docs/archive/plan/ui-design-adr-2026-10-13.md`。
 
 ---
 
@@ -458,7 +458,7 @@ xcodebuild build -project Naki.xcodeproj -scheme Naki-M -configuration Release -
 | 6 | 驗收「截圖 pixel diff 對 `rendered/` baseline 1.5%」 | `rendered/` 是 HTML 原型渲染，不宜套 App 門檻（未實測比對，不宣稱「必定不通過」）；本機無比對工具；本包只被允許 GET `/status`、`/game/state`，無法擷取 App 截圖 | §5 改為 WP-0p → WP-0 建立元件 baseline；本包未產生 baseline |
 | 7 | 驗收「每個引用的 API 名稱在 worktree 內可 grep 到」 | 系統 API（`glassEffect` 等）在 worktree 沒有使用處 | 在文中標「SwiftUI 系統 API，worktree 尚未使用」；以腳本逐一檢查並把結果存 log |
 | 8 | spike 建議的數字計數位置未指定；直覺位置是決策卡百分比 | 百分比換手時計數會誤導（§2.2） | spike 改用摘要條自家點數 |
-| 9 | 專案 CLAUDE.md 要求維護 `xxxxx-implementation-notes.md` | 派工檔範圍只允許 `docs/plan/ui-design-reference.md` 一份文件 | 以本節作為 implementation notes，不另開檔 |
+| 9 | 專案 CLAUDE.md 要求維護 `xxxxx-implementation-notes.md` | 派工檔範圍只允許 `docs/archive/plan/ui-design-reference.md` 一份文件 | 以本節作為 implementation notes，不另開檔 |
 | 10 | 主線指示 §3.1 窄版「往下一格」（例：12 → 10、16 → 12） | 套用後 `padding(compact ? 10 : 16)` 變 12／16，iOS 220pt 欄的窄版內容反而變窄 | 改採「最近值、等距取大」，窄版維持現況寬度。**統帥代決** |
 | 11 | 初稿把「macOS 標題列顯示分頁名稱」詮釋為 sheet 頂端的自訂標題列 | 用戶裁決採原生 `Settings` scene；設計者再提 sheet 方案，用戶維持原裁決 | 「標題列」指原生設定視窗的標題列，隨選取的分頁名變化（§8.2）；sheet 頂端自訂標題 `HStack` 移除 |
 | 12 | 演示頁註明「分頁切換是 0.2 秒淡入」 | macOS `Settings` 視窗的 `TabView` 切換由系統處理；自訂淡入要自做分頁列 | 不加動畫，直接切換（與 reduce motion 開啟時相同） |
@@ -481,7 +481,7 @@ Astra 審查 13 條全部採納。逐條回應見主 repo 的 `.swfd/logs/ui-des
 | §5 | 新增共通 build 閘與翻譯責任（第 12、13 條）、WP-0p 前置（第 1 條）、WP-0 比對契約與覆蓋邊界（第 3、7 條）、WP-B 驗收分流（第 4 條）、WP-C 驗收清單（第 2 條）、WP-D 改 JSON 驗證（第 5 條）、WP-E 原型同步與文件（第 12 條） |
 | §6 | Deviation 6 不再宣稱「必定不通過」（第 7 條） |
 
-用戶裁決見 `docs/plan/ui-design-adr-2026-10-13.md`。
+用戶裁決見 `docs/archive/plan/ui-design-adr-2026-10-13.md`。
 
 ### 復驗修訂（2026-10-13）
 

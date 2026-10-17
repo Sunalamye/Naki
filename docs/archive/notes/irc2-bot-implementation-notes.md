@@ -52,7 +52,7 @@
 - BT-25 收斂：`AkagiApiClient`（init 的 key、`redactingKey`）與 `CloudInferenceConfig`（`isActive`、`missingItems`、`keyLast4`）的 key 修剪改呼叫 `CloudKeyStore.sanitized`，與 `save` 同一個 helper。URL 與 model 欄位各只有 1 到 2 處獨立判斷，不另造 helper。
 - 函數結構：`sendPass` 最深 3 層（函數、`occupy` 閉包、`send` 閉包），`AutoPassDispatcher.send` 與 `runConfirmCycle` 新增段落未增加巢狀，不拆函數。
 - lint：`testNoSecondDecisionPathOutsideTheEngine` 只禁 `AutoPlayActionExecutor.execute`、`AutoPassDispatcher.send` 等字串；引擎呼叫的 `sendAndVerify` 只做送出與驗收、不含閘門或 resolver，且呼叫點仍在 `AutoPlayEngine.swift`，無第二條決策路徑。
-- `passPolicy` 殘留：全專案 grep 僅剩 `docs/design-review-2026-10-12-decisions.md:280` 的歷史紀錄（當時狀態的描述），及本檔上文；程式與測試無引用，不改歷史文件。
+- `passPolicy` 殘留：全專案 grep 僅剩 `docs/archive/plan/design-review-2026-10-12-decisions.md:280` 的歷史紀錄（當時狀態的描述），及本檔上文；程式與測試無引用，不改歷史文件。
 - 驗收：clean build 綠，去重 warning 3（算法 `grep "warning:" | sed 's/^.*warning:/warning:/' | sort -u | wc -l`，前一步 log 同算法亦為 3），證據 `cleanup-build.log`；NakiTests 1096 tests 0 failures、`ReplayFingerprintTests` 2 條綠，證據 `cleanup-test.log`；`grep -rn "/Users/" NakiTests` 0。
 
 ## 驗收

@@ -207,7 +207,7 @@ iPhone 是同一份設定的單頁捲動版（四段，「開發者」預設折�
 真正不會自己好的錯誤走頂端橫幅，不受這個開關影響。
 
 雲端相關的驗證進度記在 [`AUDIT.md`](AUDIT.md) §20 與
-[`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md)。
+[`docs/archive/plan/cloud-inference-plan.md`](docs/archive/plan/cloud-inference-plan.md)。
 
 ### 插件系統
 
@@ -439,7 +439,7 @@ Akagi v3 的三麻行為克隆模型，Apache 2.0；37×27 observation、60 個�
 **live 驗證（2026-10-09，三局人機）**：本地引擎決策、立直、和牌、碰、拔北 11/11
 （含剛摸到北）鏈路完整。**尚未驗證**：被擠下線後的退避與停滯顯示、親家局第一打偶發的重送
 （三次，原因未明）、iOS 實機。細節見 [`AUDIT.md`](AUDIT.md) 與
-[`sanma-implementation-notes.md`](sanma-implementation-notes.md)。
+[`docs/archive/notes/sanma-implementation-notes.md`](docs/archive/notes/sanma-implementation-notes.md)。
 
 ---
 

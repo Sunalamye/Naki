@@ -2,7 +2,7 @@
 //  PluginSettingsUITests.swift
 //  NakiTests
 //
-//  插件自帶設定頁（manifest `settingsUI`，docs/plan/plugin-v2.md §A）：manifest 驗證、
+//  插件自帶設定頁（manifest `settingsUI`，docs/archive/plan/plugin-v2.md §A）：manifest 驗證、
 //  檔案必須在插件目錄內、bridge 只收 schema 宣告的 key 與型別，寫入後 SettingsStore 讀得回。
 //
 

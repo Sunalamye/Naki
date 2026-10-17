@@ -1,6 +1,6 @@
 # plugin-v2 Phase 4 implementation notes
 
-分支 `plugin-v2-phase4`，基於 main `2d02a03`。設計：`docs/plan/plugin-v2-phase4.md`。log：`.swfd/logs/p4/`。
+分支 `plugin-v2-phase4`，基於 main `2d02a03`。設計：`docs/archive/plan/plugin-v2-phase4.md`。log：`.swfd/logs/p4/`。
 
 ## 授權
 
@@ -15,7 +15,7 @@
 | `scripts/plugin-v2-p4-regression.cjs` | 新增，17 條，三種假 dispatcher |
 | `scripts/plugin-v2-regression.cjs` | 第 8 條拿掉「receive 只能等長」的斷言，那是本包刻意改掉的契約 |
 | `NakiTests/JSContractTests.swift` | 新增 `testMessageListenerIsRegisteredInCapturePhase` |
-| 文件 | `docs/plan/plugin-v2-phase4.md`（新增）、`docs/plugin-api-v1.md`「v2 Phase 4（草案）」段、`docs/plugin-system-design.md` §11 #6 gate 文字 |
+| 文件 | `docs/archive/plan/plugin-v2-phase4.md`（新增）、`docs/plugin-api-v1.md`「v2 Phase 4（草案）」段、`docs/plugin-system-design.md` §11 #6 gate 文字 |
 
 ## 驗證
 
@@ -56,7 +56,7 @@
 
 ## 第二輪（回應 Astra 第一輪，主線裁決全採納）
 
-逐條處理與證據見 `docs/plan/plugin-v2-phase4-review-response.md`。
+逐條處理與證據見 `docs/archive/review/plugin-v2-phase4-review-response.md`。
 
 | 檔案 | 改動 |
 |---|---|
@@ -77,7 +77,7 @@
 
 ## 第三輪（回應 Astra 第二輪：0 擋 1 應修 3 建議，主線裁決全採納）
 
-程式只動 p4 回歸：假 dispatcher 加「遊戲有效 stop」旗標，新增盲區一的反例測試（23→24）。文件改設計 §2.1、§4、§5、§7，契約段兩處，本檔 D10、D11。逐條見 `docs/plan/plugin-v2-phase4-review-response.md`「Astra 第二輪」。
+程式只動 p4 回歸：假 dispatcher 加「遊戲有效 stop」旗標，新增盲區一的反例測試（23→24）。文件改設計 §2.1、§4、§5、§7，契約段兩處，本檔 D10、D11。逐條見 `docs/archive/review/plugin-v2-phase4-review-response.md`「Astra 第二輪」。
 
 ### Deviations（第三輪）
 

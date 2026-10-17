@@ -1,5 +1,5 @@
 // Run: node scripts/plugin-v2-p4-regression.cjs
-// Phase 4 receive 變長 replace／drop（docs/plan/plugin-v2-phase4.md）。假 dispatcher 照 live probe 的三種：
+// Phase 4 receive 變長 replace／drop（docs/archive/plan/plugin-v2-phase4.md）。假 dispatcher 照 live probe 的三種：
 // capture（target 上 capture 先跑，WebKit 實測）、order（照註冊順序）、nostop（stopImmediatePropagation 無效）。
 // NAKI_JS_DIR 可指向變異後的 JS 目錄；main 差異比較從 git 取 main（2d02a03）的 JS。
 const fs = require('node:fs');

@@ -96,7 +96,7 @@ iOS 17–25 的 `LegacyWebViewModel` 曾直接使用 AI 第一推薦，沒有 re
 | s3-live-6 | 99869 | 第 1 名 59600；拔北 11/11 收到 `ActionBaBei`（剛摸到 5、在手 6，含嶺上與立直後），0 重送；和牌 5、立直 5 |
 
 拔北修法（剛摸到北帶 `moqie=true`，送 `080b2801`）live 成立；三麻友人房須帶三麻細則（赤寶 2、起點 35000、
-返點 40000），四麻細則會回 error 1112。依據：`sanma-implementation-notes.md` S3-5／S3-6、`kita-retry-implementation-notes.md`。
+返點 40000），四麻細則會回 error 1112。依據：`docs/archive/notes/sanma-implementation-notes.md` S3-5／S3-6、`docs/archive/notes/kita-retry-implementation-notes.md`。
 
 **仍未驗證**：被擠下線後的退避與停滯顯示（live 沒遇到）、親家局第一打偶發「受理卻無權威回音、700ms 後重送」
 （三次，原因未明）、三麻雲端 3p 模型路徑、九種九牌（kyushu）、碰／槓 consumed 與赤五 copy 的逐組合對應、
@@ -160,14 +160,14 @@ iOS 實機。
 | 副露搶先送「過」、首選未授權時亂退次選 | 寬限期 8 秒（不足 timeFixed 時夾小）；退次選只退到同批 oplist 的 discard／none | `AutoPlayEngine.swift`、`AutoPlayDecisionResolver.swift` |
 | 手動 `game_action(hora)` 無 snapshot 猜 tsumo | fail-closed | `GameTools.swift` |
 | `LiqiResponseStore` 一律讀 field 1 當 error | 依 method 查 error 欄位號（21 個 method） | `LiqiResponseStore.swift` |
-| 用號段（≥ 60000）判斷 Naki 自送 | (連線, msgId) 登記制（D22）；JS 不含插件號段，Swift 的 match_sid 學習仍排除插件號段；已知殘留：同線 REQUEST 在途碰撞、本地結案不算已答、同線 RESPONSE 持續誤認、注入錯認領、Swift 綁定前窗口（見 `docs/plan/d22-naki-identity.md` §8） | `LiqiMsgIdAllocator.isIssued`、`LiqiParser.isNakiSent`、`naki-websocket.js` 的 `isNakiSent` |
+| 用號段（≥ 60000）判斷 Naki 自送 | (連線, msgId) 登記制（D22）；JS 不含插件號段，Swift 的 match_sid 學習仍排除插件號段；已知殘留：同線 REQUEST 在途碰撞、本地結案不算已答、同線 RESPONSE 持續誤認、注入錯認領、Swift 綁定前窗口（見 `docs/archive/plan/d22-naki-identity.md` §8） | `LiqiMsgIdAllocator.isIssued`、`LiqiParser.isNakiSent`、`naki-websocket.js` 的 `isNakiSent` |
 | Bot 推論失敗仍合成推薦／失敗無提示 | 不合成推薦；`GameStore.botFailure` 顯示橫幅 | `BundledCoreMLBot.swift`、`GameStore.swift` |
-| Retry-After、`/js` 非 JSON 型別、MCP 參數轉型、⌘N 等崩潰點 | 已加守衛 | 見 `code-audit-implementation-notes.md` |
+| Retry-After、`/js` 非 JSON 型別、MCP 參數轉型、⌘N 等崩潰點 | 已加守衛 | 見 `docs/archive/notes/code-audit-implementation-notes.md` |
 | Debug server 無 Host 檢查、chunked 無界、連線可無限掛著 | Host 403、411、30 秒收齊期限 | `DebugServer.swift` |
 | 測試清掉正式 App 偏好／輪替刪掉執行中 session 與錄影 | 測試用獨立 suite；test host 不輪替；有錄影的舊 session 只留 `games/` | `LogManager.pruneOldSessions` |
 | 全自動續局失敗只寫 log | 經 `onFailure` 寫進 `statusMessage` | `NakiRuntime.swift` |
 
-仍**不處理**的已知項目（附理由）見 `code-audit-implementation-notes.md`（槓種、回音逾時重送、Debug server 認證等）。
+仍**不處理**的已知項目（附理由）見 `docs/archive/notes/code-audit-implementation-notes.md`（槓種、回音逾時重送、Debug server 認證等）。
 
 ## 正確修正順序
 
@@ -667,7 +667,7 @@ live 實測兩次：
 
 ## 19. 參考 Akagi 後的實作（2026-08-01）
 
-設計對照見 `docs/design-review-vs-akagi.md`。這一節記實作的取捨。
+設計對照見 `docs/archive/plan/design-review-vs-akagi.md`。這一節記實作的取捨。
 
 ### 19.1 錯誤碼自動解碼
 
@@ -736,7 +736,7 @@ MCP 工具要 `import MCPKit`（型別在獨立 module，不在 Naki target）�
 ## 20. 雲端推論 overlay（2026-08-04）
 
 Akagi `/v3/react` 雲端推論接入完成。設計與偏差說明見
-`docs/cloud-inference-plan.md`（實作狀態表）與 `docs/cloud-inference-decisions.md`
+`docs/archive/plan/cloud-inference-plan.md`（實作狀態表）與 `docs/archive/plan/cloud-inference-decisions.md`
 （D1–D10 保守決策）。本節只記**驗證差距與完成判準**。
 
 ### 20.0 2026-08-05 修訂：protocol 版取代 overlay 版

@@ -3,6 +3,8 @@
 **最後核對**：2026-10-13  
 **原則**：本索引只列目前可用的文件；Laya、DesktopMgr、座標點擊與過渡期調查不再提供入口。
 
+歸檔結構：工作包 notes 在 `archive/notes/`，設計與 ADR 在 `archive/plan/`，審查回應在 `archive/review/`，一次性審查報告在 `archive/audit/`，舊 README 截圖在 `archive/images/`。`docs/` 第一層只留 current truth。
+
 ## 先看哪一份
 
 | 需求 | 文件 |
@@ -65,18 +67,18 @@ Repo 根目錄另有：
 
 | 檔案 | 主題（日期） |
 |------|------|
-| [code-audit-implementation-notes.md](../code-audit-implementation-notes.md) | 全程式碼審查與修正（2026-09-30） |
-| [reverify-implementation-notes.md](../reverify-implementation-notes.md) | 全程式碼復驗與變異測試（2026-10-08） |
-| [l10n-implementation-notes.md](../l10n-implementation-notes.md) | 多國語系（2026-10-01） |
-| [update-check-implementation-notes.md](../update-check-implementation-notes.md) | App 更新提醒（2026-10-01） |
-| [sanma-implementation-notes.md](../sanma-implementation-notes.md) | 三麻本地推論與 Akagi 同步（2026-10-09） |
-| [kita-retry-implementation-notes.md](../kita-retry-implementation-notes.md) | 拔北請求與重試風暴（2026-10-09） |
-| [endpoint-guard-implementation-notes.md](../endpoint-guard-implementation-notes.md) | Debug endpoint 防護 |
-| [h1-headers-implementation-notes.md](../h1-headers-implementation-notes.md) | 雀魂連線 User-Agent／header |
-| [wp3-cloud-errors-implementation-notes.md](../wp3-cloud-errors-implementation-notes.md) | 雲端錯誤提示 |
-| [wp5-kan-select-implementation-notes.md](../wp5-kan-select-implementation-notes.md) | 槓 selector 協定調查 |
-| [wp5b-kan-kind-implementation-notes.md](../wp5b-kan-kind-implementation-notes.md) | 暗槓與加槓並存時的槓種 |
-| [wp6b-sync-newround-implementation-notes.md](../wp6b-sync-newround-implementation-notes.md) | 重連同步與新局 |
+| [docs/archive/notes/code-audit-implementation-notes.md](../code-audit-implementation-notes.md) | 全程式碼審查與修正（2026-09-30） |
+| [docs/archive/notes/reverify-implementation-notes.md](../reverify-implementation-notes.md) | 全程式碼復驗與變異測試（2026-10-08） |
+| [docs/archive/notes/l10n-implementation-notes.md](../l10n-implementation-notes.md) | 多國語系（2026-10-01） |
+| [docs/archive/notes/update-check-implementation-notes.md](../update-check-implementation-notes.md) | App 更新提醒（2026-10-01） |
+| [docs/archive/notes/sanma-implementation-notes.md](../sanma-implementation-notes.md) | 三麻本地推論與 Akagi 同步（2026-10-09） |
+| [docs/archive/notes/kita-retry-implementation-notes.md](../kita-retry-implementation-notes.md) | 拔北請求與重試風暴（2026-10-09） |
+| [docs/archive/notes/endpoint-guard-implementation-notes.md](../endpoint-guard-implementation-notes.md) | Debug endpoint 防護 |
+| [docs/archive/notes/h1-headers-implementation-notes.md](../h1-headers-implementation-notes.md) | 雀魂連線 User-Agent／header |
+| [docs/archive/notes/wp3-cloud-errors-implementation-notes.md](../wp3-cloud-errors-implementation-notes.md) | 雲端錯誤提示 |
+| [docs/archive/notes/wp5-kan-select-implementation-notes.md](../wp5-kan-select-implementation-notes.md) | 槓 selector 協定調查 |
+| [docs/archive/notes/wp5b-kan-kind-implementation-notes.md](../wp5b-kan-kind-implementation-notes.md) | 暗槓與加槓並存時的槓種 |
+| [docs/archive/notes/wp6b-sync-newround-implementation-notes.md](../wp6b-sync-newround-implementation-notes.md) | 重連同步與新局 |
 
 ## 其他資源
 

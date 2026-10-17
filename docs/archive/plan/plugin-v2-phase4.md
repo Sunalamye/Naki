@@ -3,7 +3,7 @@
 **資料日期**：2026-10-17（第二輪，回應 Astra 第一輪審查）
 **狀態**：設計草案＋spike（分支 `plugin-v2-phase4`，基於 main `2d02a03`，未合併、未 push）。spike 含 capture 攔截、合成事件重派、變長 `replace`（需 `reshapeReceive`）、`drop`、禁改名單、建構期 fail-open、攔後故障狀態、kill-switch、stop 失效哨兵。`injectReceive`、`respondLocally` 只有設計。
 **gate**：`plugin-system-design.md` §11 #6「probe 綠才實作」。probe 結果見 `plugin-v2.md` §9.6，用戶 2026-10-17 裁決開工。**合併 gate**：§8 的 live 清單全部通過（Astra 第一輪第 3 條，主線裁決）。
-**決策紀錄**：repo 根 `plugin-v2-phase4-implementation-notes.md`（含 Deviations）；審查回應 `plugin-v2-phase4-review-response.md`。
+**決策紀錄**：repo 根 `docs/archive/notes/plugin-v2-phase4-implementation-notes.md`（含 Deviations）；審查回應 `plugin-v2-phase4-review-response.md`。
 **上位文件**：`plugin-system-design.md`（§7.4、§7.5、§8、§11）、`plugin-v2.md`（§4、§9）、`plugin-api-v1.md`、`d22-naki-identity.md`、`plugin-v2-b2-adr-2026-10-17.md`。本文件不推翻任何拍板。
 
 ---

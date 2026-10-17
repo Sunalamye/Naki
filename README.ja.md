@@ -206,7 +206,7 @@ iPhone は同じ設定を 1 ページのスクロールにした版です（4 �
 放っておいても直らない本当のエラーは上部のバナーに出るため、このスイッチの影響を受けません。
 
 クラウド関連の検証の進捗は [`AUDIT.md`](AUDIT.md) §20 と
-[`docs/cloud-inference-plan.md`](docs/cloud-inference-plan.md) に記録されています。
+[`docs/archive/plan/cloud-inference-plan.md`](docs/archive/plan/cloud-inference-plan.md) に記録されています。
 
 ### プラグインシステム
 
@@ -433,7 +433,7 @@ Akagi v3 のサンマ行動クローンモデル、Apache 2.0。37×27 の obser
 **live 検証（2026-10-09、CPU 戦 3 試合）**：ローカルエンジンによる判断、リーチ、和了、ポン、北抜き 11/11
 （ツモったばかりの北を含む）の経路が完全に通りました。**未検証**：他の端末からのログインで切断された後のバックオフと停滞表示、親番の最初の打牌で時折起こる再送
 （3 回、原因不明）、iOS 実機。詳細は [`AUDIT.md`](AUDIT.md) と
-[`sanma-implementation-notes.md`](sanma-implementation-notes.md) をご覧ください。
+[`docs/archive/notes/sanma-implementation-notes.md`](docs/archive/notes/sanma-implementation-notes.md) をご覧ください。
 
 ---
 

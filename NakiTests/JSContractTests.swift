@@ -160,7 +160,7 @@ final class JSContractTests: XCTestCase {
     }
 
     /// Phase 4：主 listener 以 capture 註冊（攔原事件、重派合成事件的前提），另有一個非 capture 哨兵偵測攔截失效
-    /// （docs/plan/plugin-v2-phase4.md §1、§5）。
+    /// （docs/archive/plan/plugin-v2-phase4.md §1、§5）。
     func testMessageListenerIsRegisteredInCapturePhase() throws {
         let page = try loadedPage()
         _ = page.evaluateScript("""

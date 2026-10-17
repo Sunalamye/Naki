@@ -1,6 +1,6 @@
 # D22 implementation notes
 
-設計：`docs/plan/d22-naki-identity.md`。分支 `d22-naki-identity`，基準 main `f720dc1`。log 在主 repo 的 `.swfd/logs/d22/`。
+設計：`docs/archive/plan/d22-naki-identity.md`。分支 `d22-naki-identity`，基準 main `f720dc1`。log 在主 repo 的 `.swfd/logs/d22/`。
 
 ## 決策
 

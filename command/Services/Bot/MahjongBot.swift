@@ -4,7 +4,7 @@
 //
 //  推論引擎的 protocol 抽象（pluggable-bots-plan 第 1 層；2026-08-05 使用者
 //  決策「先抽象、再實作」落地，取代前一日的 controller 內 overlay——見
-//  docs/cloud-inference-decisions.md D11）。
+//  docs/archive/plan/cloud-inference-decisions.md D11）。
 //
 //  邊界劃分：
 //  - 引擎（conform 這個 protocol）負責「對事件做出反應＋產出推薦」。

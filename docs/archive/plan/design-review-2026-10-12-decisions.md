@@ -3,7 +3,7 @@
 - 裁決基準（四份審查報告）：HEAD `813aa88`（main）；各 WP 的 diff 基準見 §12，工作樹只有未追蹤的 `build-ios-dev/`（`git status --short`）。
 - 輸入：`.swfd/logs/design-review/{arch,bot,bridge,ui}.md` 第二版（檔案時間 16:50:21／16:46:51／16:37:47／16:42:41）。四份都是靜態審查，沒有 runtime 驗證。
 - 裁決方法：每個「必須改」「建議改」項目都親自打開程式碼核對（清單見第 10 節）。核對不成立的寫在第 8 節。
-- 既有決策出處：`note/dev-notes/2026-08-02-swiftui-target-pattern.md:24-26`（Bridge／Bot 維持 service 形態、Action 是無狀態接縫、`@Entry` 預設值只給 Preview）。2026-08-05 的 422 事故出處：mempal wing `naki`，`docs/cloud-inference-decisions.md` D16 段落，與 `MajsoulBridge.swift:94-103` 的註解一致。
+- 既有決策出處：`note/dev-notes/2026-08-02-swiftui-target-pattern.md:24-26`（Bridge／Bot 維持 service 形態、Action 是無狀態接縫、`@Entry` 預設值只給 Preview）。2026-08-05 的 422 事故出處：mempal wing `naki`，`docs/archive/plan/cloud-inference-decisions.md` D16 段落，與 `MajsoulBridge.swift:94-103` 的註解一致。
 - 用詞：「做」＝本輪排入工作包；「延後」＝成立但本輪不排，列出重啟條件；「不做」＝不成立或成本大於效益；「需用戶裁決」只用於不可逆、改對外 MCP 工具清單、改協定語意、兩個既有決策衝突。其餘一律「裁決員代決」。
 
 ## 1. 總結
@@ -366,8 +366,8 @@
 - 資源：需編譯。
 
 ### WP12 文件、註解與對外說明漂移
-- 範圍：第 7 節總表列出的所有檔，加 `docs/README.md`、三份 README、`FLOW_COMPARISON.md`。
-- 內容：依第 7 節逐條修正；`CLAUDE.md` 的行號改成函式名；測試數改成「2026-10-09 整合閘 890 tests、0 failures（`.swfd/logs/merge-main/test-813aa88.log`）」；`docs/README.md` 補索引與「歷史工作紀錄（非 current truth）」一節，implementation-notes 不搬檔（專案 CLAUDE.md 規定維護位置，搬走會讓後續 WP 寫錯地方）；`FLOW_COMPARISON.md` 檔頭加一行「歷史文件，引用的 `WebViewController.swift` 已不存在」；README 三語補插件（含 L3 風險）與五語選單一段；`docs/plugin-api-v1.md` 補 D10 的「授權防誤用、不防惡意插件」（除非 U4 選 B）；`docs/majsoul-unity-protocol.md:27`、`:331` 改為「三麻 live 已驗（2026-10-09 三局）」，證據見第 6 節第 14 項。
+- 範圍：第 7 節總表列出的所有檔，加 `docs/README.md`、三份 README、`docs/archive/FLOW_COMPARISON.md`。
+- 內容：依第 7 節逐條修正；`CLAUDE.md` 的行號改成函式名；測試數改成「2026-10-09 整合閘 890 tests、0 failures（`.swfd/logs/merge-main/test-813aa88.log`）」；`docs/README.md` 補索引與「歷史工作紀錄（非 current truth）」一節，implementation-notes 不搬檔（專案 CLAUDE.md 規定維護位置，搬走會讓後續 WP 寫錯地方）；`docs/archive/FLOW_COMPARISON.md` 檔頭加一行「歷史文件，引用的 `WebViewController.swift` 已不存在」；README 三語補插件（含 L3 風險）與五語選單一段；`docs/plugin-api-v1.md` 補 D10 的「授權防誤用、不防惡意插件」（除非 U4 選 B）；`docs/majsoul-unity-protocol.md:27`、`:331` 改為「三麻 live 已驗（2026-10-09 三局）」，證據見第 6 節第 14 項。
 - 依賴：全部 WP 之後（行號與型別名才穩定）。
 - 路由：Sonnet 5.5 low。
 - 略過清理三條件：符合（純文字，但檔數超過 5，記為「機械式但多檔」）。
@@ -492,10 +492,10 @@
 | 42 | `PluginsPageView.swift:15-16` | body 讀 `recentLogLines()` | 讀 `entries` | `:644-647` |
 | 43 | `GameStore.swift:1-6` | 牌局資料的單一真實來源 | 也放更新提示、Debug server 狀態、載頁失敗 | `:67-80`、`:117-125` |
 | 44 | `NakiUITests.swift:18` | Laya/WebGL 黑盒 | Unity | CLAUDE.md |
-| 45 | `FLOW_COMPARISON.md:14`、`:107` | `command/Views/WebViewController.swift` | 檔案不存在 | find 0 命中 |
+| 45 | `docs/archive/FLOW_COMPARISON.md:14`、`:107` | `command/Views/WebViewController.swift` | 檔案不存在 | find 0 命中 |
 | 46 | `docs/README.md` 索引 | — | 18 份文件未索引 | `ls docs` |
 | 47 | `README.md`、`README.en.md`、`README.ja.md` | 未提插件系統與 App 內語言 | 兩者都是一級 UI | `PluginsPageView.swift:446`、`L10n.swift:14-21` |
-| 48 | `l10n-implementation-notes.md:61` | 726 tests | 歷史快照，標日期即可 | — |
+| 48 | `docs/archive/notes/l10n-implementation-notes.md:61` | 726 tests | 歷史快照，標日期即可 | — |
 
 ## 8. 審查員誤判與修正
 
@@ -610,7 +610,7 @@
 
 文件：
 - `CLAUDE.md`（全檔，系統注入）、`AUDIT.md`（18-26、59-63、75-83、112-128、139-143）
-- `docs/README.md`（24-34）、`docs/architecture-deep-dive.md`（50-68、87-91、111-115、173-177、186）、`docs/majsoul-unity-protocol.md`（25-29、40-44、99-106、191-195、304-308、327-333）、`docs/plugin-api-v1.md`（1-6、30-34、331-335）、`docs/plugin-system-design.md`（276-280）、`docs/mcp-server-guide.md`（265-269、工具名 grep）、`docs/akagi-audit-p0-decisions.md`（190-196）、`FLOW_COMPARISON.md`（grep）
+- `docs/README.md`（24-34）、`docs/architecture-deep-dive.md`（50-68、87-91、111-115、173-177、186）、`docs/majsoul-unity-protocol.md`（25-29、40-44、99-106、191-195、304-308、327-333）、`docs/plugin-api-v1.md`（1-6、30-34、331-335）、`docs/plugin-system-design.md`（276-280）、`docs/mcp-server-guide.md`（265-269、工具名 grep）、`docs/archive/plan/akagi-audit-p0-decisions.md`（190-196）、`docs/archive/FLOW_COMPARISON.md`（grep）
 - `note/dev-notes/2026-08-02-swiftui-target-pattern.md`（20-30）
 
 審查報告版本：四份都以第 1 節列出的檔案時間為準全文重讀；`bot.md` 16:46:51 版的 R 編號與 16:42 版不同，本文件第 3.3 節與所有 `bot Rn` 引用都已對到 16:46:51 版。
@@ -785,7 +785,7 @@
 - 統帥裁決附帶兩項：(1) **恢復 listener 身分 guard**——實作者以「main queue FIFO 所以等價」為由把存活變異判為等價並移除 guard，復驗判定跨 listener 事件入隊次序無 Network.framework API 保證，40/40 未觀察到反轉只是「未觀察到」，依「變異存活即 revert 該項」恢復；(2) `occupyPorts` 失敗改 `XCTSkip`。
 - 規則補強：**實作者不得自行把存活變異判為「等價變異」後移除被測的 guard**；判等價必須附證明（API 契約或窮舉），否則保留原碼、記為未鎖。
 - 其他復驗結論：13 項一致；`eventLog` 改名只改 Swift 名稱不改輸出 key，非契約變更；`resetConfirm` 五處逐處等價；`resolveReachDiscard` 取消在 sleep 期間與飛行中都不記故障，變異兩邊都紅。
-- 可合併後補：`DebugServer.swift:675` 的 Task 在 await 期間強持有 self，重啟時舊實例遲到的 `.cancelled` 理論上可清掉新 server 旗標（窗口極窄，推測未實測）→ 延後表；`docs/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12` 提到已刪符號 → WP12。
+- 可合併後補：`DebugServer.swift:675` 的 Task 在 await 期間強持有 self，重啟時舊實例遲到的 `.cancelled` 理論上可清掉新 server 旗標（窗口極窄，推測未實測）→ 延後表；`docs/archive/plan/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12` 提到已刪符號 → WP12。
 
 ### WP7b 結果（2026-10-12）
 - 合併到 main：merge commit `03ac6b8`（`468cd0b` MCP／`ae77c56` Debug／`e6e6eb2` Bot／`36404b3`／`6580ab0` 補強／`2a1e662` 修正，基準 `a8536e7`，30 檔 +435/−425）。復驗兩輪（`.swfd/logs/wp7b-verify/`）：第一輪「要修正」（lifecycle 測試 port 等式 flaky），第二輪「可合併」。927 → 937 條（+10）；合併態 main 全套見 `.swfd/logs/merge-main/test-03ac6b8.log`。
@@ -796,7 +796,7 @@
   - listener 身分 guard 反向變異全綠，**guard 未被測試鎖住** → WP7c 補一條能殺變異的測試。
   - 跨實例窗口：`DebugServer.swift:675` Task 在 await 期間強持有舊實例，重啟時舊實例 `stop()` 後遲到的 `.cancelled` 走 nil 分支會清掉共用 store 旗標（窄窗口，推測未實測）→ 延後表。
   - 立直第二段取消時 `cloudOverride` 仍多寫一行「呼叫失敗」log（WP4 範圍）→ 延後表（只是 log）。
-  - `docs/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12`、`CLAUDE.md` 內 `LogManager`／`AutoPlayEngine`／`BotTools` 行號 → WP12。
+  - `docs/archive/plan/cloud-inference-plan.md:69,112`、`docs/ui-reference/implementation-decisions.md:12`、`CLAUDE.md` 內 `LogManager`／`AutoPlayEngine`／`BotTools` 行號 → WP12。
 
 ### WP7c 結果（2026-10-12）
 - 合併到 main：merge commit `86792ea`（`c6f5f70` 刪 isReady／`b326603` 刪寬鬆預設值／`a30c870` stale 與三麻判斷式／`c2d488f` DecisionSource／`799a04d` snapshot 共用規則／`5f1246a` 改名 sendsActions／`a3a980d` 後續項測試／`b86f329` GameModels 三行，基準 `7a53245`，33 檔）。復驗「可合併」（`.swfd/logs/wp7c-verify/`）：937 → 949 條；fixture F 四條綠；`mutate.py` 11/11 殺；復驗自選手工變異 6/6 殺；合併態 main 全套見 `.swfd/logs/merge-main/test-86792ea.log`。

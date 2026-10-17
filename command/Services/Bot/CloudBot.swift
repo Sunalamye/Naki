@@ -2,7 +2,7 @@
 //  CloudBot.swift
 //  Naki
 //
-//  雲端推論裝飾器（docs/cloud-inference-plan.md）。
+//  雲端推論裝飾器（docs/archive/plan/cloud-inference-plan.md）。
 //
 //  雲端不是平行引擎，是包在本地引擎外面的一層：本地引擎照餵每一個事件，
 //  同時扮演合法動作閘門（本地回 nil ＝ 非決策點，連 API 都不打——省

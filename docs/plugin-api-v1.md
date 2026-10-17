@@ -1,7 +1,7 @@
 # Naki 插件 API 契約（`apiVersion: 1`）
 
 **資料日期**：2026-08-09；2026-10-13 核對實作現況
-**狀態**：**對應實作已存在**（`PluginRegistry`、`naki-plugins.js`、熱插拔都已落地）。本文件描述 `apiVersion: 1` 的介面約定，供插件作者參照。**規格與實作有差**：下列項目只在文件裡，目前**未實作**（manifest 宣告了也沒有作用，呼叫也不存在）——`rewriteSend`、`dropSend`、`onSocketClose`。`dropReceive`、`ctx.drop()` 與長度不等的 receive `replace` 見文末「v2 Phase 4」，已通過 live 驗收（`docs/plan/plugin-v2-phase4.md` §9.1）。其餘 capability 已實作：`observe`、`rewriteReceive`（`ctx.replace`，等長就地改寫）、`injectSend`（`ctx.sendRequest`，受 L3 總開關把關）；hook 已實作：`onReceive`、`onSend`、`onRecommendations`、`onInjectResponse`、`onDisable`。標「未驗證」的行為不得當保證使用。
+**狀態**：**對應實作已存在**（`PluginRegistry`、`naki-plugins.js`、熱插拔都已落地）。本文件描述 `apiVersion: 1` 的介面約定，供插件作者參照。**規格與實作有差**：下列項目只在文件裡，目前**未實作**（manifest 宣告了也沒有作用，呼叫也不存在）——`rewriteSend`、`dropSend`、`onSocketClose`。`dropReceive`、`ctx.drop()` 與長度不等的 receive `replace` 見文末「v2 Phase 4」，已通過 live 驗收（`docs/archive/plan/plugin-v2-phase4.md` §9.1）。其餘 capability 已實作：`observe`、`rewriteReceive`（`ctx.replace`，等長就地改寫）、`injectSend`（`ctx.sendRequest`，受 L3 總開關把關）；hook 已實作：`onReceive`、`onSend`、`onRecommendations`、`onInjectResponse`、`onDisable`。標「未驗證」的行為不得當保證使用。
 **權威來源**：本文件從 `plugin-system-design.md` §6–§8 抽出，面向插件作者。兩份衝突時以設計文件為準；涉及實際行為時以**執行中的 Naki 與原始碼**為準（Naki 的文件漂移過，見 `CLAUDE.md`）。
 
 ---
@@ -393,7 +393,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
 
 ## v2 Phase 4（草案，未定案）
 
-> **本段為 v2 Phase 4 契約**：設計見 `docs/plan/plugin-v2-phase4.md`；live 驗收 L1–L7 於 2026-10-17 全綠（該文件 §9.1，含 L2 限制：只驗語意不變的變長重派，改顯示值的畫面效果未驗）。上面各節仍是現行契約。
+> **本段為 v2 Phase 4 契約**：設計見 `docs/archive/plan/plugin-v2-phase4.md`；live 驗收 L1–L7 於 2026-10-17 全綠（該文件 §9.1，含 L2 限制：只驗語意不變的變長重派，改顯示值的畫面效果未驗）。上面各節仍是現行契約。
 
 - **長度不等的 `ctx.replace(bytes)` 要明確選用**：manifest `capabilities` 同時宣告 `rewriteReceive` 與 `reshapeReceive`，才會整包替換。只宣告 `reshapeReceive` 時 manifest 無效。條件：
   - 原事件的 data 是 ArrayBuffer。Blob 不提供。

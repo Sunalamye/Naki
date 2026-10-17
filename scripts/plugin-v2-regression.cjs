@@ -1,5 +1,5 @@
 // Run: node scripts/plugin-v2-regression.cjs
-// 插件 v2 草案的 rewriteSend（docs/plan/plugin-v2.md §B）：只用 bundled 模組，不需外部插件 repo。
+// 插件 v2 草案的 rewriteSend（docs/archive/plan/plugin-v2.md §B）：只用 bundled 模組，不需外部插件 repo。
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');

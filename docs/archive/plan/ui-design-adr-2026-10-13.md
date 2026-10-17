@@ -1,6 +1,6 @@
 # ADR：Naki 畫面設計參考的審查裁決（2026-10-13）
 
-設計文件：`docs/plan/ui-design-reference.md`（設計者 Opus 5.5 high，基底 15cea92）。
+設計文件：`docs/archive/plan/ui-design-reference.md`（設計者 Opus 5.5 high，基底 15cea92）。
 審查者：Astra（codex `gpt-6-astra`，唯讀 sandbox）。原文 `.swfd/logs/ui-design/astra-review.md`，回應 `.swfd/logs/ui-design/astra-response.md`。
 
 ## 數字

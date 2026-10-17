@@ -15,7 +15,7 @@
 //  - 三麻補位到長度 4；內部欄位（__nakiOplistSequence、start_game 的 id/is3P）剝除
 //
 //  ⚠️ 這些是元件測試：NativeBotController 的 overlay 整合（含立直兩段式的
-//  live 時序）沒有 live 對局驗證，狀態記在 docs/cloud-inference-plan.md。
+//  live 時序）沒有 live 對局驗證，狀態記在 docs/archive/plan/cloud-inference-plan.md。
 //
 
 import XCTest

@@ -476,7 +476,7 @@
         } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
     }
 
-    // receive 變長 replace／drop（Phase 4，docs/plan/plugin-v2-phase4.md §1–§2、§5）。
+    // receive 變長 replace／drop（Phase 4，docs/archive/plan/plugin-v2-phase4.md §1–§2、§5）。
     // 建構期（編碼、建合成事件、攔下原事件）任一步失敗 ⇒ 原事件照常交付、Swift 收原 bytes（fail-open）。
     // 攔下之後 bridge 拒收或 dispatch 拋錯 ⇒ 故障：頁面鎖死＋診斷，不重送原事件（遊戲可能已收到一部分）。
     // bridge 拒收時仍把合成事件交給遊戲：Swift 已經缺這一則，遊戲至少不卡在等它。

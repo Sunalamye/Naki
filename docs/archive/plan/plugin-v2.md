@@ -2,7 +2,7 @@
 
 **資料日期**：2026-10-14
 **狀態**：設計已提議，未拍板。2026-10-14 追加 §12 插件自由度盤點（方向：讓插件更自由）。A 與 B 的 `rewriteSend` 有 spike（分支 `plugin-v2-design`，基於 main `0ef66df`，未 commit）；變長 receive `replace`、`drop`、`injectReceive` 只有設計與 probe 腳本，**未實作**。
-**決策紀錄**：`docs/plan/plugin-v2-implementation-notes.md`（含 Deviations）。
+**決策紀錄**：`docs/archive/notes/plugin-v2-implementation-notes.md`（含 Deviations）。
 **上位文件**：`docs/plugin-api-v1.md`（現行契約）、`docs/plugin-system-design.md`（設計與拍板）。三者衝突時以 `plugin-system-design.md` §11 的拍板為準，本文件不推翻任何拍板。
 
 ---

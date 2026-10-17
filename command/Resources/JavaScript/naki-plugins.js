@@ -12,10 +12,10 @@
 //    window.__nakiPlugins.register({ id, onReceive, ... });   // 插件自己呼叫
 //
 //  observe 唯讀；rewriteReceive → ctx.replace（等長就地改寫；另宣告 reshapeReceive 才可長度不等整包換掉，Phase 4 草案；isNaki 流量不給）、
-//  dropReceive → ctx.drop（只限 NOTIFY，受 L3 總開關把關；Phase 4 草案，docs/plan/plugin-v2-phase4.md）、
-//  rewriteSend → send 方向的 ctx.replace（可改長度與 method，受 L3 總開關把關；v2 草案，docs/plan/plugin-v2.md §B）、
+//  dropReceive → ctx.drop（只限 NOTIFY，受 L3 總開關把關；Phase 4 草案，docs/archive/plan/plugin-v2-phase4.md）、
+//  rewriteSend → send 方向的 ctx.replace（可改長度與 method，受 L3 總開關把關；v2 草案，docs/archive/plan/plugin-v2.md §B）、
 //  injectSend → ctx.sendRequest（受 L3 總開關把關）。
-//  送出守衛（manifest sendGuard，docs/plan/plugin-v2-b2.md）：守衛方法 fail-closed，插件污染後持續到頁面重載。
+//  送出守衛（manifest sendGuard，docs/archive/plan/plugin-v2-b2.md）：守衛方法 fail-closed，插件污染後持續到頁面重載。
 //
 (function () {
     'use strict';
@@ -95,7 +95,7 @@
         return !!env && GUARDABLE_METHODS.indexOf(env.method) !== -1;
     }
 
-    // ---- 送出守衛（N1／N2，docs/plan/plugin-v2-b2.md §3–§4）----
+    // ---- 送出守衛（N1／N2，docs/archive/plan/plugin-v2-b2.md §3–§4）----
     // 已污染：插件 id -> 守衛方法 Set。只增不減，活在本閉包裡：disable、setGrant、自動停用、熱重載都碰不到，
     // 頁面重載（本檔重跑）才清空。不受 L3 總開關限制。
     var tainted = new Map();
@@ -481,7 +481,7 @@
             || SEND_FORBIDDEN_METHODS.indexOf(method) !== -1;
     }
 
-    // Phase 4 變長 replace／drop 的禁改名單（docs/plan/plugin-v2-phase4.md §4），rewriteAllow 解不開，canonical 全名比對。
+    // Phase 4 變長 replace／drop 的禁改名單（docs/archive/plan/plugin-v2-phase4.md §4），rewriteAllow 解不開，canonical 全名比對。
     // 來源是 Swift 消費端清單：Swift 據以改牌局、帳號或匹配狀態的 NOTIFY／RESPONSE（MajsoulBridge、LiqiParser、
     // LiqiResponseStore 表情廣播）；JSContractTests 從 Swift 原始碼反查，缺一即紅。另加對局與連線層兩個前綴。
     var RESHAPE_FORBIDDEN_METHODS = [

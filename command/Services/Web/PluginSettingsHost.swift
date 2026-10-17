@@ -2,7 +2,7 @@
 //  PluginSettingsHost.swift
 //  Naki
 //
-//  插件自帶設定頁（manifest `settingsUI`）的宿主。設計見 docs/plan/plugin-v2.md §A。
+//  插件自帶設定頁（manifest `settingsUI`）的宿主。設計見 docs/archive/plan/plugin-v2.md §A。
 //
 //  設定頁跑在 Naki 自己的 WKWebView：獨立 configuration、非持久 data store、不注入任何 Naki
 //  模組，與遊戲頁不共用 realm。頁面只拿到 `window.naki.get/set`，值仍存在 SettingsStore

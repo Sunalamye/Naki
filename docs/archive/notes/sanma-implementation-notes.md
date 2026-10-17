@@ -148,7 +148,7 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 - **視覺驗證走 HTTP，不走 Accessibility（使用者定案 2026-10-09）**：Debug server 本來就是給 agent 用的，畫面卻卡在 ContentView 的 `@State`，HTTP 開不了 sheet。開 U-hook：畫面開關搬進可注入的 `UIState`，`POST /debug/ui` 加 `screen`／`language`，`GET /debug/ui` 查狀態，DEBUG only。why：Accessibility 點擊脆弱且每台機器權限不同；HTTP hook 可重現、可寫進 verify 腳本。
 - **登入與確認框可用 CGEventPost 合成點擊**：CLAUDE.md「不座標點擊」是針對牌局動作，登入／終局確認／「已在另一處登入」不在其內，且 8/12 已 live 驗證；先前三次 S3 因此受阻是主線過度保守。
 
-- **U 系列完成（2026-10-09）**：`wp/u-fixes` 共 12 個 commit（三麻 3＋UI 9），HEAD `a18c667`，**未合 main**，與三麻一起等 MortalSwift 發版。合併時 `sanma-implementation-notes.md` 以主 repo 版為準、併入 worktree 版的「U 系列」段。
+- **U 系列完成（2026-10-09）**：`wp/u-fixes` 共 12 個 commit（三麻 3＋UI 9），HEAD `a18c667`，**未合 main**，與三麻一起等 MortalSwift 發版。合併時 `docs/archive/notes/sanma-implementation-notes.md` 以主 repo 版為準、併入 worktree 版的「U 系列」段。
 
 - **U 系列取捨（統帥代決）**：swiftui-pro 的 8 條建議與專案基準衝突不採（ViewModel、一型一檔、常數 enum、多寫註解、原生 WebView、iPhone Duo／iOS 27.1 API、自量 safe area、autoPlayModeSelection 改 onChange）。UI 分支無單測可殺時，把決策抽成純函式（`PanelLayout`、Action 回傳 enum）再測，不為測而拆 View。P2 診斷與重新注入合為一個 Action；測試用既有 `CloudMockURLProtocol` 不連真雲端。UI 畫面效果一律「未 live 驗證」，留給最後一輪復驗。
 
@@ -162,7 +162,7 @@ S1 的 MortalSwift commit：`04bcdf6`（branch `feat/akagi-sanma`，worktree `Mo
 
 S2（2026-10-09）：
 - 套件引用暫改本地路徑（統帥代決，見上）；`Package.resolved` 因此少了 mortalswift 的遠端 pin，恢復遠端引用時要重新解析並一起 commit。
-- `sanma-implementation-notes.md` 在主 repo 是未追蹤檔，worktree 內沒有，S2 複製一份到 worktree 後修改。
+- `docs/archive/notes/sanma-implementation-notes.md` 在主 repo 是未追蹤檔，worktree 內沒有，S2 複製一份到 worktree 後修改。
 - 授權類別沒有 `.hora`：引擎的 `Kind` 分 `tsumo`／`ron`，所以 oplist tsumo→`.tsumo`、ron→`.ron`；minkan→`.daiminkan`。
 - `cloudDecision` 更名 `sanmaCapableDecision`（gate／resolver／engine／NakiRuntime／測試全改）；`BotStatus` 新增 `isSanmaCapableDecision`，`isCloudDecision` 保留。
 - 範圍外但必要的小改：`GameModels.swift`（新屬性、`modelDisplayKey` 三麻引擎不標警告）、`DecisionSidebar.swift`（警告條件改用新屬性、文案改為「三麻尚無推薦…」）。`Localizable.xcstrings` 沒改，舊文案「三麻僅雲端推論…」與「雲端推論 (3P)」變成無用 key，新文案沒有翻譯。
