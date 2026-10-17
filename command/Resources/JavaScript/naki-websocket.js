@@ -562,27 +562,45 @@
     // 接收依抵達順序認領（pair-source 第十輪第 36 條）：Blob 要非同步展開，展開順序不等於抵達順序。
     // 隊首 Blob 待展開時，後到的 Blob／ArrayBuffer／TypedArray 一律排在其後；展開完成（失敗＝未匹配，不派）後依序 flush。
     // 排隊的同步封包已交給遊戲，插件只能觀察（不給 replace／變長改寫）；水位是抵達當下的序號。連線釋放即丟棄整個佇列
-    function enqueueReceive(ws, wsId, info, data) {
-        const entry = { view: null, ready: false, blob: data instanceof Blob, watermark: nakiSentSeq };
+    // 讀取失敗（reject／同步拋錯）不等於未匹配：處理到該項時宣告接收不可信，其後照常 flush 但只觀察（第十一輪第 39 條）。
+    // 佇列超過 RECV_QUEUE_LIMIT 視同讀取失敗：未就緒的全部放棄、宣告接收不可信，再 flush（第 42 條）。
+    // 不設時間逾時：Blob 讀取沒有完成期限，任何門檻都只是猜測；以容量界定累積，等待時間由 diagnostics 觀察
+    const RECV_QUEUE_LIMIT = 256;
+    function receiveLost(wsId) {
+        if (window.__nakiPlugins && window.__nakiPlugins.receiveLost) window.__nakiPlugins.receiveLost(wsId);
+    }
+    function enqueueReceive(wsId, info, data) {
+        const entry = { view: null, ready: false, failed: false, blob: data instanceof Blob, watermark: nakiSentSeq, at: Date.now() };
         info.recvQueue.push(entry);
-        if (entry.blob) {
-            const settle = function(buffer) {
-                if (buffer) entry.view = new Uint8Array(buffer);
-                entry.ready = true;
+        try {
+            if (entry.blob) {
+                const settle = function(buffer) {
+                    if (buffer) entry.view = new Uint8Array(buffer);
+                    else entry.failed = true;
+                    entry.ready = true;
+                    flushReceive(wsId, info);
+                };
+                const failed = function(e) { console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e); settle(null); };
+                try { Promise.resolve(data.arrayBuffer()).then(settle, failed); } catch (e) { failed(e); }
+                blobToBase64(data, function(base64) {
+                    sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: base64, type: 'blob', size: data.size });
+                });
+                return;
+            }
+            // 先遮罩再快照再就緒：插件、遊戲、Swift 看到同一份；遮罩拋錯就以原內容快照，不卡佇列（第 41 條）
+            const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            const original = view.slice();
+            try { nakiNicknameMask.observe(view, 'receive'); entry.view = view.slice(); }
+            catch (e) { console.error('[Naki WS] 排隊接收遮罩失敗，以原內容快照:', e); entry.view = original; }
+            entry.ready = true;
+            sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(view), type: 'binary', size: view.byteLength });
+        } finally {
+            if (info.recvQueue.length > RECV_QUEUE_LIMIT) {
+                receiveLost(wsId);
+                info.recvQueue.forEach(function(e) { if (!e.ready) { e.ready = true; e.view = null; } });
                 flushReceive(wsId, info);
-            };
-            const failed = function(e) { console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e); settle(null); };
-            try { Promise.resolve(data.arrayBuffer()).then(settle, failed); } catch (e) { failed(e); }
-            blobToBase64(data, function(base64) {
-                sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: base64, type: 'blob', size: data.size });
-            });
-            return;
+            }
         }
-        const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-        entry.view = view.slice();
-        entry.ready = true;   // 先就緒：後面的步驟拋錯也不卡住佇列
-        nakiNicknameMask.observe(view, 'receive');
-        sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(view), type: 'binary', size: view.byteLength });
     }
     function flushReceive(wsId, info) {
         if (info.flushing) return;
@@ -591,7 +609,7 @@
             const q = info.recvQueue;
             while (q.length && q[0].ready) {
                 const entry = q.shift();
-                if (!entry.view) continue;
+                if (!entry.view) { if (entry.failed) receiveLost(wsId); continue; }
                 try {
                     if (entry.blob) markNakiAnswered(wsId, entry.view, entry.watermark);   // 記帳處讀不到 Blob，展開後補標記
                     dispatchToPlugins('receive', wsId, info, entry.view, false, false, undefined, undefined, { watermark: entry.watermark });
@@ -635,8 +653,9 @@
         }
 
         try {
-            if (direction === 'receive' && info && (dataType === 'Blob' || (info.recvQueue.length && (dataType === 'ArrayBuffer' || dataType === 'TypedArray')))) {
-                return enqueueReceive(ws, wsId, info, data);
+            // 佇列非空、或 flush 進行中（重入，佇列可能剛被取空）時，同步封包也排隊（第 40 條）
+            if (direction === 'receive' && info && (dataType === 'Blob' || ((info.recvQueue.length || info.flushing) && (dataType === 'ArrayBuffer' || dataType === 'TypedArray')))) {
+                return enqueueReceive(wsId, info, data);
             }
             if (data instanceof ArrayBuffer) {
                 const pluginBytes = new Uint8Array(data);
@@ -721,7 +740,11 @@
 
     window.__nakiWebSocket = {
         diagnostics: function () {
-            return JSON.parse(JSON.stringify(Object.assign({ reshape: reshapeStats, reshapeLocked: reshapeLocked, reshapeFaults: reshapeFaults }, messageTypes)));
+            const now = Date.now(), recvQueue = [];
+            wsConnections.forEach(function(info) {
+                if (info.recvQueue.length) recvQueue.push({ socketId: info.id, length: info.recvQueue.length, headWaitMs: now - info.recvQueue[0].at });
+            });
+            return JSON.parse(JSON.stringify(Object.assign({ reshape: reshapeStats, reshapeLocked: reshapeLocked, reshapeFaults: reshapeFaults, recvQueue: recvQueue }, messageTypes)));
         },
         isNakiSent: isNakiSent,
         // D22 登記與插件層可消耗紀錄共用的遞增序號（pair-source 第九輪）

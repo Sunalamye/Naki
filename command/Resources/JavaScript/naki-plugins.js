@@ -98,6 +98,9 @@
     function newerThan(watermark, seq) { return watermark != null && seq > watermark; }
     var openCommits = new Set();   // 送出交易還沒結束的提交紀錄：撤回資料只活在交易期間，未答表只存序號（第六輪第 23 條）
     var untrustedSockets = new Set();   // 遊戲送過 Blob 的連線
+    // 接收不可信：接收 Blob 讀取失敗或接收佇列溢出的連線。讀不到不等於未匹配，之後的回應無法確定歸屬，
+    // 所以回應一律只觀察（不認領注入、不進一般鏈、不給改寫），配對與未答照常消耗，直到關閉（pair-source 第十一輪第 39、42 條）
+    var recvLostSockets = new Set();
     // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
     function gameSent(socketId, msgId) {
         var g = gameSends.get(socketId);
@@ -828,7 +831,7 @@
         diagnostics.lastMethod = method;
         // 未匹配的延後回應（抵達前沒有任何同鍵紀錄）走到這裡時 method 為 null：下面的鏈一個 hook 都不派，也不消耗、不建歧義
         // 注入登記還在就是插件自送，即使 sendRaw 登記已被淘汰（D22 第二輪第 1 條）
-        var isNaki = injected || ambiguous || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
+        var isNaki = injected || ambiguous || (injectedKey != null && recvLostSockets.has(String(raw.wsId))) || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
 
         // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
         // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
@@ -1176,6 +1179,28 @@
         // naki-websocket 在 ws.send 入口看到遊戲的 Blob 送出時同步呼叫：這條連線的號碼不可信直到關閉
         markUntrusted: function (socketId) { untrustedSockets.add(socketId); },
 
+        // naki-websocket 在接收 Blob 讀取失敗、或接收佇列溢出時呼叫：該連線接收不可信到關閉，拒發新注入；
+        // 既有注入登記立即以 response_lost 結案交回發起插件（第十一輪第 39 條）
+        receiveLost: function (socketId) {
+            untrustedSockets.add(socketId);
+            recvLostSockets.add(String(socketId));
+            var prefix = socketId + ':';
+            Array.from(injectedMsgIds.keys()).forEach(function (k) {
+                if (k.indexOf(prefix) !== 0) return;
+                var injection = injectedMsgIds.get(k), msgId = Number(k.slice(prefix.length));
+                injectedMsgIds.delete(k);
+                var origin = registry.get(injection.id);
+                if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
+                var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: new Uint8Array(0), mutable: false },
+                    { type: TYPE_RESPONSE, msgId: msgId, method: injection.method, payload: null }, injection.method, true, origin);
+                rctx.inResponseTo = msgId;
+                rctx.timedOut = false;
+                rctx.error = 'response_lost';
+                try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
+                catch (e) { noteFailure(origin, 'onInjectResponse', e); }
+            });
+        },
+
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
         // 這條連線的回應不會再來，配對一併清掉（第十二輪第 1 條）
         closed: function (socketId) {
@@ -1187,6 +1212,7 @@
             ambiguousSockets.delete(String(socketId));
             gameSends.delete(socketId);
             untrustedSockets.delete(socketId);
+            recvLostSockets.delete(String(socketId));
         },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
@@ -1244,6 +1270,7 @@
                 gameInflight: Array.from(gameSends.values()).reduce(function (n, g) { return n + g.inflight.size; }, 0),
                 openCommits: openCommits.size,
                 untrustedSockets: untrustedSockets.size,
+                receiveLost: recvLostSockets.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,

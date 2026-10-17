@@ -2670,14 +2670,14 @@ test('GG11-3 (Astra10 2): onDisable that only swaps the grant without registerin
 const FST = '.lq.Lobby.fetchServerTime';
 function injector11(t) {
   t.c.__nakiPluginsMayModifyOutbound = true;
-  const answers = [], answerPayloads = [];
+  const answers = [], answerPayloads = [], answerErrors = [];
   let send;
   t.c.__nakiPlugins.setGrant('inj11', { capabilities: ['observe', 'injectSend'], methods: [BEAT] });
   t.c.__nakiPlugins.register({ id: 'inj11', onSend(ctx) { send = ctx.sendRequest; },
-    onInjectResponse(ctx) { answers.push([ctx.inResponseTo, ctx.method]); answerPayloads.push(ctx.bytes[ctx.bytes.length - 1]); } });
+    onInjectResponse(ctx) { answers.push([ctx.inResponseTo, ctx.method]); answerPayloads.push(ctx.bytes[ctx.bytes.length - 1]); answerErrors.push(ctx.error || null); } });
   t.lobby.send(request(1840, BEAT));
   t.lobby.receive(response(1840, [8, 1]));
-  return { answers, answerPayloads, inject: (m, p = [8, 1]) => send(m, new t.c.Uint8Array(p)) };
+  return { answers, answerPayloads, answerErrors, inject: (m, p = [8, 1]) => send(m, new t.c.Uint8Array(p)) };
 }
 const pendingPairs = t => t.c.__nakiPlugins.diagnostics().pendingPairs;
 const pendingInjections = t => t.c.__nakiPlugins.diagnostics().pendingInjections;
@@ -3582,24 +3582,27 @@ test('PS-54 (r10 37): injection FST#64000 with its D22 entry evicted, the game s
   assert.deepEqual(plain(seen), [[22, true, false], [33, false, true]]);
 });
 
-test('PS-55 (r10 36, failure): a received Blob whose expansion rejects (or throws synchronously) counts as unmatched — the TypedArray queued behind it is still dispatched in order, and nothing waits forever', async () => {
+test('PS-55 (r10 36, r11 39): a received Blob whose expansion rejects (or throws synchronously) makes the connection receive-untrusted — the TypedArray queued behind it is still dispatched in order but observe-only, later RESPONSEs too, and nothing waits forever', async () => {
   for (const sync of [false, true]) {
     const label = sync ? 'sync throw' : 'rejected';
     const t = page();
-    const got = seen11(t, [INFO]);
+    const { inject } = injector11(t);
+    const seen = nakiObserver(t, 'obs55');
     t.lobby.send(request(1970, INFO));
     const bad = rejectingBlob(t, response(1970, [8, 1]), sync);
     t.lobby.send(request(1971, INFO));
     arrive(t, bad.blob);
     t.lobby.receive(response(1971, [8, 2]));
-    if (!sync) { assert.deepEqual(plain(got), [], label + ': queued'); bad.fail(); }
+    if (!sync) { assert.deepEqual(plain(seen), [], label + ': queued'); bad.fail(); }
     await tick(); await tick();
-    assert.deepEqual(plain(got), [INFO], label + ': the TypedArray behind the failed Blob is dispatched');
-    t.lobby.receive(response(1972, [8, 3]));
-    assert.deepEqual(plain(got), [INFO], label + ': the queue is empty again (an unmatched RESPONSE dispatches nothing)');
+    assert.deepEqual(plain(seen), [[2, true, false]], label + ': the TypedArray behind the failed Blob is observe-only');
+    assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 1, label);
+    assert.equal(inject(FST).ok, false, label + ': no new injection while receive-untrusted');
     t.lobby.send(request(1973, INFO));
     t.lobby.receive(response(1973, [8, 4]));
-    assert.deepEqual(plain(got), [INFO, INFO], label + ': later traffic is synchronous again');
+    assert.deepEqual(plain(seen), [[2, true, false], [4, true, false]], label + ': later RESPONSEs are synchronous but still observe-only');
+    assert.equal(pendingPairs(t), 1, label + ': only the pairing of the lost RESPONSE remains');
+    assert.deepEqual(plain(t.c.__nakiWebSocket.diagnostics().recvQueue), [], label + ': the queue drained');
   }
 });
 
@@ -3658,6 +3661,107 @@ test('PS-58 (r10 36, watermark kept): BEAT#64000 is answered, then a stray dupli
     assert.deepEqual(plain(answers), [[64000, FST]], label);
     assert.deepEqual(plain(answerPayloads), [3], label);
   }
+});
+
+// ---- pair-source 第十一輪：接收讀取失敗＝接收不可信、flush 重入排隊、遮罩後快照、佇列容量 ----
+test('PS-59 (r11 39): injected FST#64000, the game sends INFO#64000, the FST RESPONSE Blob fails to read (reject or sync throw), the INFO RESPONSE (22) arrives as a TypedArray — FST gets response_lost, INFO\'s RESPONSE never reaches FST and is observe-only', async () => {
+  for (const sync of [false, true]) {
+    const label = sync ? 'sync throw' : 'rejected';
+    const t = page();
+    const { answers, answerErrors, inject } = injector11(t);
+    const seen = nakiObserver(t, 'obs59'), general = [];
+    t.c.__nakiPlugins.setGrant('gen59', { capabilities: ['observe'], methods: [INFO], priority: 200 });
+    t.c.__nakiPlugins.register({ id: 'gen59', onReceive(ctx) { general.push(ctx.bytes[ctx.bytes.length - 1]); } });
+    const r = inject(FST);
+    assert.equal(r.msgId, 64000, label);
+    t.lobby.send(request(64000, INFO));
+    const bad = rejectingBlob(t, response(64000, [8, 11]), sync);
+    arrive(t, bad.blob);
+    t.lobby.receive(response(64000, [8, 22]));
+    if (!sync) bad.fail();
+    await tick(); await tick();
+    assert.deepEqual(plain(answers), [[64000, FST]], label);
+    assert.deepEqual(plain(answerErrors), ['response_lost'], label);
+    assert.equal(pendingInjections(t), 0, label);
+    assert.deepEqual(plain(seen), [[22, true, false]], label + ': INFO\'s RESPONSE is observe-only');
+    assert.deepEqual(plain(general), [], label);
+    assert.deepEqual(gameDiag(t), [0, 0], label + ': INFO\'s unanswered record is still consumed');
+    assert.equal(pendingPairs(t), 0, label);
+    assert.equal(untrusted(t), 1, label);
+  }
+});
+
+test('PS-60 (r11 40): while the last queued item is being dispatched, observer A synchronously delivers RESPONSE #3 — it is queued behind the current item, so the hook order is A1, B1, A3, B3', async () => {
+  const t = page();
+  const order = [];
+  let reentered = false;
+  t.c.__nakiPlugins.setGrant('a60', { capabilities: ['observe'], methods: [INFO], priority: 500 });
+  t.c.__nakiPlugins.register({ id: 'a60', onReceive(ctx) {
+    order.push('A' + ctx.msgId % 10);
+    if (!reentered) { reentered = true; t.lobby.receive(response(2003, [8, 3])); }
+  } });
+  t.c.__nakiPlugins.setGrant('b60', { capabilities: ['observe'], methods: [INFO], priority: 600 });
+  t.c.__nakiPlugins.register({ id: 'b60', onReceive(ctx) { order.push('B' + ctx.msgId % 10); } });
+  t.lobby.send(request(2001, INFO));
+  t.lobby.send(request(2003, INFO));
+  const held = heldBlob(t, response(2001, [8, 1]));
+  arrive(t, held.blob);
+  held.open();
+  await tick(); await tick();
+  assert.deepEqual(plain(order), ['A1', 'B1', 'A3', 'B3']);
+  assert.deepEqual(plain(t.c.__nakiWebSocket.diagnostics().recvQueue), []);
+});
+
+test('PS-61 (r11 41): with the nickname mask on and a Blob unexpanded, an authGame RESPONSE arriving as a TypedArray is the same masked content for plugins, the game and Swift; if the mask throws the plugin gets the original bytes and the queue still drains', async () => {
+  for (const broken of [false, true]) {
+    const label = broken ? 'mask throws' : 'mask works';
+    const t = page();
+    t.c.__nakiHideNames.setEnabled(true);
+    const seen = [];
+    t.c.__nakiPlugins.setGrant('auth61', { capabilities: ['observe'], methods: [AUTH] });
+    t.c.__nakiPlugins.register({ id: 'auth61', onReceive(ctx) { seen.push(Array.from(ctx.bytes)); } });
+    t.lobby.send(request(2010, INFO));
+    t.lobby.send(request(2011, AUTH));
+    const held = heldBlob(t, response(2010, [8, 1]));
+    arrive(t, held.blob);
+    const name = [...Buffer.from('Alice')], view = [0x22, name.length, ...name];
+    if (broken) t.c.__nakiHideNames.observe = () => { throw new Error('mask broke'); };
+    t.lobby.receive(response(2011, [18, view.length, ...view]));
+    held.open();
+    await tick(); await tick();
+    const game = t.game.slice(-1)[0], swift = t.toSwift('receive').find(b => b[0] === 3 && (b[1] | (b[2] << 8)) === 2011);
+    assert.equal(Buffer.from(game.slice(-5)).toString(), broken ? 'Alice' : 'P1   ', label);
+    assert.deepEqual(plain(seen), [game], label + ': the plugin sees what the game got');
+    assert.deepEqual(swift, game, label + ': Swift too');
+  }
+});
+
+test('PS-62 (r11 42): a Blob that never settles holds 256 queued items (diagnostics show the length and the head wait); the 257th makes the connection receive-untrusted, abandons the Blob, drains the queue observe-only and closes the pending injection with response_lost', async () => {
+  const t = page();
+  const { answerErrors, inject } = injector11(t);
+  const seen = nakiObserver(t, 'obs62');
+  assert.equal(inject(FST).msgId, 64000);
+  t.lobby.send(request(2020, INFO));
+  const held = heldBlob(t, response(2020, [8, 1]));
+  arrive(t, held.blob);
+  for (let i = 0; i < 255; i++) t.lobby.receive(response(30000 + i, [8, 2]));
+  const d = plain(t.c.__nakiWebSocket.diagnostics().recvQueue);
+  assert.equal(d.length, 1);
+  assert.equal(d[0].length, 256);
+  assert.equal(typeof d[0].headWaitMs, 'number');
+  assert.deepEqual(plain(answerErrors), []);
+  t.lobby.send(request(2021, INFO));
+  t.lobby.receive(response(2021, [8, 3]));
+  assert.deepEqual(plain(answerErrors), ['response_lost']);
+  assert.deepEqual(plain(t.c.__nakiWebSocket.diagnostics().recvQueue), []);
+  assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 1);
+  assert.deepEqual(plain(seen), [[3, true, false]], 'the 257th is dispatched observe-only');
+  held.open();
+  await tick(); await tick();
+  assert.deepEqual(plain(seen), [[3, true, false]], 'the abandoned Blob is never dispatched');
+  t.lobby.close();
+  assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 0, 'closing clears receive-untrusted');
+  assert.equal(untrusted(t), 0);
 });
 
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {

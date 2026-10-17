@@ -538,5 +538,66 @@ PS11（擋下不消耗遊戲未答）隨 `blockSend` 的 `gameDone` 移除；它
 ### 第十輪已知風險
 
 - Swift 端收到 Blob 的順序仍可能晚於後到的同步封包（`blobToBase64` 非同步），不在本包範圍。
-- 隊首 Blob 永遠不 settle 時，該連線之後的接收全部排隊、插件收不到，直到連線關閉。瀏覽器的 `Blob.arrayBuffer()` 必定 settle，只有頁面替換它時才可能。
+- ~~隊首 Blob 永遠不 settle 時，該連線之後的接收全部排隊、插件收不到，直到連線關閉。瀏覽器的 `Blob.arrayBuffer()` 必定 settle，只有頁面替換它時才可能。~~ 第十一輪撤回（42 條）：File API 沒有完成期限，「必定 settle」不是已驗證前提；改以佇列容量 256 界定。
 - 未 live 驗證；計數器步進、繞回、重連、回應順序前提仍未驗證。
+
+## 第十一輪（Astra 第十輪 39～42 條；主線裁決全採納）
+
+第十輪 Deviations 經 Astra 核對採納。
+
+### 做了什麼
+
+- `naki-plugins.js`：
+  - 新增 `receiveLost(socketId)`：標記不可信（拒發新注入）與接收不可信（`recvLostSockets`）；該連線既有注入登記全部以 `ctx.error = 'response_lost'`、空 bytes 交回發起插件並清空。
+  - `runChain` 的 `isNaki` 加上「RESPONSE 且連線接收不可信」，所以只給 Naki observer、沒有 `replace`；配對、未答照常消耗。注入認領不另擋：登記已清空、之後拒發，認領不到。
+  - `closed` 清除接收不可信；`diagnostics().receiveLost` 為數量。
+- `naki-websocket.js`：
+  - 入隊條件加上 `info.flushing`（第 40 條）。flush 迴圈本身會接著處理重入入隊的項目，不需另掃。
+  - 讀取失敗的項目記 `failed`；flush 處理到它時呼叫 `receiveLost`（在佇列中的位置生效，前面已處理的不受影響）。
+  - 同步封包：先遮罩、再快照、再就緒；遮罩拋錯時以遮罩前複製的原內容快照並記 log（第 41 條）。送 Swift 在就緒之後，拋錯照舊由 `handleMessage` 記 log。
+  - 佇列超過 256 項：`receiveLost`、所有未就緒項目改為就緒且無內容（放棄），再 flush。放棄的 Blob 之後才完成時，它已不在佇列，不派發。容量檢查放在 `finally`，送 Swift 拋錯也照樣檢查。
+  - 每項記抵達時間；`__nakiWebSocket.diagnostics().recvQueue` 列出每條非空佇列的 `socketId`、`length`、`headWaitMs`。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 39 | 讀取失敗＝接收不可信：既有注入 `response_lost`、之後回應只觀察、拒發新注入 | PS-59（reject、同步拋錯）、PS-55（改寫） |
+| 應修 40 | flush 中入隊 | PS-60 |
+| 應修 41 | 遮罩後快照；遮罩拋錯以原內容快照 | PS-61（正常、遮罩拋錯） |
+| 建議 42 | 撤回 settle 前提；`recvQueue` 診斷；超過 256 視同 39；不設時間逾時 | PS-62 |
+
+PS-55 改寫：第十輪斷言「失敗項以未匹配處理、之後恢復一般鏈」，與 39 條相反；改為斷言接收不可信。
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-55～PS-62 套在 `b1fefec` 的 JS | PS-55、59、60、61、62 紅；PS-62 含診斷欄位缺少的形式紅 | `r11-red-on-b1fefec.log` |
+| 同上，刪去診斷斷言 | 同五條紅，皆為行為紅：失敗後回應進一般鏈或交給注入者、重入繞過佇列、插件拿到遮罩前內容、溢出不處理。PS-56～58 為既有守門測試，綠 | `r11-red-behavior-on-b1fefec.log` |
+| 實作後 | b2 237／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r11-{b2,v2,p4,keepalive,plugin-regression,local-unlock}.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| PS68～PS84（含本輪新增 PS75～PS84 十個） | 17/17 殺 | `r11-mutate-new.log` |
+| 全量 0–167 | 165/167；存活只有 U10、T7 | `r11-mutate-full.log` |
+
+替換字串隨程式更新：PS15、PS68、PS74。全量第二段 PS15 先報過期，更新後單獨補跑已殺（同一 log 末段）。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r11-swift-targeted.log`），全量 `NakiTests` 1184／0（`r11-swift-full.log`）。
+
+### 第十一輪 Deviations
+
+1. **`runChain` 不另擋接收不可信連線的注入認領**：`receiveLost` 已清空該連線注入登記，且同時標記不可信，之後 `nextPluginMsgId` 一律回 null，所以不會再有可認領的登記。另寫判斷是死碼，變異殺不掉。
+2. **放棄項的晚到完成不另設守衛**：放棄時項目已就緒，下一次 flush 就移出佇列；之後才完成只改到已移出的物件，不派發。
+3. **NOTIFY 不套「只觀察」**：裁決寫的是「回應」；NOTIFY 沒有配對或注入可認領，歸屬不受讀取失敗影響。
+
+### 第十一輪已知風險
+
+- 接收不可信會讓整頁注入回 `msgid_busy` 直到該連線關閉（沿用 `untrustedSockets` 的全域效果）。
+- `response_lost` 時請求可能已被伺服器處理，結果未知；插件須自行處理。
+- 容量 256 是啟發式；`headWaitMs` 沒有 live 數據。
+- Swift 端收到 Blob 的順序仍可能晚於後到的同步封包，不在本包範圍。
+- 未 live 驗證。
