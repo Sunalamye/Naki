@@ -377,11 +377,15 @@
         if (origObj.length === original.length) u8set.call(origObj, original);
     }
 
-    // 配對的唯一寫入口：容量 PENDING_LIMIT（FIFO，覆寫算最新）。沒有插件也沒有污染時，receive 不派發、沒人消耗，不登記（第十二輪第 1 條）
+    // 沒有插件也沒有污染：receive 不派發，配對沒人消耗（dispatch 與 remember 共用，第十三輪第 2 條）
+    function noConsumers() { return registry.size === 0 && tainted.size === 0; }
+
+    // 配對的唯一寫入口：容量 PENDING_LIMIT（FIFO，覆寫算最新）。同鍵舊配對一律先撤銷，沒人消耗時只撤銷、不新增，
+    // 鏈中插件全部退出時不會留下鏈首依原請求登記的舊值（第十二輪第 1 條、第十三輪第 1 條）
     function remember(socketId, msgId, method) {
-        if (registry.size === 0 && tainted.size === 0) return;
         var key = msgKey(socketId, msgId);
         pendingMethods.delete(key);
+        if (noConsumers()) return;
         pendingMethods.set(key, method);
         if (pendingMethods.size > PENDING_LIMIT) pendingMethods.delete(pendingMethods.keys().next().value);
     }
@@ -956,7 +960,7 @@
             // 沒有插件也鎖定角色（每條連線只解析到鎖定為止），之後才啟用的守衛一開始就認得大廳
             var env = send && !roles.has(raw.wsId) ? parseEnvelope(raw.bytes) : undefined;
             if (send) lockRole(raw.wsId, env);
-            if (registry.size === 0 && tainted.size === 0) return;
+            if (noConsumers()) return;
             if (env === undefined) env = parseEnvelope(raw.bytes);
             if (send && env && injecting && env.msgId === injecting.msgId && sameBytes(raw.bytes, injecting.bytes)) {
                 var fallback = isLobby(raw.wsId) ? undefined : injectedFallback(raw, env);

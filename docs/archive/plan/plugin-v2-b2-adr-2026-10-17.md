@@ -114,3 +114,5 @@ Astra 第九輪（`astra-review9.md`）：2【應修】1【建議】，主線全
 Astra 第十輪（`astra-review10.md`）：1【應修】1【建議】，主線全採納，notes Deviation 48–51 採納。應修 1（既有缺口，屬本包「配對依實際外送內容」範圍）：bridge 故障退回原 bytes 時，配對仍停在 `replace` 後的 method；改為 `failSafe` 照送的每個出口把配對改回原請求，擋下的出口仍撤銷。建議 2：Dev 49–51 的邊界收進固定回歸，並在 §1.4 明載跨來源 msgId 碰撞沒有配對隔離。
 
 Astra 第十一輪（`astra-review11.md`）：1【應修】1【建議】，主線全採納，notes Deviation 52–55 採納。應修 1：第十一輪新增的 `failSafe` 配對入口繞過容量上限，零插件時 receive 不派發、沒人消耗，配對無限累積（關閉重連後仍在）；改為所有配對寫入經同一入口套用上限、零插件不登記、連線關閉清該連線配對。建議 2：本檔設計文件 `plugin-v2-b2.md` 檔頭加歷史文件標記，§4.6 註明已被 D22 取代。
+
+Astra 第十二輪（`astra-review12.md`）：1【應修】1【建議】，主線全採納，notes Deviation 56–59 採納。應修 1：`remember` 的零插件早退也略過了同鍵舊配對的處理，唯一插件改寫後停用自己時，鏈首依原請求登記的 INFO 留著，RESPONSE 被派成 INFO；改為先撤銷同鍵舊配對，沒人消耗時只撤銷不新增。建議 2：零插件判定抽成 `noConsumers()`，`dispatch` 與 `remember` 共用。

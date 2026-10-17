@@ -464,3 +464,34 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 - 送出時沒有插件、回應到達前才啟用插件，這筆 RESPONSE 對不回 method（Deviation 56，與修前相同）。
 - WebKit、live 未驗證（I2）。
+
+## 第十三輪（Astra 第十二輪審查：1【應修】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review12.md`。Deviations 56–59 主線採納。main 仍是 `d95d5b1`，不需 rebase。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 應修 1 | 唯一插件把 INFO 改成 loginBeat、同一 `onSend` 停用自己：wire 是 loginBeat，但鏈尾 `remember` 因零插件早退，鏈首依原請求登記的 INFO 配對留著；回應前註冊的觀察者收到 INFO。`190d97e` 同一探針收到 loginBeat | `remember` 先刪同鍵舊配對，再判 `noConsumers()`：沒人消耗時只撤銷、不新增；有人消耗時以最終 wire 的 method 重寫（`GG13-1` 兩情境：唯一插件撤銷、仍有其他插件更正為 loginBeat） |
+| 建議 2 | 零插件條件在 `remember` 與 `dispatch` 各寫一次 | 抽成 `noConsumers()` 兩處共用；`GG13-2` 鎖住「有污染、無註冊插件」仍算有人消耗 |
+
+### 第十三輪 Deviations
+
+60. **沒人消耗時撤銷，不更正。** 主線指示零插件且無污染時撤銷。`190d97e` 在這個探針上會更正成 loginBeat（觀察者收到 loginBeat），本輪則是撤銷（觀察者收不到）。撤銷後表不留沒人消耗的登記，第十二輪的容量回歸維持成立；代價與 Dev 56 相同：送出時沒人消耗、回應前才註冊的插件看不到這筆 RESPONSE，但不會看到錯的 method。
+61. **`seen11` 測試 helper 改用遞增 id 並斷言註冊成功。** 原本以陣列位置當 id，同一頁面呼叫兩次會撞 id、第二次註冊靜默失敗；`GG13-1` 的「仍有其他插件」情境因此一度沒有 INFO 觀察者。改後所有用到它的測試照綠。
+62. **修前對照以探針記錄觀察者收到的 method。** `GG13-1` 在 `190d97e` 上也紅，但只因為那版留了一筆更正後的配對（`pendingPairs` 1），方向與本輪不同。探針拿掉筆數斷言，三版的觀察者結果：`e18ce82` 收到 INFO（錯）、`190d97e` 收到 loginBeat、本輪收不到（撤銷）。
+
+### 第十三輪驗證（log：主 repo `.swfd/logs/guard-gaps/r13-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第十二輪 HEAD `e18ce82` 的 JS | 1 紅：`GG13-1`（唯一插件情境殘留 1 筆配對）；探針顯示觀察者收到 INFO。`190d97e` 對照見 Dev 62 | `r13-red-b2-on-e18ce82.log` |
+| 變異（b2＋v2＋p4，扣基線） | 83／85 被殺。新增 AA1–AA5 全殺（撤銷順序、`remember` 與 `dispatch` 各自改成只看 registry 或只看 tainted）；Z1 改成新字串仍被殺；存活的 `T7`、`U10` 為既有等價變異 | `r13-mutation.log` |
+| node 五套 | b2 175／0（0 略過）、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r13-green-*.log` |
+| naki-plugins `local-unlock-naki.cjs` | 9／0（`NAKI_ROOT` 指向本 worktree，0 略過） | `r13-green-local-unlock-naki.log` |
+| Swift | 本輪只改 JS 與文件，沒有改 Swift 檔，依主線指示未重跑 | |
+| `git diff main --check` | 無警告 | |
+
+### 第十三輪未驗證與風險
+
+- 送出時沒人消耗（含唯一插件在鏈中停用自己）的請求，回應前才註冊的插件看不到它的 RESPONSE（Dev 60，不會看到錯的 method）。
+- WebKit、live 未驗證（I2）。

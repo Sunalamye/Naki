@@ -2567,12 +2567,13 @@ test('GG10-1b (Astra9 1): a blocked request leaves no pairing behind — a stray
 });
 
 // ---- guard-gaps 第十一輪（Astra guard-gaps 第十輪 1–2 條）：bridge 故障退回原請求時配對跟著退回、邊界固定回歸 ----
+let seen11Seq = 0;
 function seen11(t, methods, { naki = false } = {}) {
   const got = [];
-  methods.forEach((m, i) => {
-    const id = 'seen11-' + i;
+  methods.forEach(m => {
+    const id = 'seen11-' + (++seen11Seq);
     t.c.__nakiPlugins.setGrant(id, { capabilities: ['observe'], methods: [m], priority: 500, observeNakiTraffic: naki });
-    t.c.__nakiPlugins.register({ id, onReceive(ctx) { got.push(ctx.method); } });
+    assert.equal(t.c.__nakiPlugins.register({ id, onReceive(ctx) { got.push(ctx.method); } }), true);
   });
   return got;
 }
@@ -2741,4 +2742,38 @@ test('GG12-1 (Astra11 1): pairings never accumulate — zero plugins with a brok
     other.close();
     assert.equal(pendingPairs(t), 0, label);
   }
+});
+
+// ---- guard-gaps 第十三輪（Astra guard-gaps 第十二輪 1–2 條）：沒人消耗時只撤銷舊配對、不留鏈首的舊值 ----
+test('GG13-1 (Astra12 1): the only plugin replaces INFO→loginBeat and disables itself in the same onSend — the wire carries loginBeat and the stale INFO pairing is revoked; with another plugin still present it is corrected to loginBeat', async () => {
+  for (const alone of [true, false]) {
+    const label = alone ? 'only plugin' : 'another plugin stays';
+    const t = page();
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    if (!alone) seen11(t, [TITLE]);
+    t.c.__nakiPlugins.setGrant('rw13', { capabilities: ['observe', 'rewriteSend'], methods: [INFO], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'rw13', onSend(ctx) {
+      assert.equal(ctx.replace(request(ctx.msgId, BEAT)), true);
+      t.c.__nakiPlugins.disable('rw13');
+    } });
+    t.lobby.send(request(2000, INFO, [8, 1]));
+    await tick();
+    assert.deepEqual(t.lobby.committed.map(d => methodOf(Uint8Array.from(d))), [BEAT], label);
+    assert.equal(pendingPairs(t), alone ? 0 : 1, label);
+    const got = seen11(t, [INFO, BEAT]);
+    t.lobby.receive(response(2000, [8, 1]));
+    assert.deepEqual(plain(got), alone ? [] : [BEAT], label);
+  }
+});
+
+test('GG13-2 (Astra12 2): a page with taint but no registered plugin still has consumers — pairings are kept until the RESPONSE consumes them', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  t.c.__nakiPlugins.disable(ID);
+  assert.deepEqual(plain(t.c.__nakiPlugins.list()), []);
+  t.lobby.send(request(2010, BEAT));
+  assert.equal(pendingPairs(t), 1);
+  t.lobby.receive(response(2010, [8, 1]));
+  assert.equal(pendingPairs(t), 0);
 });
