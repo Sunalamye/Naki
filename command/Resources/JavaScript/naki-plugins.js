@@ -80,14 +80,22 @@
 
     // ---- L3 送出側（injectSend，§7.6/§7.7b）----
     // 插件注入用 msgId 區段 64000–65500（Naki 自送收窄為 60000–63999）。
-    var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500;
-    var pluginMsgId = PLUGIN_MSGID_FIRST;
+    // 遊戲計數器全域遞增、會進這個號段：輪用時跳過任一連線上未答的配對，以及遊戲接下來 GAME_AHEAD 個號碼（pair-source）。
+    // 注入彼此不撞：輪一圈 1501 號，注入登記上限 256。不可用最多 PENDING_LIMIT＋GAME_AHEAD 個，找不到的分支不可達
+    var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500, GAME_AHEAD = 256;
+    var pluginMsgId = PLUGIN_MSGID_FIRST, lastGameMsgId = null;
     function nextPluginMsgId() {
-        var v = pluginMsgId;
-        pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
-        return v;
+        var busy = new Set();
+        pendingMethods.forEach(function (m, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
+        for (var n = PLUGIN_MSGID_LAST - PLUGIN_MSGID_FIRST + 1; n > 0; n--) {
+            var v = pluginMsgId;
+            pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
+            var ahead = lastGameMsgId == null ? 0 : (v - lastGameMsgId + 65536) % 65536;
+            if (!busy.has(v) && !(ahead > 0 && ahead <= GAME_AHEAD)) return v;
+        }
+        return null;
     }
-    // 插件注入的 (連線, msgId) -> 發起插件 id（回應路由，§7.7b）
+    // 插件注入的 (連線, msgId) -> { id: 發起插件, method }（回應路由，§7.7b）。注入的配對只存這裡，不進 pendingMethods
     var injectedMsgIds = new Map();
     // sendRequest 呼叫 sendRaw 期間的注入標記：sendRaw 同步經包裝的 ws.send 回到 dispatch。
     // 同 msgId 且 bytes 與注入的 envelope 完全相同才算這次注入（第三輪第 2 條）：注入前後其他派發的同號請求，
@@ -383,12 +391,18 @@
     // 配對的唯一寫入口：容量 PENDING_LIMIT（FIFO，覆寫算最新）。同鍵舊配對一律先撤銷，沒人消耗時只撤銷、不新增，
     // 鏈中插件全部退出時不會留下鏈首依原請求登記的舊值（第十二輪第 1 條、第十三輪第 1 條）
     function remember(socketId, msgId, method) {
+        if (isInjecting(msgId)) return;
         var key = msgKey(socketId, msgId);
         pendingMethods.delete(key);
         if (noConsumers()) return;
         pendingMethods.set(key, method);
         if (pendingMethods.size > PENDING_LIMIT) pendingMethods.delete(pendingMethods.keys().next().value);
     }
+
+    // 這次注入的請求：配對存在注入登記，不寫也不撤銷 pendingMethods（同號的遊戲配對保留，pair-source）。
+    // 只比 msgId：注入號碼避開遊戲未答與接下來的號碼，注入期間重入的遊戲送出不會同號。
+    // 注入被擋時 blockSend 依鍵撤銷，撤到的也只會是空鍵（同號遊戲配對已被避開）
+    function isInjecting(msgId) { return !!injecting && injecting.msgId === msgId; }
 
     // 依實際上 wire 的 bytes 登記回應配對（msgId → method）
     function pairWith(socketId, bytes) {
@@ -523,6 +537,7 @@
                 }
                 var payload = payloadBytes || new Uint8Array(0);
                 var msgId = nextPluginMsgId();
+                if (msgId == null) return { ok: false, reason: 'msgid_busy' };
                 var envBytes = buildRequestEnvelope(msgId, method, payload);
                 var b64;
                 try { b64 = uint8ToBase64(envBytes); }
@@ -536,7 +551,7 @@
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
                 // 登記 (連線, msgId) → 發起插件（§7.7b 回應路由）；連線是 sendRaw 實際選到的那條
-                injectedMsgIds.set(msgKey(r.socketId, msgId), grant.__id);
+                injectedMsgIds.set(msgKey(r.socketId, msgId), { id: grant.__id, method: method });
                 if (injectedMsgIds.size > 256) {
                     injectedMsgIds.delete(injectedMsgIds.keys().next().value);
                 }
@@ -672,19 +687,20 @@
     function runChain(raw, env, guard, lobby) {
         diagnostics.parsed++;
         rememberIfRequest(env, raw.direction, raw.wsId);
-        var method = resolveMethod(env, raw.direction, raw.wsId);
-        diagnostics.lastMethod = method;
         var injectedKey = raw.direction === 'receive' && env.msgId != null ? msgKey(raw.wsId, env.msgId) : null;
-        var injected = injectedKey != null && injectedMsgIds.has(injectedKey);
+        var injection = injectedKey != null ? injectedMsgIds.get(injectedKey) : undefined;
+        var injected = injection !== undefined;
+        // 注入回應用注入自己的方法、只消耗注入登記；同號的遊戲配對留給遊戲的回應（pair-source）
+        var method = injected ? injection.method : resolveMethod(env, raw.direction, raw.wsId);
+        diagnostics.lastMethod = method;
         // 注入登記還在就是插件自送，即使 sendRaw 登記已被淘汰（D22 第二輪第 1 條）
         var isNaki = injected || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
 
         // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
         // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
         if (injected) {
-            var originId = injectedMsgIds.get(injectedKey);
             injectedMsgIds.delete(injectedKey);
-            var origin = registry.get(originId);
+            var origin = registry.get(injection.id);
             if (origin && typeof origin.spec.onInjectResponse === 'function') {
                 var rctx = makeCtx(raw, env, method, isNaki, origin);
                 rctx.inResponseTo = env.msgId;
@@ -960,6 +976,10 @@
             // 沒有插件也鎖定角色（每條連線只解析到鎖定為止），之後才啟用的守衛一開始就認得大廳
             var env = send && !roles.has(raw.wsId) ? parseEnvelope(raw.bytes) : undefined;
             if (send) lockRole(raw.wsId, env);
+            // 遊戲計數器的最新號碼（注入配發避開它接下來的號碼）。Naki 自送與插件注入都經 sendRaw 先登記，不算
+            var b = raw.bytes;
+            if (send && b[0] === TYPE_REQUEST && b.length >= 3
+                && !isNakiMsgId(b[1] | (b[2] << 8), raw.wsId, true)) lastGameMsgId = b[1] | (b[2] << 8);
             if (noConsumers()) {
                 // 配對的新增看有沒有人消耗，消耗不看：RESPONSE 到達、或同鍵送出新請求，舊配對一律清掉（第十四輪第 1 條）
                 if (pendingMethods.size) {
@@ -1027,6 +1047,7 @@
             roles.delete(socketId);
             var prefix = socketId + ':';
             Array.from(pendingMethods.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) pendingMethods.delete(k); });
+            Array.from(injectedMsgIds.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) injectedMsgIds.delete(k); });
         },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
@@ -1044,10 +1065,10 @@
         localResponse: function (socketId, msgId, method, bytes) {
             if (msgId == null) return;
             var key = msgKey(socketId, msgId);
-            var originId = injectedMsgIds.get(key);
-            if (originId == null) return;
+            var injection = injectedMsgIds.get(key);
+            if (injection == null) return;
             injectedMsgIds.delete(key);
-            var origin = registry.get(originId);
+            var origin = registry.get(injection.id);
             if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
             var env = parseEnvelope(bytes) || { type: TYPE_RESPONSE, msgId: msgId, method: null, payload: null };
             var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: bytes, mutable: false },
@@ -1079,6 +1100,7 @@
         diagnostics: function () {
             return JSON.parse(JSON.stringify({ runtime: diagnostics, registered: api.list(), guard: api.guardState(),
                 pendingPairs: pendingMethods.size,
+                pendingInjections: injectedMsgIds.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,

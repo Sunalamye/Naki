@@ -2655,22 +2655,112 @@ test('GG11-3 (Astra10 2): onDisable that only swaps the grant without registerin
   assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'b11'), false);
 });
 
-test('GG11-4 (Astra10 2, documented residual risk): a game INFO awaiting msgId 64000 loses its pairing when a plugin injection with the same msgId is blocked — no cross-source pairing isolation', async () => {
-  const t = page();
+// ---- pair-source：插件注入的 msgId 避開使用中與遊戲即將用到的號碼，注入的回應配對與遊戲分開（docs/archive/plan/pair-source-design-2026-10-17.md）----
+const FST = '.lq.Lobby.fetchServerTime';
+function injector11(t) {
   t.c.__nakiPluginsMayModifyOutbound = true;
-  guard11(t);
-  let inject;
+  const answers = [];
+  let send;
   t.c.__nakiPlugins.setGrant('inj11', { capabilities: ['observe', 'injectSend'], methods: [BEAT] });
-  t.c.__nakiPlugins.register({ id: 'inj11', onSend(ctx) { inject = ctx.sendRequest; } });
-  const got = seen11(t, [INFO], { naki: true });
+  t.c.__nakiPlugins.register({ id: 'inj11', onSend(ctx) { send = ctx.sendRequest; },
+    onInjectResponse(ctx) { answers.push([ctx.inResponseTo, ctx.method]); } });
   t.lobby.send(request(1840, BEAT));
+  t.lobby.receive(response(1840, [8, 1]));
+  return { answers, inject: (m, p = [8, 1]) => send(m, new t.c.Uint8Array(p)) };
+}
+const pendingPairs = t => t.c.__nakiPlugins.diagnostics().pendingPairs;
+const pendingInjections = t => t.c.__nakiPlugins.diagnostics().pendingInjections;
+
+test('GG11-4 / PS-1: a game INFO awaiting msgId 64000 keeps its pairing — a blocked plugin injection never takes 64000, and its local error carries its own msgId', async () => {
+  const t = page();
+  guard11(t);
+  const { answers, inject } = injector11(t);
+  const got = seen11(t, [INFO], { naki: true });
   t.lobby.send(request(64000, INFO));
-  const r = inject(SKIN, new t.c.Uint8Array([8, 1]));
-  assert.equal(r.msgId, 64000);
+  const r = inject(SKIN);
+  assert.equal(r.ok, true);
+  assert.notEqual(r.msgId, 64000);
   await tick();
-  assert.deepEqual(lastGuard(t), [[64000, 'local_error', 'naki_traffic']]);
+  assert.deepEqual(lastGuard(t), [[r.msgId, 'local_error', 'naki_traffic']]);
+  assert.deepEqual(t.game.slice(-1), [errorResponse(r.msgId)], 'the game gets the local error under the injection msgId only');
+  assert.deepEqual(answers, [[r.msgId, SKIN]]);
   t.lobby.receive(response(64000, [8, 1]));
-  assert.deepEqual(plain(got), [], 'the INFO RESPONSE resolves to no method');
+  assert.deepEqual(plain(got), [INFO]);
+});
+
+test('PS-2: a game request and an injection pending at the same time each get their own RESPONSE and method, in either arrival order', () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  const got = seen11(t, [INFO]);
+  t.lobby.send(request(64000, INFO));
+  const r = inject(FST);
+  assert.equal(r.ok, true);
+  assert.notEqual(r.msgId, 64000);
+  t.lobby.receive(response(r.msgId, [8, 1]));
+  t.lobby.receive(response(64000, [8, 1]));
+  assert.deepEqual(answers, [[r.msgId, FST]]);
+  assert.deepEqual(plain(got), [INFO]);
+  assert.equal(pendingPairs(t), 0);
+  assert.equal(pendingInjections(t), 0);
+});
+
+test('PS-3: two injections in a row skip the numbers the game counter reaches next, so the game\'s following requests keep their own pairings', () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  const got = seen11(t, [INFO]);
+  t.lobby.send(request(63999, BEAT));
+  t.lobby.receive(response(63999, [8, 1]));
+  const a = inject(FST).msgId, b = inject(FST).msgId;
+  assert.notEqual(a, b);
+  for (const id of [a, b]) assert.ok(id >= 64000 && id <= 65500 && id - 63999 > 256, 'outside the game window: ' + id);
+  t.lobby.send(request(64000, INFO));
+  t.lobby.send(request(64001, INFO));
+  for (const id of [a, b, 64000, 64001]) t.lobby.receive(response(id, [8, 1]));
+  assert.deepEqual(answers, [[a, FST], [b, FST]]);
+  assert.deepEqual(plain(got), [INFO, INFO]);
+});
+
+test('PS-4: the game reusing a pending injection msgId on the same connection does not overwrite either pairing — the first RESPONSE answers the injection with its own method, the second resolves to the game method', () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  const got = seen11(t, [INFO], { naki: true });
+  const plainGot = seen11(t, [INFO]);
+  const a = inject(FST).msgId;
+  t.lobby.send(request(a, INFO));
+  t.lobby.receive(response(a, [8, 1]));
+  assert.deepEqual(answers, [[a, FST]]);
+  t.lobby.receive(response(a, [8, 2]));
+  assert.deepEqual(plain(got), [INFO], 'D22: the game request on a pending Naki pair stays Naki-attributed');
+  assert.deepEqual(plain(plainGot), []);
+  assert.equal(pendingPairs(t), 0);
+});
+
+test('PS-5: closing a connection drops its injection registrations with its pairings; after reconnecting, a stale number answers nobody and a new injection routes normally', () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  t.lobby.send(request(64000, INFO));
+  const a = inject(FST).msgId;
+  assert.equal(pendingInjections(t), 1);
+  t.lobby.close();
+  assert.equal(pendingPairs(t), 0);
+  assert.equal(pendingInjections(t), 0);
+  const lobby2 = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+  lobby2.send(request(64001, BEAT));
+  const c = inject(FST).msgId;
+  assert.notEqual(c, a);
+  assert.equal(lobby2.sent.length, 2, 'the injection goes out on the new lobby');
+  lobby2.receive(response(a, [8, 1]));
+  lobby2.receive(response(c, [8, 1]));
+  assert.deepEqual(answers, [[c, FST]]);
+  assert.equal(pendingInjections(t), 0);
+});
+
+test('PS-6: Naki\'s own sendRaw and the injection itself do not move the game counter window — after Naki sends 63999 and one injection, the next injection still starts right at the plugin range', () => {
+  const t = page();
+  const { inject } = injector11(t);
+  t.c.__nakiWebSocket.sendRaw(b64(request(63999, BEAT)));
+  const a = inject(FST).msgId, b = inject(FST).msgId;
+  assert.deepEqual([a, b], [64000, 64001]);
 });
 
 test('GG11-1c (Astra10 1): the bridge failure path keeps the original pairing when the guard lookup itself throws inside failSafe, and on a game connection', async () => {
@@ -2707,7 +2797,6 @@ test('GG11-1c (Astra10 1): the bridge failure path keeps the original pairing wh
 });
 
 // ---- guard-gaps 第十二輪（Astra guard-gaps 第十一輪 1 條）：所有配對寫入共用容量上限、零插件不登記、關閉清該連線 ----
-const pendingPairs = t => t.c.__nakiPlugins.diagnostics().pendingPairs;
 
 test('GG12-1 (Astra11 1): pairings never accumulate — zero plugins with a broken bridge leave none after 300 round trips, also after close and reconnect; with plugins the table stays at PENDING_LIMIT and close clears that connection', async () => {
   {

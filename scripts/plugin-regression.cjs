@@ -358,7 +358,7 @@ test('D22-3 the same Naki msgId on two /gateway sockets, only one answered: isNa
   other.send(request(60012, LOBBY));
   assert.deepEqual(watcher.at(-1), [60012, true]);
 });
-test('D22-3 residual: with its sendRaw registration evicted, a game RESPONSE on the injected pair is claimed first; the real one gets no callback and reaches no plugin', () => {
+test('D22-3 residual + pair-source: with its sendRaw registration evicted, the first RESPONSE on the injected pair is still claimed by the injection; the second resolves to the game method and reaches the general chain', () => {
   const { c, ws, general, socket } = traffic(); let notify; const got = [];
   c.__nakiPluginsMayModifyOutbound = true;
   c.__nakiPlugins.setGrant('injector', { capabilities: ['observe', 'injectSend'], methods: ['.lq.NotifyFoo', LOBBY] });
@@ -371,7 +371,7 @@ test('D22-3 residual: with its sendRaw registration evicted, a game RESPONSE on 
   ws.listeners.message({ data: response(64000).buffer });
   ws.listeners.message({ data: response(64000).buffer });
   assert.deepEqual(got, [true], 'the first RESPONSE on the pair is taken as the injected one');
-  assert.deepEqual(general.filter(x => x === 64000), [64000], 'only the game REQUEST reached the general chain');
+  assert.deepEqual(general.filter(x => x === 64000), [64000, 64000], 'the game REQUEST and, with its own pairing kept, the game RESPONSE reach the general chain');
 });
 
 // WebKit 握手失敗兩種情境（live 2026-10-17）：error 當下 readyState 仍是 0；(a) 之後完全沒有 close（live 紀錄）、(b) 下個 tick 變 3 並補 close

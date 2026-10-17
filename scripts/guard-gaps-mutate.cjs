@@ -106,6 +106,14 @@ const MUTANTS = [
   ["M9 refuseOpaqueSend 只看 lobby", [["if (roles.get(socketId) === 'game') return false;", "if (!isLobby(socketId)) return false;"]]],
   ["M10 refuseOpaqueSend 連 game 也拒", [["if (roles.get(socketId) === 'game') return false;", ";"]]],
   ["M11 非大廳要求 method 改變", [[": GUARDABLE_METHODS.indexOf(now.method) !== -1)) {", ": now.method !== method && GUARDABLE_METHODS.indexOf(now.method) !== -1)) {"]]],
+  ["PS1 配發不避未答配對", [["        pendingMethods.forEach(function (m, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });\n", ""]]],
+  ["PS2 配發不避遊戲接下來的號碼", [["if (!busy.has(v) && !(ahead > 0 && ahead <= GAME_AHEAD)) return v;", "if (!busy.has(v)) return v;"]]],
+  ["PS3 遊戲窗口少算邊界", [["ahead > 0 && ahead <= GAME_AHEAD", "ahead > 0 && ahead < GAME_AHEAD"]]],
+  ["PS4 注入仍寫 pendingMethods", [["        if (isInjecting(msgId)) return;\n", ""]]],
+  ["PS5 注入回應改用 resolveMethod", [["var method = injected ? injection.method : resolveMethod(env, raw.direction, raw.wsId);", "var method = resolveMethod(env, raw.direction, raw.wsId);"]]],
+  ["PS6 關閉不清注入登記", [["            Array.from(injectedMsgIds.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) injectedMsgIds.delete(k); });\n", ""]]],
+  ["PS7 Naki 自送也算遊戲號碼", [["\n                && !isNakiMsgId(b[1] | (b[2] << 8), raw.wsId, true)) lastGameMsgId", ") lastGameMsgId"]]],
+  ["PS8 遊戲號碼不追蹤", [["raw.wsId, true)) lastGameMsgId = b[1] | (b[2] << 8);", "raw.wsId, true)) lastGameMsgId = null;"]]],
   ["VB2 同鍵覆寫不移到最新（只在零消耗者時刪舊鍵）", [["        var key = msgKey(socketId, msgId);\n        pendingMethods.delete(key);\n        if (noConsumers()) return;\n", "        var key = msgKey(socketId, msgId);\n        if (noConsumers()) { pendingMethods.delete(key); return; }\n"]]]
 ];
 
