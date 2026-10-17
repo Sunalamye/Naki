@@ -125,11 +125,13 @@ Naki 載入雀魂頁面時可設 User-Agent 與額外 header（`MajsoulRequestBu
 
 一般 `.lq.ActionPrototype` 收包會做 Liqi XOR decode；`syncGame`／`enterGame` response 內的 restore actions 已是 payload，不應再 XOR。
 
-協定欄位的唯一 schema 來源是 [`docs/protocol/liqi.json`](protocol/liqi.json)。2026-08-01 由 Naki live resource manifest 取得的 CDN 檔與 repo 版本 byte-for-byte 相同，SHA-256 都是：
+協定欄位的唯一 schema 來源是 [`docs/protocol/liqi.json`](protocol/liqi.json)。2026-10-17 起它由 `scripts/extract-liqi.py` 從雀魂官方 Unity 資源包抽出：入口 `https://game.maj-soul.com/1/`（productVersion 4.0.47）→ `assetbundles/clientBundleSettings/chs_t-release.json` → warehouse → `assetbundles/DXT/bundle_info_so.majset` → `Protol/*_pb.lua` 與 `proto_config.bytes`。格式仍是 protobufjs nested。內容含 1125 個頂層型別與 443 個 RPC，與 Akagi v3 的 `liqi.proto` 逐欄相同。SHA-256：
 
 ```text
-f2955c3d10cf2d42bee9309f672c062540941ea0cffe1bd62e3f436c7afc404c
+fa234be58831ccfccf0bea108f5897f2f77f302df4a38a76e3b45f914436fa25
 ```
+
+舊檔來自 CDN 的 `res/proto/liqi.json`，那是 Laya 時代的遺留檔，已不再更新。新舊差異見 `.swfd/logs/liqi-refresh/liqi-diff.md`。Naki 用到的 RPC、error 欄位位置與插件守衛名單的欄位號都沒有變動。`scripts/check-liqi-drift.sh` 以同一條管線重抽後比對。
 
 ### 連線選擇
 
@@ -282,7 +284,7 @@ live Naki 取得：
 
 ```text
 version.json                    0.11.252.w
-res/proto/liqi.json prefix      v0.11.243.w
+res/proto/liqi.json prefix      v0.11.243.w（Laya 遺留檔，已不是 schema 基準）
 res/proto/config.proto prefix   v0.10.1.w
 res/config/lqc.lqbin prefix     v0.11.252.w
 ```
@@ -344,7 +346,7 @@ Debug server 只綁 loopback，HTTP 與 MCP 共用 port 8765。2026-10-13 靜態
 
 - Unity 客戶端、canvas、Laya 缺席、WebSocket 與 WebGL hook 的 live 存在性。
 - live Debug API 與 42-tool MCP registry。
-- 當前 `liqi.json` 與 live CDN 相同。
+- 當前 `liqi.json` 與官方資源包 4.0.47 重抽結果逐位元組相同（2026-10-17，`scripts/check-liqi-drift.sh`）。
 - 當前 config 資源 fresh download／hash／解析統計。
 - MortalSwift parity fixtures 與 Naki resolver／builder 單元測試。
 - runtime 榮和、碰與一般 discard／pass 的協定鏈。

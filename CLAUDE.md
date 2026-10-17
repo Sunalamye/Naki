@@ -124,13 +124,12 @@ OptionalOperationList
 - normal ActionPrototype 需 XOR；sync restore payload 不再 XOR。
 - FastTest 對局 request 走 `/game-gateway`，lobby request 走 `/gateway`。
 - `sendRaw` 成功只代表 WebSocket 接受 bytes；真正成功要看同 msgId RESPONSE／權威 action。
-- field number 只查 `docs/protocol/liqi.json`。⚠️ **「與 live CDN byte-identical」不代表
-  schema 正確**：那個 CDN 資源（`res/proto/liqi.json`）是 Laya 時代的遺留檔，resource
-  prefix `v0.11.243.w` 落後 client `4.0.45` 好幾版；雀魂遷 Unity 後真正的 descriptor 改放
-  asset bundle 的 `Protol/*_pb.lua`，那個 JSON 不再更新。實證：repo 這份的
-  `ReqSelfOperation` 曾缺 `auto_operation`（2026-10-09 依 Akagi 的 liqi.proto 4.0.47 補上，
-  其餘 Naki 用到的 26 個訊息逐欄一致）。`scripts/check-liqi-drift.sh` 比對的是同一個
-  過期基準，**結構上驗不到這種漂移**（見 task #16）。
+- field number 只查 `docs/protocol/liqi.json`。它由 `scripts/extract-liqi.py` 從官方 Unity
+  資源包的 `Protol/*_pb.lua`＋`proto_config.bytes` 抽出（2026-10-17，productVersion 4.0.47，
+  入口 `https://game.maj-soul.com/1/`；443 個 RPC，與 Akagi v3 `liqi.proto` 逐欄相同）。
+  CDN 的 `res/proto/liqi.json` 是 Laya 時代的遺留檔，不再更新，不可當基準。
+  `scripts/check-liqi-drift.sh` 用同一條管線重抽再比對（需要能 import UnityPy 的 python，
+  以 `LIQI_PYTHON` 指定）。
 - MJAI 字牌 `E/S/W/N/P/F/C`；雀魂字牌 `1z`–`7z`。
 - **段位場入口已換人**（2026-08-09 實測）：`.lq.Lobby.matchGame` 對 match_mode
   1／2／3 一律回 **error 1306**；現行入口是 `.lq.Lobby.startUnifiedMatch`
