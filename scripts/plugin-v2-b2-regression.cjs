@@ -1809,3 +1809,207 @@ test('devLog: no webkit bridge at all returns false', () => {
   t.c.__nakiPlugins.setGrant('d', { capabilities: ['observe'], methods: [] });
   assert.equal(t.c.__nakiPlugins.devLog('d', 'x'), false);
 });
+
+// ---- guard-gaps 第六輪（Astra guard-gaps 第五輪 1–2 條）：replace 入口先物化再驗證，hook 結束一律完整重驗 ----
+const N6 = 40;
+const info6 = (msgId, last = 8) => { const b = sameLength(INFO, N6, msgId); b[N6 - 1] = last; return b; };
+const failedHook = (t, id) => t.events('log').some(e => e.data.id === id && /拋錯/.test(e.data.msg));
+function replacer(t, make) {
+  const results = [];
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  t.c.__nakiPlugins.setGrant('rp6', { capabilities: ['observe', 'rewriteSend'], methods: [INFO] });
+  assert.equal(t.c.__nakiPlugins.register({ id: 'rp6', onSend(ctx) { results.push(make(ctx)); } }), true);
+  return results;
+}
+const withLength = (b, n) => { Object.defineProperty(b, 'length', { value: n }); return b; };
+
+test('GG6-1 (Astra5 1): a raw ArrayBuffer, SharedArrayBuffer or resizable ArrayBuffer with an own length is refused; rewriting it into SKIN afterwards never reaches the wire or Swift', () => {
+  const kinds = {
+    ArrayBuffer: () => new ArrayBuffer(N6),
+    SharedArrayBuffer: () => new SharedArrayBuffer(N6),
+    'resizable ArrayBuffer': () => new ArrayBuffer(N6, { maxByteLength: 2 * N6 })
+  };
+  for (const [name, make] of Object.entries(kinds)) {
+    const t = page();
+    guardPlugin(t.c);
+    const results = replacer(t, ctx => {
+      const buf = withLength(make(), N6), view = new Uint8Array(buf);
+      view.set(info6(ctx.msgId, 9));
+      const ok = ctx.replace(buf);
+      view.set(sameLength(SKIN, N6, ctx.msgId));
+      return ok;
+    });
+    const req = info6(1201);
+    const original = Array.from(req);
+    t.lobby.send(req);
+    assert.deepEqual(results, [false], name);
+    assert.deepEqual(t.lobby.committed[0], original, name);
+    assert.deepEqual(t.toSwift('send'), [original], name);
+    assert.equal(guardLog(t).length, 0, name + ': SKIN never formed, so nothing reached the guard');
+  }
+});
+
+test('GG6-1b (Astra5 1): a Uint8Array view over a shared, resizable or own-length buffer is copied at replace time; later writes through the buffer do not change what is sent', () => {
+  const kinds = {
+    'own-length ArrayBuffer': () => withLength(new ArrayBuffer(N6), 96),
+    SharedArrayBuffer: () => new SharedArrayBuffer(N6),
+    'resizable ArrayBuffer': () => new ArrayBuffer(N6, { maxByteLength: 2 * N6 })
+  };
+  for (const [name, make] of Object.entries(kinds)) {
+    for (const onLobby of [true, false]) {
+      const t = page();
+      guardPlugin(t.c);
+      const results = replacer(t, ctx => {
+        const buf = make(), view = new Uint8Array(buf);
+        view.set(info6(ctx.msgId, 9));
+        const ok = ctx.replace(view);
+        if (buf.resizable) buf.resize(2 * N6);
+        new Uint8Array(buf).set(sameLength(SKIN, N6, ctx.msgId));
+        return ok;
+      });
+      const ws = onLobby ? t.lobby : gameSocket(t.c);
+      if (!onLobby) ws.send(request(1199, AUTH));
+      ws.send(info6(1202));
+      const expected = Array.from(info6(1202, 9)), label = name + (onLobby ? ' lobby' : ' game');
+      assert.deepEqual(results, [true], label);
+      assert.deepEqual(ws.committed.slice(-1), [expected], label);
+      assert.deepEqual(t.toSwift('send').slice(-1), [expected], label);
+      assert.equal(t.toSwift('send').some(b => methodOf(Uint8Array.from(b)) === SKIN), false, label);
+    }
+  }
+});
+
+test('GG6-2 (Astra5 1): changing msgId 1204→1205 through the buffer after replace never goes out — a raw buffer is refused, a view is copied', () => {
+  for (const asView of [false, true]) {
+    for (const onLobby of [true, false]) {
+      const t = page();
+      const results = replacer(t, ctx => {
+        const buf = withLength(new ArrayBuffer(N6), N6), view = new Uint8Array(buf);
+        view.set(info6(ctx.msgId, 9));
+        const ok = ctx.replace(asView ? view : buf);
+        view[1] = 1205 & 0xff;
+        return ok;
+      });
+      const ws = onLobby ? t.lobby : gameSocket(t.c);
+      if (!onLobby) ws.send(request(1203, AUTH));
+      ws.send(info6(1204));
+      const label = (asView ? 'view' : 'buffer') + (onLobby ? ' lobby' : ' game');
+      assert.deepEqual(results, [asView], label);
+      assert.deepEqual(ws.committed.slice(-1), [Array.from(info6(1204, asView ? 9 : 8))], label);
+      assert.deepEqual(t.toSwift('send').slice(-1), [Array.from(info6(1204, asView ? 9 : 8))], label);
+      assert.deepEqual(sentOn(ws).slice(-1), [1204], label);
+    }
+  }
+});
+
+test('GG6-2b: an in-place change of msgId or type on ctx.bytes is fully revalidated at hook end, reverted and counted as a hook failure, on lobby and game', () => {
+  for (const [what, edit] of [['msgId', b => { b[1] ^= 1; }], ['type', b => { b[0] = 1; }]]) {
+    for (const onLobby of [true, false]) {
+      const t = page();
+      t.c.__nakiPlugins.setGrant('ip6', { capabilities: ['observe'], methods: [INFO] });
+      t.c.__nakiPlugins.register({ id: 'ip6', onSend(ctx) { edit(ctx.bytes); } });
+      const ws = onLobby ? t.lobby : gameSocket(t.c);
+      if (!onLobby) ws.send(request(1205, AUTH));
+      const req = info6(1206), label = what + (onLobby ? ' lobby' : ' game');
+      ws.send(req);
+      assert.deepEqual(ws.committed.slice(-1), [Array.from(info6(1206))], label);
+      assert.equal(failedHook(t, 'ip6'), true, label);
+    }
+  }
+});
+
+test('GG6-2c: a replace on a game connection that passes the entry check but is a GUARDABLE method is still caught by the hook-end revalidation', () => {
+  const t = page();
+  const results = replacer(t, ctx => ctx.replace(sameLength(TITLE, N6, ctx.msgId)));
+  const g = gameSocket(t.c);
+  g.send(request(1207, AUTH));
+  g.send(info6(1208));
+  assert.deepEqual(results, [true]);
+  assert.deepEqual(g.committed[1], Array.from(info6(1208)));
+  assert.equal(failedHook(t, 'rp6'), true);
+});
+
+// 入口型別矩陣（建議 2）：replace 參數只收 TypedArray（以內部槽讀長度與內容），其餘回 false；hook 回傳值只看 then，從不替換 bytes
+const detached = () => { const u = new Uint8Array(N6); u.buffer.transfer(); return u; };
+const outOfBounds = () => { const r = new ArrayBuffer(N6, { maxByteLength: N6 }); const u = new Uint8Array(r, 0, N6); r.resize(4); return u; };
+const MATRIX6 = [
+  ['Uint8Array', id => info6(id, 9), 'accept'],
+  ['cross-realm Uint8Array', id => vm.runInNewContext('new Uint8Array(a)', { a: Array.from(info6(id, 9)) }), 'accept'],
+  ['Uint16Array of byte values', id => Uint16Array.from(info6(id, 9)), 'accept'],
+  ['Uint8Array over SharedArrayBuffer', id => { const u = new Uint8Array(new SharedArrayBuffer(N6)); u.set(info6(id, 9)); return u; }, 'accept'],
+  ['length-tracking Uint8Array over resizable', id => { const u = new Uint8Array(new ArrayBuffer(N6, { maxByteLength: 2 * N6 })); u.set(info6(id, 9)); return u; }, 'accept'],
+  ['Uint8Array with a throwing own length', id => { const u = info6(id, 9); Object.defineProperty(u, 'length', { get() { throw new Error('own length read'); } }); return u; }, 'accept'],
+  ['Proxy of Uint8Array', id => new Proxy(info6(id, 9), {}), 'false'],
+  ['array-like Proxy', id => new Proxy({}, { get: (o, k) => k === 'length' ? N6 : info6(id, 9)[k] }), 'false'],
+  ['plain Array', id => Array.from(info6(id, 9)), 'false'],
+  ['DataView', id => new DataView(info6(id, 9).buffer), 'false'],
+  ['ArrayBuffer', id => info6(id, 9).buffer, 'false'],
+  ['SharedArrayBuffer', () => new SharedArrayBuffer(N6), 'false'],
+  ['resizable ArrayBuffer', () => new ArrayBuffer(N6, { maxByteLength: N6 }), 'false'],
+  ['detached Uint8Array', detached, 'false'],
+  ['out-of-bounds Uint8Array', outOfBounds, 'false'],
+  ['null', () => null, 'false']
+];
+
+test('GG6-3 (Astra5 2): replace argument matrix — TypedArrays are accepted by internal slots, everything else returns false without a hook failure', () => {
+  for (const [name, make, expect] of MATRIX6) {
+    const t = page();
+    const results = replacer(t, ctx => ctx.replace(make(ctx.msgId)));
+    const g = gameSocket(t.c);
+    g.send(request(1209, AUTH));
+    g.send(info6(1210));
+    assert.deepEqual(results, [expect === 'accept'], name);
+    assert.deepEqual(g.committed[1], Array.from(info6(1210, expect === 'accept' ? 9 : 8)), name);
+    assert.equal(failedHook(t, 'rp6'), false, name);
+  }
+});
+
+test('GG6-4 (Astra5 2): hook return value matrix — no return value ever replaces the bytes or fails the hook', () => {
+  for (const [name, make] of MATRIX6) {
+    const t = page();
+    const g = gameWith(t, 'ret6', {}, { onSend(ctx) { return make(ctx.msgId); } });
+    const req = OPREQ(1211);
+    g.send(req);
+    assert.equal(g.sent[1], req, name);
+    assert.equal(failedHook(t, 'ret6'), false, name);
+  }
+});
+
+test('GG6-5: receive reshape copies its argument before validating; a raw shared buffer is refused and writes through a view after replace do not reach later plugins', () => {
+  for (const asView of [false, true]) {
+    const t = page();
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    const results = [], seen = [];
+    t.c.__nakiPlugins.setGrant('rs6', { capabilities: ['observe', 'rewriteReceive', 'reshapeReceive'], methods: [INFO], priority: 0 });
+    t.c.__nakiPlugins.register({ id: 'rs6', onReceive(ctx) {
+      const view = new Uint8Array(withLength(new SharedArrayBuffer(11), 11));
+      view.set([3, ctx.msgId & 0xff, ctx.msgId >> 8, 18, 6, 8, 1, 8, 1, 8, 1]);
+      results.push(ctx.replace(asView ? view : view.buffer));
+      view[1] ^= 1;
+      view[5] = 9;
+    } });
+    t.c.__nakiPlugins.setGrant('see6', { capabilities: ['observe'], methods: [INFO], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'see6', onReceive(ctx) { seen.push(Array.from(ctx.bytes)); } });
+    t.lobby.send(request(1212, INFO));
+    t.lobby.receive(response(1212, [8, 1]));
+    assert.deepEqual(results, [asView]);
+    assert.deepEqual(seen, [asView ? [3, 1212 & 0xff, 1212 >> 8, 18, 6, 8, 1, 8, 1, 8, 1] : Array.from(response(1212, [8, 1]))]);
+  }
+});
+
+test('GG6-6: the hook-end check of a replace is not skipped — a guard for the new method that appears after replace returned still reverts it on the lobby', () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  const FST = '.lq.Lobby.fetchServerTime', results = [];
+  t.c.__nakiPlugins.setGrant('rw6', { capabilities: ['observe', 'rewriteSend'], methods: [FST] });
+  t.c.__nakiPlugins.register({ id: 'rw6', onSend(ctx) {
+    results.push(ctx.replace(request(ctx.msgId, TITLE, [8, 9])));
+    t.c.__nakiPlugins.setGrant('tg6', { capabilities: ['observe'], methods: [TITLE], sendGuard: [TITLE] });
+    results.push(t.c.__nakiPlugins.register({ id: 'tg6', onSend() {} }));
+  } });
+  const req = request(1213, FST);
+  t.lobby.send(req);
+  assert.deepEqual(results, [true, true]);
+  assert.equal(t.lobby.sent[0], req);
+  assert.equal(failedHook(t, 'rw6'), true);
+});

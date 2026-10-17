@@ -445,11 +445,12 @@
             && !isSendForbidden(method)) {
             ctx.replace = function (newBytes) {
                 if (!window.__nakiPluginsMayModifyOutbound) return false;
-                if (!newBytes || typeof newBytes.length !== 'number') return false;
-                var next = new Uint8Array(newBytes);
-                var after = parseEnvelope(next);
-                if (!after || !isWellFormed(next) || after.type !== TYPE_REQUEST
-                    || after.msgId !== env.msgId || isSendForbidden(after.method)) {
+                // 先物化成宿主自有副本再驗證，驗的與採用的是同一份；之後插件改它傳進來的物件（含共用的 ArrayBuffer）無效。
+                // 只收 TypedArray，ArrayBuffer／SAB／DataView／array-like／Proxy 回 false，不讀自有 length（第六輪第 1 條）
+                var next;
+                try { next = hostCopy(newBytes); } catch (e) { return false; }
+                var after = sendViolation(next, env.msgId) ? null : parseEnvelope(next);
+                if (!after) {
                     noteFailure(grant.__id, 'replace', new Error('rewriteSend 不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已放棄'));
                     return false;
                 }
@@ -553,7 +554,8 @@
     // 整包替換 receive：type、msgId 不變；NOTIFY 的 method 不變，RESPONSE 不得帶 method（field 1 可省，Naki 按欄位號取 payload）
     function reshapeReceive(raw, env, method, grant, newBytes) {
         if (!raw.reshape || isReshapeForbidden(method)) return false;
-        var next = new Uint8Array(newBytes);
+        var next;
+        try { next = hostCopy(newBytes); } catch (e) { return false; }   // 與送出 replace 同：先物化再驗證（第六輪）
         var after = parseEnvelope(next);
         if (!after || !isWellFormed(next) || after.type !== env.type || after.msgId !== env.msgId
             || (env.type === TYPE_RESPONSE ? !!after.method : after.method !== method)) {
@@ -563,6 +565,12 @@
         raw.bytes = next;
         noteSuccess(grant.__id, 'replace');
         return true;
+    }
+
+    // 送出改寫的結構與名單驗證，對宿主自有快照判定：replace 入口與每個 hook 結束各跑一次
+    function sendViolation(next, msgId) {
+        var after = parseEnvelope(next);
+        return !after || !isWellFormed(next) || after.type !== TYPE_REQUEST || after.msgId !== msgId || isSendForbidden(after.method);
     }
 
     // envelope 逐欄位走到結尾、沒有越界、field 1（method）非空（RESPONSE 可省）。parseEnvelope 對截斷的 fixed32／fixed64
@@ -656,7 +664,7 @@
         // 驗證的是這份快照。遊戲的原 buffer 與 cur 從不交給插件，驗證之後才執行的插件程式碼（記帳、getter、onDisable）
         // 只碰得到過期的副本（第五輪）。receive 維持與遊戲共用 buffer 的就地改寫（契約 §4）
         var copy = raw.direction === 'send' && raw.mutable !== false;
-        var original = raw.bytes, cur = copy ? hostCopy(original) : null, by = [];
+        var original = raw.bytes, cur = copy ? hostCopy(original) : null, by = [], type = env.type, msgId = env.msgId;
         for (var k = 0; k < chain.length; k++) {
             var entry = chain[k];
             var hook = raw.direction === 'receive' ? 'onReceive' : 'onSend';
@@ -679,17 +687,19 @@
                     settle(ret, entry.spec.id, hook, state);
                 }
                 if (copy) {
-                    var out = raw.bytes;
-                    replaced = out !== before;
-                    try { staged = hostCopy(out); } catch (x) { staged = null; }   // 副本的 buffer 被分離時原生 set 會拋錯
+                    replaced = raw.bytes !== before;
+                    try { staged = hostCopy(raw.bytes); } catch (x) { staged = null; }   // 副本的 buffer 被分離時原生 set 會拋錯
                     if (!staged) throw new Error('送出內容無法讀取（buffer 已分離），已撤回');
-                    // 送出改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
-                    // 大廳（guardedSend 的鏈）：就地改成另一個守衛方法（第三輪第 5 條），其餘由鏈後判定。
-                    // 其他連線：就地或經 ctx.replace，改後是 GUARDABLE_METHODS 就撤回，只看閉包常數、不讀 sendGuard（第四輪第 2 條，guard-gaps b、第二輪第 1 條）
+                    // 物化後的快照一律完整重驗，replace 入口驗過也重驗（第六輪第 1 條）：經 replace 的照 rewriteSend 規則，
+                    // 就地改的 type／msgId 不得變。不合規或改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
+                    // 大廳（guardedSend 的鏈）：改成另一個守衛方法（第三輪第 5 條），改動有守衛者的方法本身由鏈後判定。
+                    // 其他連線：改後是 GUARDABLE_METHODS 就撤回，只看閉包常數、不讀 sendGuard（第四輪第 2 條，guard-gaps b、第二輪第 1 條）
                     if (!sameBytes(staged, cur)) {
                         var now = parseEnvelope(staged);
-                        if (now && now.method && (lobby ? !replaced && now.method !== method && guardFor(now.method)
-                            : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
+                        if (replaced ? sendViolation(staged, msgId) : !now || now.type !== type || now.msgId !== msgId) {
+                            throw new Error('送出改寫不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已撤回');
+                        }
+                        if (now.method && (lobby ? now.method !== method && guardFor(now.method) : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
                             throw new Error('改寫成守衛方法 ' + now.method + '，已撤回');
                         }
                     }
@@ -711,7 +721,8 @@
             }
             var changed = false;
             if (copy) {
-                changed = !failure && (replaced || !sameBytes(staged, cur));
+                changed = !failure && !sameBytes(staged, cur);
+                replaced = changed && replaced;
                 if (changed) cur = staged;
                 raw.bytes = cur;
             }
@@ -737,7 +748,7 @@
             }
             if (copy) {
                 if (changed) by.push(entry.spec.id);
-                if (changed && replaced) {
+                if (replaced) {
                     // 換 buffer：send 換了 method 就停——後面的插件是照舊 method 的白名單選進鏈的
                     env = parseEnvelope(cur);
                     if (env.method !== method) break;

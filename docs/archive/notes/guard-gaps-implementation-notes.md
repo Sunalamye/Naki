@@ -168,6 +168,7 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 16. **內容沒變時送原物件，不送快照。** 主線寫「外送只用快照」。原物件在送出鏈上從不交給插件，鏈結束到原生 `send` 之間也不執行插件程式碼，所以內容沒變時它與快照位元相同。這樣做保留了既有測試鎖住的「原物件送出」，也不必改 `naki-websocket.js`。內容有變時一律送宿主快照。
 17. **`R6-4` 行為改變。** observer 只改副本，bridge 出錯時 `failSafe` 拿到遊戲的原 bytes。大廳上被改壞的 FastTest 從「拒送」變成「照送原內容」。送出的是遊戲自己未被修改的請求，比拒送保守。§1.4 第 1 項（D32）已同步。
 18. **分離檢查改為依賴原生 `set` 拋錯。** 主線沒有指定。副本由宿主建立，buffer 不可調整大小；只有分離會讓內容不可讀，而分離時 `set` 會拋 TypeError。原先另寫的長度比對是死碼，已刪（`GG5-6`）。
+    - **第六輪更正**：第五輪寫「buffer 不可調整大小」不成立。當時送出 `replace` 以 `new Uint8Array(newBytes)` 包裝，插件傳 `ArrayBuffer`／`SharedArrayBuffer`／resizable 時，`raw.bytes` 是插件持有的 buffer。第六輪起 `replace` 先 `hostCopy`，送出鏈上的 `raw.bytes` 一律是宿主 `new U8(n)` 建的固定長度 buffer，這句才成立。插件仍能分離它拿到的副本，分離時原生 `set` 拋錯，照撤回處理（`GG5-6`）。
 19. **第四輪 Q1～Q3、Q5、Q6 變異不再適用。** 它們針對送出鏈的「記帳後還原」，這段程式只剩 receive 使用，送出鏈改由 S1～S8 覆蓋。
 
 ### 第五輪驗證（log：主 repo `.swfd/logs/guard-gaps/r5-*`）
@@ -180,3 +181,67 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 | `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r5-swift-targeted.log` |
 | 全量 NakiTests（一次） | 1183／0，無 test host 重啟 | `r5-test-full.log` |
 | `git diff main --check` | 無警告（ADR、notes 檔尾空白行已修） | |
+
+## 第六輪（Astra 第五輪審查：1【擋】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review5.md`。Deviations 16–19 主線採納，Astra 確認 17 成立。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 擋 1 | 送出 `replace` 以 `new Uint8Array(newBytes)` 包裝插件的 `ArrayBuffer`（帶自有 `length`）、SAB 或 resizable，與插件共用記憶體；入口驗 INFO 後插件改成 SKIN，hook 結束因 `replaced` 跳過守衛檢查，SKIN 外送且守衛紀錄為空；改 msgId 1204→1205 也外送 | 入口先 `hostCopy(newBytes)` 物化，只收 TypedArray，失敗回 `false`；驗證與採用同一份副本。hook 結束一律完整重驗：經 `replace` 的跑 `sendViolation`（envelope 完整、type REQUEST、msgId 不變、不在送出禁改名單），就地改的驗 type 與 msgId，兩者都過守衛規則，不再因 `replaced` 跳過（`GG6-1`、`GG6-1b`、`GG6-2`、`GG6-2b`、`GG6-2c`、`GG6-6`）。Dev 18 已更正 |
+| 建議 2 | 固定入口型別矩陣 | `GG6-3`（replace 參數）、`GG6-4`（hook 回傳值），見下表 |
+
+### 入口型別矩陣（現行行為，`GG6-3`／`GG6-4` 固定）
+
+| 輸入 | 送出 `ctx.replace` 參數 | hook 回傳值 |
+|---|---|---|
+| `Uint8Array` | 接受（複製） | 不替換，hook 成功 |
+| 跨 realm `Uint8Array` | 接受（內部槽與 realm 無關） | 不替換，hook 成功 |
+| `Uint16Array`（元素都是 byte 值） | 接受，逐元素轉成 uint8 | 不替換，hook 成功 |
+| SAB 上的 `Uint8Array` | 接受，複製當下內容 | 不替換，hook 成功 |
+| resizable 上長度追蹤的 `Uint8Array` | 接受，複製當下內容 | 不替換，hook 成功 |
+| 自有 `length` getter 會拋錯的 `Uint8Array` | 接受，getter 不被讀 | 不替換，hook 成功 |
+| `Uint8Array` 的 Proxy | `false`，不計失敗 | 不替換，hook 成功 |
+| array-like Proxy | `false`，不計失敗 | 不替換，hook 成功 |
+| 普通陣列 | `false`，不計失敗 | 不替換，hook 成功 |
+| `DataView` | `false`，不計失敗 | 不替換，hook 成功 |
+| `ArrayBuffer`（含帶自有 `length`） | `false`，不計失敗 | 不替換，hook 成功 |
+| `SharedArrayBuffer`（含帶自有 `length`） | `false`，不計失敗 | 不替換，hook 成功 |
+| resizable `ArrayBuffer`（含帶自有 `length`） | `false`，不計失敗 | 不替換，hook 成功 |
+| 已分離的 `Uint8Array` | `false`，不計失敗（原生 `set` 拋錯） | 不替換，hook 成功 |
+| 越界的 `Uint8Array`（resizable 縮小） | `false`，不計失敗（原生 `set` 拋錯） | 不替換，hook 成功 |
+| `null` | `false`，不計失敗 | 不替換，hook 成功 |
+
+- 接受後內容不合規（type／msgId／method／禁改名單／envelope 不完整）照舊回 `false` 並計一次 `replace` 失敗；大廳上改成另一個有守衛者的方法也是。
+- hook 回傳值只讀 `then`，其餘一律不看。`then` getter 拋錯算 hook 失敗（第二輪起的既有行為，不在本表）。
+- 「不讀自有屬性」現在同時適用 `replace` 入口與物化步驟。receive 等長 `replace` 仍讀 `newBytes.length` 決定走等長或變長，等長時用原生 `set` 寫入後重新解析，未在本輪改動。
+
+### 第六輪 Deviations
+
+20. **`GG6-1` 斷言「守衛紀錄為空」，不是主線寫的「非空」。** 修後 `replace` 收到 buffer 就回 `false`，INFO 照原樣送出，SKIN 從未形成，守衛沒有東西可記。測試改斷言更強的條件：wire 與 Swift 都是原 INFO，且 Swift 收到的請求沒有任何一筆是 SKIN。
+21. **receive 方向的變長 `replace`（`reshapeReceive`）一併改為先物化。** 主線只點名送出。它有同樣的共用記憶體問題：驗證後改傳入的 buffer，後續插件與遊戲看到的就不是驗過的內容。改法相同，保守處理（`GG6-5`）。
+22. **就地改的完整重驗只驗 type 與 msgId，不套送出禁改名單與 envelope 完整性。** 主線寫「完整重驗（type／msgId／method／守衛）」。就地改沒有 `rewriteSend` 能力也能做，既有測試（`GG5-8`、`guard-gaps b`、`GG2-6c` 等）鎖住「合法就地改照送」，FastTest 與 Route 方法都不在 `.lq.Lobby.` 底下，套禁改名單會全數撤回。method 由守衛規則把關。經 `replace` 的內容照 `rewriteSend` 規則全驗。
+23. **就地改的新增撤回會計 hook 失敗。** 改 type 或 msgId 的就地改寫從「照送」變成「撤回並計一次 onSend 失敗」，連續 10 次自動停用。遊戲在等原 msgId 的回應，照送會讓遊戲掛住，撤回較保守（`GG6-2b`）。
+24. **鏈中斷條件不變。** 只有經 `replace` 換了 method 才停止後續插件；就地改 method 照舊繼續。試過改成一律中斷，會改變 `GG3-4c` 的既有語意，已回退。
+25. **`T7` 為等價變異，不計入。** hook 結束對 `replace` 內容跑的 `sendViolation` 與入口是同一個純函式、同一份宿主副本（插件拿不到它）、同一個 msgId，結果必然相同。主線要求一律重驗，程式保留，作為縱深防禦。守衛規則那一半（`T8`）不等價：入口之後新出現的守衛會被 hook 結束的重驗擋下，由 `GG6-6` 殺掉。
+
+### 第六輪驗證（log：主 repo `.swfd/logs/guard-gaps/r6-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第五輪 HEAD `f004e53` 的 JS | 5 紅：`GG6-1`、`GG6-2`、`GG6-2b`、`GG6-3`、`GG6-5`。`GG6-1b`、`GG6-2c`、`GG6-4`、`GG6-6` 修前即綠，用來固定行為（傳 view 時舊碼本來就複製） | `r6-red-b2-on-f004e53.log` |
+| rebase | 到 main `92dbe39`，無衝突 | |
+| 變異（b2＋v2＋p4 三套，扣除變異目錄的基線失敗） | 38／39 被殺。新增 T1～T9，T7 為等價變異（Deviation 25） | `r6-mutation.log` |
+| rebase 後 node 四套 | b2 127／0、v2 21／0、p4 24／0、plugin-regression 39／0；另 keepalive 11／0 | `r6-green-*.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 19／0 | `r6-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1184／0，無 test host 重啟 | `r6-test-full.log` |
+| `git diff main --check` | 無警告 | |
+
+- 變異基線：p4 的 `main parity` 在變異目錄（不在 git 工作樹內）必紅，與變異無關，每個變異的失敗都先扣掉它。上一輪的 `r5-mutation.log` 只跑 b2，沒有這個問題。
+
+### 第六輪未驗證與風險
+
+- WebKit 上 `hostCopy` 對 SAB、resizable、跨 realm TypedArray 的行為只在 node 驗過，未在 WebKit 實測。依規範內部槽行為一致，未驗證。
+- 插件在別的執行緒經 SAB 改內容與 `hostCopy` 的競態未測。複製後的副本與 SAB 無關，競態只影響「複製到哪一刻的內容」，複製後的內容仍會完整驗證。
+- 就地改 type／msgId 由「照送」改為「撤回並計失敗」。既有插件若依賴這種改寫會開始累計失敗，naki-plugins 回歸 39／0，未見依賴。
+- live 擋下未驗證（I2）。

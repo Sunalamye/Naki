@@ -99,3 +99,5 @@ Astra 第二輪（`astra-review2.md`）：2【擋】1【應修】1【建議】�
 Astra 第三輪（`astra-review3.md`）：1【擋】1【應修】1【建議】，主線全採納（根治而非再補一層驗證）。擋 1：驗證之後的失敗記帳仍執行插件程式碼（錯誤的 `message` getter、第 10 次的 `onDisable`），可把保留的 bytes 改成守衛方法外送。修法：每個 hook 驗證完成即定案送出快照，記帳後還原成快照；快照、撤回、還原用原生 `slice`／`set`。§1.4 第 2 項區分「本次外送內容」與「派發後改保留參照」，並另列「遊戲重用 buffer」前提。同日 rebase 到 main `ffe0670`，本 ADR 尾端兩段裁決並存。
 
 Astra 第四輪（`astra-review4.md`）：2【擋】2【應修】，主線全採納並撤回第四輪 Deviation 13（「記帳後還原到快照、保留原物件同一性」與外送等價）：插件在副本實例上定義 `constructor`／`byteLength` getter，或後插件的 `onSend` getter 改前插件保留的 bytes，都能在快照之後改到實際外送內容。改採根治：送出鏈上插件只拿宿主副本，宿主只讀內部槽物化成自有快照再驗證，外送只用未外露的原物件或宿主快照。主線同時解除原 D28「`naki-websocket.js` 不得改」的限制（理由：Astra 兩輪證明同一性保留無法成立）；實作最後不需要改它，既有的「鏈回傳值取代原物件」路徑已足夠。
+
+Astra 第五輪（`astra-review5.md`）：1【擋】1【建議】，主線全採納。擋 1：送出 `ctx.replace` 以 `new Uint8Array(newBytes)` 包裝插件的 `ArrayBuffer`／SAB／resizable，與插件共用記憶體；入口驗過後插件改成 SKIN 或改 msgId，hook 結束因 `replaced` 跳過守衛檢查，照樣外送。修法：入口先以宿主 `hostCopy` 物化，只收 TypedArray，驗證與採用同一份；hook 結束一律完整重驗。receive 變長 `replace` 一併先物化。建議 2 的入口型別矩陣以測試固定，表列在 notes 第六輪。
