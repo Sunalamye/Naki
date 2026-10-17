@@ -393,7 +393,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
 
 ## v2 Phase 4（草案，未定案）
 
-> **本段未定案**：只描述分支 `plugin-v2-phase4` 的 spike，設計見 `docs/plan/plugin-v2-phase4.md`。沒有 live 驗證，合併前必須通過該文件 §8 的 live 清單。上面各節仍是現行契約。
+> **本段為 v2 Phase 4 契約**：設計見 `docs/plan/plugin-v2-phase4.md`；live 驗收 L1–L7 於 2026-10-17 全綠（該文件 §9.1，含 L2 限制：只驗語意不變的變長重派，改顯示值的畫面效果未驗）。上面各節仍是現行契約。
 
 - **長度不等的 `ctx.replace(bytes)` 要明確選用**：manifest `capabilities` 同時宣告 `rewriteReceive` 與 `reshapeReceive`，才會整包替換。只宣告 `reshapeReceive` 時 manifest 無效。條件：
   - 原事件的 data 是 ArrayBuffer。Blob 不提供。
