@@ -36,7 +36,7 @@ final class UISnapshotTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
         defaults = nil
         super.tearDown()
     }

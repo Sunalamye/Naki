@@ -34,7 +34,7 @@ final class SettingsStoreInlinePathTests: XCTestCase {
     func testLoadersReturnDocumentedDefaultsOnEmptySuite() throws {
         let name = "naki.tests.loaders.\(UUID().uuidString)"
         let empty = try XCTUnwrap(UserDefaults(suiteName: name))
-        defer { empty.removePersistentDomain(forName: name) }
+        defer { removeIsolatedSuite(name) }
         let s = SettingsStore(defaults: empty)
         XCTAssertEqual(s.majsoulServer, .cn)
         XCTAssertEqual(s.cloudServerURL, "https://mjapi.shinkuan.me")

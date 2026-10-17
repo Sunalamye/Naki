@@ -107,7 +107,7 @@ final class WebLayerGapTests: XCTestCase {
     func testKeepAliveLoopTicksWhileHiddenAndHoldsActivityOnlyWhileEnabled() async throws {
         let suite = "naki.tests.web.keepalive.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeIsolatedSuite(suite) }
 
         let settings = SettingsStore(defaults: defaults)
         let session = WebSession(store: GameStore(), settings: settings, messageHandler: handler)

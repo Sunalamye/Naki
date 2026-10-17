@@ -191,7 +191,7 @@ final class ToolAndModelGapTests: XCTestCase {
     func testSettingsWritesChangesThroughToUserDefaults() throws {
         let suite = "naki.tests.gap.settings.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeIsolatedSuite(suite) }
 
         let store = SettingsStore(defaults: defaults)
         for flip in [false, true] {

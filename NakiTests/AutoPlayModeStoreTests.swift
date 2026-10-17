@@ -31,7 +31,7 @@ final class AutoPlayModeStoreTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
         defaults = nil
         suiteName = nil
         super.tearDown()
@@ -142,7 +142,7 @@ extension XCTestCase {
         AutoPlayModeStore.defaults = defaults
         addTeardownBlock {
             AutoPlayModeStore.defaults = original
-            defaults.removePersistentDomain(forName: suite)
+            removeIsolatedSuite(suite)
         }
         return defaults
     }

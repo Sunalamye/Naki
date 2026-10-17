@@ -54,7 +54,7 @@ extension XCTestCase {
         L10n.defaults = defaults
         addTeardownBlock {
             L10n.defaults = original
-            defaults.removePersistentDomain(forName: suite)
+            removeIsolatedSuite(suite)
         }
     }
 }

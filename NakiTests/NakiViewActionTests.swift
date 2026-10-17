@@ -23,7 +23,7 @@ final class NakiViewActionTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
         defaults = nil
         suiteName = nil
         super.tearDown()

@@ -24,7 +24,7 @@ func isolateSharedObservedMatchSids(_ testCase: XCTestCase) {
     ObservedMatchSids.shared.redirect(to: defaults)
     testCase.addTeardownBlock { @MainActor in
         ObservedMatchSids.shared.redirect(to: SettingsStore.standard)
-        defaults.removePersistentDomain(forName: suite)
+        removeIsolatedSuite(suite)
     }
 }
 
@@ -43,7 +43,7 @@ final class ObservedMatchSidsTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
         store = nil
         defaults = nil
         suiteName = nil
@@ -199,9 +199,9 @@ final class ObservedMatchSidsParserTests: XCTestCase {
 
     @MainActor
     private func makeIsolatedStore(_ name: String) -> ObservedMatchSids {
+        removeIsolatedSuite(name)
         let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
-        addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+        addTeardownBlock { removeIsolatedSuite(name) }
         return ObservedMatchSids.makeForTesting(defaults: defaults)
     }
 

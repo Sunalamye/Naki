@@ -433,7 +433,7 @@ final class FullAutoModeTests: XCTestCase {
     /// 預設四麻、預設最低房：兩個預設都選「不會愈打愈糟」的那一邊
     func testDefaults() {
         let defaults = UserDefaults(suiteName: "naki.tests.fullauto")!
-        defaults.removePersistentDomain(forName: "naki.tests.fullauto")
+        defer { removeIsolatedSuite("naki.tests.fullauto") }
         XCTAssertFalse(SettingsStore.loadFullAutoPrefersSanma(from: defaults))
         XCTAssertEqual(SettingsStore.loadFullAutoRoomPreference(from: defaults), .lowest)
     }
@@ -453,7 +453,7 @@ final class ObservedMatchSidPersistenceTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
         defaults = nil
         suiteName = nil
         super.tearDown()

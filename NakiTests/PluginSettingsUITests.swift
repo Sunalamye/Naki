@@ -29,7 +29,7 @@ final class PluginSettingsUITests: XCTestCase {
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: tmp)
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
     }
 
     private func installFixture() throws -> URL {

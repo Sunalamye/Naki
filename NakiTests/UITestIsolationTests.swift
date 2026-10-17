@@ -72,6 +72,7 @@ final class UITestIsolationTests: XCTestCase {
         #if DEBUG
         let names = ["NSGlobalDomain", try XCTUnwrap(Bundle.main.bundleIdentifier)]
         let fallback = try XCTUnwrap(UserDefaults(suiteName: "naki.tests.ui"))
+        defer { removeIsolatedSuite("naki.tests.ui") }
         for name in names {
             XCTAssertNil(UserDefaults(suiteName: name), name)
             let marker = "naki.tests.marker.\(UUID().uuidString)"

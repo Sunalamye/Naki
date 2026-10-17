@@ -38,7 +38,7 @@ final class StatusBarBadgeTests: XCTestCase {
     func testRenderStatusBarForOffAndRecommend() throws {
         let suite = "naki.tests.statusbar.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeIsolatedSuite(suite) }
         let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent("naki-statusbar-\(UUID().uuidString)", isDirectory: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: tmpDir) }
         let outDirs = [tmpDir] + (ProcessInfo.processInfo.environment["NAKI_SNAPSHOT_DIR"].map { [URL(fileURLWithPath: $0, isDirectory: true)] } ?? [])

@@ -88,7 +88,7 @@ final class MajsoulConnectionSettingsTests: XCTestCase {
     func testExtraHeadersRoundTripThroughDefaults() throws {
         let suite = "naki.tests.h1.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeIsolatedSuite(suite) }
 
         XCTAssertEqual(SettingsStore.loadExtraHeaders(from: defaults), [:])
         let headers = ["X-Naki-Test": "abc", "accept-language": "ja"]
@@ -99,7 +99,7 @@ final class MajsoulConnectionSettingsTests: XCTestCase {
     func testSettingsStorePersistsUserAgentAndHeaders() throws {
         let suite = "naki.tests.h1.persist.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { removeIsolatedSuite(suite) }
 
         let settings = SettingsStore(defaults: defaults)
         settings.majsoulUserAgent = "Naki-UA/1"

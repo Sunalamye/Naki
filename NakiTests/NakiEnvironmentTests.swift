@@ -207,7 +207,7 @@ final class SettingsStoreTests: XCTestCase {
     func testKeepAliveInBackgroundDefaultsToOnAndHonorsPersistedValue() throws {
         let name = "naki.tests.keepAlive.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-        defer { defaults.removePersistentDomain(forName: name) }
+        defer { removeIsolatedSuite(name) }
 
         XCTAssertTrue(SettingsStore.loadKeepAliveInBackground(from: defaults))
 
@@ -308,7 +308,7 @@ final class ViewSideEffectActionTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
         defaults = nil
         super.tearDown()
     }
@@ -384,7 +384,7 @@ final class NakiEnvironmentTests: XCTestCase {
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
+        removeIsolatedSuite(suiteName)
         defaults = nil
         super.tearDown()
     }
