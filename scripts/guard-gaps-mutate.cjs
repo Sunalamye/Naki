@@ -1,0 +1,159 @@
+// Run: node scripts/guard-gaps-mutate.cjs [--from N] [--to M] [--log <path>]
+// guard-gaps 送出守衛的變異測試：逐一把 MUTANTS 的字串替換套到 naki-plugins.js，跑 b2／v2／p4 三套 node 回歸，
+// 至少一條 not ok 才算殺掉。先跑未變異基線，基線必須 0 fail；存活只准 EQUIVALENT 內的等價變異，否則 exit 1。
+// b2 需要 naki-plugins repo（NAKI_PLUGINS_DIR，預設 ../naki-plugins）。--from／--to 分段（索引以 MUTANTS 為準，含頭不含尾）。
+// 用法與歷史見 docs/archive/notes/guard-gaps-implementation-notes.md「變異 harness」。
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+
+const root = path.resolve(__dirname, '..');
+const jsDir = path.join(root, 'command/Resources/JavaScript');
+const arg = (k, d) => { const i = process.argv.indexOf(k); return i === -1 ? d : process.argv[i + 1]; };
+const from = Number(arg('--from', 0)), to = Number(arg('--to', Infinity));
+const logPath = arg('--log', null);
+const pluginsDir = process.env.NAKI_PLUGINS_DIR || path.resolve(root, '../naki-plugins');
+const EQUIVALENT = ['T7', 'U10'];
+
+const MUTANTS = [
+  ["BB1 零消耗者 RESPONSE 不消耗配對", [["e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) pendingMethods.delete", "send && e.type === TYPE_REQUEST) pendingMethods.delete"]]],
+  ["BB2 零消耗者同鍵送出不撤銷舊配對", [["e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) pendingMethods.delete", "!send && e.type === TYPE_RESPONSE) pendingMethods.delete"]]],
+  ["BB3 零消耗者完全不碰配對", [["                if (pendingMethods.size) {\n", "                if (false) {\n"]]],
+  ["BB4 零消耗者方向對調", [["e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) pendingMethods.delete", "e.type === (send ? TYPE_RESPONSE : TYPE_REQUEST)) pendingMethods.delete"]]],
+  ["AA1 沒人消耗時先早退、不撤銷舊配對", [["        pendingMethods.delete(key);\n        if (noConsumers()) return;\n", "        if (noConsumers()) return;\n        pendingMethods.delete(key);\n"]]],
+  ["AA2 remember 只看 registry", [["        if (noConsumers()) return;\n        pendingMethods.set(key, method);", "        if (registry.size === 0) return;\n        pendingMethods.set(key, method);"]]],
+  ["AA3 remember 只看 tainted", [["        if (noConsumers()) return;\n        pendingMethods.set(key, method);", "        if (tainted.size === 0) return;\n        pendingMethods.set(key, method);"]]],
+  ["AA4 dispatch 只看 registry", [["            if (noConsumers()) {\n", "            if (registry.size === 0) {\n"]]],
+  ["AA5 dispatch 只看 tainted", [["            if (noConsumers()) {\n", "            if (tainted.size === 0) {\n"]]],
+  ["Z1 零插件仍登記配對", [["        if (noConsumers()) return;\n        pendingMethods.set(key, method);", "        pendingMethods.set(key, method);"]]],
+  ["Z2 配對不設容量上限", [["        if (pendingMethods.size > PENDING_LIMIT) pendingMethods.delete(pendingMethods.keys().next().value);\n", ""]]],
+  ["Z3 關閉不清配對", [["            Array.from(pendingMethods.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) pendingMethods.delete(k); });\n", ""]]],
+  ["Z4 關閉清掉所有連線的配對", [["if (k.indexOf(prefix) === 0) pendingMethods.delete(k);", "pendingMethods.delete(k);"]]],
+  ["Z5 pairWith 繞過唯一寫入口", [["e.method) remember(socketId, e.msgId, e.method);", "e.method) pendingMethods.set(msgKey(socketId, e.msgId), e.method);"]]],
+  ["Y1 failSafe 照送不恢復配對", [["try { if (env) pairWith(socketId, original); } catch (x)", "try { } catch (x)"]]],
+  ["Y2 大廳非守衛方法照送不恢復配對", [["                    if (!guard) return sendOriginal();\n", "                    if (!guard) return;\n"]]],
+  ["Y3 failSafe 查找出錯照送不恢復配對", [["(!env && !guardActive())) return sendOriginal();\n            }\n", "(!env && !guardActive())) return;\n            }\n"]]],
+  ["Y4 非大廳照送不恢復配對", [["if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return sendOriginal();", "if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return;"]]],
+  ["X1 擋下不撤銷配對", [["            if (msgId != null) pendingMethods.delete(msgKey(raw.wsId, msgId));\n", ""]]],
+  ["X2 擋下仍提交配對", [["if (!(result && result.block)) pairWith(raw.wsId, raw.bytes);", "pairWith(raw.wsId, raw.bytes);"]]],
+  ["X3 本地結案仍刪配對", [["            var key = msgKey(socketId, msgId);\n", "            var key = msgKey(socketId, msgId);\n            pendingMethods.delete(key);\n"]]],
+  ["X4 disable 無條件清失敗計數", [["            if (!registry.has(id)) {\n                failures.delete(id);", "            failures.delete(id);\n            if (!registry.has(id)) {"]]],
+  ["X5 disable 無條件刪 grant", [["            if (!registry.has(id)) {\n                failures.delete(id);\n                if (window.__nakiPluginGrants) delete window.__nakiPluginGrants[id];\n            }", "            if (!registry.has(id)) failures.delete(id);\n            if (window.__nakiPluginGrants) delete window.__nakiPluginGrants[id];"]]],
+  ["W1 回應配對不在守衛判決後提交", [["        if (!(result && result.block)) pairWith(raw.wsId, raw.bytes);\n        return result;", "        return result;"]]],
+  ["W3 失敗記帳不核對實例", [["        if (!current(entry)) return;\n        var f = failures.get(id) || {};", "        var f = failures.get(id) || {};"]]],
+  ["W4 成功記帳不核對實例", [["var f = current(entry) && failures.get(entry.id);", "var f = failures.get(entry.id);"]]],
+  ["W5 先核對實例再讀錯誤訊息", [["        var message, id = entry.id;\n", "        var message, id = entry.id;\n        if (!current(entry)) return;\n"], ["        if (!current(entry)) return;\n        var f = failures.get(id) || {};", "        var f = failures.get(id) || {};"]]],
+  ["V1 放行不核對註冊實例", [["return a.id === ids[i] && !!entry && a.token === entry.token && a.version === versionOf(a.id);", "return a.id === ids[i] && !!entry && a.version === versionOf(a.id);"]]],
+  ["V2 放行不核對污染版本", [["return a.id === ids[i] && !!entry && a.token === entry.token && a.version === versionOf(a.id);", "return a.id === ids[i] && !!entry && a.token === entry.token;"]]],
+  ["V3 放行版本在記帳時才取", [["if (p.isGuard) guard.approved.push(p.approval);", "if (p.isGuard) guard.approved.push({ id: p.entry.id, token: p.entry.token, version: versionOf(p.entry.id) });"]]],
+  ["V4 污染不遞增版本", [["        if (first || set.size !== size) taintVersions.set(id, versionOf(id) + 1);\n", ""]]],
+  ["V15 重複污染也遞增版本", [["if (first || set.size !== size) taintVersions.set(", "if (true) taintVersions.set("]]],
+  ["V16 守衛拋錯或 thenable 後退出也解除", [["if (!now && guard && !guard.threw.length && !guard.async.length) {", "if (!now && guard) {"]]],
+  ["V5 送出鏈成功立即記帳", [["                } else if (copy) {\n", "                } else if (false) {\n"]]],
+  ["V6 鏈尾違規者仍記成功", [["var charged = bad && p.entry === last;", "var charged = false;"]]],
+  ["V7 鏈尾歸責讀 spec.id", [["noteFailure(last, 'onSend'", "noteFailure(registry.get(last.spec.id) || last, 'onSend'"]]],
+  ["V8 registry 身分跟著 spec.id 走", [["var entry = { id: id, token:", "var entry = { get id() { return spec.id; }, token:"]]],
+  ["V9 守衛全部退出時不解除", [["if (!now && guard && !guard.threw.length && !guard.async.length) {", "if (false) {"]]],
+  ["V10 receive 等長不驗結構", [["if (!after || !isWellFormed(raw.bytes) || after.type", "if (!after || after.type"]]],
+  ["V11 送出就地改不驗結構", [[": !now || !isWellFormed(staged) || now.type", ": !now || now.type"]]],
+  ["V13 記帳後不再判", [["} else if (last && !sameBytes(cur, original) && finalViolation(cur, type, msgId, method, lobby)) {", "} else if (false) {"]]],
+  ["U1 就地改可換 method", [[" || now.msgId !== msgId || now.method !== method) {", " || now.msgId !== msgId) {"]]],
+  ["U2 已有守衛時不併入鏈中新增的守衛者", [["if (now) guard = { method: env.method, ids: now.ids,", "if (now && !guard) guard = { method: env.method, ids: now.ids,"]]],
+  ["U3 開頭沒有守衛者就不重算", [["var now = env.method ? guardFor(env.method) : null;", "var now = guard && env.method ? guardFor(env.method) : null;"]]],
+  ["U4 鏈尾不終判", [["var bad = last && !sameBytes(cur, original) ? finalViolation(cur, type, msgId, method, lobby) : null;", "var bad = null;"]]],
+  ["U5 鏈尾不合規但不退回", [["if (bad) { cur = original; env = parseEnvelope(original); }", "if (bad) { env = parseEnvelope(original); }"]]],
+  ["U6 鏈尾禁改名單只看換 method", [["if (SEND_FORBIDDEN_METHODS.indexOf(fin.method) !== -1 || (fin.method !== method && isSendForbidden(fin.method))) {", "if (fin.method !== method && isSendForbidden(fin.method)) {"]]],
+  ["U7 鏈尾失敗記在第一個改動者", [["                    last = entry;\n", "                    last = last || entry;\n"]]],
+  ["U8 receive replace 以自有 length 選路", [["if (taLength.call(next) !== taLength.call(raw.bytes)) {", "if (newBytes.length !== raw.bytes.length) {"]]],
+  ["U10 receive 變長入口不物化（等價：new Uint8Array(TypedArray) 也只讀內部槽並複製）", [["return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, entry, next);", "return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, entry, new Uint8Array(newBytes));"]]],
+  ["U9 receive replace 寫入未物化的原參數", [["                u8set.call(raw.bytes, next);\n", "                try { raw.bytes.set(newBytes); } catch (e) { return false; }\n"]]],
+  ["T1 送出 replace 入口不物化（共用來源記憶體）", [["try { next = hostCopy(newBytes); } catch (e) { return false; }\n                var after", "next = new Uint8Array(newBytes);\n                var after"]]],
+  ["T2 送出 replace 入口讀自有 length", [["try { next = hostCopy(newBytes); } catch (e) { return false; }\n                var after", "try { next = new U8(newBytes.length); u8set.call(next, newBytes); } catch (e) { return false; }\n                var after"]]],
+  ["T3 hook 結束不驗就地改的 type／msgId", [["now.type !== type || now.msgId !== msgId || now.method !== method) {", "now.method !== method) {"]]],
+  ["T4 送出 replace 入口不驗證", [["var after = sendViolation(next, env.msgId) ? null : parseEnvelope(next);", "var after = parseEnvelope(next);"]]],
+  ["T6 物化失敗退回共用 view", [["try { next = hostCopy(newBytes); } catch (e) { return false; }\n                var after", "try { next = hostCopy(newBytes); } catch (e) { next = new Uint8Array(newBytes); }\n                var after"]]],
+  ["T7 hook 結束對 replace 跳過完整重驗（等價，入口已驗同一份）", [["if (replaced ? sendViolation(staged, msgId)\n", "if (replaced ? false\n"]]],
+  ["T8 hook 結束對 replace 跳過大廳守衛", [["(lobby ? now.method !== method && guardFor(now.method)", "(lobby ? !replaced && now.method !== method && guardFor(now.method)"]]],
+  ["T9 hook 結束只驗 type 不驗 msgId", [[" || now.msgId !== msgId || now.method !== method) {", " || now.method !== method) {"]]],
+  ["S1 插件直接拿宿主快照 cur（不複製）", [["var before = copy ? hostCopy(cur) : raw.bytes;", "var before = copy ? cur : raw.bytes;"]]],
+  ["S2 送出鏈不複製（插件拿原件）", [["var copy = raw.direction === 'send' && raw.mutable !== false;", "var copy = false;"]]],
+  ["S3 物化讀實例 length", [["var c = new U8(taLength.call(b));", "var c = new U8(b.length);"]]],
+  ["S4 外送插件持有的最後副本", [["        if (copy) raw.bytes = cur;\n        if (raw.bytes === original", "        if (copy) raw.bytes = before;\n        if (raw.bytes === original"]]],
+  ["S5 內容變了仍送原物件", [["if (raw.bytes === original || (copy && sameBytes(cur, original)))", "if (raw.bytes === original || copy)"]]],
+  ["S6 錯誤訊息讀兩次", [["            var m = err && err.message;   // getter 只觸發一次\n            message = String(m ? m : err);", "            message = String(err && err.message ? err.message : err);"]]],
+  ["S7 物化失敗不視為違規", [["if (!staged) throw new Error('送出內容無法讀取（buffer 已分離），已撤回');", "if (!staged) staged = cur;"]]],
+  ["S8 物化前就記帳（驗證用插件陣列本身）", [["try { staged = hostCopy(raw.bytes); } catch (x) { staged = null; }", "staged = raw.bytes;"]]],
+  ["P1 先驗證再接管 thenable", [["                    settle(ret, entry, hook, state);\n", ""], ["                // 守衛插件改了或丟了大廳的回應", "                if (thenable) settle(ret, entry, hook, state);\n                // 守衛插件改了或丟了大廳的回應"]]],
+  ["P2 注入標記第一次派發用掉", [["env.msgId === injecting.msgId && sameBytes(raw.bytes, injecting.bytes)", "env.msgId === injecting.msgId && !injecting.used && (injecting.used = true)"]]],
+  ["P3 注入只比 msgId", [[" && sameBytes(raw.bytes, injecting.bytes)", ""]]],
+  ["P4 違規後仍記 thenable 結果", [["                    judge(state, entry, hook, true);\n", "                    judge(state, entry, hook, false);\n"]]],
+  ["P5 不接 rejection", [["thenable.then(function () { done(true); }, function (e) { done(false, e); });", "thenable.then(function () { done(true); });"]]],
+  ["P6 提早 resolve 立刻記成功", [["if (!state.judged) { state.early = { ok: ok, e: e }; return; }", "if (!state.judged) { if (ok) noteSuccess(entry, hook); else state.early = { ok: ok, e: e }; return; }"]]],
+  ["P7 判定通過時丟掉提早結果", [["if (!failed && state.early) {", "if (false) {"]]],
+  ["N2 finally 還原 null", [["finally { injecting = prev; }", "finally { injecting = null; }"]]],
+  ["N3 只在正常返回時還原", [["try { r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' }; }\n                finally { injecting = prev; }", "r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' };\n                injecting = prev;"]]],
+  ["N4 注入退回不先以常數排除", [["if (env.type !== TYPE_REQUEST || GUARDABLE_METHODS.indexOf(env.method) === -1) return undefined;\n        try {", "try {"]]],
+  ["N5 先記成功再驗證", [["var ret = fn(ctx);   //", "var ret = fn(ctx); noteSuccess(entry, hook);   //"]]],
+  ["N6 非大廳只查就地（漏 replace）", [[": GUARDABLE_METHODS.indexOf(now.method) !== -1)) {", ": !replaced && GUARDABLE_METHODS.indexOf(now.method) !== -1)) {"]]],
+  ["Q4 錯誤訊息讀取不設防", [["        } catch (x) { message = '（錯誤訊息無法讀取）'; }", "        } finally {}"]]],
+  ["M1 不檢查注入退回", [["if (send && env && injecting && env.msgId === injecting.msgId", "if (false && env.msgId === injecting.msgId"]]],
+  ["M2 不設注入標記", [["injecting = { msgId: msgId, bytes: envBytes };", ";"]]],
+  ["M4 注入查找出錯放行", [["} catch (e) { ids = []; }", "} catch (e) { return undefined; }"]]],
+  ["M5 注入退回改 lobby 才判", [["var fallback = isLobby(raw.wsId) ? undefined : injectedFallback(raw, env);", "var fallback = isLobby(raw.wsId) ? injectedFallback(raw, env) : undefined;"]]],
+  ["M6 非大廳改寫不檢查", [[": GUARDABLE_METHODS.indexOf(now.method) !== -1)) {", ": false)) {"]]],
+  ["M7 非大廳改讀 guardFor", [[": GUARDABLE_METHODS.indexOf(now.method) !== -1)) {", ": guardFor(now.method))) {"]]],
+  ["M9 refuseOpaqueSend 只看 lobby", [["if (roles.get(socketId) === 'game') return false;", "if (!isLobby(socketId)) return false;"]]],
+  ["M10 refuseOpaqueSend 連 game 也拒", [["if (roles.get(socketId) === 'game') return false;", ";"]]],
+  ["M11 非大廳要求 method 改變", [[": GUARDABLE_METHODS.indexOf(now.method) !== -1)) {", ": now.method !== method && GUARDABLE_METHODS.indexOf(now.method) !== -1)) {"]]],
+  ["VB2 同鍵覆寫不移到最新（只在零消耗者時刪舊鍵）", [["        var key = msgKey(socketId, msgId);\n        pendingMethods.delete(key);\n        if (noConsumers()) return;\n", "        var key = msgKey(socketId, msgId);\n        if (noConsumers()) { pendingMethods.delete(key); return; }\n"]]]
+];
+
+const src = fs.readFileSync(path.join(jsDir, 'naki-plugins.js'), 'utf8');
+const work = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-gaps-mutate-'));
+const log = line => { console.log(line); if (logPath) fs.appendFileSync(logPath, line + '\n'); };
+
+function run(code) {
+  const dir = path.join(work, 'tree');
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  fs.cpSync(jsDir, path.join(dir, 'command/Resources/JavaScript'), { recursive: true });
+  for (const s of ['plugin-v2-b2-regression.cjs', 'plugin-v2-regression.cjs']) fs.copyFileSync(path.join(root, 'scripts', s), path.join(dir, 'scripts', s));
+  fs.writeFileSync(path.join(dir, 'command/Resources/JavaScript/naki-plugins.js'), code);
+  const env = { ...process.env, NAKI_PLUGINS_DIR: pluginsDir };
+  const suites = [
+    ['b2', path.join(dir, 'scripts/plugin-v2-b2-regression.cjs'), env],
+    ['v2', path.join(dir, 'scripts/plugin-v2-regression.cjs'), env],
+    // p4 從自己的 git 取 main 做差異比較，所以跑 repo 內的腳本、只把 JS 指向變異目錄
+    ['p4', path.join(root, 'scripts/plugin-v2-p4-regression.cjs'), { ...env, NAKI_JS_DIR: path.join(dir, 'command/Resources/JavaScript') }],
+  ];
+  const fails = [];
+  for (const [name, file, e] of suites) {
+    const r = spawnSync(process.execPath, [file], { cwd: root, env: e, encoding: 'utf8', timeout: 300000 });
+    const out = r.stdout || '';
+    out.split('\n').filter(l => l.startsWith('not ok')).forEach(l => fails.push(name + ': ' + l));
+    if (!/^# tests \d+/m.test(out)) fails.push(name + ': 沒有 TAP 摘要（崩潰或逾時）' + String(r.stderr || '').slice(-200));
+  }
+  return fails;
+}
+
+const base = run(src);
+log('BASE（未變異）: ' + base.length + ' fail' + base.map(f => '\n   ' + f).join(''));
+if (base.length) { log('基線不是 0 fail，停止'); process.exit(1); }
+let killed = 0, survivors = [];
+MUTANTS.forEach(([name, pairs], i) => {
+  if (i < from || i >= to) return;
+  let code = src;
+  for (const [a, b] of pairs) {
+    if (code.split(a).length !== 2) { log(`[${i}] ${name}: 替換字串不唯一或不存在，變異定義過期`); process.exitCode = 1; return; }
+    code = code.replace(a, () => b);
+  }
+  const fails = run(code);
+  if (fails.length) killed++; else survivors.push(name);
+  log(`[${i}] ${name}: ${fails.length ? 'KILLED' : 'SURVIVED'} (${fails.length} fail)` + fails.slice(0, 4).map(f => '\n   ' + f).join(''));
+});
+const ran = MUTANTS.filter((_, i) => i >= from && i < to).length;
+log(`TOTAL ${killed}/${ran} killed（${from}–${Math.min(to, MUTANTS.length)}，共 ${MUTANTS.length} 個定義）`);
+const unexpected = survivors.filter(n => !EQUIVALENT.includes(n.split(' ')[0]));
+if (unexpected.length) { log('非等價存活：' + unexpected.join('、')); process.exitCode = 1; }
+fs.rmSync(work, { recursive: true, force: true });

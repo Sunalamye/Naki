@@ -31,7 +31,7 @@ plugin-v2-b2 61／61、plugin-regression 29／29、plugin-v2-regression 21／21�
 
 ## 保證範圍（設計 §1.4，確認稿必須逐條揭露）
 
-守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。七項不在保證內：sendRaw 退回對局、不經 `ctx.replace` 的就地改寫、Blob 空窗、lobby 上被改壞的 FastTest 會被拒送、已鎖 game 的連線上的 Lobby 請求不守衛、unknown 上 Naki 解析不出而伺服器解得開的守衛方法照送、角色清除只靠接線呼叫 `closed`。不宣稱 I2 全域成立。
+守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。原本七項不在保證內；sendRaw 退回對局、不經 `ctx.replace` 的就地改寫、Blob 空窗三項已於 2026-10-17 由 guard-gaps 修掉（見文末）。剩四項：lobby 上同步可辨識的 FastTest 不守衛（observer 只改得到副本，bridge 出錯時照送遊戲未被碰過的原內容；guard-gaps 第五輪前是拒送改壞的 bytes）、已鎖 game 的連線上 Naki 自送或遊戲自送的 Lobby 請求不守衛、unknown 上 Naki 解析不出而伺服器解得開的守衛方法照送、角色清除只靠接線呼叫 `closed`（`close` 與 `error` 都經 `release` 呼叫一次）。不宣稱 I2 全域成立。
 
 ## 下一個節點
 
@@ -82,3 +82,39 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 裁決：Naki 新增 `__nakiPlugins.devLogSeal(pluginId, meta)`，由宿主落檔一行 seal（count 由宿主計、插件不可偽造），封存後該頁 devLog 一律拒收。插件側驗收改依 seal 行；匯入順序改依宿主時間戳排序、不可證則拒驗。
 
 取捨：多一個宿主 API（小包 plugin-devlog-seal），換掉三個 localStorage 鍵與一整套可被繞過的頁面側證明；不選「操作者手動 quit App 當封存」是因為時序無法由紀錄本身證明。
+
+## 2026-10-17 後續裁決：保證範圍三條改為修掉（guard-gaps）
+
+用戶裁決「能修就修，不得只列限制」。D28–D30 三條改以程式修掉，只改 `naki-plugins.js`，`naki-websocket.js` 不動。設計細節在 `plugin-v2-b2.md` §1.4，判斷與 Deviations 在 `docs/archive/notes/guard-gaps-implementation-notes.md`。
+
+| 原條 | 修法 | 與先前裁決的關係 |
+|---|---|---|
+| D28 `sendRaw` 退回 | 注入標記帶 msgId 與注入 envelope bytes，兩者都相同的送出派發才算注入；落到非大廳連線、方法屬 `GUARDABLE_METHODS` 且有守衛者 ⇒ `tainted_fallback` 擋下，結果與大廳 `naki_traffic` 相同 | 不改 `naki-websocket.js`；Naki 自送不受影響 |
+| D29 就地改寫 | 非大廳連線上 hook 就地、經 `ctx.replace` 或在 thenable 的 `then` 裡同步改成 `GUARDABLE_METHODS` 即撤回、計 hook 失敗，只用閉包常數 | 不讀 `sendGuard`，第四輪第 2 條不受影響（`R5-2b` 綠） |
+| D30 Blob 空窗 | 角色未定的連線比照 lobby，有守衛者時拒送 Blob | 推翻原「unknown fail-open」的這一處。獨立風險：只有 `authGame` 改用 Blob 時，對局連線持續被拒、角色持續 unknown、不會自行恢復，大廳照常（`GG2-5`）。保留拒送策略 |
+
+Astra 第一輪（主 repo `.swfd/logs/guard-gaps-review/astra-review1.md`）：1【擋】5【應修】，主線全採納。擋 1 是 game 連線上的 `ctx.replace` 改成守衛方法仍外送，已併入 D29 的修法；其餘是注入標記綁定派發、常數先行排除、成功記帳順序、Blob 獨立風險揭露、補變異與固定回歸。
+
+Astra 第二輪（`astra-review2.md`）：2【擋】1【應修】1【建議】，主線全採納。兩個擋是第二輪引入的回歸（`65a7865` 不會發生）：thenable 的 `then` 在驗證之後才執行、可同步改回守衛方法；注入標記可被注入前的同號派發用掉。修法：先接管 thenable 再驗證；注入以 msgId＋bytes 綁定，不再「用掉」。
+
+Astra 第三輪（`astra-review3.md`）：1【擋】1【應修】1【建議】，主線全採納（根治而非再補一層驗證）。擋 1：驗證之後的失敗記帳仍執行插件程式碼（錯誤的 `message` getter、第 10 次的 `onDisable`），可把保留的 bytes 改成守衛方法外送。修法：每個 hook 驗證完成即定案送出快照，記帳後還原成快照；快照、撤回、還原用原生 `slice`／`set`。§1.4 第 2 項區分「本次外送內容」與「派發後改保留參照」，並另列「遊戲重用 buffer」前提。同日 rebase 到 main `ffe0670`，本 ADR 尾端兩段裁決並存。
+
+Astra 第四輪（`astra-review4.md`）：2【擋】2【應修】，主線全採納並撤回第四輪 Deviation 13（「記帳後還原到快照、保留原物件同一性」與外送等價）：插件在副本實例上定義 `constructor`／`byteLength` getter，或後插件的 `onSend` getter 改前插件保留的 bytes，都能在快照之後改到實際外送內容。改採根治：送出鏈上插件只拿宿主副本，宿主只讀內部槽物化成自有快照再驗證，外送只用未外露的原物件或宿主快照。主線同時解除原 D28「`naki-websocket.js` 不得改」的限制（理由：Astra 兩輪證明同一性保留無法成立）；實作最後不需要改它，既有的「鏈回傳值取代原物件」路徑已足夠。
+
+Astra 第五輪（`astra-review5.md`）：1【擋】1【建議】，主線全採納。擋 1：送出 `ctx.replace` 以 `new Uint8Array(newBytes)` 包裝插件的 `ArrayBuffer`／SAB／resizable，與插件共用記憶體；入口驗過後插件改成 SKIN 或改 msgId，hook 結束因 `replaced` 跳過守衛檢查，照樣外送。修法：入口先以宿主 `hostCopy` 物化，只收 TypedArray，驗證與採用同一份；hook 結束一律完整重驗。receive 變長 `replace` 一併先物化。建議 2 的入口型別矩陣以測試固定，表列在 notes 第六輪。
+
+Astra 第六輪（`astra-review6.md`）：2【擋】2【應修】1【建議】，主線全採納，撤回 notes Deviation 22、24。擋 2（主裁決）：就地改不得換 method，換 method 只能經 `replace` 走完整 `rewriteSend` 規則；同時消除應修 3 的回應配對過期。擋 1：鏈尾對最終候選以目前狀態終判（送出禁改名單、type／msgId、守衛規則），不過就整筆退回遊戲原內容並記在最後改動的 hook；大廳上鏈中才出現的守衛者（註冊或經同步 receive 重入污染）未在鏈上放行，視同 `not_on_chain` 擋下。應修 4：receive 等長 `replace` 先物化，以實際長度選路。建議 5：本 ADR 保證範圍段與設計 §1.4 第 4 項更正。
+
+Astra 第七輪（`astra-review7.md`）：1【擋】4【應修】，主線全採納，notes Deviation 26–34 採納。擋 1：守衛的放行沒有綁定狀態，守衛者在同一筆送出中被污染（含另一條大廳連線、實際 local-unlock 插件的 2301）或同 id 重新註冊後，舊放行仍有效。修法：放行綁定註冊實例代號與污染版本，鏈尾不符即 `not_on_chain`。應修：成功記帳等本筆鏈尾判定（鏈尾違規可累計到自動停用）；歸責用 register 時固定的 id；未污染守衛者在鏈中全部退出時本筆解除守衛、送原請求；就地改與等長 receive `replace` 補結構檢查。
+
+Astra 第八輪（`astra-review8.md`）：2【應修】1【建議】，主線全採納，notes Deviation 35–43 採納。應修 1：解除守衛退回原請求時，回應配對仍是被撤回的新 method；改為守衛判決後依實際上 wire 的內容提交。應修 2：記帳以 id 查表，舊實例能重設或停用同 id 的新實例；改為記帳一律綁註冊實例，實例已換掉就丟棄。建議 3：契約補「退出前已拋錯／回 thenable 的守衛者否決仍有效」。
+
+Astra 第九輪（`astra-review9.md`）：2【應修】1【建議】，主線全採納，notes Deviation 44–47 採納（45 前提被推翻、改寫）。應修 1：本地結案在遊戲回呼之後刪配對，會刪掉遊戲在合成錯誤回呼內以同 msgId 新送請求的配對；改為擋下當下撤銷被擋請求的配對、擋下不提交配對，本地結案不碰配對。應修 2：`disable` 尾端無條件清失敗計數與 grant，會清掉 `onDisable` 內同 id 新註冊的實例；改為 registry 沒有同 id 新實例時才清。建議 3：§1.4 區分原請求解析失敗（照送，殘餘風險）與 hook 產生的解析不出改寫（撤回）。
+
+Astra 第十輪（`astra-review10.md`）：1【應修】1【建議】，主線全採納，notes Deviation 48–51 採納。應修 1（既有缺口，屬本包「配對依實際外送內容」範圍）：bridge 故障退回原 bytes 時，配對仍停在 `replace` 後的 method；改為 `failSafe` 照送的每個出口把配對改回原請求，擋下的出口仍撤銷。建議 2：Dev 49–51 的邊界收進固定回歸，並在 §1.4 明載跨來源 msgId 碰撞沒有配對隔離。
+
+Astra 第十一輪（`astra-review11.md`）：1【應修】1【建議】，主線全採納，notes Deviation 52–55 採納。應修 1：第十一輪新增的 `failSafe` 配對入口繞過容量上限，零插件時 receive 不派發、沒人消耗，配對無限累積（關閉重連後仍在）；改為所有配對寫入經同一入口套用上限、零插件不登記、連線關閉清該連線配對。建議 2：本檔設計文件 `plugin-v2-b2.md` 檔頭加歷史文件標記，§4.6 註明已被 D22 取代。
+
+Astra 第十二輪（`astra-review12.md`）：1【應修】1【建議】，主線全採納，notes Deviation 56–59 採納。應修 1：`remember` 的零插件早退也略過了同鍵舊配對的處理，唯一插件改寫後停用自己時，鏈首依原請求登記的 INFO 留著，RESPONSE 被派成 INFO；改為先撤銷同鍵舊配對，沒人消耗時只撤銷不新增。建議 2：零插件判定抽成 `noConsumers()`，`dispatch` 與 `remember` 共用。
+
+Astra 第十三輪（`astra-review13.md`）：1【應修】，主線採納，notes Deviation 60–62 採納。應修 1：`dispatch` 的零消耗者早退跳過了配對的消耗，INFO 已回應、唯一插件已停用後，同連線重用 msgId 送 loginBeat，之後註冊的觀察者收到 INFO；改為配對的新增依消耗者、消耗不依消耗者。契約與 §1.4 的「不會看到錯的 method」改為有條件敘述。

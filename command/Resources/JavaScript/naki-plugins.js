@@ -32,6 +32,16 @@
     var parseEnvelope = (window.__nakiCore && window.__nakiCore.parseEnvelope)
         || function () { return null; };
 
+    // 宿主快照用的原生入口，載入時保存。set 的來源是 typed array 時只讀內部槽；length 用 %TypedArray% 原型上的 getter
+    // 以 .call 讀，實例上的自有屬性遮蔽不到。slice 會讀 constructor（species），只用在插件碰不到的陣列上
+    var U8 = Uint8Array, u8set = Uint8Array.prototype.set, u8slice = Uint8Array.prototype.slice;
+    var taLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
+    function hostCopy(b) {
+        var c = new U8(taLength.call(b));
+        u8set.call(c, b);
+        return c;
+    }
+
     var TYPE_NOTIFY = 1;
     var TYPE_REQUEST = 2;
     var TYPE_RESPONSE = 3;
@@ -48,6 +58,9 @@
 
     // 已註冊插件：id -> { spec, grant }
     var registry = new Map();
+    // 註冊實例代號與污染版本：守衛的放行只對「放行當時的那個實例、那個污染版本」有效（第八輪第 1 條）
+    var registerSeq = 0, taintVersions = new Map();
+    function versionOf(id) { return taintVersions.get(id) || 0; }
     // 連續失敗計數：id -> { hook名: Number }（同一個 hook 連續達上限才自動停用；
     // 別的 hook 成功不能沖掉它，否則永遠拋錯的 onReceive 會被正常的 onRecommendations 蓋掉）
     var failures = new Map();
@@ -56,8 +69,8 @@
         recommendationUpdates: 0, recommendationHooks: 0, lastError: null };
     function cleanup(entry) {
         if (!entry || typeof entry.spec.onDisable !== 'function') return;
-        try { entry.spec.onDisable({ log: function (msg) { pluginLog(entry.spec.id, msg); } }); }
-        catch (e) { pluginLog(entry.spec.id, 'cleanup failed: ' + e.message); }
+        try { entry.spec.onDisable({ log: function (msg) { pluginLog(entry.id, msg); } }); }
+        catch (e) { pluginLog(entry.id, 'cleanup failed: ' + e.message); }
     }
     // 自己維護的 (連線, msgId) -> method（只為 RESPONSE 對回；與 nicknameMask 各一份，刻意隔離）。
     // RESPONSE 只回到送出它的那條連線，所以一律以連線＋msgId 為鍵（審查第三輪第 2 條）。
@@ -76,6 +89,10 @@
     }
     // 插件注入的 (連線, msgId) -> 發起插件 id（回應路由，§7.7b）
     var injectedMsgIds = new Map();
+    // sendRequest 呼叫 sendRaw 期間的注入標記：sendRaw 同步經包裝的 ws.send 回到 dispatch。
+    // 同 msgId 且 bytes 與注入的 envelope 完全相同才算這次注入（第三輪第 2 條）：注入前後其他派發的同號請求，
+    // 內容不同就不算，也不消耗標記（第二輪第 2 條）
+    var injecting = null;
 
     // 連線角色由協定握手鎖定，URL 不參與（審查第四輪第 1 條）：每條連線第一個請求是 .lq.Route.requestConnection，
     // 第二個才揭露角色（大廳 oauth2Login／prepareLogin，對局 authGame；live 2026-10-17）。
@@ -147,37 +164,62 @@
         } catch (e) { return false; /* log 不該反過來弄壞 dispatch */ }
     }
 
-    // 只在需要時報一次某插件的內部錯誤，避免對局時間軸被洗版
-    function noteFailure(id, hook, err) {
-        diagnostics.lastError = { id: id, message: String(err && err.message || err) };
+    // 只在需要時報一次某插件的內部錯誤，避免對局時間軸被洗版。
+    // 記帳綁註冊實例（entry），不以 id 查表：實例已被停用或同 id 換掉時整筆丟棄，不算給新實例（第九輪第 2 條）
+    function noteFailure(entry, hook, err) {
+        // 錯誤訊息只讀一次，讀取本身拋錯也不中斷記帳（getter 是插件程式碼，可能換掉實例，所以讀完才核對）
+        var message, id = entry.id;
+        try {
+            var m = err && err.message;   // getter 只觸發一次
+            message = String(m ? m : err);
+        } catch (x) { message = '（錯誤訊息無法讀取）'; }
+        diagnostics.lastError = { id: id, message: message };
+        if (!current(entry)) return;
         var f = failures.get(id) || {};
         var n = (f[hook] || 0) + 1;
         f[hook] = n;
         failures.set(id, f);
-        pluginLog(id, hook + ' 拋錯（第 ' + n + ' 次）：' + (err && err.message ? err.message : err));
+        pluginLog(id, hook + ' 拋錯（第 ' + n + ' 次）：' + message);
         if (n >= FAILURE_LIMIT) {
-            var entry = registry.get(id);
             registry.delete(id);
             cleanup(entry);
             pluginLog(id, '連續失敗達 ' + FAILURE_LIMIT + ' 次，本頁面生命週期內停用');
         }
     }
 
-    function noteSuccess(id, hook) {
-        var f = failures.get(id);
+    function noteSuccess(entry, hook) {
+        var f = current(entry) && failures.get(entry.id);
         if (f) f[hook] = 0;
     }
 
-    function settle(thenable, id, hook) {
-        try { thenable.then(function () { noteSuccess(id, hook); }, function (e) { noteFailure(id, hook, e); }); }
-        catch (e) { noteFailure(id, hook, e); }
+    // 接管 hook 回傳的 thenable。then 會同步跑插件程式碼（可能改 bytes），所以先接管、再由呼叫端驗證（第三輪第 1 條）。
+    // 驗證結束前的結果先暫存；這次已判違規就不再記帳，rejection 仍被接住、不重複計失敗（第三輪第 3 條）
+    // 記帳只算在當時的註冊實例：結果晚到時插件已停用或同 id 重新註冊，就不算（第八輪第 3 條）
+    function current(entry) { return registry.get(entry.id) === entry; }
+    function settle(thenable, entry, hook, state) {
+        function done(ok, e) {
+            if (!state.judged) { state.early = { ok: ok, e: e }; return; }
+            if (state.failed) return;
+            if (ok) noteSuccess(entry, hook); else noteFailure(entry, hook, e);
+        }
+        try { thenable.then(function () { done(true); }, function (e) { done(false, e); }); }
+        catch (e) { done(false, e); }
+    }
+    function judge(state, entry, hook, failed) {
+        state.judged = true;
+        state.failed = failed;
+        if (!failed && state.early) {
+            if (state.early.ok) noteSuccess(entry, hook); else noteFailure(entry, hook, state.early.e);
+        }
     }
 
     function taint(id, grant) {
         var set = tainted.get(id) || new Set();
-        var first = !tainted.has(id);
+        var first = !tainted.has(id), size = set.size;
         (grant.sendGuard || []).forEach(function (m) { set.add(m); });
         tainted.set(id, set);
+        // 污染狀態真的變了（第一次、或多守衛了方法）才換版本；重複呼叫維持「沒有副作用」
+        if (first || set.size !== size) taintVersions.set(id, versionOf(id) + 1);
         if (first) {
             try { sendToSwift('plugin_event', { id: id, kind: 'tainted', msg: '已污染：守衛方法到頁面重載前都不會原樣送出' }); }
             catch (e) { /* 通知失敗不影響守衛本身 */ }
@@ -208,7 +250,12 @@
         if (guard.threw.length) return 'hook_threw';
         if (guard.async.length) return 'async_hook';
         var ids = guard.ids, m = guard.method, i, entry;
-        for (i = 0; i < ids.length; i++) if (guard.approved.indexOf(ids[i]) === -1) return 'not_on_chain';
+        for (i = 0; i < ids.length; i++) {
+            entry = registry.get(ids[i]);
+            if (!guard.approved.some(function (a) {
+                return a.id === ids[i] && !!entry && a.token === entry.token && a.version === versionOf(a.id);
+            })) return 'not_on_chain';
+        }
         var taintedHere = ids.filter(function (id) { return tainted.has(id) && tainted.get(id).has(m); });
         for (i = 0; i < taintedHere.length; i++) {
             entry = registry.get(taintedHere[i]);
@@ -255,6 +302,8 @@
     function blockSend(raw, origObj, original, msgId, method, origMethod, reason, ids) {
         var response = null;
         try {
+            // 擋下的請求不上 wire，它在鏈首登記的配對當場撤銷；本地結案不再刪配對，遊戲回呼內新送的同 msgId 請求才保得住（第十輪第 1 條）
+            if (msgId != null) pendingMethods.delete(msgKey(raw.wsId, msgId));
             restore(raw, origObj, original);
             recordGuard(msgId, method, 'local_error', reason, ids, raw.wsId);
             pluginLog(ids.join(','), '守衛擋下 ' + method + ' msgId=' + msgId + '（' + reason + '），改回本地錯誤');
@@ -268,8 +317,14 @@
     // 跑鏈與鏈後判定在 try 內（第二輪第 1 條）；無法解析的在 try 前就依有無守衛者決定。出錯時只擋守衛方法與
     // 原方法在 GUARDABLE_METHODS 者；其他還原原 bytes 照送（第四輪第 3 條）。實際送出的是原 bytes，所以只看原方法；
     // 這個判斷只用本閉包的常數與 parser，不碰出錯的 grant。
+    // 回應配對在守衛判決之後才提交，依最後真的上 wire 的內容（擋下、解除守衛、退回原內容時都是原請求）（第九輪第 1 條）
     function guardedSend(raw, env) {
-        var origObj = raw.bytes, original = origObj.slice(), guard = null;
+        var result = guardedVerdict(raw, env);
+        if (!(result && result.block)) pairWith(raw.wsId, raw.bytes);
+        return result;
+    }
+    function guardedVerdict(raw, env) {
+        var origObj = raw.bytes, original = u8slice.call(origObj), guard = null;
         if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
         try {
             guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
@@ -277,6 +332,17 @@
                 return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'naki_traffic', guard.ids);
             }
             var out = runChain(raw, env, guard, true);
+            // 鏈尾以目前的守衛者終判（第七、八輪）：守衛者名單重算，鏈中才出現的（註冊或經重入污染）沒有在鏈上放行，
+            // 放行也只對當時的實例與污染版本有效，否則視同 not_on_chain
+            var now = env.method ? guardFor(env.method) : null;
+            if (!now && guard && !guard.threw.length && !guard.async.length) {
+                // 守衛者在鏈中全部退出（未污染者停用）：本筆解除守衛，照送原請求（第八輪第 4 條）
+                restore(raw, origObj, original);
+                recordGuard(env.msgId, env.method, 'sent', 'guard_left', guard.ids, raw.wsId);
+                return undefined;
+            }
+            if (now) guard = { method: env.method, ids: now.ids, approved: guard ? guard.approved : [],
+                threw: guard ? guard.threw : [], async: guard ? guard.async : [] };
             if (!guard) return out;
             var reason = guardFailure(guard) || (!sameBytes(original, raw.bytes) ? 'rewritten' : null);
             if (reason) return blockSend(raw, origObj, original, env.msgId, env.method, env.method, reason, guard.ids);
@@ -292,18 +358,46 @@
         }
     }
 
+    // 插件注入落到非大廳連線（sendRaw 沒有大廳候選時退回全部連線，D28）：比照大廳的 naki_traffic，
+    // 有守衛者就擋下。只在注入期間判定，遊戲與 Naki 自送不經這裡。先以常數排除，不可能有守衛的方法不讀 sendGuard（第二輪第 3 條）；
+    // 查找出錯時只擋 GUARDABLE_METHODS
+    function injectedFallback(raw, env) {
+        var ids;
+        if (env.type !== TYPE_REQUEST || GUARDABLE_METHODS.indexOf(env.method) === -1) return undefined;
+        try {
+            var guard = guardFor(env.method);
+            if (!guard) return undefined;
+            ids = guard.ids;
+        } catch (e) { ids = []; }
+        return blockSend(raw, raw.bytes, u8slice.call(raw.bytes), env.msgId, env.method, env.method, 'tainted_fallback', ids);
+    }
+
     function restore(raw, origObj, original) {
         raw.bytes = origObj;
-        if (origObj.length === original.length) origObj.set(original);
+        if (origObj.length === original.length) u8set.call(origObj, original);
+    }
+
+    // 沒有插件也沒有污染：receive 不派發，配對沒人消耗（dispatch 與 remember 共用，第十三輪第 2 條）
+    function noConsumers() { return registry.size === 0 && tainted.size === 0; }
+
+    // 配對的唯一寫入口：容量 PENDING_LIMIT（FIFO，覆寫算最新）。同鍵舊配對一律先撤銷，沒人消耗時只撤銷、不新增，
+    // 鏈中插件全部退出時不會留下鏈首依原請求登記的舊值（第十二輪第 1 條、第十三輪第 1 條）
+    function remember(socketId, msgId, method) {
+        var key = msgKey(socketId, msgId);
+        pendingMethods.delete(key);
+        if (noConsumers()) return;
+        pendingMethods.set(key, method);
+        if (pendingMethods.size > PENDING_LIMIT) pendingMethods.delete(pendingMethods.keys().next().value);
+    }
+
+    // 依實際上 wire 的 bytes 登記回應配對（msgId → method）
+    function pairWith(socketId, bytes) {
+        var e = parseEnvelope(bytes);
+        if (e && e.type === TYPE_REQUEST && e.msgId != null && e.method) remember(socketId, e.msgId, e.method);
     }
 
     function rememberIfRequest(env, direction, socketId) {
-        if (direction === 'send' && env.type === TYPE_REQUEST && env.msgId != null && env.method) {
-            pendingMethods.set(msgKey(socketId, env.msgId), env.method);
-            if (pendingMethods.size > PENDING_LIMIT) {
-                pendingMethods.delete(pendingMethods.keys().next().value);
-            }
-        }
+        if (direction === 'send' && env.type === TYPE_REQUEST && env.msgId != null && env.method) remember(socketId, env.msgId, env.method);
     }
 
     // RESPONSE envelope 不帶 method，靠送出時記下的 msgId 對回（可能對不上 → null）
@@ -316,7 +410,8 @@
         return null;
     }
 
-    function makeCtx(raw, env, method, isNaki, grant) {
+    function makeCtx(raw, env, method, isNaki, entry) {
+        var grant = entry.grant;
         var ctx = {
             direction: raw.direction,
             socketId: raw.wsId,
@@ -351,28 +446,26 @@
             && caps.indexOf('rewriteReceive') !== -1
             && !isForbiddenMethod(method, grant)) {
             ctx.replace = function (newBytes) {
-                if (!newBytes || typeof newBytes.length !== 'number') return false;
+                // 先物化再以實際長度選路（第七輪第 4 條）：自有 length 騙不過，只收 TypedArray。raw.bytes 也只讀內部槽
+                var next;
+                try { next = hostCopy(newBytes); } catch (e) { return false; }
                 // 長度不等：宣告 reshapeReceive 才走 Phase 4 整包替換（攔原事件、重派合成事件），否則照 v1 回 false。等長仍就地改
-                if (newBytes.length !== raw.bytes.length) {
-                    return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, grant, newBytes);
+                if (taLength.call(next) !== taLength.call(raw.bytes)) {
+                    return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, entry, next);
                 }
-                var original = raw.bytes.slice();
-                try {
-                    raw.bytes.set(newBytes);
-                } catch (e) {
-                    return false;
-                }
+                var original = hostCopy(raw.bytes);
+                u8set.call(raw.bytes, next);
                 // 等長改寫可以把整個 envelope 換掉：改後重新解析，method 變了或落進禁改名單
                 // 就還原並計一次失敗（禁改名單只擋改寫前的 method 等於沒擋）。
                 var after = parseEnvelope(raw.bytes);
                 var afterMethod = after && (after.method || method);
-                if (!after || after.type !== env.type || after.msgId !== env.msgId
+                if (!after || !isWellFormed(raw.bytes) || after.type !== env.type || after.msgId !== env.msgId
                     || afterMethod !== method || isForbiddenMethod(afterMethod, grant)) {
-                    raw.bytes.set(original);
-                    noteFailure(grant.__id, 'replace', new Error('改寫換掉了 method 或觸及禁改名單，已還原'));
+                    u8set.call(raw.bytes, original);
+                    noteFailure(entry, 'replace', new Error('改寫換掉了 method 或觸及禁改名單，已還原'));
                     return false;
                 }
-                noteSuccess(grant.__id, 'replace');
+                noteSuccess(entry, 'replace');
                 return true;
             };
         }
@@ -397,21 +490,22 @@
             && !isSendForbidden(method)) {
             ctx.replace = function (newBytes) {
                 if (!window.__nakiPluginsMayModifyOutbound) return false;
-                if (!newBytes || typeof newBytes.length !== 'number') return false;
-                var next = new Uint8Array(newBytes);
-                var after = parseEnvelope(next);
-                if (!after || !isWellFormed(next) || after.type !== TYPE_REQUEST
-                    || after.msgId !== env.msgId || isSendForbidden(after.method)) {
-                    noteFailure(grant.__id, 'replace', new Error('rewriteSend 不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已放棄'));
+                // 先物化成宿主自有副本再驗證，驗的與採用的是同一份；之後插件改它傳進來的物件（含共用的 ArrayBuffer）無效。
+                // 只收 TypedArray，ArrayBuffer／SAB／DataView／array-like／Proxy 回 false，不讀自有 length（第六輪第 1 條）
+                var next;
+                try { next = hostCopy(newBytes); } catch (e) { return false; }
+                var after = sendViolation(next, env.msgId) ? null : parseEnvelope(next);
+                if (!after) {
+                    noteFailure(entry, 'replace', new Error('rewriteSend 不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已放棄'));
                     return false;
                 }
                 // 不得改寫成另一個守衛方法：遊戲等的是原方法的回應型別，擋下時合不出正確的錯誤（第二輪第 4 條）
                 if (after.method !== env.method && isLobby(raw.wsId) && guardFor(after.method)) {
-                    noteFailure(grant.__id, 'replace', new Error('rewriteSend 不得改寫成守衛方法 ' + after.method + '，已放棄'));
+                    noteFailure(entry, 'replace', new Error('rewriteSend 不得改寫成守衛方法 ' + after.method + '，已放棄'));
                     return false;
                 }
                 raw.bytes = next;
-                noteSuccess(grant.__id, 'replace');
+                noteSuccess(entry, 'replace');
                 pluginLog(grant.__id, 'rewriteSend ' + method + ' → ' + after.method + '（' + next.length + ' bytes）');
                 return true;
             };
@@ -434,8 +528,10 @@
                 try { b64 = uint8ToBase64(envBytes); }
                 catch (e) { return { ok: false, reason: 'encode_failed' }; }
 
-                var ws = window.__nakiWebSocket;
-                var r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' };
+                var ws = window.__nakiWebSocket, r, prev = injecting;
+                injecting = { msgId: msgId, bytes: envBytes };
+                try { r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' }; }
+                finally { injecting = prev; }
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
@@ -501,18 +597,36 @@
     }
 
     // 整包替換 receive：type、msgId 不變；NOTIFY 的 method 不變，RESPONSE 不得帶 method（field 1 可省，Naki 按欄位號取 payload）
-    function reshapeReceive(raw, env, method, grant, newBytes) {
+    // next 是 replace 入口已物化的宿主副本（第六、七輪），插件拿不到
+    function reshapeReceive(raw, env, method, entry, next) {
         if (!raw.reshape || isReshapeForbidden(method)) return false;
-        var next = new Uint8Array(newBytes);
         var after = parseEnvelope(next);
         if (!after || !isWellFormed(next) || after.type !== env.type || after.msgId !== env.msgId
             || (env.type === TYPE_RESPONSE ? !!after.method : after.method !== method)) {
-            noteFailure(grant.__id, 'replace', new Error('變長 replace 不合規（type／msgId／method 變了或 envelope 不完整），已放棄'));
+            noteFailure(entry, 'replace', new Error('變長 replace 不合規（type／msgId／method 變了或 envelope 不完整），已放棄'));
             return false;
         }
         raw.bytes = next;
-        noteSuccess(grant.__id, 'replace');
+        noteSuccess(entry, 'replace');
         return true;
+    }
+
+    // 送出改寫的結構與名單驗證，對宿主自有快照判定：replace 入口與每個 hook 結束各跑一次
+    function sendViolation(next, msgId) {
+        var after = parseEnvelope(next);
+        return !after || !isWellFormed(next) || after.type !== TYPE_REQUEST || after.msgId !== msgId || isSendForbidden(after.method);
+    }
+
+    function finalViolation(bytes, type, msgId, method, lobby) {
+        var fin = parseEnvelope(bytes);
+        if (!fin || fin.type !== type || fin.msgId !== msgId) return 'type／msgId 變了或無法解析';
+        if (SEND_FORBIDDEN_METHODS.indexOf(fin.method) !== -1 || (fin.method !== method && isSendForbidden(fin.method))) {
+            return '觸及送出禁改名單 ' + fin.method;
+        }
+        if (lobby ? fin.method !== method && guardFor(fin.method) : GUARDABLE_METHODS.indexOf(fin.method) !== -1) {
+            return '改寫成守衛方法 ' + fin.method;
+        }
+        return null;
     }
 
     // envelope 逐欄位走到結尾、沒有越界、field 1（method）非空（RESPONSE 可省）。parseEnvelope 對截斷的 fixed32／fixed64
@@ -572,11 +686,11 @@
             injectedMsgIds.delete(injectedKey);
             var origin = registry.get(originId);
             if (origin && typeof origin.spec.onInjectResponse === 'function') {
-                var rctx = makeCtx(raw, env, method, isNaki, origin.grant);
+                var rctx = makeCtx(raw, env, method, isNaki, origin);
                 rctx.inResponseTo = env.msgId;
                 rctx.timedOut = false;
-                try { origin.spec.onInjectResponse(rctx); noteSuccess(originId, 'onInjectResponse'); }
-                catch (e) { noteFailure(originId, 'onInjectResponse', e); }
+                try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
+                catch (e) { noteFailure(origin, 'onInjectResponse', e); }
             }
             return;   // 注入回應不進一般鏈
         }
@@ -599,66 +713,145 @@
         chain.sort(function (a, b) {
             var pa = a.grant.priority || 0, pb = b.grant.priority || 0;
             if (pa !== pb) return pa - pb;
-            return a.spec.id < b.spec.id ? -1 : (a.spec.id > b.spec.id ? 1 : 0);
+            return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
         });
 
-        var original = raw.bytes, by = [];
+        // 送出（可改寫）時插件只拿副本：每個 hook 拿從宿主快照 cur 複製的新陣列，hook 結束後宿主只讀內部槽把它物化成新快照，
+        // 驗證的是這份快照。遊戲的原 buffer 與 cur 從不交給插件，驗證之後才執行的插件程式碼（記帳、getter、onDisable）
+        // 只碰得到過期的副本（第五輪）。receive 維持與遊戲共用 buffer 的就地改寫（契約 §4）
+        var copy = raw.direction === 'send' && raw.mutable !== false;
+        var original = raw.bytes, cur = copy ? hostCopy(original) : null, by = [], type = env.type, msgId = env.msgId;
+        var passed = [], last = null;   // 送出鏈：成功記帳等本筆終判（第八輪第 2 條）；last 是最後改動的註冊實例
         for (var k = 0; k < chain.length; k++) {
             var entry = chain[k];
             var hook = raw.direction === 'receive' ? 'onReceive' : 'onSend';
+            if (copy) raw.bytes = cur;
             var fn = entry.spec[hook];
             if (typeof fn !== 'function') continue;
-            var ctx = makeCtx(raw, env, method, isNaki, entry.grant);
-            var before = raw.bytes;
-            var snapshot = raw.mutable === false ? null : before.slice();
-            var isGuard = !!guard && guard.ids.indexOf(entry.spec.id) !== -1;
+            var before = copy ? hostCopy(cur) : raw.bytes;
+            if (copy) raw.bytes = before;
+            var ctx = makeCtx(raw, env, method, isNaki, entry);
+            var snapshot = copy || raw.mutable === false ? null : u8slice.call(before);
+            var isGuard = !!guard && guard.ids.indexOf(entry.id) !== -1;
+            var approval = { id: entry.id, token: entry.token, version: versionOf(entry.id) };   // hook 執行前的版本
+            var state = { judged: false, failed: false, early: null };
+            var thenable = false, failure = null, staged = null, replaced = false;
             try {
                 diagnostics.hooks++;
                 var ret = fn(ctx);   // 改寫只能經 ctx.replace（見 makeCtx）；回傳 Promise／thenable 不算放行（審查第 2 條）
-                if (ret && typeof ret.then === 'function') {
-                    // 結果出來才記成功或失敗：先記成功會把連續失敗歸零（第二輪第 6 條）
-                    if (isGuard) guard.async.push(entry.spec.id);
-                    settle(ret, entry.spec.id, hook);
-                } else {
-                    noteSuccess(entry.spec.id, hook);
-                    if (isGuard) guard.approved.push(entry.spec.id);
+                thenable = !!ret && typeof ret.then === 'function';
+                if (thenable) {
+                    if (isGuard) guard.async.push(entry.id);
+                    settle(ret, entry, hook, state);
                 }
-                // 大廳上就地改寫成另一個守衛方法：當成這個 hook 失敗，撤回改動，原請求照常送（第三輪第 5 條）
-                if (lobby && raw.bytes === before && snapshot
-                    && !sameBytes(snapshot, raw.bytes)) {
-                    var now = parseEnvelope(raw.bytes);
-                    if (now && now.method && now.method !== method && guardFor(now.method)) {
-                        throw new Error('就地改寫成守衛方法 ' + now.method + '，已撤回');
+                if (copy) {
+                    replaced = raw.bytes !== before;
+                    try { staged = hostCopy(raw.bytes); } catch (x) { staged = null; }   // 副本的 buffer 被分離時原生 set 會拋錯
+                    if (!staged) throw new Error('送出內容無法讀取（buffer 已分離），已撤回');
+                    // 物化後的快照一律完整重驗，replace 入口驗過也重驗（第六輪第 1 條）：經 replace 的照 rewriteSend 規則，
+                    // 就地改的 type／msgId／method 都不得變，換 method 只能經 replace（第七輪第 2 條）。不合規或改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
+                    // 大廳（guardedSend 的鏈）：改成另一個守衛方法（第三輪第 5 條），改動有守衛者的方法本身由鏈後判定。
+                    // 其他連線：改後是 GUARDABLE_METHODS 就撤回，只看閉包常數、不讀 sendGuard（第四輪第 2 條，guard-gaps b、第二輪第 1 條）
+                    if (!sameBytes(staged, cur)) {
+                        var now = parseEnvelope(staged);
+                        if (now && now.method && (lobby ? now.method !== method && guardFor(now.method) : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
+                            throw new Error('改寫成守衛方法 ' + now.method + '，已撤回');
+                        }
+                        if (replaced ? sendViolation(staged, msgId)
+                            : !now || !isWellFormed(staged) || now.type !== type || now.msgId !== msgId || now.method !== method) {
+                            throw new Error('送出改寫不合規（type／msgId／method 變了、envelope 不完整或觸及送出禁改名單），已撤回');
+                        }
                     }
                 }
                 // 守衛插件改了或丟了大廳的回應／通知 ⇒ 已污染，直到頁面重載
                 if (raw.direction === 'receive' && snapshot && (entry.grant.sendGuard || []).length
                     && isLobby(raw.wsId) && (raw.drop || !sameBytes(snapshot, raw.bytes))) {
-                    taint(entry.spec.id, entry.grant);
+                    taint(entry.id, entry.grant);
                 }
             } catch (e) {
-                // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）。守衛方法另由 guardedSend 改為不送出
-                raw.bytes = before;
-                raw.drop = false;
-                if (snapshot) before.set(snapshot);
-                if (isGuard) guard.threw.push(entry.spec.id);
-                noteFailure(entry.spec.id, hook, e);
+                // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）。守衛方法另由 guardedSend 改為不送出。
+                // 送出鏈的改動只在副本上，不採用 staged 就是撤回
+                if (!copy) {
+                    raw.bytes = before;
+                    raw.drop = false;
+                    if (snapshot) u8set.call(before, snapshot);
+                }
+                failure = { error: e };
             }
-            if (raw.drop || raw.bytes !== before || (snapshot && !sameBytes(snapshot, raw.bytes))) by.push(entry.spec.id);
+            var changed = false;
+            if (copy) {
+                changed = !failure && !sameBytes(staged, cur);
+                replaced = changed && replaced;
+                if (changed) cur = staged;
+                raw.bytes = cur;
+            }
+            // receive：驗證（或撤回）完成即定案，記帳後還原（第四輪第 1 條）。送出鏈已定案在 cur，插件碰不到
+            var committed = raw.bytes, committedDrop = raw.drop, frozen = !copy && snapshot ? u8slice.call(committed) : null;
+            try {
+                if (failure) {
+                    if (isGuard) guard.threw.push(entry.id);
+                    judge(state, entry, hook, true);
+                    noteFailure(entry, hook, failure.error);
+                } else if (copy) {
+                    passed.push({ entry: entry, hook: hook, state: state, thenable: thenable, isGuard: isGuard, approval: approval });
+                } else {
+                    // 驗證都過了才記成功：先記會把違規前的連續失敗歸零（第二輪第 4 條）；thenable 的結果出來才記（第二輪第 6 條）
+                    judge(state, entry, hook, false);
+                    if (!thenable) {
+                        noteSuccess(entry, hook);
+                        if (isGuard) guard.approved.push(approval);
+                    }
+                }
+            } finally {
+                raw.bytes = committed;
+                raw.drop = committedDrop;
+                if (frozen && !sameBytes(frozen, committed)) u8set.call(committed, frozen);
+            }
+            if (copy) {
+                if (changed) {
+                    // 後續插件的 ctx 依目前快照解析；換了 method（只可能經 replace）就停——後面的插件是照舊 method 的白名單選進鏈的
+                    by.push(entry.id);
+                    last = entry;
+                    env = parseEnvelope(cur);
+                    if (env.method !== method) break;
+                }
+                continue;
+            }
+            if (raw.drop || raw.bytes !== before || (snapshot && !sameBytes(snapshot, raw.bytes))) by.push(entry.id);
             if (raw.drop) break;   // drop 短路：後續插件不再收到
-            if (raw.bytes !== before) {
-                // 換 buffer：後續插件看新 bytes。send 換了 method 就停——後面的插件是照舊 method 的白名單選進鏈的
-                env = parseEnvelope(raw.bytes);
-                if (raw.direction === 'send' && env.method !== method) break;
-            }
+            if (raw.bytes !== before) env = parseEnvelope(raw.bytes);   // 換 buffer：後續插件看新 bytes
         }
         if (raw.direction === 'receive') {
             if (!raw.drop && raw.bytes === original) return undefined;
             return { reshape: true, drop: !!raw.drop, bytes: raw.drop ? null : raw.bytes, method: method, msgId: env.msgId, by: by };
         }
-        if (raw.bytes === original) return undefined;
-        // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致
-        if (env && env.method) pendingMethods.set(msgKey(raw.wsId, env.msgId), env.method);
+        // 鏈尾終判（第七輪第 1 條）：最終候選以目前狀態再判一次，任一不過整筆退回遊戲原內容（不是中間快照），記在最後改動的
+        // 註冊實例。成功記帳在判決之後（第八輪第 2 條）；記帳會執行插件程式碼（onDisable、thenable），之後再判一次，
+        // 第二次不過只退回、不再記帳，不再給插件程式碼執行的機會
+        if (copy) {
+            var bad = last && !sameBytes(cur, original) ? finalViolation(cur, type, msgId, method, lobby) : null;
+            if (bad) { cur = original; env = parseEnvelope(original); }
+            passed.forEach(function (p) {
+                var charged = bad && p.entry === last;
+                if (charged && p.isGuard) guard.threw.push(p.entry.id);
+                judge(p.state, p.entry, p.hook, charged);
+                if (charged || p.thenable) return;
+                noteSuccess(p.entry, p.hook);
+                if (p.isGuard) guard.approved.push(p.approval);
+            });
+            if (bad) {
+                try { noteFailure(last, 'onSend', new Error('鏈尾終判：' + bad + '，整筆退回原內容')); } catch (x) { /* 退回不受記帳影響 */ }
+            } else if (last && !sameBytes(cur, original) && finalViolation(cur, type, msgId, method, lobby)) {
+                cur = original;
+                env = parseEnvelope(original);
+                pluginLog(last.id, '鏈尾終判（記帳後）不合規，整筆退回原內容');
+            }
+        }
+        // 送出：內容沒變就送原物件（插件從未拿到它）；變了就送宿主快照 cur
+        if (copy) raw.bytes = cur;
+        if (raw.bytes === original || (copy && sameBytes(cur, original))) { raw.bytes = original; return undefined; }
+        // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致。大廳鏈由 guardedSend 在守衛判決後提交（第九輪第 1 條）
+        if (!lobby) pairWith(raw.wsId, raw.bytes);
         return raw.bytes;
     }
 
@@ -714,31 +907,34 @@
 
         // 插件進入點自己呼叫。manifest（grant）是權威。
         register: function (spec) {
-            if (!spec || typeof spec.id !== 'string') {
+            // id 只讀一次並固定在 registry 實例上，之後歸責、停用都用它，不再讀插件持有的 spec（第八輪第 3 條）
+            var id = spec ? spec.id : undefined;
+            if (typeof id !== 'string') {
                 return false;
             }
-            var grant = grantFor(spec.id);
+            var grant = grantFor(id);
             if (!grant) {
                 // 未啟用或未知 id。不 log 封包內容，只記 id。
-                pluginLog(spec.id, 'register 被拒：未啟用或未知 id');
+                pluginLog(id, 'register 被拒：未啟用或未知 id');
                 return false;
             }
-            if (registry.has(spec.id)) {
-                pluginLog(spec.id, 'register 被拒：重複註冊');
+            if (registry.has(id)) {
+                pluginLog(id, 'register 被拒：重複註冊');
                 return false;
             }
             var badGuard = (grant.sendGuard || []).filter(function (m) {
                 return GUARDABLE_METHODS.indexOf(m) === -1 || (grant.methods || []).indexOf(m) === -1;
             });
             if (badGuard.length) {
-                pluginLog(spec.id, 'register 被拒：sendGuard 含不可守衛（回應型別未確認）或不在 methods 的方法：' + badGuard.join(','));
+                pluginLog(id, 'register 被拒：sendGuard 含不可守衛（回應型別未確認）或不在 methods 的方法：' + badGuard.join(','));
                 return false;
             }
             // 把 id 綁進 grant 供 ctx.log 使用（不動原物件語意）
-            grant.__id = spec.id;
-            registry.set(spec.id, { spec: spec, grant: grant });
-            failures.set(spec.id, {});
-            pluginLog(spec.id, 'registered（capabilities=' + (grant.capabilities || []).join(',') + '）');
+            grant.__id = id;
+            var entry = { id: id, token: ++registerSeq, spec: spec, grant: grant };
+            registry.set(id, entry);
+            failures.set(id, {});
+            pluginLog(id, 'registered（capabilities=' + (grant.capabilities || []).join(',') + '）');
 
             // 高亮類插件不應該等下一個 WebSocket 封包才看見已經算好的推薦。
             // 熱啟用時如果頁面上已經有推薦，立刻補一次目前狀態。
@@ -747,7 +943,7 @@
                 try {
                     spec.onRecommendations(makeRecommendationCtx(grant, window.__nakiRecommendations));
                 } catch (e) {
-                    noteFailure(spec.id, 'onRecommendations', e);
+                    noteFailure(entry, 'onRecommendations', e);
                 }
             }
             return true;
@@ -764,8 +960,19 @@
             // 沒有插件也鎖定角色（每條連線只解析到鎖定為止），之後才啟用的守衛一開始就認得大廳
             var env = send && !roles.has(raw.wsId) ? parseEnvelope(raw.bytes) : undefined;
             if (send) lockRole(raw.wsId, env);
-            if (registry.size === 0 && tainted.size === 0) return;
+            if (noConsumers()) {
+                // 配對的新增看有沒有人消耗，消耗不看：RESPONSE 到達、或同鍵送出新請求，舊配對一律清掉（第十四輪第 1 條）
+                if (pendingMethods.size) {
+                    var e = env === undefined ? parseEnvelope(raw.bytes) : env;
+                    if (e && e.msgId != null && e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) pendingMethods.delete(msgKey(raw.wsId, e.msgId));
+                }
+                return;
+            }
             if (env === undefined) env = parseEnvelope(raw.bytes);
+            if (send && env && injecting && env.msgId === injecting.msgId && sameBytes(raw.bytes, injecting.bytes)) {
+                var fallback = isLobby(raw.wsId) ? undefined : injectedFallback(raw, env);
+                if (fallback) return fallback;
+            }
             // 對局、未定角色、大廳上的 FastTest：現行鏈原樣，例外與鏈後檢查都不經守衛（第四輪第 2 條）。
             // Blob 的非同步副本已送出，守衛無從判定，只觀察
             if (send && raw.mutable !== false && isLobby(raw.wsId) && !isFastTest(env)) return guardedSend(raw, env);
@@ -773,15 +980,16 @@
         },
 
         // 有守衛者（已污染或已註冊 sendGuard）時拒送無法同步辨識的送出（Blob 等，審查第 4 條）。
+        // 角色未定的連線比照大廳（guard-gaps c）：Blob 無法同步解析，守衛方法本可在這裡先於鎖定外送；只有已鎖 game 的放行。
         // 呼叫端不得送出，也沒有 msgId 可回應。
         refuseOpaqueSend: function (socketId) {
-            if (!isLobby(socketId)) return false;
+            if (roles.get(socketId) === 'game') return false;
             var ids = Array.from(tainted.keys());
             registry.forEach(function (entry, id) {
                 if ((entry.grant.sendGuard || []).length && ids.indexOf(id) === -1) ids.push(id);
             });
             if (ids.length === 0) return false;
-            recordGuard(null, null, 'refused_opaque', 'opaque', ids);
+            recordGuard(null, null, 'refused_opaque', isLobby(socketId) ? 'opaque' : 'opaque_unknown_role', ids, socketId);
             pluginLog(ids.join(','), '已污染：拒送一筆無法同步辨識的送出');
             return true;
         },
@@ -789,22 +997,24 @@
         // naki-websocket 的送出路徑出錯時問這裡。只管已鎖定為大廳的連線，其他連線與 FastTest 一律照舊送出。
         // 大廳上：守衛方法擋下；已知非守衛方法照送；查找出錯時只擋 GUARDABLE_METHODS；無法解析時有守衛者才擋下。
         // 回 undefined ＝照舊送出。自己不得拋錯。
+        // 照送時上 wire 的是遊戲原 bytes：派發已依改寫後內容提交的配對改回原請求（第十一輪第 1 條）；擋下時由 blockSend 撤銷
         failSafe: function (data, socketId) {
             var b = null, original = null, env = null, ids = [];
+            function sendOriginal() { try { if (env) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ } }
             try {
                 b = data instanceof ArrayBuffer ? new Uint8Array(data)
                     : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-                original = b.slice();
+                original = u8slice.call(b);
                 env = parseEnvelope(original);
                 lockRole(socketId, env);
-                if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return;
+                if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return sendOriginal();
                 if (env) {
                     var guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
-                    if (!guard) return;
+                    if (!guard) return sendOriginal();
                     ids = guard.ids;
                 }
             } catch (e) {
-                if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return;
+                if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return sendOriginal();
             }
             var empty = new Uint8Array(0);
             return blockSend({ bytes: b || empty, wsId: socketId }, b || empty, original || empty,
@@ -812,7 +1022,12 @@
         },
 
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
-        closed: function (socketId) { roles.delete(socketId); },
+        // 這條連線的回應不會再來，配對一併清掉（第十二輪第 1 條）
+        closed: function (socketId) {
+            roles.delete(socketId);
+            var prefix = socketId + ':';
+            Array.from(pendingMethods.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) pendingMethods.delete(k); });
+        },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
         reshapeLocked: function (kind, meta) {
@@ -823,12 +1038,12 @@
         // 唯讀：變長 replace／drop 是否禁改這個 method（契約測試從 Swift 消費端反查用）
         isReshapeForbidden: function (method) { return isReshapeForbidden(method); },
 
-        // 本地回應交給遊戲之後呼叫：清 msgId 對照，插件注入的請求把本地結果交回發起插件（審查第 8 條）。
+        // 本地回應交給遊戲之後呼叫：插件注入的請求把本地結果交回發起插件（審查第 8 條）。
+        // 配對已在擋下當時撤銷，這裡不碰 pendingMethods：遊戲在回呼內可能已用同 msgId 送出新請求（第十輪第 1 條）。
         // msgId 與原方法來自擋下當時的判定，bytes 是交付前另存的快照（第二輪第 5 條）。不跑改寫鏈、不送 Swift。
         localResponse: function (socketId, msgId, method, bytes) {
             if (msgId == null) return;
             var key = msgKey(socketId, msgId);
-            pendingMethods.delete(key);
             var originId = injectedMsgIds.get(key);
             if (originId == null) return;
             injectedMsgIds.delete(key);
@@ -836,12 +1051,12 @@
             if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
             var env = parseEnvelope(bytes) || { type: TYPE_RESPONSE, msgId: msgId, method: null, payload: null };
             var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: bytes, mutable: false },
-                env, method || null, true, origin.grant);
+                env, method || null, true, origin);
             rctx.inResponseTo = msgId;
             rctx.timedOut = false;
             rctx.local = true;
-            try { origin.spec.onInjectResponse(rctx); noteSuccess(originId, 'onInjectResponse'); }
-            catch (e) { noteFailure(originId, 'onInjectResponse', e); }
+            try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
+            catch (e) { noteFailure(origin, 'onInjectResponse', e); }
         },
 
         // 推薦不是 WebSocket hook 的副產品：它要等 Swift / Mortal 推論完成才存在。
@@ -854,15 +1069,16 @@
                 try {
                     diagnostics.recommendationHooks++;
                     entry.spec.onRecommendations(makeRecommendationCtx(entry.grant, recs, context));
-                    noteSuccess(id, 'onRecommendations');
+                    noteSuccess(entry, 'onRecommendations');
                 } catch (e) {
-                    noteFailure(id, 'onRecommendations', e);
+                    noteFailure(entry, 'onRecommendations', e);
                 }
             });
         },
 
         diagnostics: function () {
             return JSON.parse(JSON.stringify({ runtime: diagnostics, registered: api.list(), guard: api.guardState(),
+                pendingPairs: pendingMethods.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,
@@ -904,12 +1120,15 @@
         },
 
         // 熱停用：從 registry 移除、清 grant、歸零失敗計數。回可觀測結果。
+        // onDisable 內可能已註冊同 id 的新實例：有新實例就不清它的失敗計數與 grant；只換 grant、沒有重新註冊時照刪（第十輪第 2 條，與契約一致）
         disable: function (id) {
             var entry = registry.get(id);
             var wasRegistered = registry.delete(id);
             cleanup(entry);
-            failures.delete(id);
-            if (window.__nakiPluginGrants) delete window.__nakiPluginGrants[id];
+            if (!registry.has(id)) {
+                failures.delete(id);
+                if (window.__nakiPluginGrants) delete window.__nakiPluginGrants[id];
+            }
             pluginLog(id, 'disabled（熱停用，免 reload）');
             return { ok: true, wasRegistered: wasRegistered };
         }

@@ -103,7 +103,7 @@ ctx = {
   type      : 1 | 2 | 3,           // notify / request / response（envelope 第 0 byte）
   msgId     : number | null,       // notify 沒有 msgId
   method    : string | null,       // REQUEST 直接解出；RESPONSE 由 pending 對回（可能 null）
-  bytes     : Uint8Array,          // 完整 envelope。可就地改（等長，見 §4）
+  bytes     : Uint8Array,          // 完整 envelope。receive 可就地改（等長，見 §4）；send 是宿主給的副本，見下方「送出守衛」
   payload   : { from, to } | null, // envelope 內 field 2 的 byte range，不必自己再剝 wrapper
   isNaki    : boolean,             // 這筆是 Naki 或插件自己送的：當前 (socketId, msgId) 在 sendRaw 送出登記表內（REQUEST 只認尚未收到 RESPONSE 的），或是你注入請求的回應（見 §5）
   settings  : object,              // manifest 有宣告 settings 才存在，唯讀快照（見 §6）
@@ -165,7 +165,7 @@ onReceive(ctx) {
 }
 ```
 
-整包替換走 `ctx.replace()`，receive 方向長度不等 ⇒ 回 `false` 且**不改任何 bytes**（fail-open，原樣通過）。替換後 Naki 會**重新解析** envelope：type／msgId／method 變了或落進禁改名單 ⇒ 還原原 bytes、計一次 `replace` 失敗並回 `false`。isNaki 流量不提供 `replace`：
+整包替換走 `ctx.replace()`，只收 TypedArray，先複製再以實際長度判斷（自有 `length` 不算數）。等長替換後 envelope 結構不完整（欄位長度越界等）也回 `false` 並還原。receive 方向長度不等 ⇒ 回 `false` 且**不改任何 bytes**（fail-open，原樣通過）。替換後 Naki 會**重新解析** envelope：type／msgId／method 變了或落進禁改名單 ⇒ 還原原 bytes、計一次 `replace` 失敗並回 `false`。isNaki 流量不提供 `replace`：
 
 ```js
 const ok = ctx.replace(newBytes);
@@ -427,6 +427,15 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
   - **`ctx.taint()`**：`onReceive`、`onSend`、`onInjectResponse` 的 ctx 有；`onRecommendations`、`onDisable` 沒有。把呼叫的插件自己標成已污染，不必等大廳改寫（對局連線上的長改寫不會自動污染，應先呼叫）。只能污染自己，沒有宣告 `sendGuard` 的插件回 `false` 且不做事，否則回 `true`。污染後的行為與大廳改寫造成的污染完全相同。重複呼叫沒有副作用，也不重發事件。
   - **`ctx.isTainted()`**：回傳自己是否已污染。曾污染的插件重新註冊後仍為 `true`，即使新的 grant 不再宣告 `sendGuard`。
   - **污染不可解除，頁面重載才清**：停用、熱重載、自動停用、`setGrant` 都不會解除。
+  - **放行只對當下有效**：守衛者在 `onSend` 正常返回算放行，但只對「放行時的那次註冊」與「放行前的污染狀態」有效。同一筆送出還沒結束時，守衛者被污染（在任何大廳連線上、包括後面插件同步觸發的 receive），或同 id 停用後重新註冊，這次放行就作廢，這一筆擋下並改回本地錯誤（`not_on_chain`）。下一筆由新的狀態、新的 `onSend` 重新判定。已污染的插件重複呼叫 `ctx.taint()`、守衛方法沒變時，不影響放行。
+  - **守衛者中途退出**：這一筆送出期間，未污染的守衛者全部停用（自己停用或被停用）而且沒有拋錯、沒有回傳 thenable，這一筆就不再受守衛，送出遊戲的原請求，插件的改動一律不送，守衛紀錄是 `sent`／`guard_left`。還有其他守衛者時，由其餘守衛者照常判定；例外是退出前已經拋錯或回傳 thenable 的守衛者，它對這一筆的否決仍有效（N2），即使其餘守衛者放行，這一筆仍擋下。這一筆的回應配對跟著實際送出的原請求，`replace` 換過的 method 不算。
+  - **失敗歸責**：`onSend` 的成功要等這一筆的鏈尾判定通過才記，鏈尾違規照樣累計，連續 10 次自動停用。歸責與停用綁定 `register` 當下的那次註冊；之後再改自己 `spec.id` 不會轉嫁給別的插件。插件停用或同 id 重新註冊之後才記到的成功、失敗（含鏈尾判決、晚到的 thenable 結果，以及錯誤訊息 getter 執行期間換掉的情況）一律丟棄，不算在新的註冊上。`onDisable` 執行中若以同 id 重新註冊，停用結束時不清新註冊的失敗計數與 grant；新註冊照常累計，第 10 次停用。
+  - **擋下請求的回應配對**：被擋下的請求不送出，它的回應配對在擋下當下就撤銷。遊戲收到本地錯誤回應後，即使在同一個回呼裡以同連線、同 msgId 送出新請求，新請求的配對也保留，伺服器的 RESPONSE 依新請求的 method 派發。送往 Swift 的路徑出錯、改送遊戲原請求時，配對也改回原請求的 method，`replace` 換過的 method 不算。
+  - **沒有跨來源的配對隔離**：配對以 (連線, msgId) 為鍵，遊戲、Naki 與插件注入共用。遊戲有一筆同號請求還沒收到回應時，插件注入的同號請求被擋下，會連帶撤銷遊戲那筆的配對，它的 RESPONSE 對不回 method。插件注入號段 64000–65500 與遊戲號碼重疊時會發生。
+  - **配對表容量**：所有連線共用一張表，上限 256 筆，滿了淘汰最舊的（同鍵重寫算最新）。連線關閉時清掉該連線的配對。配對的**新增**看頁面上有沒有插件或污染：都沒有時不登記，同鍵已有的配對一併撤銷。配對的**消耗**不看：RESPONSE 到達、或同一連線以同一個 msgId 送出新請求，舊配對一律清掉。所以同一來源依序重用 msgId 時，RESPONSE 只會派成最後送出那筆請求的 method，或對不回 method（送出時沒人消耗）。已知例外：跨來源的同號碰撞可能派錯或對不回（見上一條）；表滿被淘汰的配對，它的 RESPONSE 對不回 method。目前筆數見 `__nakiPlugins.diagnostics().pendingPairs`。
+  - **`ctx.sendRequest` 退回對局連線**：沒有開著的大廳連線時，Lobby 方法可能落到對局連線。這個方法有守衛者時（已污染或已註冊宣告 `sendGuard`）照樣擋下，與大廳上相同：回 `ok:true`，之後 `onInjectResponse` 收到 `ctx.local === true` 的錯誤回應。
+  - **送出方向不得就地改 `ctx.bytes`**：送出改寫只能經 `rewriteSend` 的 `ctx.replace`。大廳以外的連線上，不論就地改或經 `ctx.replace`，把請求改成可守衛方法（換裝、稱號、角色類），或改動既有可守衛方法的內容，都會撤回這個 hook 的改動並計一次該 hook 失敗；前面插件的合法改寫保留。hook 回傳 thenable 時，`then` 同步做的改寫一併檢查；違規那一次 thenable 的結果不再另計。送出方向的 `ctx.bytes` 是宿主給的副本，不是遊戲的 buffer：hook 結束當下的內容經檢查後由宿主複製送出，之後在錯誤處理、`onDisable` 或非同步時機改 `ctx.bytes`、呼叫 `ctx.replace`，都不會影響這一筆，也碰不到遊戲之後的送出。在副本上定義 `length`、`constructor` 等屬性不影響宿主讀到的內容。送出的 `ctx.replace(newBytes)` 只收 TypedArray：當下就複製成宿主自有的一份，驗證這份、採用這份，之後再改傳入物件或它的 buffer 都無效；`ArrayBuffer`、`SharedArrayBuffer`、`DataView`、普通陣列、Proxy、已分離或越界的 view 一律回 `false`，不計失敗；長度與內容只讀內部槽，自有 `length` 不讀。receive 方向長度不等的 `replace` 同樣先複製再驗證。每個 hook 結束時，宿主對要採用的快照再完整驗一次：經 `replace` 的照 `rewriteSend` 規則，就地改的不得改 type、msgId 或 method（要換 method 只能經 `rewriteSend` 的 `replace`），envelope 結構也要完整（每個欄位在界內），兩者都要過守衛規則；不合規就撤回這個 hook 的改動並計一次該 hook 失敗。整條鏈跑完後再對最終要送的內容判一次（type／msgId 不變、不在送出禁改名單、守衛規則，以當下的守衛者為準）；不過就整筆退回遊戲原內容，前面插件的改動一併不送，失敗記在最後改動的 hook。大廳上鏈跑到一半才出現的守衛者（新註冊或經同步 receive 重入污染）沒有在鏈上放行，這一筆照守衛規則擋下並改回本地錯誤。連續 10 次會自動停用。大廳上照舊：就地改成另一個有守衛者的方法會撤回，`replace` 成守衛方法當下回 `false`，改動有守衛者的方法本身會擋下並改回本地錯誤。
+  - **角色未定的連線上的 Blob**：頁面上有守衛者時拒送，與大廳相同。只有已確定是對局的連線照送。若遊戲只在對局握手改用 Blob，對局連線會一直連不上。要停用宣告 `sendGuard` 的插件；已污染時還要重載頁面。
   - 沒有 `api.taint`：`register` 沒有回傳每個插件專屬的物件，全域 `__nakiPlugins` 不能辨識呼叫者。`guardState()` 是診斷用，不屬於契約，插件不得依賴。
 - **`injectReceive`**：只有設計，未實作。設計採弱順序：只保證排在當前這則之後交付，中間可能插進其他網路訊息。
 
