@@ -8,7 +8,7 @@ const { test } = require('node:test');
 const root = path.resolve(__dirname, '..');
 const source = name => fs.readFileSync(path.join(root, 'command/Resources/JavaScript', name), 'utf8');
 
-function page(wiring = source('naki-websocket.js'), { breakBase64 = false, swiftFails = () => false, realCore = false, postFails = () => false } = {}) {
+function page(wiring = source('naki-websocket.js'), { breakBase64 = false, encode = null, swiftFails = () => false, realCore = false, postFails = () => false } = {}) {
   const swift = [];
   class MessageEvent { constructor(type, init) { this.type = type; this.data = init.data; } }
   class Socket {
@@ -34,6 +34,7 @@ function page(wiring = source('naki-websocket.js'), { breakBase64 = false, swift
   vm.runInContext(source('naki-core.js'), c);
   if (!realCore) c.__nakiCore.sendToSwift = (type, data) => { if (swiftFails(type, data)) throw new Error('bridge down'); swift.push({ type, data }); return true; };
   if (breakBase64) c.__nakiCore.arrayBufferToBase64 = () => { throw new Error('encode failed'); };
+  if (encode) c.__nakiCore.arrayBufferToBase64 = encode;
   vm.runInContext(wiring, c);
   vm.runInContext(source('naki-plugins.js'), c);
   const lobby = new c.WebSocket('wss://route-4.maj-soul.com/gateway');
@@ -2563,4 +2564,143 @@ test('GG10-1b (Astra9 1): a blocked request leaves no pairing behind — a stray
   t.lobby.receive(response(1720, [8, 1]));
   assert.deepEqual(lastGuard(t), [[1720, 'local_error', 'hook_threw']]);
   assert.deepEqual(got, { skin: 0, beat: 0 });
+});
+
+// ---- guard-gaps 第十一輪（Astra guard-gaps 第十輪 1–2 條）：bridge 故障退回原請求時配對跟著退回、邊界固定回歸 ----
+function seen11(t, methods, { naki = false } = {}) {
+  const got = [];
+  methods.forEach((m, i) => {
+    const id = 'seen11-' + i;
+    t.c.__nakiPlugins.setGrant(id, { capabilities: ['observe'], methods: [m], priority: 500, observeNakiTraffic: naki });
+    t.c.__nakiPlugins.register({ id, onReceive(ctx) { got.push(ctx.method); } });
+  });
+  return got;
+}
+function guard11(t) {
+  t.c.__nakiPlugins.setGrant('g11', { capabilities: ['observe'], methods: [SKIN], sendGuard: [SKIN] });
+  assert.equal(t.c.__nakiPlugins.register({ id: 'g11', onSend() {} }), true);
+}
+
+test('GG11-1 (Astra10 1): a bridge failure after a replace INFO→loginBeat sends the original INFO and its RESPONSE goes to the INFO plugin (with and without a page guard); without the failure both follow loginBeat', async () => {
+  for (const [broken, guarded] of [[true, false], [true, true], [false, false]]) {
+    const label = (broken ? 'bridge error' : 'healthy') + (guarded ? ', page guard' : '');
+    const t = page(source('naki-websocket.js'), { breakBase64: broken });
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    if (guarded) guard11(t);
+    t.c.__nakiPlugins.setGrant('rw11', { capabilities: ['observe', 'rewriteSend'], methods: [INFO], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'rw11', onSend(ctx) { assert.equal(ctx.replace(request(ctx.msgId, BEAT)), true); } });
+    const got = seen11(t, [INFO, BEAT]);
+    t.lobby.send(request(1800, INFO, [8, 1]));
+    await tick();
+    assert.deepEqual(t.lobby.committed.map(d => methodOf(Uint8Array.from(d))), [broken ? INFO : BEAT], label);
+    t.lobby.receive(response(1800, [8, 1]));
+    assert.deepEqual(plain(got), [broken ? INFO : BEAT], label);
+  }
+});
+
+test('GG11-1b (Astra10 1/2): a guarded method that hits a bridge failure is blocked as bridge_error, keeps no pairing, and a loginBeat resent with its msgId inside the error callback keeps its own', async () => {
+  for (const resend of [false, true]) {
+    const t = page(source('naki-websocket.js'), { breakBase64: true });
+    guard11(t);
+    const got = seen11(t, [SKIN, BEAT]);
+    t.lobby.onmessage = ev => {
+      const b = Array.from(new Uint8Array(ev.data));
+      t.game.push(b);
+      if (resend && JSON.stringify(b) === JSON.stringify(errorResponse(1810))) t.lobby.send(request(1810, BEAT));
+    };
+    t.lobby.send(request(1810, SKIN, [8, 1]));
+    await tick();
+    assert.deepEqual(lastGuard(t), [[1810, 'local_error', 'bridge_error']]);
+    assert.deepEqual(t.lobby.committed.map(d => methodOf(Uint8Array.from(d))), resend ? [BEAT] : []);
+    t.lobby.receive(response(1810, [8, 1]));
+    assert.deepEqual(plain(got), resend ? [BEAT] : [], resend ? 'resend' : 'no resend');
+  }
+});
+
+test('GG11-2 (Astra10 2): the game resends on the game connection inside the tainted_fallback error callback — its pairing survives (the RESPONSE is Naki-attributed per the contract, so only a Naki-traffic observer sees it)', async () => {
+  const { t, g, inject } = fallbackPage();
+  const got = seen11(t, [OP], { naki: true });
+  let msgId = null;
+  g.onmessage = ev => {
+    const b = new Uint8Array(ev.data);
+    if (msgId != null && (b[1] | (b[2] << 8)) === msgId && b[0] === 3) g.send(request(msgId, OP));
+  };
+  msgId = inject(SKIN).msgId;
+  await tick();
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[msgId, 'local_error', 'tainted_fallback']]);
+  assert.deepEqual(sentOn(g), [700, 701, msgId]);
+  g.receive(response(msgId, [8, 1]));
+  assert.deepEqual(plain(got), [OP]);
+});
+
+test('GG11-3 (Astra10 2): onDisable that only swaps the grant without registering again leaves no grant behind; an auto-disabled plugin registered again counts from 1 to 10 afresh', () => {
+  const t = page();
+  const FIRE = '.lq.Lobby.fetchServerTime';
+  t.c.__nakiPlugins.setGrant('a11', { capabilities: ['observe'], methods: [FIRE] });
+  t.c.__nakiPlugins.register({ id: 'a11', onDisable() { t.c.__nakiPlugins.setGrant('a11', { capabilities: ['observe'], methods: [FIRE] }); } });
+  t.c.__nakiPlugins.disable('a11');
+  assert.equal(Object.prototype.hasOwnProperty.call(t.c.__nakiPluginGrants, 'a11'), false, 'grant swap only');
+  const counts = () => t.events('log').filter(e => e.data.id === 'b11').map(e => (/onSend 拋錯（第 (\d+) 次）/.exec(e.data.msg) || [])[1]).filter(Boolean).map(Number);
+  const reg = () => {
+    t.c.__nakiPlugins.setGrant('b11', { capabilities: ['observe'], methods: [FIRE] });
+    assert.equal(t.c.__nakiPlugins.register({ id: 'b11', onSend() { throw new Error('b'); } }), true);
+  };
+  reg();
+  for (let i = 0; i < 10; i++) t.lobby.send(request(1820 + i, FIRE));
+  assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'b11'), false);
+  reg();
+  for (let i = 0; i < 10; i++) t.lobby.send(request(1830 + i, FIRE));
+  assert.deepEqual(counts(), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'b11'), false);
+});
+
+test('GG11-4 (Astra10 2, documented residual risk): a game INFO awaiting msgId 64000 loses its pairing when a plugin injection with the same msgId is blocked — no cross-source pairing isolation', async () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  guard11(t);
+  let inject;
+  t.c.__nakiPlugins.setGrant('inj11', { capabilities: ['observe', 'injectSend'], methods: [BEAT] });
+  t.c.__nakiPlugins.register({ id: 'inj11', onSend(ctx) { inject = ctx.sendRequest; } });
+  const got = seen11(t, [INFO], { naki: true });
+  t.lobby.send(request(1840, BEAT));
+  t.lobby.send(request(64000, INFO));
+  const r = inject(SKIN, new t.c.Uint8Array([8, 1]));
+  assert.equal(r.msgId, 64000);
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64000, 'local_error', 'naki_traffic']]);
+  t.lobby.receive(response(64000, [8, 1]));
+  assert.deepEqual(plain(got), [], 'the INFO RESPONSE resolves to no method');
+});
+
+test('GG11-1c (Astra10 1): the bridge failure path keeps the original pairing when the guard lookup itself throws inside failSafe, and on a game connection', async () => {
+  {
+    let armed = false;
+    const t = page(source('naki-websocket.js'), { encode: () => { armed = true; throw new Error('encode failed'); } });
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    guard11(t);
+    t.c.__nakiPluginGrants.g11.sendGuard = { indexOf(m) { if (armed) throw new Error('lookup failed'); return [SKIN].indexOf(m); } };
+    t.c.__nakiPlugins.setGrant('rw11', { capabilities: ['observe', 'rewriteSend'], methods: [INFO], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'rw11', onSend(ctx) { assert.equal(ctx.replace(request(ctx.msgId, BEAT)), true); } });
+    const got = seen11(t, [INFO, BEAT]);
+    t.lobby.send(request(1850, INFO, [8, 1]));
+    armed = false;
+    await tick();
+    assert.deepEqual(t.lobby.committed.map(d => methodOf(Uint8Array.from(d))), [INFO], 'lookup throws in failSafe');
+    t.lobby.receive(response(1850, [8, 1]));
+    assert.deepEqual(plain(got), [INFO], 'lookup throws in failSafe');
+  }
+  {
+    const t = page(source('naki-websocket.js'), { breakBase64: true });
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    const g = gameSocket(t.c);
+    g.send(request(1859, AUTH));
+    t.c.__nakiPlugins.setGrant('rw11', { capabilities: ['observe', 'rewriteSend'], methods: [INFO], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'rw11', onSend(ctx) { assert.equal(ctx.replace(request(ctx.msgId, BEAT)), true); } });
+    const got = seen11(t, [INFO, BEAT]);
+    g.send(request(1860, INFO, [8, 1]));
+    await tick();
+    assert.deepEqual(g.committed.map(d => methodOf(Uint8Array.from(d))), [AUTH, INFO], 'game connection');
+    g.receive(response(1860, [8, 1]));
+    assert.deepEqual(plain(got), [INFO], 'game connection');
+  }
 });

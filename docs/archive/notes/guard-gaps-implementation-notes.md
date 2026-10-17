@@ -399,3 +399,36 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 - 擋下時依 (連線, msgId) 撤銷配對，同號更早的未答請求的配對會一併消失（Deviation 49）。
 - 遊戲在合成錯誤回呼內重送的行為只在 node 替身驗證；WebKit、live 未驗證（I2）。
+
+## 第十一輪（Astra 第十輪審查：1【應修】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review10.md`。Deviations 48–51 主線採納。開工前 rebase 到 main `d95d5b1`（devLogSeal），無衝突。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 應修 1 | `replace` 把 fetchCharacterInfo 換成 loginBeat 後，送 Swift 的編碼拋錯，`failSafe` 照送遊戲原 fetchCharacterInfo，但配對仍是派發時提交的 loginBeat，真 RESPONSE 派給 loginBeat 插件。main 上既有缺口 | `failSafe` 照送原 bytes 的三個出口（非大廳／FastTest／無守衛者的解析失敗、大廳非守衛方法、查找出錯的非守衛方法）都經 `sendOriginal` 依原請求重新提交配對；擋下的出口照舊由 `blockSend` 撤銷（`GG11-1` 有無頁面守衛兩情境與健康對照、`GG11-1b`、`GG11-1c`） |
+| 建議 2 | Dev 49–51 的邊界與同號碰撞反例只有探針 | 固定回歸：`GG11-1b`（bridge_error 擋下、回呼內同號重送）、`GG11-2`（tainted_fallback 回呼內重送）、`GG11-3`（只換 grant 不重註冊、自動停用後重註冊 1–10 重新累計）、`GG11-4`（遊戲 INFO 64000 未答、插件注入 SKIN 同為 64000 被擋，INFO 的 RESPONSE 對不回 method）。§1.4 新增第 5 項、契約新增「沒有跨來源的配對隔離」 |
+
+### 第十一輪 Deviations
+
+52. **`failSafe` 照送時依原請求重新提交配對，不判斷派發是否改過。** `failSafe` 拿不到派發的中間狀態，一律以遊戲原 bytes 覆寫同鍵配對最簡單，也涵蓋「派發前就出錯、根本沒登記」的情況（修前這種情況沒有配對，修後有，與實際上 wire 的請求一致）。原 bytes 解析不出時沒有 msgId，什麼都不做；這時派發也不會跑鏈，不會留下改寫後的配對。
+53. **`GG11-2` 以 Naki 流量觀察者驗證。** tainted_fallback 的注入號碼在 `sendRaw` 登記為 Naki 自送且未答，遊戲在回呼內以同號重送，依契約「REQUEST 本地結案例外」仍算 Naki，所以一般觀察者看不到它的 RESPONSE，只有宣告 `observeNakiTraffic` 的看得到。測試斷言配對保留（method 是重送的 inputOperation），不改歸屬規則。
+54. **同號碰撞只固定現行行為、揭露，不修。** 主線指示固定反例並明載。修法（配對帶來源或交易代號）會改動 `naki-websocket.js` 的 `sendRaw` 號段與登記，超出本包可改清單。
+55. **測試 harness 加 `encode` 選項。** `GG11-1c` 要讓守衛查找只在 `failSafe` 內拋錯，需要在編碼失敗那一刻才武裝；既有 `breakBase64` 是固定的拋錯函式，接不到時機。只改 b2 回歸腳本的 `page()`，預設不影響其他測試。
+
+### 第十一輪驗證（log：主 repo `.swfd/logs/guard-gaps/r11-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| rebase | 先 rebase 到 main `d95d5b1`，無衝突；rebase 後 b2 166／0 | |
+| 新測試套在第十輪 HEAD `eead829`（rebase 後）的 JS | 2 紅：`GG11-1`、`GG11-1c`。`GG11-1` 兩個故障情境各自單跑：修前各 1 紅，修後各 0。`GG11-1b`、`GG11-2`、`GG11-3`、`GG11-4` 修前即綠，用來固定建議 2 的行為 | `r11-red-b2-on-eead829.log` |
+| 變異（b2＋v2＋p4，扣基線） | 73／75 被殺。新增 Y1–Y4 全殺（Y3、Y4 初跑存活，補 `GG11-1c` 後被殺）；存活的 `T7`、`U10` 為既有等價變異 | `r11-mutation.log` |
+| node 五套 | b2 172／0（0 略過）、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r11-green-*.log` |
+| naki-plugins `local-unlock-naki.cjs` | 9／0（`NAKI_ROOT` 指向本 worktree，0 略過） | `r11-green-local-unlock-naki.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 19／0 | `r11-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1184／0 | `r11-test-full.log` |
+
+### 第十一輪未驗證與風險
+
+- 跨來源 msgId 碰撞沒有配對隔離（Deviation 54，§1.4 第 5 項）。
+- bridge 故障只以 node 替身的編碼拋錯注入驗證；WebKit、live 未驗證（I2）。

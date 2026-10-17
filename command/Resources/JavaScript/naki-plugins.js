@@ -982,22 +982,24 @@
         // naki-websocket 的送出路徑出錯時問這裡。只管已鎖定為大廳的連線，其他連線與 FastTest 一律照舊送出。
         // 大廳上：守衛方法擋下；已知非守衛方法照送；查找出錯時只擋 GUARDABLE_METHODS；無法解析時有守衛者才擋下。
         // 回 undefined ＝照舊送出。自己不得拋錯。
+        // 照送時上 wire 的是遊戲原 bytes：派發已依改寫後內容提交的配對改回原請求（第十一輪第 1 條）；擋下時由 blockSend 撤銷
         failSafe: function (data, socketId) {
             var b = null, original = null, env = null, ids = [];
+            function sendOriginal() { try { if (env) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ } }
             try {
                 b = data instanceof ArrayBuffer ? new Uint8Array(data)
                     : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
                 original = u8slice.call(b);
                 env = parseEnvelope(original);
                 lockRole(socketId, env);
-                if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return;
+                if (!isLobby(socketId) || isFastTest(env) || (!env && !guardActive())) return sendOriginal();
                 if (env) {
                     var guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
-                    if (!guard) return;
+                    if (!guard) return sendOriginal();
                     ids = guard.ids;
                 }
             } catch (e) {
-                if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return;
+                if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return sendOriginal();
             }
             var empty = new Uint8Array(0);
             return blockSend({ bytes: b || empty, wsId: socketId }, b || empty, original || empty,
