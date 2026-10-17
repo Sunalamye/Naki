@@ -56,3 +56,11 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 合併：用戶裁決 2026-10-17 合併進 main 並移除 worktree；確認稿與發版說明須揭露上述未驗證項與 §1.4 七項限定。
 
 連線失敗不觸發 close 的殘留已於 fix/ws-error-cleanup 修正（commit 見該分支，error 且 readyState 為 CLOSED 時與 close 同路徑清理，只執行一次）。
+
+## 2026-10-17 後續裁決：守衛名單擴充與插件主動污染
+
+解鎖插件 v1 盤點 `liqi.json` 後找出 13 個不在 `GUARDABLE_METHODS`、但請求可能帶入補進外觀 id 的大廳方法（聊天、好友訊息、client message、logReport 表情、活動角色、建房與賽事的 extendinfo），以及兩個對局連線方法（`broadcastInGame`、`inputGameGMCommand`）。
+
+- **不立刻擴充名單**。守衛是 fail-closed：污染後這些方法到頁面重載都不送，把聊天與建房加進去等於啟用解鎖插件就不能聊天、不能開房。先在 v2.20.0 上 live 只觀察不點擊，看遊戲是否真的把補進的 id 送進這些入口，再依證據決定擴充哪幾個。
+- **對局連線守衛延後**。守衛結構上只在大廳連線；要不要支援 FastTest 另案。
+- **先做插件主動污染 API 與污染查詢契約**（工作包 guard-taint-api）：讓插件在任何改寫前自行標污染，不必依賴「大廳改寫一次」或未記載的 `guardState()`。這是純增加、不改既有行為，且不受 live 結果影響。
