@@ -167,9 +167,19 @@
         ws.send = function(data) {
             // rewriteSend（L3）換掉時改送新 bytes；沒換就是原物件，Naki 自送（isNaki）永遠沒換
             // 守衛擋下（block）時一律不送出：交付失敗也不退回 originalSend
-            const out = handleMessage(ws, wsId, data, 'send', isMajsoul);
-            if (out && out.block) return respondLocal(ws, wsId, out);
-            return originalSend(out || data);
+            // tx：這一筆的送出交易，涵蓋底層 send；拋錯時撤回這筆的遊戲未答提交，原例外照拋（pair-source 第六輪第 24 條）
+            const tx = {};
+            let failed = true;
+            try {
+                const out = handleMessage(ws, wsId, data, 'send', isMajsoul, undefined, tx);
+                if (out && out.block) { failed = false; return respondLocal(ws, wsId, out); }
+                const sent = originalSend(out || data);
+                failed = false;
+                return sent;
+            } finally {
+                try { if (window.__nakiPlugins && window.__nakiPlugins.sendSettled) window.__nakiPlugins.sendSettled(tx, failed); }
+                catch (e) { console.error('[Naki WS] 送出交易結算錯誤:', e); }
+            }
         };
 
         return ws;
@@ -540,7 +550,7 @@
         receive: { ArrayBuffer: 0, TypedArray: 0, Blob: 0, String: 0, Other: 0 },
         send: { ArrayBuffer: 0, TypedArray: 0, Blob: 0, String: 0, Other: 0 }
     };
-    function handleMessage(ws, wsId, data, direction, isMajsoul, event) {
+    function handleMessage(ws, wsId, data, direction, isMajsoul, event, tx) {
         // 只處理雀魂連接的訊息
         if (!isMajsoul) return;
         const dataType = data instanceof ArrayBuffer ? 'ArrayBuffer'
@@ -548,7 +558,6 @@
             : data instanceof Blob ? 'Blob' : typeof data === 'string' ? 'String' : 'Other';
         messageTypes[direction][dataType]++;
         const sender = direction === 'send' && data && typeof data === 'object' ? rawSenders.get(data) : undefined;
-        const tx = direction === 'send' ? {} : undefined;
         // 大廳連線上有守衛者時，無法同步辨識的送出一律拒送（Blob 等）
         if (direction === 'send' && (dataType === 'Blob' || dataType === 'Other')
             && window.__nakiPlugins && window.__nakiPlugins.refuseOpaqueSend && window.__nakiPlugins.refuseOpaqueSend(wsId)) {
@@ -611,12 +620,17 @@
                 // Blob 只能異步展開；拿到的是副本，已經來不及改遊戲真正收到的 event.data，
                 // 所以這條只允許 observe，不提供 rewriteReceive。
                 const arrivedAtSeq = nakiSentSeq;
+                // 遊戲的 Blob 送出：展開前不知道號碼，插件層這段期間拒發注入
+                const plugins = direction === 'send' && sender === undefined && window.__nakiPlugins && window.__nakiPlugins.blobSend ? window.__nakiPlugins : null;
+                if (plugins) plugins.blobSend(wsId, 1);
                 data.arrayBuffer().then(function(buffer) {
                     const view = new Uint8Array(buffer);
                     if (direction === 'receive') markNakiAnswered(wsId, view, arrivedAtSeq);   // 記帳處讀不到 Blob，展開後補標記
                     dispatchToPlugins(direction, wsId, info, view, false, false, sender, tx);
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);
+                }).then(function() {
+                    if (plugins) plugins.blobSend(wsId, -1);
                 });
 
                 blobToBase64(data, function(base64) {

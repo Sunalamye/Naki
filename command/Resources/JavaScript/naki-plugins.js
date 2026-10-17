@@ -83,20 +83,24 @@
     // 遊戲計數器會進這個號段（pair-source）：輪用時跳過未答的注入、各連線未答的遊戲請求，以及各連線遊戲最後號碼之後 GAME_AHEAD 個。
     // 遊戲請求另記，不靠 pendingMethods（零消耗者不登記、FIFO 會淘汰）：不論有沒有插件都記。遊戲＝沒有 sendRaw 送出者，
     // 不看 D22 身分。記帳分兩段：派發一進入就保留號碼（同步 hook 內的注入要避開，第四輪第 15 條），判決外送後才提交進未答容量；
-    // 提交後 failSafe 才擋下時，只撤回這筆送出交易的增量（第五輪第 19、20 條）。沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
-    // 每連線未答上限 GAME_INFLIGHT_LIMIT，超過就失準，該連線關閉前一律拒發（msgid_busy）；不可用號碼占滿號段也回 msgid_busy
+    // 提交後 failSafe 或底層 send 失敗時，只撤回這筆送出交易的增量（第五輪第 19、20 條，第六輪第 24 條）。沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
+    // 每連線未答上限 GAME_INFLIGHT_LIMIT，超過就失準，該連線關閉前一律拒發（msgid_busy）；不可用號碼占滿號段也回 msgid_busy。
+    // 遊戲 Blob 送出要等 arrayBuffer() 才知道號碼：任一連線有待展開的遊戲 Blob 時也回 msgid_busy（第六輪第 21 條）
     var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500, GAME_AHEAD = 256, GAME_INFLIGHT_LIMIT = 256;
     var pluginMsgId = PLUGIN_MSGID_FIRST;
-    var gameSends = new Map();   // socketId -> { last, inflight: Map(msgId -> 提交紀錄), lost, version }
+    var gameSends = new Map();   // socketId -> { last, inflight: Map(msgId -> 提交序號), lost, version }
     var gameDispatching = [];    // 派發中的遊戲請求 { msgId }
-    // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交）、造成的淘汰與失準、提交後的版本
+    var gameSeq = 0;
+    var openCommits = new Set();   // 送出交易還沒結束的提交紀錄：撤回資料只活在交易期間，未答表只存序號（第六輪第 23 條）
+    var blobSends = new Map();     // socketId -> 待展開的遊戲 Blob 送出數
+    // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
     function gameSent(socketId, msgId) {
         var g = gameSends.get(socketId);
         if (!g) gameSends.set(socketId, g = { last: msgId, inflight: new Map(), lost: false, version: 0 });
-        var c = { socketId: socketId, g: g, msgId: msgId, prev: g.inflight.get(msgId), evicted: null, lostSet: false };
+        var c = { socketId: socketId, g: g, msgId: msgId, seq: ++gameSeq, prev: g.inflight.get(msgId), evicted: null, lostSet: false };
         g.last = msgId;
         g.inflight.delete(msgId);
-        g.inflight.set(msgId, c);
+        g.inflight.set(msgId, c.seq);
         if (g.inflight.size > GAME_INFLIGHT_LIMIT) {
             c.evicted = g.inflight.entries().next().value;
             g.inflight.delete(c.evicted[0]);
@@ -106,24 +110,39 @@
         c.version = ++g.version;
         return c;
     }
-    function gameDone(socketId, msgId) { var g = gameSends.get(socketId); if (g && g.inflight.delete(msgId)) g.version++; }
-    // 撤回只動自己：msgId 仍是這筆提交的才移除（先前提交放回）。之後表有變動（版本不符）就不回復淘汰與失準，寧可保守失準
+    // 已被進行中交易暫時淘汰的號碼收到回答：作廢那筆淘汰，撤回時不放回（第六輪第 22 條）
+    function gameDone(socketId, msgId) {
+        var g = gameSends.get(socketId);
+        if (!g) return;
+        if (g.inflight.delete(msgId)) { g.version++; return; }
+        openCommits.forEach(function (c) { if (c.g === g && c.evicted && c.evicted[0] === msgId) c.evicted = null; });
+    }
+    // 撤回只動自己：msgId 仍是這筆提交的才移除（先前提交放回，排到最新，不恢復原 FIFO 位置）。
+    // 之後表有變動（版本不符）就不回復淘汰與失準，寧可保守失準
     function revertGameSend(c) {
-        if (!c || gameSends.get(c.socketId) !== c.g) return;
+        if (!c || !openCommits.delete(c) || gameSends.get(c.socketId) !== c.g) return;
         var g = c.g, clean = g.version === c.version;
-        if (g.inflight.get(c.msgId) === c) { if (c.prev) g.inflight.set(c.msgId, c.prev); else g.inflight.delete(c.msgId); }
+        if (g.inflight.get(c.msgId) === c.seq) { g.inflight.delete(c.msgId); if (c.prev !== undefined) g.inflight.set(c.msgId, c.prev); }
         if (clean && c.evicted) g.inflight = new Map([c.evicted].concat(Array.from(g.inflight)));
         if (clean && c.lostSet) g.lost = false;
         g.version++;
     }
     function requestMsgId(b) { return b && b.length >= 3 && b[0] === TYPE_REQUEST ? b[1] | (b[2] << 8) : null; }
     function noteGameSend(socketId, b) { var id = requestMsgId(b); return id == null ? null : gameSent(socketId, id); }
+    // 提交掛到這筆送出交易上；交易已失敗不提交，已結束（晚到的 Blob）只提交不留撤回資料
+    function commitGameSend(tx, socketId, b) {
+        if (tx && tx.aborted) return;
+        var c = noteGameSend(socketId, b);
+        if (!c || !tx || tx.settled) return;
+        tx.commit = c;
+        openCommits.add(c);
+    }
     function nextPluginMsgId() {
         var busy = new Set(), lasts = [], lost = false;
         injectedMsgIds.forEach(function (v, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
         gameSends.forEach(function (g) { lost = lost || g.lost; lasts.push(g.last); g.inflight.forEach(function (c, id) { busy.add(id); }); });
         gameDispatching.forEach(function (d) { busy.add(d.msgId); lasts.push(d.msgId); });
-        if (lost) return null;
+        if (lost || blobSends.size) return null;
         for (var n = PLUGIN_MSGID_LAST - PLUGIN_MSGID_FIRST + 1; n > 0; n--) {
             var v = pluginMsgId;
             pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
@@ -1062,7 +1081,7 @@
             if (mark) gameDispatching.push(mark);
             try { var result = dispatchRaw(raw); }
             finally { if (mark) gameDispatching.splice(gameDispatching.indexOf(mark), 1); }
-            if (game && !(result && result.block)) { var c = noteGameSend(raw.wsId, raw.bytes); if (raw.tx) raw.tx.commit = c; }
+            if (game && !(result && result.block)) commitGameSend(raw.tx, raw.wsId, raw.bytes);
             return result;
         },
 
@@ -1092,7 +1111,7 @@
             // 照送：遊戲的才登記配對並記入未答（派發已記過的同號只會刷新）
             function sendOriginal() {
                 try { if (env && !injected) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ }
-                if (sender === undefined && original) noteGameSend(socketId, original);
+                if (sender === undefined && original && !(tx && tx.commit)) commitGameSend(tx, socketId, original);
             }
             try {
                 b = data instanceof ArrayBuffer ? new Uint8Array(data)
@@ -1116,6 +1135,21 @@
             return verdict;
         },
 
+        // naki-websocket 的 ws.send 包裝在每筆送出結束時呼叫（含底層 send 拋錯）：失敗撤回這筆的提交，成功只釋放撤回資料
+        sendSettled: function (tx, failed) {
+            if (!tx) return;
+            if (failed) { revertGameSend(tx.commit); tx.aborted = true; }
+            else openCommits.delete(tx.commit);
+            tx.commit = null;
+            tx.settled = true;
+        },
+
+        // naki-websocket 在遊戲 Blob 送出待展開時 +1、派發後（或展開失敗）-1
+        blobSend: function (socketId, delta) {
+            var n = (blobSends.get(socketId) || 0) + delta;
+            if (n > 0) blobSends.set(socketId, n); else blobSends.delete(socketId);
+        },
+
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
         // 這條連線的回應不會再來，配對一併清掉（第十二輪第 1 條）
         closed: function (socketId) {
@@ -1126,6 +1160,7 @@
             Array.from(ambiguousPairs).forEach(function (k) { if (k.indexOf(prefix) === 0) ambiguousPairs.delete(k); });
             ambiguousSockets.delete(String(socketId));
             gameSends.delete(socketId);
+            blobSends.delete(socketId);
         },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
@@ -1180,6 +1215,8 @@
             return JSON.parse(JSON.stringify({ runtime: diagnostics, registered: api.list(), guard: api.guardState(),
                 pendingPairs: pendingMethods.size,
                 pendingInjections: injectedMsgIds.size,
+                gameInflight: Array.from(gameSends.values()).reduce(function (n, g) { return n + g.inflight.size; }, 0),
+                openCommits: openCommits.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,

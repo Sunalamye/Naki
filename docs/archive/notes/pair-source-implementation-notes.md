@@ -260,3 +260,62 @@ PS11（擋下不消耗遊戲未答）隨 `blockSend` 的 `gameDone` 移除；它
 
 - 直接呼叫 `__nakiPlugins.dispatch`／`failSafe` 而不帶交易的程式，提交無法撤回，只會更保守。
 - 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。
+
+## 第六輪（Astra 第五輪 21～25 條；全採納）
+
+審查原文：主 repo `.swfd/logs/pair-source-review/astra-review5.md`。main 仍在 `13abe49`，不需 rebase。第五輪 Deviations 採納。
+
+### 做了什麼
+
+- `naki-websocket.js`：
+  - `ws.send` 包裝建立交易物件 `tx`，傳進 `handleMessage`（新增第七參數）。`originalSend` 拋錯時以 `sendSettled(tx, true)` 撤回並照拋原例外，其餘以 `sendSettled(tx, false)` 結束。結算本身的錯誤只記 log。
+  - 遊戲的 Blob 送出在 `arrayBuffer()` 前呼叫 `blobSend(wsId, 1)`，派發或展開失敗後 `blobSend(wsId, -1)`。
+- `naki-plugins.js`：
+  - 未答表改存提交序號，不存紀錄物件。撤回資料只在 `openCommits`，由 `commitGameSend` 掛上交易，`sendSettled` 釋放。
+  - `gameDone` 找不到號碼時，作廢進行中交易裡同號的淘汰項。
+  - `revertGameSend` 只處理仍在 `openCommits` 的紀錄。放回先前同號提交時排到最新。
+  - `failSafe` 照送時，交易已有派發的提交就不重複提交。
+  - 有待展開的遊戲 Blob 時，`nextPluginMsgId` 回 null（`msgid_busy`）。
+  - `diagnostics()` 新增 `gameInflight`、`openCommits`。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 21 | Blob 待展開期間拒發注入（選拒發，不排隊） | PS-37（無守衛大廳、有守衛對局連線） |
+| 應修 22 | 交易期間被回答的淘汰項作廢 | PS-38 |
+| 應修 23 | 撤回資料與未答分離，交易結束釋放 | PS-39、PS-43 |
+| 應修 24 | 交易涵蓋底層 send，拋錯撤回後照拋；失敗交易不收晚到的 Blob 提交 | PS-40、PS-42 |
+| 建議 25 | 放回先前提交不恢復原 FIFO 位置，文件寫明 | PS-41 |
+| 文件 | 包裝公開 `dispatch` 可改寫交易，依 U4 不列阻擋，契約與設計寫明 | — |
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-37～PS-41 套在 `ea86d74` 的 JS | 5 紅。PS-37、PS-38、PS-40 是行為紅：注入未被拒、`msgid_busy`、`msgid_busy`。PS-39、PS-41 只因新的量測欄位不存在而紅；拿掉量測斷言後只剩前三條紅，PS-41 的行為在舊版已成立，屬建議 25 的釘死測試 | `r6-red-on-ea86d74.log`、`r6-red-behavior-on-ea86d74.log` |
+| PS-42、PS-43 | 實作後補，殺變異 PS46、PS48 | — |
+| 實作後 | b2 219／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r6-final-*.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| 本輪新增 PS41～PS48 | 8/8 殺 | `r6-mutate-new.log` |
+| 全量 0–137 | 135/137；存活只有 U10、T7 | `r6-mutate-full.log` |
+
+替換字串隨程式更新：PS9、PS23、PS34、PS36、PS37、PS39、PS40。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r6-test-targeted.log`），全量 `NakiTests` 1184／0（`r6-test-full.log`）。
+
+### 第六輪 Deviations
+
+1. **Blob 拒發不分連線**：主線指示「該連線有 pending Blob」。注入配號時還不知道 `sendRaw` 會選哪條連線，所以任一連線有待展開的遊戲 Blob 就拒發，較保守。
+2. **CONNECTING 拋錯的路徑未經真 WebKit 驗證**：PS-40、PS-42 用假 socket 在 `readyState === 0` 時拋 `InvalidStateError`。真 WebKit 在 CONNECTING 時是否同步拋錯、拋什麼，沒有 live 證據。
+3. **可達紀錄數以診斷欄位量測**：測試無法走訪閉包，改以 `gameInflight`（未答）與 `openCommits`（撤回資料）兩個計數斷言。未答表的值是數字，不可能形成 `prev` 鏈。
+4. **底層 send 拋錯時，`handleMessage` 已送給 Swift 的那一筆不收回**：本包只管插件層的未答記帳，Swift 端的觀察紀錄維持原樣。
+
+### 第六輪已知風險
+
+- Blob 送出頻繁的頁面，注入會在展開期間反覆收到 `msgid_busy`。現行 Unity 客戶端送出是 TypedArray，live 未觀察到遊戲 Blob 送出。
+- 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。

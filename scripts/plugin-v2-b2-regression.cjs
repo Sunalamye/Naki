@@ -3215,6 +3215,107 @@ test('PS-36 (r5 20, consume at capacity): 256 unanswered, the 257th overflows an
   assert.equal(inject(FST).reason, 'msgid_busy');
 });
 
+const gameDiag = t => { const d = t.c.__nakiPlugins.diagnostics(); return [d.gameInflight, d.openCommits]; };
+
+test('PS-37 (r6 21): a game Blob goes out and an injection follows at once — refused msgid_busy until the Blob is expanded, then the injection avoids its number (unguarded lobby, guarded game connection)', async () => {
+  for (const guarded of [false, true]) {
+    const label = guarded ? 'guarded' : 'unguarded';
+    const t = page();
+    if (guarded) guard11(t);
+    const { inject } = injector11(t);
+    let ws = t.lobby;
+    if (guarded) { ws = gameSocket(t.c); ws.send(request(700, AUTH)); ws.receive(response(700, [8, 1])); }
+    const before = ws.sent.length;
+    ws.send(new t.c.Blob([request(64000, guarded ? OP : BEAT)]));
+    assert.equal(ws.sent.length, before + 1, label + ': the Blob went out');
+    assert.equal(inject(FST).reason, 'msgid_busy', label);
+    await tick();
+    const r = inject(FST);
+    assert.equal(r.ok, true, label + ' ' + JSON.stringify(plain(r)));
+    assert.notEqual(r.msgId, 64000, label);
+    assert.equal(gameDiag(t)[1], 0, label + ': a late Blob commit keeps no rollback record');
+  }
+});
+
+test('PS-38 (r6 22): 256 unanswered, the 257th is committed and fails, and the RESPONSE of the evicted #64000 arrives inside failSafe — the rollback does not revive 64000, so the next real send does not overflow', async () => {
+  const { t, arm } = reenterInFailSafe(t => t.lobby.receive(response(64000, [8, 1])));
+  const { inject } = injector11(t);
+  for (let i = 0; i < 256; i++) t.lobby.send(request(64000 + i, BEAT));
+  arm();
+  t.lobby.send(request(64256, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64256, 'local_error', 'bridge_error']]);
+  assert.deepEqual(gameDiag(t), [255, 0]);
+  t.lobby.send(request(64300, BEAT));
+  const r = inject(FST);
+  assert.equal(r.ok, true, JSON.stringify(plain(r)));
+});
+
+test('PS-39 (r6 23): rollback data lives only while a send is open — 4096 distinct sends keep 256 unanswered and no commit records, and 4096 re-sends of one number keep one', () => {
+  const t = page();
+  for (let i = 0; i < 4096; i++) t.lobby.send(request(1000 + i, BEAT));
+  assert.deepEqual(gameDiag(t), [256, 0]);
+  const u = page();
+  for (let i = 0; i < 4096; i++) u.lobby.send(request(5000, BEAT));
+  assert.deepEqual(gameDiag(u), [1, 0]);
+});
+
+test('PS-40 (r6 24): a socket still CONNECTING throws InvalidStateError on 257 sends — each failed send rolls its commit back and the error is rethrown, so injections work once it opens (fake socket model, not real WebKit)', () => {
+  const t = page();
+  const { inject } = injector11(t);
+  const proto = Object.getPrototypeOf(t.lobby), send = proto.send;
+  proto.send = function (d) { if (this.readyState === 0) { const e = new Error('still connecting'); e.name = 'InvalidStateError'; throw e; } return send.call(this, d); };
+  const ws = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+  ws.readyState = 0;
+  for (let i = 0; i < 257; i++) assert.throws(() => ws.send(request(64000 + i, BEAT)), { name: 'InvalidStateError' });
+  assert.equal(ws.sent.length, 0);
+  assert.deepEqual(gameDiag(t), [0, 0]);
+  ws.readyState = 1;
+  const r = inject(FST);
+  assert.equal(r.ok, true, JSON.stringify(plain(r)));
+  assert.equal(r.msgId, 64000);
+});
+
+test('PS-41 (r6 25): at full capacity, re-sending the oldest number and failing after dispatch puts the earlier commit back (as the newest, not at its old FIFO spot) — still 256, no records left', async () => {
+  let armed = 0;
+  const t = page(source('naki-websocket.js'), { encode: d => { if (armed && --armed === 0) throw new Error('encode failed'); return Buffer.from(d).toString('base64'); } });
+  guard11(t);
+  const { inject } = injector11(t);
+  for (let i = 0; i < 256; i++) t.lobby.send(request(64000 + i, BEAT));
+  armed = 1;
+  t.lobby.send(request(64000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64000, 'local_error', 'bridge_error']]);
+  assert.deepEqual(gameDiag(t), [256, 0]);
+  const r = inject(FST);
+  assert.equal(r.ok, true, JSON.stringify(plain(r)));
+  assert.equal(r.msgId >= 64256, true, String(r.msgId));
+});
+
+test('PS-42 (r6 24): a Blob sent on a CONNECTING socket throws, and its expansion arrives after the failure — the failed send is never committed', async () => {
+  const t = page();
+  const { inject } = injector11(t);
+  const proto = Object.getPrototypeOf(t.lobby), send = proto.send;
+  proto.send = function (d) { if (this.readyState === 0) { const e = new Error('still connecting'); e.name = 'InvalidStateError'; throw e; } return send.call(this, d); };
+  const ws = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+  ws.readyState = 0;
+  assert.throws(() => ws.send(new t.c.Blob([request(64000, BEAT)])), { name: 'InvalidStateError' });
+  await tick();
+  assert.deepEqual(gameDiag(t), [0, 0]);
+  ws.readyState = 1;
+  assert.equal(inject(FST).msgId, 64000);
+});
+
+test('PS-43 (r6 23): a request committed by the dispatch and then sent as-is by failSafe (bridge error, no guard) is counted once and leaves no rollback record', () => {
+  let armed = 0;
+  const t = page(source('naki-websocket.js'), { encode: d => { if (armed && --armed === 0) throw new Error('encode failed'); return Buffer.from(d).toString('base64'); } });
+  injector11(t);
+  armed = 1;
+  t.lobby.send(request(64000, BEAT));
+  assert.equal(sentOn(t.lobby).includes(64000), true);
+  assert.deepEqual(gameDiag(t), [1, 0]);
+});
+
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
   const t = page();
   const { answers, inject } = injector11(t);
