@@ -294,8 +294,8 @@ struct PluginsPageView: View {
         HStack(spacing: PanelLayout.Spacing.s6) {
             Text("來源").font(.caption).foregroundStyle(.secondary)
             if let url = d.sourceURL {
-                Link(url.host.map { $0 + url.path } ?? url.absoluteString, destination: url)
-                    .font(.caption).lineLimit(1).help(url.absoluteString)
+                Link(Self.sourceLabel(url), destination: url)
+                    .font(.caption).lineLimit(1).truncationMode(.middle).help(url.absoluteString)
             } else {
                 Text("手動安裝").font(.caption).foregroundStyle(.secondary)
             }
@@ -307,6 +307,14 @@ struct PluginsPageView: View {
                 .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             #endif
         }
+    }
+
+    /// host 加 path 前兩段；更長的以「…」結尾。
+    static func sourceLabel(_ url: URL) -> String {
+        guard let host = url.host else { return url.absoluteString }
+        let parts = url.pathComponents.filter { $0 != "/" }
+        let head = ([host] + parts.prefix(2)).joined(separator: "/")
+        return parts.count > 2 ? head + "…" : head
     }
 
     /// 右欄：選中插件的完整詳情（header + 操作 + 設定 + 原始碼）。

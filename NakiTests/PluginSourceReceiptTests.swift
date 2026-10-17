@@ -55,4 +55,17 @@ final class PluginSourceReceiptTests: XCTestCase {
             XCTAssertNil(PluginRegistry.load(directory: dir).sourceURL, bad)
         }
     }
+
+    func testSourceLabelKeepsTwoSegmentsWithoutEllipsis() {
+        XCTAssertEqual(PluginsPageView.sourceLabel(URL(string: "https://github.com/o/r")!), "github.com/o/r")
+    }
+
+    func testSourceLabelTruncatesLongPathWithEllipsis() {
+        let url = URL(string: "https://raw.githubusercontent.com/Sunalamye/naki-plugins/94fa19/plugins/x/plugin.json")!
+        XCTAssertEqual(PluginsPageView.sourceLabel(url), "raw.githubusercontent.com/Sunalamye/naki-plugins…")
+    }
+
+    func testSourceLabelWithoutPathShowsHostOnly() {
+        XCTAssertEqual(PluginsPageView.sourceLabel(URL(string: "https://example.com")!), "example.com")
+    }
 }
