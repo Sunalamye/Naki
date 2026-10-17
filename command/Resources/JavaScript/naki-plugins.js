@@ -667,6 +667,8 @@
     var bootstrapState = 'idle';   // idle → loading → done
     var DEV_LOG_LIMIT = 500;
     var devLogCounts = new Map();
+    var devLogSealed = new Set();
+    var SEAL_META_MAX_BYTES = 512;
 
     var api = {
         get loadSource() { return bootstrapState === 'loading' ? 'document-start' : 'hot'; },
@@ -674,6 +676,8 @@
         beginBootstrap: function () {
             if (bootstrapState !== 'idle') return false;
             bootstrapState = 'loading';
+            devLogCounts.clear();
+            devLogSealed.clear();
             return true;
         },
         endBootstrap: function () {
@@ -684,11 +688,27 @@
         // 拿到 ctx.log 之前就能寫宿主 log（同一管道、同一前綴）。只收已註冊或持有宿主 grant 的 id，每插件每頁 500 行。
         // 回 true＝sendToSwift 確認已交給宿主；bridge 缺席／拋錯／line.toString 拋錯＝false 且不佔配額。
         devLog: function (pluginId, line) {
-            if (typeof pluginId !== 'string' || !(registry.has(pluginId) || grantFor(pluginId))) return false;
+            if (typeof pluginId !== 'string' || devLogSealed.has(pluginId) || !(registry.has(pluginId) || grantFor(pluginId))) return false;
             var n = devLogCounts.get(pluginId) || 0;
             if (n >= DEV_LOG_LIMIT) return false;
             if (!pluginLog(pluginId, line)) return false;
             devLogCounts.set(pluginId, n + 1);
+            return true;
+        },
+
+        // 封存：宿主以真實交付數組 seal 行（插件無法偽造 count），成功後該插件本頁 devLog／devLogSeal 一律 false。不佔 500 行配額。
+        devLogSeal: function (pluginId, meta) {
+            if (typeof pluginId !== 'string' || devLogSealed.has(pluginId) || !(registry.has(pluginId) || grantFor(pluginId))) return false;
+            if (meta === null || typeof meta !== 'object') return false;
+            var proto = Object.getPrototypeOf(meta);
+            if (proto !== null && Object.getPrototypeOf(proto) !== null) return false;   // 純物件（含跨 realm），排除 class 實例
+            var metaJson;
+            try { metaJson = JSON.stringify(meta); } catch (e) { return false; }
+            if (typeof metaJson !== 'string' || unescape(encodeURIComponent(metaJson)).length > SEAL_META_MAX_BYTES) return false;
+            var line = '{"kind":"seal","plugin":' + JSON.stringify(pluginId) + ',"count":' + (devLogCounts.get(pluginId) || 0) + ',"meta":' + metaJson + '}';
+            if (devLogSealed.has(pluginId)) return false;   // stringify 期間 getter／toJSON 可能重入並已封存
+            if (!pluginLog(pluginId, line)) return false;
+            devLogSealed.add(pluginId);
             return true;
         },
 

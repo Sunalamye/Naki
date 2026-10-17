@@ -688,3 +688,7 @@ window.__nakiProto.schemaInfo  // { source: 'docs/protocol/liqi.json', sha256, k
 6. **驗收**：`node` 測試涵蓋 hook 成功、hook 拋錯後退回重跑、`seq` 逆序丟棄、無 hook 插件走舊路徑；Swift 單測涵蓋 `seq` 遞增與快照內容；App 內手測一次。
 
 **代價**：比第一版估計大，但仍小。`naki-plugins.js` 一個函式、一個 hook、一個 `seq` 表；`NakiRuntime.setPluginSetting` 換一段 JS 並維護 `seq`。
+
+## devLogSeal：devLog 尾封（2026-10-17）
+
+插件測試紀錄的頁尾完整性無法由頁面側（localStorage）自證，需宿主見證。`__nakiPlugins.devLogSeal(pluginId, meta)` 由宿主組 `{"kind":"seal","plugin","count","meta"}` 一行，走 `devLog` 同一 `plugin_event` 管道與落檔格式；`count` 取宿主已成功交付的 `devLog` 行數，插件無法偽造。封存成功後該插件本頁 `devLog`／`devLogSeal` fail-closed。契約見 `docs/plugin-api-v1.md`，實作紀錄見 `docs/archive/notes/plugin-devlog-seal-implementation-notes.md`。
