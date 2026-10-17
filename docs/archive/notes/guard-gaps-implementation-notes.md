@@ -53,3 +53,34 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 - Naki 自送經 `sendRaw` 退回到對局連線的守衛方法不擋，這是主線指定的範圍。Naki 的 Swift 端目前沒有送任何可守衛方法（`command/` 下 grep 19 個方法名為零）。`execute_js` 之類的通用入口不在此列。
 - 就地改寫成「Naki 解析不出、伺服器解得開」的守衛方法不撤回，因為判斷依賴解析。歸入 §1.4 剩下的第 3 項。
 - hook 保留 `ctx.bytes` 的參照、在之後的派發外改寫不在範圍內。派發到 `originalSend` 是同步的，非同步改寫趕不上這一筆。遊戲重用同一塊 heap view 的情況未驗證。
+
+## 第二輪（Astra 第一輪審查：1【擋】5【應修】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review1.md`。五個 Deviations 主線採納。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 擋 1 | 鎖 game、污染 SKIN 後，hook 以 `ctx.replace` 把 `fetchCharacterInfo` 換成 SKIN，仍外送且無紀錄 | `runChain` 的送出改寫檢查涵蓋 `replace`：非大廳的鏈上，改後解析為 `GUARDABLE_METHODS` 就撤回並計 hook 失敗，不污染、不讀 `sendGuard`。大廳不變。§1.4 第 2 項改列實際剩餘來源，不再寫「插件改寫來源已收完」（`GG2-1`） |
+| 應修 2 | 注入標記只比 msgId，注入派發中 hook 在另一條 game 連線同步送同號 SKIN 被誤擋 | 標記改成 `{ msgId, used }`，同 msgId 的第一次送出派發用掉它；之後同號的派發不算注入（`GG2-2`） |
+| 應修 3 | game 上 `sendRequest(OP)` 多讀一次 `sendGuard` | `injectedFallback` 先以 `GUARDABLE_METHODS` 排除（`GG2-3`） |
+| 應修 4 | `noteSuccess` 在違規檢查前，連續違規永遠記「第 1 次」 | 成功記帳移到檢查之後（`GG2-4`：第 10 次自動停用） |
+| 應修 5 | Blob 代價被「大廳本來就不可用」帶過 | 設計 §1.4、ADR、契約明載獨立風險：只有 `authGame` 改用 Blob 時，對局連線持續被拒、角色持續 unknown、不會自行恢復；補混合型別案例（`GG2-5`）。保留拒送策略 |
+| 應修 6 | 「還原 null」「僅正常返回時還原」兩個變異存活 | `GG2-6a`（`sendRaw` 拋錯後標記清掉）、`GG2-6b`（`sendRaw` 前巢狀注入，外層標記恢復）；型別矩陣與前 hook 合法改寫保留入固定回歸（`GG2-6c`） |
+
+### 第二輪 Deviations
+
+7. **擋 1 撤回的是「這個 hook 的改動」，不是整鏈。** 先前 hook 的合法改寫保留（`GG2-6c`）。與主線「送原 bytes」的差別只在多插件鏈；單一插件時就是原 bytes。這沿用既有 catch 的語意（契約「hook 拋錯」段）。
+8. **應修 2 用「第一次派發用掉」綁定，不帶連線 id。** `sendRaw` 選線之後才知道連線，插件層拿不到。從設標記到包裝的 `ws.send` 進入 `dispatch`，中間不會跑插件程式碼（`sendRaw` 只做解碼與選線），除非頁面替換了 `sendRaw`（`GG2-6b` 模擬這種情況）。所以第一次同號送出派發就是這次注入。
+9. **「還原 null 而非 prev」只在設標記與派發之間有巢狀注入時可觀測。** 正常的巢狀注入發生在外層派發的 hook 裡，那時外層標記已用掉，還原成 null 或 prev 結果相同。`GG2-6b` 以替換 `sendRaw` 製造派發前的巢狀注入，殺掉這個變異。
+10. **恢復條件寫得比主線精確。** 主線寫「不會自行恢復」。實際要停用所有宣告 `sendGuard` 的插件；已污染時還要重載頁面，而重載後守衛插件若仍啟用會再次拒送。
+
+### 第二輪驗證（log：主 repo `.swfd/logs/guard-gaps/r2-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第一輪 HEAD `65a7865` 的 JS | 4 紅（`GG2-1`～`GG2-4`）；`GG2-5`、`GG2-6a`～`GG2-6c` 鎖既有行為與殺變異，修前即綠 | `r2-red-b2-on-65a7865.log` |
+| 修後 node 四套 | b2 86／0、v2 21／0、p4 24／0、plugin-regression 38／0 | `r2-green-*.log` |
+| 變異 | 17／17 被殺（新增 N1～N7，第一輪 M 系列依新程式更新字串後重跑） | `r2-mutation.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r2-swift-targeted.log` |
+| 全量 NakiTests（等另一個 xcodebuild 結束後跑，一次） | 1181／0，無 test host 重啟 | `r2-test-full.log` |
+

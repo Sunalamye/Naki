@@ -840,7 +840,7 @@ test('R6-2 (Astra5 2, guard-gaps b): an in-place rewrite outside ctx.replace int
     const out = ws.sent.slice(-1)[0];
     assert.deepEqual(Array.from(new Uint8Array(out.buffer ? out.buffer : out)), original, method);
     assert.equal(roleOf(t, ws), first ? 'lobby' : undefined, method);
-    assert.equal(t.events('log').some(e => /就地改寫成守衛方法/.test(e.data.msg)), true, method);
+    assert.equal(t.events('log').some(e => /改寫成守衛方法/.test(e.data.msg)), true, method);
   }
 });
 
@@ -895,6 +895,132 @@ test('guard-gaps c: with no guard present a Blob on an unknown connection still 
   const blob = new t.c.Blob([request(723, SKIN)]);
   u.send(blob);
   assert.equal(u.sent[0], blob);
+});
+
+// ---- guard-gaps 第二輪（Astra guard-gaps 第 1–6 條）----
+const bytesOf = d => Array.from(d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d.buffer, d.byteOffset, d.byteLength));
+const idOf = (t, ws) => t.c.__nakiWebSocket.getMajsoulConnections().find(c => c.ws === ws).id;
+const sameLength = (method, total, msgId) => request(msgId, method, new Array(total - 5 - method.length - 2).fill(8));
+
+test('GG2-1 (Astra 1): on a game connection a ctx.replace into a guarded method is reverted, counted as a hook failure, and the original goes out', async () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  guardPlugin(t.c);
+  pollute(t);
+  const results = [];
+  t.c.__nakiPlugins.setGrant('rw', { capabilities: ['observe', 'rewriteSend'], methods: [INFO] });
+  t.c.__nakiPlugins.register({ id: 'rw', onSend(ctx) { results.push(ctx.replace(request(ctx.msgId, SKIN, [8, 1]))); } });
+  const g = gameSocket(t.c);
+  g.send(request(800, AUTH));
+  const req = request(801, INFO);
+  const original = Array.from(req);
+  g.send(req);
+  await tick();
+  assert.deepEqual(results, [true]);
+  assert.deepEqual(sentOn(g), [800, 801]);
+  assert.deepEqual(bytesOf(g.sent[1]), original);
+  assert.equal(t.events('log').some(e => e.data.id === 'rw' && /onSend 拋錯（第 1 次）.*改寫成守衛方法/.test(e.data.msg)), true);
+});
+
+test('GG2-2 (Astra 2): a hook of the injected dispatch sending the same msgId on another game connection is not judged as the injection', async () => {
+  const { t, g, inject } = fallbackPage();
+  const g2 = gameSocket(t.c);
+  g2.send(request(702, AUTH));
+  t.c.__nakiPlugins.setGrant('obsN', { capabilities: ['observe'], methods: [TITLE], observeNakiTraffic: true });
+  t.c.__nakiPlugins.register({ id: 'obsN', onSend(ctx) {
+    if (ctx.isNaki) (ctx.socketId === idOf(t, g) ? g2 : g).send(request(ctx.msgId, SKIN)); } });
+  const r = inject(TITLE);
+  await tick();
+  const all = [...sentOn(g), ...sentOn(g2)];
+  assert.equal(all.filter(id => id === r.msgId).length, 2, 'the injected TITLE and the game\'s own SKIN both go out');
+  assert.deepEqual(guardLog(t), []);
+});
+
+test('GG2-3 (Astra 3): injecting a method that can never be guarded does not read sendGuard', () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  let reads = 0;
+  t.c.__nakiPlugins.setGrant('g', { capabilities: ['observe'], methods: [SKIN], get sendGuard() { reads++; return [SKIN]; } });
+  t.c.__nakiPlugins.register({ id: 'g', onSend() {} });
+  const inject = injector(t);
+  const g = gameSocket(t.c);
+  g.send(request(810, AUTH));
+  g.send(request(811, OP));
+  const before = reads;
+  const r = inject()(OP, new t.c.Uint8Array([8, 1]));
+  assert.equal(r.ok, true);
+  assert.equal(reads, before);
+  assert.deepEqual(sentOn(g), [810, 811, r.msgId]);
+});
+
+test('GG2-4 (Astra 4): ten consecutive in-place violations auto-disable the plugin', () => {
+  const t = page();
+  t.c.__nakiPlugins.setGrant('bad', { capabilities: ['observe'], methods: [OP] });
+  t.c.__nakiPlugins.register({ id: 'bad', onSend(ctx) { ctx.bytes.set(sameLength(TITLE, ctx.bytes.length, ctx.msgId)); } });
+  const g = gameSocket(t.c);
+  g.send(request(820, AUTH));
+  const originals = [];
+  for (let i = 0; i < 11; i++) { const req = request(821 + i, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]); originals.push(Array.from(req)); g.send(req); }
+  assert.deepEqual(g.sent.slice(1).map(bytesOf), originals);
+  assert.equal(t.events('log').some(e => e.data.id === 'bad' && /第 10 次/.test(e.data.msg)), true);
+  assert.deepEqual(plain(t.c.__nakiPlugins.list()), [], 'auto-disabled after the tenth');
+});
+
+test('GG2-5 (Astra 5, documented risk): with only authGame switched to Blob, the lobby keeps working while the game connection is refused on every retry and stays unknown', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  t.lobby.send(request(830, BEAT));
+  const g = gameSocket(t.c);
+  for (let i = 0; i < 3; i++) g.send(new t.c.Blob([request(831 + i, AUTH)]));
+  t.lobby.send(request(834, BEAT));
+  await tick();
+  assert.deepEqual(sentIds(t), [830, 834]);
+  assert.equal(g.sent.length, 0);
+  assert.equal(roleOf(t, g), undefined);
+  assert.deepEqual(guardLog(t).map(e => e.slice(2)), Array(3).fill(['refused_opaque', 'opaque_unknown_role']));
+});
+
+test('GG2-6a (Astra 6): when sendRaw throws, the injection marker is cleared, so a later game request with that msgId goes out', async () => {
+  const { t, g, inject } = fallbackPage();
+  const real = t.c.__nakiWebSocket.sendRaw;
+  t.c.__nakiWebSocket.sendRaw = () => { throw new Error('bridge gone'); };
+  assert.throws(() => inject(SKIN), /bridge gone/);
+  t.c.__nakiWebSocket.sendRaw = real;
+  g.send(request(64000, SKIN));
+  await tick();
+  assert.deepEqual(sentOn(g), [700, 701, 64000]);
+  assert.deepEqual(guardLog(t), []);
+});
+
+test('GG2-6b (Astra 6): an injection nested before the outer dispatch restores the outer marker, so the outer guarded injection is still blocked', async () => {
+  const { t, g, inject } = fallbackPage();
+  const real = t.c.__nakiWebSocket.sendRaw;
+  let depth = 0, inner;
+  t.c.__nakiWebSocket.sendRaw = b => { if (depth++ === 0) inner = inject(TITLE); return real(b); };
+  const outer = inject(SKIN);
+  await tick();
+  assert.equal(inner.ok && outer.ok, true);
+  assert.deepEqual(sentOn(g), [700, 701, inner.msgId]);
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[outer.msgId, 'local_error', 'tainted_fallback']]);
+});
+
+test('GG2-6c (Astra 6): the in-place revert holds for ArrayBuffer, Uint8Array and an offset DataView, and keeps an earlier hook\'s legal change', () => {
+  for (const kind of ['ArrayBuffer', 'Uint8Array', 'DataView']) {
+    const t = page();
+    t.c.__nakiPlugins.setGrant('p1', { capabilities: ['observe'], methods: [OP], priority: 0 });
+    t.c.__nakiPlugins.register({ id: 'p1', onSend(ctx) { ctx.bytes[ctx.bytes.length - 1] ^= 1; } });
+    t.c.__nakiPlugins.setGrant('p2', { capabilities: ['observe'], methods: [OP], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'p2', onSend(ctx) { ctx.bytes.set(sameLength(TITLE, ctx.bytes.length, ctx.msgId)); } });
+    const g = gameSocket(t.c);
+    g.send(request(840, AUTH));
+    const req = request(841, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]);
+    const expected = Array.from(req); expected[expected.length - 1] ^= 1;
+    const big = new Uint8Array(req.length + 4); big.set(req, 2);
+    const data = kind === 'ArrayBuffer' ? req.slice().buffer : kind === 'Uint8Array' ? req.slice() : new DataView(big.buffer, 2, req.length);
+    g.send(data);
+    assert.deepEqual(bytesOf(g.sent[1]), expected, kind);
+    if (kind === 'DataView') assert.deepEqual([big[0], big[1], big[big.length - 2], big[big.length - 1]], [0, 0, 0, 0], 'bytes outside the view untouched');
+  }
 });
 
 test('R6-4 (Astra5 5): a FastTest whose type byte an observer corrupts is refused by failSafe on a lobby, sent on a game connection', async () => {
