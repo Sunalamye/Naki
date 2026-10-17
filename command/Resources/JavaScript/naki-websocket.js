@@ -130,7 +130,8 @@
             sendToSwift('websocket_connected', { socketId: wsId, url: url, isMajsoul: isMajsoul });
         });
 
-        // 連線紀錄只清一次：握手失敗只會觸發 error（readyState 直接為 CLOSED，不一定有 close）
+        // 連線紀錄只清一次。握手失敗只觸發 error 且當下 readyState 仍是 CONNECTING（live 實測，下個 tick 才 CLOSED），
+        // 所以不能靠 readyState 判斷；error 一律釋放，隨後的 close 靠 released 冪等
         let released = false;
         const release = function() {
             if (released) return;
@@ -158,7 +159,7 @@
                 socketId: wsId,
                 error: 'WebSocket error'
             });
-            if (ws.readyState === OriginalWebSocket.CLOSED) release();
+            release();
         });
 
         // 攔截 send 方法
@@ -457,7 +458,7 @@
                 const resB64 = arrayBufferToBase64(response.slice().buffer);
                 if (reqB64 && resB64) {
                     sendToSwift('websocket_message', { socketId: wsId, direction: 'send', data: reqB64, type: 'binary',
-                        size: verdict.request.byteLength, localResponse: resB64 });
+                        size: verdict.request.byteLength, localResponse: resB64, reason: verdict.reason });
                 }
             }
         } catch (e) { console.error('[Naki WS] 本地交易送 Swift 失敗（兩份都沒送）:', e); }

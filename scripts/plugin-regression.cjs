@@ -374,14 +374,24 @@ test('D22-3 residual: with its sendRaw registration evicted, a game RESPONSE on 
   assert.deepEqual(general.filter(x => x === 64000), [64000], 'only the game REQUEST reached the general chain');
 });
 
-test('handshake failure: error with readyState CLOSED releases the connection and notifies plugins once', () => {
-  const { c, socket } = page(); let closed = 0, ids = []; const orig = c.__nakiPlugins.closed;
+// WebKit 握手失敗兩種情境（live 2026-10-17）：error 當下 readyState 仍是 0；(a) 之後完全沒有 close（live 紀錄）、(b) 下個 tick 變 3 並補 close
+function failHandshake(ws) { ws.readyState = 0; ws.listeners.error({}); }
+test('handshake failure (a): error with no close afterwards releases the connection and notifies plugins once', () => {
+  const { c, events, socket } = page(); let closed = 0, ids = []; const orig = c.__nakiPlugins.closed;
   c.__nakiPlugins.closed = id => { closed++; ids.push(id); return orig.call(c.__nakiPlugins, id); };
   const ws = socket(GATEWAY); const id = c.__nakiWebSocket.getConnections()[0].id;
-  ws.listeners.error({}); assert.equal(c.__nakiWebSocket.getConnections().length, 1, 'error while not CLOSED keeps it');
-  ws.readyState = 3; ws.listeners.error({});
+  failHandshake(ws);
   assert.equal(c.__nakiWebSocket.getConnections().some(x => x.id === id), false);
   assert.deepEqual([closed, ids[0]], [1, id]);
+  assert.equal(events.filter(e => e.type === 'websocket_error').length, 1);
+});
+test('handshake failure (b): the close that follows the error neither releases nor notifies plugins twice, Swift still hears it', () => {
+  const { c, events, socket } = page(); let closed = 0; const orig = c.__nakiPlugins.closed;
+  c.__nakiPlugins.closed = id => { closed++; return orig.call(c.__nakiPlugins, id); };
+  const ws = socket(GATEWAY);
+  failHandshake(ws); ws.readyState = 3; ws.listeners.close({ code: 1006, reason: '' });
+  assert.equal(closed, 1); assert.equal(c.__nakiWebSocket.getConnections().length, 0);
+  assert.equal(events.filter(e => e.type === 'websocket_close').length, 1);
 });
 test('close then error releases only once', () => {
   const { c, socket } = page(); let closed = 0; const orig = c.__nakiPlugins.closed;

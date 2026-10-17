@@ -118,6 +118,7 @@ test('N1: auto-disable after repeated failures, failed hot reload, and L3 off al
   assert.deepEqual(sentIds(t), [10]);
   assert.equal(t.game.filter(b => JSON.stringify(b.slice(3)) === JSON.stringify(errorResponse(0).slice(3))).length, 11, 'eleven synthetic error responses reached the game');
   assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.slice(-1).map(e => e.reason), ['not_on_chain']);
+  assert.equal(t.swift.filter(e => e.data.localResponse).pop().data.reason, 'not_on_chain', 'Swift gets the block reason for its log');
 });
 
 test('N1: a re-registered tainted plugin that still guards the method must approve again', () => {
