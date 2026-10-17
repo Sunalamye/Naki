@@ -508,6 +508,25 @@ return JSON.stringify(P.sockets.map(function (s) {
 
 主線或用戶，在**測試帳號**、有 live 對局的 session 上跑。本工作包沒有測試帳號與對局，**未執行**。log 建議放 `.swfd/logs/plugin-v2-probe/`（三次 `/js` 回應原文＋兩次 `/game/state`）。
 
+### 9.6 live 結果（2026-10-17）
+
+結論：**(a)(b)(c)(d) 全部未驗證**。兩個目標 method 在整場對局都沒有出現，攔截器沒有觸發，沒有合成事件。
+
+| 項 | 結果 | 依據 |
+|---|---|---|
+| (a) | 未驗證 | game-gateway `target` 全程為 null |
+| (b) | 未驗證 | 同上；沒有合成事件可吃 |
+| (c) | 未驗證；只得到註冊方式的事實 | 遊戲對每條連線（game-gateway 與三條 gateway）都只用 `onmessage` 註冊 1 次，`addEventListener` 0 次 |
+| (d) | 未驗證 | 同 (a) |
+
+- **環境**：Naki 2.18.0（`/Applications/Naki.app`），測試帳號，`room_quick_test` 四人南人機房＋`bot_sync`。probe 在大廳、進場前安裝（`02-install.json`，第二次回 `already: true`），game-gateway 進場後即 `armed`。
+- **命中的 method**：無。game-gateway 全場收到 `.lq.ActionPrototype` 693、`inputOperation` 87、`.lq.Route.heartbeat` 31、`inputChiPengGang` 28 等，`.lq.FastTest.checkNetworkDelay` 0 筆。Naki all.log 裡唯一的 `checkNetworkDelay` 字樣是 probe 腳本本身。現行 Unity 客戶端以 `.lq.Route.heartbeat` 保活，§9.2 的「checkNetworkDelay 會週期性送」不成立。`.lq.NotifyGameBroadcast` 需要送表情，本次不授權送。
+- **對局是否照常**：照常。東1局起打到有人被飛終局（約 9 分鐘），自動打牌全程有 `inputOperation`／RESPONSE，`/game/state` 持續前進，game-gateway 沒有重連（probe 只記到一條 game-gateway、`requestConnection` 1 次），probe 沒記到遊戲 handler 拋錯。03:43:33 有一筆 `WebSocket error`，是 `bot_sync` 強制重連後一條 lobby `/gateway` 連線失敗（readyState 3、零訊息），不是 game-gateway，發生時攔截器尚未觸發過。
+- **收尾**：終局後重載頁面，`window.__nakiP4` 已不存在。
+- **原始資料**：`.swfd/logs/phase4-probe-live/`（`02-install*.json`、`03-probe-1..10.json` 每 30 秒一次、`03-probe-11-final.json`、`04-naki-log-grep.txt`、截圖）。
+- **要讓 probe 能判讀，需要另擇目標**（待主線與用戶裁決，本次未做）：game-gateway 的 `.lq.Route.heartbeat` RESPONSE（約每 15 秒一筆、不在禁止清單），或授權送一次表情觸發 `NotifyGameBroadcast`。
+- **Deviations**：工作包要求的節號是 9.4，但 9.4 已是「判準」，為免重編號改用 9.6。
+
 ---
 
 ## 10. 工作包切分與順序
@@ -517,7 +536,7 @@ return JSON.stringify(P.sockets.map(function (s) {
 | **PV2-A** 設定頁 | spike 補完：App 內手測（macOS）與 iOS 模擬器手測；iframe 拿不到 bridge 的測試；`plugin-api-v1.md` §1／§6 補 `settingsUI` 與 `window.naki`。**加入 §12 一項**：設定 `json` 型別（§12.2 #5，規則見 §12.4）。spike 已含：匯入補抓 `settingsUI`（審查第 2 條）、共用讀值規則（第 10 條）、設定頁身分重建（第 8 條）、bridge 只授權 manifest 頁（第 13 條） | 無 | 低：不碰封包、不碰遊戲頁 |
 | **PV2-B1** `rewriteSend`＋JS hook | spike 補完：`plugin-api-v1.md` §3／§4／§5 改契約（送出禁改名單的保障範圍、換 method 規則、RESPONSE `ctx.method` 語意、鏈停止條件、hook 拋錯全還原）；UI 對 `rewriteSend` 插件顯示 L3 警語；`naki-core.js` 的 `parseEnvelope` 修 fixed32／fixed64 越界並更新 corpus 測試；**live 測試帳號驗一次**（改寫一個無害的大廳請求，要有同 msgId RESPONSE）。**加入 §12 兩項**：`onSocketClose`（§12.2 #11）、設定熱更新 `onSettingsChanged`（§12.2 #7，JS 與 `NakiRuntime.setPluginSetting` 一起，規則見 §12.5） | **修改 bridge 前**取得主線確認（CLAUDE.md；spike 已先改，程序偏離由主線處理，審查第 12 條）；task #5 已滿足「不需回應的先上」 | 中：動送出路徑，但 isNaki 與零插件路徑有單測鎖住 |
 | **PV2-C** protobuf 編解碼 API | §12.3：bundled `liqi.json` 驅動的 `window.__nakiProto`；資料保真契約與往返 fixture（§12.3 列的六類）；與 Swift 端解析結果對照的 fixture；manifest 加 `"protobuf": true` 才注入 | 無（不卡 Phase 4）；`liqi.json` 打包進 App 需主線確認 | 中：第二份協定解讀，`liqi.json` 本身過期（CLAUDE.md） |
-| **PV2-B2** Phase 4 | 變長 receive `replace`、receive `drop`、`injectReceive`、`respondLocally`（含 §4.3 的 Swift 配對順序與契約測試）；Naki listener 改 capture 與合成 event 略過；canonical proto3 三種變形 fixture；`replay-check.sh` 零插件指紋相同；`soak-test.sh` ≥3 局 | **§9 probe (a)(b)(c) 全綠**（`plugin-system-design.md` §11 #6） | 高：動 Naki 收封包的主路徑，做壞了 Naki 整個瞎掉 |
+| **PV2-B2** Phase 4 | 變長 receive `replace`、receive `drop`、`injectReceive`、`respondLocally`（含 §4.3 的 Swift 配對順序與契約測試）；Naki listener 改 capture 與合成 event 略過；canonical proto3 三種變形 fixture；`replay-check.sh` 零插件指紋相同；`soak-test.sh` ≥3 局 | **§9 probe (a)(b)(c) 全綠**（`plugin-system-design.md` §11 #6）；probe 結果見 §9.6 | 高：動 Naki 收封包的主路徑，做壞了 Naki 整個瞎掉 |
 
 **檔案歸屬**（審查第 11 條：第一版寫「三包檔案不重疊」不正確，熱更新會動 `naki-plugins.js`）：
 
