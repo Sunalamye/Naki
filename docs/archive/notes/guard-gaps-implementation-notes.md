@@ -525,3 +525,34 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 - 跨來源同號碰撞可能派錯或對不回；表滿淘汰的配對對不回 method（Dev 65）。
 - WebKit、live 未驗證（I2）。
+
+## 合併前補項（復驗剩餘問題 1、2，主線指示）
+
+| 項 | 處理 |
+|---|---|
+| 1 | 補 `GG14-2`：表滿 256 時先寫 A、覆寫 A、再寫 255 個新鍵，A 仍在、最舊的另一鍵（3001）被淘汰。復驗者的變異 VB2（只在零消耗者時刪舊鍵，覆寫不移到最新）原本存活，現在被 `GG14-2` 殺掉 |
+| 2 | 變異 harness 入 repo：`scripts/guard-gaps-mutate.cjs`，見下節 |
+| 3 | `disable` 註解原寫「或換了 grant」，改成與契約一致：有新實例才不清；只換 grant、沒有重新註冊時照刪（Dev 50） |
+
+### 變異 harness（`scripts/guard-gaps-mutate.cjs`）
+
+- 內含 90 個變異定義：第二輪到第十四輪的 89 個，加上復驗者的 VB2。每個定義是一組「原字串 → 變異字串」，原字串在 `naki-plugins.js` 必須唯一；程式改動後對不上時該變異報「定義過期」並以非 0 結束，要跟著改定義。
+- 做法沿用復驗者的 `verify-mut.py`：每個變異在暫存目錄複製一份 JS 與 b2／v2 腳本後跑；p4 跑 repo 內的腳本，以 `NAKI_JS_DIR` 指向變異 JS（p4 從自己的 git 取 main 比對，搬到暫存目錄會讓「main parity」恆紅）。先跑未變異基線，基線必須 0 fail，否則停止。
+- 判定：b2、v2、p4 任一有 `not ok` 就算殺掉；沒有 TAP 摘要（崩潰或逾時）也算失敗。存活只准 `T7`、`U10`（等價變異，見 Dev 25、34），其他存活以非 0 結束。
+- 用法（需要 naki-plugins repo，`NAKI_PLUGINS_DIR` 預設 `../naki-plugins`）：
+
+```bash
+NAKI_PLUGINS_DIR=<naki-plugins> node scripts/guard-gaps-mutate.cjs --from 0 --to 45 --log <log>
+NAKI_PLUGINS_DIR=<naki-plugins> node scripts/guard-gaps-mutate.cjs --from 45 --to 90 --log <log>
+```
+
+  `--from`／`--to` 是定義索引（含頭不含尾），用來分段在前景跑；`--log` 逐行追加，中斷時已跑的不會丟。全量兩段各約 1 分鐘（本機實測第一段 45 秒）。
+
+### 驗證（log：主 repo `.swfd/logs/guard-gaps/fix-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 全量變異（兩段，基線各 0 fail） | 88／90 被殺；存活只有 `T7`、`U10`；VB2 由 `GG14-2` 殺掉 | `fix-mutation.log` |
+| 定義與最終原始碼 | 變異跑完後只改了 `disable` 一行註解；之後重新核對 90 個定義的原字串在最終 `naki-plugins.js` 都唯一存在，無過期 | |
+| b2 | 177／0（0 略過） | `fix-green-plugin-v2-b2.log` |
+| plugin-regression | 39／0 | `fix-green-plugin-regression.log` |

@@ -1120,7 +1120,7 @@
         },
 
         // 熱停用：從 registry 移除、清 grant、歸零失敗計數。回可觀測結果。
-        // onDisable 內可能已註冊同 id 的新實例（或換了 grant）：尾端清理只作用於被停用的這個實例與它的 grant（第十輪第 2 條）
+        // onDisable 內可能已註冊同 id 的新實例：有新實例就不清它的失敗計數與 grant；只換 grant、沒有重新註冊時照刪（第十輪第 2 條，與契約一致）
         disable: function (id) {
             var entry = registry.get(id);
             var wasRegistered = registry.delete(id);

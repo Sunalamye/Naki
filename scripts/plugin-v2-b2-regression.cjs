@@ -2802,3 +2802,17 @@ test('GG14-1 (Astra13 1): INFO sent, the only plugin disabled, INFO answered to 
     assert.deepEqual(plain(got), early ? [BEAT] : [], label);
   }
 });
+
+test('GG14-2 (verifier VB2): overwriting a key moves it to the newest position — with the table full, rewrite A then add 255 new keys: A survives and the oldest other key is evicted', async () => {
+  const t = page();
+  const got = seen11(t, [INFO, BEAT]);
+  for (let i = 0; i < 256; i++) t.lobby.send(request(3000 + i, INFO));
+  assert.equal(pendingPairs(t), 256);
+  t.lobby.send(request(3000, BEAT));
+  for (let i = 0; i < 255; i++) t.lobby.send(request(3300 + i, INFO));
+  await tick();
+  assert.equal(pendingPairs(t), 256);
+  t.lobby.receive(response(3001, [8, 1]));
+  t.lobby.receive(response(3000, [8, 1]));
+  assert.deepEqual(plain(got), [BEAT], 'A (rewritten as loginBeat) is still paired; 3001 was evicted');
+});
