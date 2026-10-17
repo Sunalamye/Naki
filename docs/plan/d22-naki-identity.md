@@ -86,6 +86,8 @@ live 事實（`.swfd/logs/unlock-handshake-20261017/README.md`）：遊戲 msgId
   - **RESPONSE 持續誤認**：Naki 往返結束後，遊戲同號 REQUEST 會恢復，但它的 RESPONSE 仍算 Naki，直到淘汰。重送會延續登記，不會解除。一般 observer 收不到這則回應，也沒有 `replace`。RESPONSE 分不出是哪一筆的回應，所以寧可少給 rewrite。
   - **注入錯認領**：注入的 `sendRaw` 登記已淘汰、注入登記還在時，遊戲同號 RESPONSE 先到，會被交給 `onInjectResponse` 並消耗注入登記。之後真回應不再有 callback，方法也對不回，所以不會交給任何插件。
   - 不建 session 身分來消除這些殘留。
+- **序號的保證範圍。** 序號只辨別 listener 的到達順序，不辨別回應屬於哪一次送出。重送若先於 RESPONSE 進入 listener，不論 Blob 或 ArrayBuffer，都會把目前的登記標成已答。
+- **序號上限。** 序號是 JS Number，到 2^53 後不再遞增；每秒千筆也要約 28 萬年，所以不加歸零。
 - **Swift 綁定前窗口。** 保證只涵蓋「已綁定、而且查詢帶連線」。窗口內未綁定的登記交給先到的同號回應：
   - 別條線上遊戲的同號回應先到，就會被認領並存進以 msgId 為鍵的 store。之後的 `bind` 找不到登記，A 線的真回應也無法認領。
   - 真回應先到時正常認領，之後的 `bind` 不起作用。
