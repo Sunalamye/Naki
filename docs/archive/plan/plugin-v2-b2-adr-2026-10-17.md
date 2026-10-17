@@ -74,3 +74,11 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 - 「對局結束誤報、連線失敗清理」只缺 live 重現，派 known-limits-live。
 - `injectReceive`／`respondLocally` 是功能缺口，排在上述之後另案。
 規則：release note 的「已知限制」只能列**證明不可測或不可修**的項目，其餘要在下一版前驗掉或修掉。
+
+## 2026-10-17 21:25 主線裁決：插件測試紀錄的頁尾完整性改由宿主見證
+
+外部審查（解鎖 v1.1 第十輪）證明：隔離測試插件用 localStorage 的 tail／prev 鍵自證「final 之後沒有遺失行」不可靠——prev 是可過期快照、同 realm 可改、同 origin 多頁共用單鍵、寫失敗未 fail-closed；整輪最後一個 nav 更無任何見證。
+
+裁決：Naki 新增 `__nakiPlugins.devLogSeal(pluginId, meta)`，由宿主落檔一行 seal（count 由宿主計、插件不可偽造），封存後該頁 devLog 一律拒收。插件側驗收改依 seal 行；匯入順序改依宿主時間戳排序、不可證則拒驗。
+
+取捨：多一個宿主 API（小包 plugin-devlog-seal），換掉三個 localStorage 鍵與一整套可被繞過的頁面側證明；不選「操作者手動 quit App 當封存」是因為時序無法由紀錄本身證明。
