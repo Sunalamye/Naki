@@ -46,3 +46,11 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 1. 套用送出守衛的接線 patch（`naki-websocket.js`）。
 2. 接受 Swift 配對改動（`pendingRequests` 以「連線＋msgId」為鍵，socketId 傳到 `LiqiParser.parse`）。
 3. 測試通過後先 live 驗證再合併 main。
+
+## live 結果（2026-10-17，測試帳號，主 repo `.swfd/logs/pv2-b2-live/`）
+
+接線後 e5852ea Debug build，兩局人機。已驗：角色鎖定與握手一致（兩條 `/gateway` 為 lobby、`/game-gateway` 為 game、關閉即清）；守衛者在場時大廳心跳、Naki 自送 `lobby_server_time`、自動打牌（每筆 inputOperation 有 RESPONSE）不受影響；停用守衛者後不誤擋；`register` 在 live 拒絕不可守衛方法。
+
+**未驗證：守衛「真的擋下」。** `GUARDABLE_METHODS` 19 個全是換裝、稱號、角色、領獎類，I2 禁止對真伺服器送出，主線不授權用無效 payload 試；本機 sink 變體被 WebKit 擋下（https 頁面連 `ws://127.0.0.1` 只得 readyState 3）。實擋目前只有 `PluginSendGuardTests` 11、`plugin-v2-b2-regression` 60、變異 13 覆蓋。裁決全文 `.swfd/logs/pv2-b2-live/decision-live-guard-test.md`。
+
+合併：用戶裁決 2026-10-17 合併進 main 並移除 worktree；確認稿與發版說明須揭露上述未驗證項與 §1.4 七項限定。
