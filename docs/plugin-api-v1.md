@@ -204,8 +204,8 @@ L3 只能在使用者的**測試帳號**上用（Naki 的既有邊界）。
 你注入的 request 用 **64000–65500** 號段（Naki 自送的是 60000–63999，遊戲自己的是低位遞增，跑久了也可能進入 60000+）。Swift 端（`ObservedMatchSids`、`LiqiResponseStore`）判斷「是不是 Naki 自己送的」靠配發器登記；Swift 沒有插件登記，`ObservedMatchSids` 仍把插件號段整段當成 Naki 側。
 
 **`ctx.isNaki` 的語意（D9 起登記制；D22 起加上連線）**：不是號段猜測。遊戲自己的 msgId 計數器跨連線遞增，跑久了會進 60000–65500。判斷規則如下：
-- `sendRaw`（Naki 自送與你的 `sendRequest` 都走它）每送一筆，就把 **(socketId, msgId)** 記進登記表。表的**上限 256 筆，所有連線共用**，FIFO 淘汰。同一配對重送會刷新成最新，並重新變回「還沒收到 RESPONSE」。
-- REQUEST：配對在表內、且這個配對**還沒收到 RESPONSE** 才算 Naki。Naki 的 RESPONSE（ArrayBuffer、TypedArray 或 Blob 都算）到了以後，同一連線上同號的 REQUEST 是遊戲自己的。只有收到那條連線上的 RESPONSE 才算，別條連線的同號不算。
+- `sendRaw`（Naki 自送與你的 `sendRequest` 都走它）每送一筆，就把 **(socketId, msgId)** 記進登記表。表的**上限 256 筆，所有連線共用**，FIFO 淘汰。同一配對重送會刷新成最新，並重新變回「還沒收到 RESPONSE」，但不會移除配對；只有淘汰才會移除。
+- REQUEST：配對在表內、且這個配對**還沒收到 RESPONSE** 才算 Naki。Naki 的 RESPONSE（ArrayBuffer、TypedArray 或 Blob 都算）到了以後，同一連線上同號的 REQUEST 是遊戲自己的。只有收到那條連線上的網路 RESPONSE 才算：別條連線的同號不算，本地錯誤回應不算，在這筆送出之前就已抵達、展開較慢的 Blob 也不算。
 - RESPONSE：配對在表內就算 Naki。你注入請求的回應只要注入登記還在，即使送出登記已被淘汰，也算 Naki。
 - 插件號段 64000–65500 本身**不再**算 Naki。別條連線上的同號也不算。
 - 頁面 API `window.__nakiWebSocket.isNakiSent(msgId, socketId?, pendingOnly?)`：
@@ -222,8 +222,8 @@ tile-highlighter 的 ActionPrototype 與推薦更新路徑不受影響。
 
 **仍會誤認的情況**（都只發生在遊戲用到同一連線上的同一個 msgId 時）：
 - **REQUEST 在途碰撞**：Naki 的請求還沒收到 RESPONSE 時，遊戲在同一連線送出同號請求，這筆仍被當成 Naki。
-- **REQUEST 本地結案例外**：Naki 或你注入的守衛方法請求被擋下、改由本地錯誤回應時，伺服器沒有收到它，這個配對會一直停在「還沒收到 RESPONSE」，直到登記被淘汰或重送。期間遊戲在同一連線送出同號請求，仍被當成 Naki。不把本地錯誤當成已答，是因為擋下的也可能是被誤認的遊戲請求，而真正的 Naki 請求仍在路上。
-- **RESPONSE 持續誤認**：Naki 往返結束後，遊戲同號請求會恢復成遊戲的，但它的 RESPONSE 仍算 Naki，直到登記被淘汰或重送。一般 observer 收不到這則回應，也沒有 `replace`。
+- **REQUEST 本地結案例外**：Naki 或你注入的守衛方法請求被擋下、改由本地錯誤回應時，伺服器沒有收到它，這個配對會一直停在「還沒收到 RESPONSE」，直到登記被淘汰；重送也只是重新進入待答。期間遊戲在同一連線送出同號請求，仍被當成 Naki。不把本地錯誤當成已答，是因為擋下的也可能是被誤認的遊戲請求，而真正的 Naki 請求仍在路上。
+- **RESPONSE 持續誤認**：Naki 往返結束後，遊戲同號請求會恢復成遊戲的，但它的 RESPONSE 仍算 Naki，直到登記被淘汰；重送會延續這個登記，不會解除。一般 observer 收不到這則回應，也沒有 `replace`。
 - **注入錯認領**：你注入請求的 `sendRaw` 登記已被淘汰、注入登記還在時，遊戲在同一連線的同號 RESPONSE 若先到，會被當成你的回應交給 `onInjectResponse`，並消耗注入登記。之後真正的回應不會再觸發 `onInjectResponse`，因為方法已對不回，也不會交給任何插件。
 - 繞過 `sendRaw` 直接 `ws.send` 的送出會被當成遊戲自己的。
 

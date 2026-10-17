@@ -926,3 +926,27 @@ test('D22-3: the same Naki msgId on two lobbies with only one answered: only the
   assert.equal(lobby2.sent.length, 2, 'the game request on the unanswered lobby never went out');
 });
 
+test('D22-4: a Blob RESPONSE unwrapped after a re-send of the same pair does not answer the new send: the game\'s same pair stays blocked', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  t.c.__nakiWebSocket.sendRaw(b64(request(60008, BEAT)));
+  t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: new t.c.Blob([response(60008, [])]) }));
+  t.c.__nakiWebSocket.sendRaw(b64(request(60008, BEAT)));
+  for (let i = 0; i < 5; i++) await tick();
+  t.lobby.send(request(60008, SKIN, [8, 1]));
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[60008, 'local_error', 'naki_traffic']]);
+  assert.deepEqual(sentIds(t), [60008, 60008], 'only the two Naki sends went out');
+});
+
+test('D22-4: a locally answered Naki guarded request that is re-sent stays pending: the game\'s same pair goes out 0 times', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  for (let i = 0; i < 2; i++) { t.c.__nakiWebSocket.sendRaw(b64(request(60001, SKIN))); await tick(); }
+  const id = t.c.__nakiWebSocket.getMajsoulConnections()[0].id;
+  assert.equal(t.c.__nakiWebSocket.isNakiSent(60001, id, true), true);
+  t.lobby.send(request(60001, SKIN, [8, 1]));
+  assert.deepEqual(guardLog(t).map(e => e[3]), ['naki_traffic', 'naki_traffic', 'naki_traffic']);
+  assert.deepEqual(sentIds(t), [10]);
+});
+

@@ -47,6 +47,8 @@ live 事實（`.swfd/logs/unlock-handshake-20261017/README.md`）：遊戲 msgId
 - 登記表鍵為 `socketId:msgId`，值記 `answered`。上限 256 筆，**所有連線共用**，FIFO；同配對重送刷新成最新、`answered` 歸零。
 - `sendRaw` 先選連線（proven 或 recency），登記 `(conn.id, msgId)` 後才 `ws.send`。
 - 收到 RESPONSE 時，把同一配對（只限同一連線）標成 `answered`。ArrayBuffer／TypedArray 在 `handleMessage` 收訊記帳處標記，與 `lastRecvAt` 同一行；Blob 讀不到，在異步展開完成處標記。兩處都在插件鏈之外，而 RESPONSE 的判斷不讀 `answered`，所以先標記不影響這則回應本身。
+- 每筆登記帶遞增的序號 `seq`。RESPONSE 只能標記它抵達時已存在的登記：記帳處以當下序號判斷；Blob 在 listener 收到時先記下序號，展開完成後只標記 `seq` 不大於該值的登記。這樣展開期間的同配對重送仍維持待答。
+- 終止條件：重送重新進入待答；只有收到同一連線的網路 RESPONSE 才標記已答；本地結案不解除待答；配對身分只有淘汰才移除。
 - 本地結案（守衛擋下後的本地錯誤回應）不標記，理由見 §8。
 - `isNakiSent(msgId, socketId?, pendingOnly?)`：給連線時精確比對，不給時查任一連線。`pendingOnly` 為真時只認未答的配對。
 - `attributeSend` 以該連線、`pendingOnly` 查。
@@ -80,8 +82,8 @@ live 事實（`.swfd/logs/unlock-handshake-20261017/README.md`）：遊戲 msgId
 
 - **JS 同線同號的殘留。** 以下都只在遊戲用到「同一連線上、Naki 用過的同一 msgId」時發生。這些都存在於 main，D22 沒有讓它們更鬆。
   - **REQUEST 在途碰撞**：Naki 的 REQUEST 還沒收到 RESPONSE 時，遊戲同號 REQUEST 仍被當成 Naki，守衛方法得到本地錯誤。RESPONSE 到達後恢復。
-  - **REQUEST 本地結案例外**：Naki（或注入）的守衛方法請求被擋下後，只有本地錯誤回應，配對維持待答，直到淘汰或重送。不標記的理由是：被擋下的也可能是被誤認的遊戲請求，此時真正的 Naki 請求仍在路上。把所有本地錯誤都當成已答，會讓在途碰撞更鬆。維持待答是較嚴的一側。
-  - **RESPONSE 持續誤認**：Naki 往返結束後，遊戲同號 REQUEST 會恢復，但它的 RESPONSE 仍算 Naki，直到淘汰或重送。一般 observer 收不到這則回應，也沒有 `replace`。RESPONSE 分不出是哪一筆的回應，所以寧可少給 rewrite。
+  - **REQUEST 本地結案例外**：Naki（或注入）的守衛方法請求被擋下後，只有本地錯誤回應，配對維持待答，直到淘汰。重送只是重新進入待答。不標記的理由是：被擋下的也可能是被誤認的遊戲請求，此時真正的 Naki 請求仍在路上。把所有本地錯誤都當成已答，會讓在途碰撞更鬆。維持待答是較嚴的一側。
+  - **RESPONSE 持續誤認**：Naki 往返結束後，遊戲同號 REQUEST 會恢復，但它的 RESPONSE 仍算 Naki，直到淘汰。重送會延續登記，不會解除。一般 observer 收不到這則回應，也沒有 `replace`。RESPONSE 分不出是哪一筆的回應，所以寧可少給 rewrite。
   - **注入錯認領**：注入的 `sendRaw` 登記已淘汰、注入登記還在時，遊戲同號 RESPONSE 先到，會被交給 `onInjectResponse` 並消耗注入登記。之後真回應不再有 callback，方法也對不回，所以不會交給任何插件。
   - 不建 session 身分來消除這些殘留。
 - **Swift 綁定前窗口。** 保證只涵蓋「已綁定、而且查詢帶連線」。窗口內未綁定的登記交給先到的同號回應：

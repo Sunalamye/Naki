@@ -26,6 +26,11 @@
 - **D14 本地結案不標記 `answered`。** 被擋下的也可能是被誤認的遊戲請求，此時真正的 Naki 請求仍在路上。只標記「Naki 自己那筆」需要在 `sendRaw` 與 `respondLocal` 之間傳旗標，換到的只是少擋一些同線同號的遊戲請求。所以維持較嚴的一側，在設計與 API 列為例外。
 - **D15 同線同號的 RESPONSE 持續誤認與注入錯認領只在文件中限定。** 兩者在 main 就存在。注入錯認領之後，真回應的方法已對不回，不會交給任何插件，所以沒有新的改寫機會。
 
+第四輪（回應 Astra 第三輪 2 條）：
+
+- **D16 登記帶遞增序號 `seq`，RESPONSE 只標記它抵達前就存在的登記。** Blob 在 listener 收到時先記下當下序號，展開後才比對。選序號而不是保留登記物件，是因為 Blob 展開前還不知道 msgId，抓不到是哪個物件。
+- **D17 殘留的終止條件以實作為準。** 重送會重新進入待答，但不解除配對身分；只有淘汰會移除登記。
+
 
 ## Deviations
 
@@ -141,4 +146,23 @@
 | T5 注入回應不消耗注入登記 | plugin-regression 36 |
 
 每個變異的 log 是 `round3-mut-*.log`。
+
+## 第四輪測試與變異
+
+| 項目 | 結果 | log |
+|---|---|---|
+| node `plugin-regression.cjs <plugins>` | 36 pass、0 fail | `round4-plugin-regression.log` |
+| node `plugin-v2-b2-regression.cjs` | 68 pass、0 fail | `round4-b2.log` |
+| node `plugin-v2-regression.cjs` | 21 pass、0 fail | `round4-v2.log` |
+| 全量 NakiTests | 1165 tests、0 failures（Swift 未改） | `round4-full-nakitests.log` |
+
+紅燈證據：Blob 展開期間重送的案例（b2 第 67 案例）對 701d42e 是紅的，見 `round4-red-b2.log`。
+
+| 變異 | 抓到的測試 |
+|---|---|
+| U1 拿掉序號比對 | b2 67 |
+| U2 Blob 在展開後才取序號 | b2 67 |
+| U4 本地結案標記已答 | b2 65、68 |
+
+U3 是建構錯誤的等價變異：改動後的條件在測試路徑上恆為 false，等於沒改，所以丟棄，log 也已刪除。
 

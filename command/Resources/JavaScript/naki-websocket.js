@@ -346,20 +346,22 @@
     // Naki 自送登記（bridge D9、D22）：遊戲自己的 msgId 跑久了也會進 60000+，號段猜不準；
     // 遊戲的計數器跨連線遞增，所以以 (連線, msgId) 為鍵。只記最近 256 筆（所有連線共用），被淘汰的一律當成遊戲自己的。
     // RESPONSE 到了就標記已答：之後同線同號的 REQUEST 是遊戲自己的；同號 RESPONSE 仍算 Naki（分不出是哪一筆的回應）。
+    // seq：登記序號。RESPONSE 只能回答它抵達前就存在的登記（Blob 異步展開期間的重送不算）
     const nakiSent = new Map();
+    let nakiSentSeq = 0;
     function rememberNakiSent(socketId, bytes) {
         if (bytes[0] !== 2 || bytes.length < 3) return;
         const msgId = bytes[1] | (bytes[2] << 8), key = socketId + ':' + msgId;
         nakiSent.delete(key);
-        nakiSent.set(key, { msgId: msgId, answered: false });
+        nakiSent.set(key, { msgId: msgId, answered: false, seq: ++nakiSentSeq });
         if (nakiSent.size > 256) nakiSent.delete(nakiSent.keys().next().value);
     }
-    function markNakiAnswered(socketId, data) {
+    function markNakiAnswered(socketId, data, arrivedAtSeq) {
         const b = data instanceof ArrayBuffer ? new Uint8Array(data)
                 : (ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
         if (!b || b.length < 3 || b[0] !== 3) return;
         const entry = nakiSent.get(socketId + ':' + (b[1] | (b[2] << 8)));
-        if (entry) entry.answered = true;
+        if (entry && entry.seq <= arrivedAtSeq) entry.answered = true;
     }
     // 不給連線時回答「任一條連線上有沒有」（頁面 API 相容）；pendingOnly 只認還沒收到 RESPONSE 的（判斷 REQUEST 用）
     function isNakiSent(msgId, socketId, pendingOnly) {
@@ -483,7 +485,7 @@
         // 否則會把自己送錯的那次記成正確答案，錯誤自我強化。
         const info = wsConnections.get(ws);
         if (info) {
-            if (direction === 'receive') { info.lastRecvAt = Date.now(); markNakiAnswered(info.id, data); }
+            if (direction === 'receive') { info.lastRecvAt = Date.now(); markNakiAnswered(info.id, data, nakiSentSeq); }
             else if (direction === 'send') attributeSend(info, data);
         }
 
@@ -527,9 +529,10 @@
                 //
                 // Blob 只能異步展開；拿到的是副本，已經來不及改遊戲真正收到的 event.data，
                 // 所以這條只允許 observe，不提供 rewriteReceive。
+                const arrivedAtSeq = nakiSentSeq;
                 data.arrayBuffer().then(function(buffer) {
                     const view = new Uint8Array(buffer);
-                    if (direction === 'receive') markNakiAnswered(wsId, view);   // 記帳處讀不到 Blob，展開後補標記
+                    if (direction === 'receive') markNakiAnswered(wsId, view, arrivedAtSeq);   // 記帳處讀不到 Blob，展開後補標記
                     dispatchToPlugins(direction, wsId, info, view, false);
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);
