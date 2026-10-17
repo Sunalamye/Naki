@@ -377,19 +377,23 @@
         if (origObj.length === original.length) u8set.call(origObj, original);
     }
 
+    // 配對的唯一寫入口：容量 PENDING_LIMIT（FIFO，覆寫算最新）。沒有插件也沒有污染時，receive 不派發、沒人消耗，不登記（第十二輪第 1 條）
+    function remember(socketId, msgId, method) {
+        if (registry.size === 0 && tainted.size === 0) return;
+        var key = msgKey(socketId, msgId);
+        pendingMethods.delete(key);
+        pendingMethods.set(key, method);
+        if (pendingMethods.size > PENDING_LIMIT) pendingMethods.delete(pendingMethods.keys().next().value);
+    }
+
     // 依實際上 wire 的 bytes 登記回應配對（msgId → method）
     function pairWith(socketId, bytes) {
         var e = parseEnvelope(bytes);
-        if (e && e.type === TYPE_REQUEST && e.msgId != null && e.method) pendingMethods.set(msgKey(socketId, e.msgId), e.method);
+        if (e && e.type === TYPE_REQUEST && e.msgId != null && e.method) remember(socketId, e.msgId, e.method);
     }
 
     function rememberIfRequest(env, direction, socketId) {
-        if (direction === 'send' && env.type === TYPE_REQUEST && env.msgId != null && env.method) {
-            pendingMethods.set(msgKey(socketId, env.msgId), env.method);
-            if (pendingMethods.size > PENDING_LIMIT) {
-                pendingMethods.delete(pendingMethods.keys().next().value);
-            }
-        }
+        if (direction === 'send' && env.type === TYPE_REQUEST && env.msgId != null && env.method) remember(socketId, env.msgId, env.method);
     }
 
     // RESPONSE envelope 不帶 method，靠送出時記下的 msgId 對回（可能對不上 → null）
@@ -1007,7 +1011,12 @@
         },
 
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
-        closed: function (socketId) { roles.delete(socketId); },
+        // 這條連線的回應不會再來，配對一併清掉（第十二輪第 1 條）
+        closed: function (socketId) {
+            roles.delete(socketId);
+            var prefix = socketId + ':';
+            Array.from(pendingMethods.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) pendingMethods.delete(k); });
+        },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
         reshapeLocked: function (kind, meta) {
@@ -1058,6 +1067,7 @@
 
         diagnostics: function () {
             return JSON.parse(JSON.stringify({ runtime: diagnostics, registered: api.list(), guard: api.guardState(),
+                pendingPairs: pendingMethods.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,

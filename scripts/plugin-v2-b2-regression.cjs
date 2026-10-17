@@ -2704,3 +2704,41 @@ test('GG11-1c (Astra10 1): the bridge failure path keeps the original pairing wh
     assert.deepEqual(plain(got), [INFO], 'game connection');
   }
 });
+
+// ---- guard-gaps 第十二輪（Astra guard-gaps 第十一輪 1 條）：所有配對寫入共用容量上限、零插件不登記、關閉清該連線 ----
+const pendingPairs = t => t.c.__nakiPlugins.diagnostics().pendingPairs;
+
+test('GG12-1 (Astra11 1): pairings never accumulate — zero plugins with a broken bridge leave none after 300 round trips, also after close and reconnect; with plugins the table stays at PENDING_LIMIT and close clears that connection', async () => {
+  {
+    const t = page(source('naki-websocket.js'), { breakBase64: true });
+    const round = async ws => {
+      for (let i = 0; i < 300; i++) ws.send(request(1900 + i, BEAT));
+      await tick();
+      for (let i = 0; i < 300; i++) ws.receive(response(1900 + i, [8, 1]));
+      assert.equal(ws.sent.length, 300);
+      assert.equal(pendingPairs(t), 0);
+    };
+    await round(t.lobby);
+    t.lobby.close();
+    const again = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+    await round(again);
+    again.close();
+    assert.equal(pendingPairs(t), 0);
+  }
+  for (const broken of [false, true]) {
+    const label = broken ? 'bridge error' : 'healthy';
+    const t = page(source('naki-websocket.js'), { breakBase64: broken });
+    seen11(t, [INFO]);
+    for (let i = 0; i < 300; i++) t.lobby.send(request(2300 + i, BEAT));
+    await tick();
+    assert.equal(pendingPairs(t), 256, label);
+    const other = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+    for (let i = 0; i < 10; i++) other.send(request(2700 + i, BEAT));
+    await tick();
+    assert.equal(pendingPairs(t), 256, label);
+    t.lobby.close();
+    assert.equal(pendingPairs(t), 10, label + ': close clears only that connection');
+    other.close();
+    assert.equal(pendingPairs(t), 0, label);
+  }
+});

@@ -432,3 +432,35 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 - 跨來源 msgId 碰撞沒有配對隔離（Deviation 54，§1.4 第 5 項）。
 - bridge 故障只以 node 替身的編碼拋錯注入驗證；WebKit、live 未驗證（I2）。
+
+## 第十二輪（Astra 第十一輪審查：1【應修】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review11.md`。Deviations 52–55 主線採納。main 仍是 `d95d5b1`，不需 rebase。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 應修 1 | 第十一輪的 `failSafe` 配對入口直接寫表、不套 `PENDING_LIMIT`；零插件時 receive 提早返回，沒人消耗；`closed` 只清角色。零插件＋`breakBase64` 送收 300 筆後殘留 300，重連再跑 600 | 新增唯一寫入口 `remember`：套 `PENDING_LIMIT`（FIFO，同鍵先刪再寫算最新）；`registry` 與 `tainted` 都空時不登記，與 `dispatch` 的零插件提早返回同一條件。`pairWith`、`rememberIfRequest` 都經它。`closed` 清該連線前綴的配對。`diagnostics()` 加 `pendingPairs`（`GG12-1`） |
+| 建議 2 | `plugin-v2-b2.md` 開頭仍稱接線未套用、§4.6 仍稱身分只看號碼 | 檔頭加歷史文件標記，指向 §1.4 與契約守衛段；§4.6 加「已被 D22 取代」註記，保留原文 |
+
+### 第十二輪 Deviations
+
+56. **採「零插件不登記」，不採「零插件也消耗」。** 主線給兩個選項。`dispatch` 在沒有插件也沒有污染時本來就提早返回、不跑鏈，送出也從不登記；讓 `failSafe` 守同一條件，零插件頁面的配對表永遠是空的，receive 路徑不必改。代價：送出時沒有插件、回應到達前才啟用的插件，這筆 RESPONSE 對不回 method，與修前 `dispatch` 的行為相同。
+57. **同鍵重寫先刪再寫。** `Map.set` 覆寫不改插入順序，最新寫入的配對可能被當成最舊的淘汰。刪後再寫讓 FIFO 以最後一次寫入為準。修前 `rememberIfRequest` 沒這樣做，影響只在表滿時的淘汰順序。
+58. **`diagnostics()` 新增 `pendingPairs`。** 測試要觀察表的大小，閉包外沒有其他讀法。只加一個唯讀數字欄位；Swift 端 `NakiRuntime.pluginDiagnostics` 把結果當字串收進 `PluginDiagnostics.report`，不解析欄位（已讀原始碼確認）。
+59. **修前紅以「只補讀數」的舊 JS 跑。** 舊 JS 沒有 `pendingPairs`，直接跑只會因欄位不存在而紅。紅測目錄在 `190d97e` 的 JS 上只補那一行讀數、不改行為，紅在實際數量（零插件殘留 300），與 Astra 探針一致。
+
+### 第十二輪驗證（log：主 repo `.swfd/logs/guard-gaps/r12-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第十一輪 HEAD `190d97e` 的 JS（只補 `pendingPairs` 讀數） | 1 紅：`GG12-1`，零插件送收 300 筆後殘留 300（預期 0） | `r12-red-b2-on-190d97e.log` |
+| 變異（b2＋v2＋p4，扣基線） | 78／80 被殺。新增 Z1–Z5 全殺；存活的 `T7`、`U10` 為既有等價變異 | `r12-mutation.log` |
+| node 五套 | b2 173／0（0 略過）、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r12-green-*.log` |
+| naki-plugins `local-unlock-naki.cjs` | 9／0（`NAKI_ROOT` 指向本 worktree，0 略過） | `r12-green-local-unlock-naki.log` |
+| Swift | 主線指示純 JS 與文件不需重跑；本輪沒有改 Swift 檔，未重跑 | |
+| `git diff main --check` | 無警告 | |
+
+### 第十二輪未驗證與風險
+
+- 送出時沒有插件、回應到達前才啟用插件，這筆 RESPONSE 對不回 method（Deviation 56，與修前相同）。
+- WebKit、live 未驗證（I2）。
