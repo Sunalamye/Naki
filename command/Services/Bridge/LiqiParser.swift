@@ -881,9 +881,7 @@ class LiqiParser {
 
             switch block.fieldId {
             case 1: // error（.lq.Error：1=code）
-                let code = parseProtobufBlocks(block.data).first { $0.fieldId == 1 }
-                    .flatMap { parseVarint($0.data, offset: 0)?.0 }
-                result["error"] = code ?? 0
+                result["error"] = parseErrorCode(block.data)
             case 2: // players (repeated PlayerGameView) - 每個玩家依座位順序排列
                 players.append(parsePlayerGameView(block.data))
             case 3: // seat_list（repeated uint32）— ⭐ 座位的權威來源
@@ -1058,6 +1056,11 @@ class LiqiParser {
 
     // MARK: - Login Response
 
+    private func parseErrorCode(_ data: Data) -> Int {
+        parseProtobufBlocks(data).first { $0.fieldId == 1 }
+            .flatMap { parseVarint($0.data, offset: 0)?.0 } ?? 0
+    }
+
     private func parseLoginResponse(_ blocks: [ProtobufBlock]) -> [String: Any]? {
         var result: [String: Any] = [:]
 
@@ -1067,8 +1070,8 @@ class LiqiParser {
             liqiLog("[LiqiParser] Login field \(block.fieldId), wireType \(block.wireType), size \(block.data.count)")
 
             switch block.fieldId {
-            case 1: // error (如果有錯誤)
-                if let (v, _) = parseVarint(block.data, offset: 0) { result["error"] = v }
+            case 1: // error（.lq.Error：1=code）
+                result["error"] = parseErrorCode(block.data)
             case 2: // account_id (直接的帳號 ID)
                 if let v = loginAccountId(block) {
                     result["accountId"] = v
