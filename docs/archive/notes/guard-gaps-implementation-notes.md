@@ -139,3 +139,44 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 | 修後 node 四套 | b2 110／0、v2 21／0、p4 24／0、plugin-regression 38／0 | `r4-green-*.log` |
 | `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r4-swift-targeted.log` |
 | 全量 NakiTests（一次，基底 main `ffe0670`） | 1183／0，無 test host 重啟（main 比上一輪多 2 個測試） | `r4-test-full.log` |
+
+## 第五輪（Astra 第四輪審查：2【擋】2【應修】，主線全採納；撤回 Deviation 13）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review4.md`。
+
+**主線裁決**：撤回 Deviation 13，改採根治。送出鏈上插件只拿宿主副本，外送只用宿主快照。原 ADR D28「`naki-websocket.js` 不得改」由主線解除，理由是 Astra 兩輪證明「保留原物件同一性」與只用快照外送不等價。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 擋 1 | 原生 `slice` 會讀 `constructor`（species），插件在實例上定義 getter 就能在快照時改內容 | 宿主不再對插件拿過的陣列呼叫 `slice`；物化只用保存的 `%TypedArray%` 原型 `length` getter 與 `set`，都只讀內部槽（`GG5-1`，含 `sendRaw`＋`observeNakiTraffic`） |
+| 擋 2 | 還原後仍有插件程式碼執行點：`sent.byteLength` getter、後插件的 `onSend` getter | 插件從不拿原物件或宿主快照，外送物件上沒有插件定義的屬性；前插件保留的副本被改也不影響（`GG5-2`、`GG5-3`） |
+| 應修 3 | 錯誤訊息讀兩次 | 先存 `err.message` 一次再格式化（`GG5-5` 斷言讀取 1 次、`lastError` 是第一次的值） |
+| 應修 4 | 重用 buffer 時第二筆照送 SKIN | 遊戲 buffer 不外露，第二筆是遊戲原內容 OP（`GG5-4`）；§1.4 該項改為「不適用」 |
+
+### 實作
+
+- `runChain` 的送出鏈（`raw.mutable !== false` 的 send）：
+  - 鏈開始時 `cur = hostCopy(原件)`。
+  - 每個 hook：`raw.bytes = hostCopy(cur)` 交給 `makeCtx`；hook 與 `then` 跑完後，`staged = hostCopy(raw.bytes)` 物化（含 `replace` 換上的新 bytes），驗證 `staged`，通過才 `cur = staged`；之後才記帳。
+  - 鏈結束：內容與原件相同回 `undefined`（送原物件），不同回 `cur`。
+- `hostCopy`：`new U8(taLength.call(b))` 加 `u8set.call(c, b)`。`U8`、`taLength`、`u8set` 載入時保存。
+- receive 方向不變，第四輪的「記帳後還原」只留給 receive。
+- `naki-websocket.js` 未改：`ws.send` 包裝本來就是 `originalSend(out || data)`，送 Swift 也是 `rewritten || data`。
+
+### 第五輪 Deviations
+
+16. **內容沒變時送原物件，不送快照。** 主線寫「外送只用快照」。原物件在送出鏈上從不交給插件，鏈結束到原生 `send` 之間也不執行插件程式碼，所以內容沒變時它與快照位元相同。這樣做保留了既有測試鎖住的「原物件送出」，也不必改 `naki-websocket.js`。內容有變時一律送宿主快照。
+17. **`R6-4` 行為改變。** observer 只改副本，bridge 出錯時 `failSafe` 拿到遊戲的原 bytes。大廳上被改壞的 FastTest 從「拒送」變成「照送原內容」。送出的是遊戲自己未被修改的請求，比拒送保守。§1.4 第 1 項（D32）已同步。
+18. **分離檢查改為依賴原生 `set` 拋錯。** 主線沒有指定。副本由宿主建立，buffer 不可調整大小；只有分離會讓內容不可讀，而分離時 `set` 會拋 TypeError。原先另寫的長度比對是死碼，已刪（`GG5-6`）。
+19. **第四輪 Q1～Q3、Q5、Q6 變異不再適用。** 它們針對送出鏈的「記帳後還原」，這段程式只剩 receive 使用，送出鏈改由 S1～S8 覆蓋。
+
+### 第五輪驗證（log：主 repo `.swfd/logs/guard-gaps/r5-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第四輪 HEAD `8ed6f1b` 的 JS | 8 紅（`GG5-1`～`GG5-6`、`GG5-8`、改寫後的 `R6-4`）；`GG5-7` 鎖既有行為，修前即綠 | `r5-red-b2-on-8ed6f1b.log` |
+| 變異 | 30／30 被殺；新增 S1～S8 | `r5-mutation.log` |
+| 修後 node 四套 | b2 118／0、v2 21／0、p4 24／0、plugin-regression 38／0 | `r5-green-*.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r5-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1183／0，無 test host 重啟 | `r5-test-full.log` |
+| `git diff main --check` | 無警告（ADR、notes 檔尾空白行已修） | |

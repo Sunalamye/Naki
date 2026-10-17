@@ -32,8 +32,15 @@
     var parseEnvelope = (window.__nakiCore && window.__nakiCore.parseEnvelope)
         || function () { return null; };
 
-    // 送出快照用的原生方法：插件可能改掉 ctx.bytes 這個實例的 set／slice
-    var u8set = Uint8Array.prototype.set, u8slice = Uint8Array.prototype.slice;
+    // 宿主快照用的原生入口，載入時保存。set 的來源是 typed array 時只讀內部槽；length 用 %TypedArray% 原型上的 getter
+    // 以 .call 讀，實例上的自有屬性遮蔽不到。slice 會讀 constructor（species），只用在插件碰不到的陣列上
+    var U8 = Uint8Array, u8set = Uint8Array.prototype.set, u8slice = Uint8Array.prototype.slice;
+    var taLength = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype), 'length').get;
+    function hostCopy(b) {
+        var c = new U8(taLength.call(b));
+        u8set.call(c, b);
+        return c;
+    }
 
     var TYPE_NOTIFY = 1;
     var TYPE_REQUEST = 2;
@@ -158,7 +165,10 @@
     function noteFailure(id, hook, err) {
         // 錯誤訊息只讀一次，讀取本身拋錯也不中斷記帳（getter 是插件程式碼）
         var message;
-        try { message = String(err && err.message ? err.message : err); } catch (x) { message = '（錯誤訊息無法讀取）'; }
+        try {
+            var m = err && err.message;   // getter 只觸發一次
+            message = String(m ? m : err);
+        } catch (x) { message = '（錯誤訊息無法讀取）'; }
         diagnostics.lastError = { id: id, message: message };
         var f = failures.get(id) || {};
         var n = (f[hook] || 0) + 1;
@@ -642,18 +652,24 @@
             return a.spec.id < b.spec.id ? -1 : (a.spec.id > b.spec.id ? 1 : 0);
         });
 
-        var original = raw.bytes, by = [];
+        // 送出（可改寫）時插件只拿副本：每個 hook 拿從宿主快照 cur 複製的新陣列，hook 結束後宿主只讀內部槽把它物化成新快照，
+        // 驗證的是這份快照。遊戲的原 buffer 與 cur 從不交給插件，驗證之後才執行的插件程式碼（記帳、getter、onDisable）
+        // 只碰得到過期的副本（第五輪）。receive 維持與遊戲共用 buffer 的就地改寫（契約 §4）
+        var copy = raw.direction === 'send' && raw.mutable !== false;
+        var original = raw.bytes, cur = copy ? hostCopy(original) : null, by = [];
         for (var k = 0; k < chain.length; k++) {
             var entry = chain[k];
             var hook = raw.direction === 'receive' ? 'onReceive' : 'onSend';
+            if (copy) raw.bytes = cur;
             var fn = entry.spec[hook];
             if (typeof fn !== 'function') continue;
+            var before = copy ? hostCopy(cur) : raw.bytes;
+            if (copy) raw.bytes = before;
             var ctx = makeCtx(raw, env, method, isNaki, entry.grant);
-            var before = raw.bytes;
-            var snapshot = raw.mutable === false ? null : u8slice.call(before);
+            var snapshot = copy || raw.mutable === false ? null : u8slice.call(before);
             var isGuard = !!guard && guard.ids.indexOf(entry.spec.id) !== -1;
             var state = { judged: false, failed: false, early: null };
-            var thenable = false, failure = null;
+            var thenable = false, failure = null, staged = null, replaced = false;
             try {
                 diagnostics.hooks++;
                 var ret = fn(ctx);   // 改寫只能經 ctx.replace（見 makeCtx）；回傳 Promise／thenable 不算放行（審查第 2 條）
@@ -662,14 +678,20 @@
                     if (isGuard) guard.async.push(entry.spec.id);
                     settle(ret, entry.spec.id, hook, state);
                 }
-                // 送出改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
-                // 大廳（guardedSend 的鏈）：就地改成另一個守衛方法（第三輪第 5 條），其餘由鏈後判定。
-                // 其他連線：就地或經 ctx.replace，改後是 GUARDABLE_METHODS 就撤回，只看閉包常數、不讀 sendGuard（第四輪第 2 條，guard-gaps b、第二輪第 1 條）
-                if (raw.direction === 'send') {
-                    var now = raw.bytes !== before || (snapshot && !sameBytes(snapshot, raw.bytes)) ? parseEnvelope(raw.bytes) : null;
-                    if (now && now.method && (lobby ? raw.bytes === before && now.method !== method && guardFor(now.method)
-                        : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
-                        throw new Error('改寫成守衛方法 ' + now.method + '，已撤回');
+                if (copy) {
+                    var out = raw.bytes;
+                    replaced = out !== before;
+                    try { staged = hostCopy(out); } catch (x) { staged = null; }   // 副本的 buffer 被分離時原生 set 會拋錯
+                    if (!staged) throw new Error('送出內容無法讀取（buffer 已分離），已撤回');
+                    // 送出改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
+                    // 大廳（guardedSend 的鏈）：就地改成另一個守衛方法（第三輪第 5 條），其餘由鏈後判定。
+                    // 其他連線：就地或經 ctx.replace，改後是 GUARDABLE_METHODS 就撤回，只看閉包常數、不讀 sendGuard（第四輪第 2 條，guard-gaps b、第二輪第 1 條）
+                    if (!sameBytes(staged, cur)) {
+                        var now = parseEnvelope(staged);
+                        if (now && now.method && (lobby ? !replaced && now.method !== method && guardFor(now.method)
+                            : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
+                            throw new Error('改寫成守衛方法 ' + now.method + '，已撤回');
+                        }
                     }
                 }
                 // 守衛插件改了或丟了大廳的回應／通知 ⇒ 已污染，直到頁面重載
@@ -678,15 +700,23 @@
                     taint(entry.spec.id, entry.grant);
                 }
             } catch (e) {
-                // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）。守衛方法另由 guardedSend 改為不送出
-                raw.bytes = before;
-                raw.drop = false;
-                if (snapshot) u8set.call(before, snapshot);
+                // fail-open：hook 拋錯就撤回它這次的全部改動（整包替換與就地改寫）。守衛方法另由 guardedSend 改為不送出。
+                // 送出鏈的改動只在副本上，不採用 staged 就是撤回
+                if (!copy) {
+                    raw.bytes = before;
+                    raw.drop = false;
+                    if (snapshot) u8set.call(before, snapshot);
+                }
                 failure = { error: e };
             }
-            // 送出快照：驗證（或撤回）完成的這一刻定案本次內容。之後的記帳會執行插件程式碼（thenable 結果、錯誤的 message getter、
-            // 自動停用的 onDisable），改 ctx.bytes、replace、drop 都不影響本次外送，記帳後一律還原成快照（第四輪第 1 條）
-            var committed = raw.bytes, committedDrop = raw.drop, frozen = snapshot ? u8slice.call(committed) : null;
+            var changed = false;
+            if (copy) {
+                changed = !failure && (replaced || !sameBytes(staged, cur));
+                if (changed) cur = staged;
+                raw.bytes = cur;
+            }
+            // receive：驗證（或撤回）完成即定案，記帳後還原（第四輪第 1 條）。送出鏈已定案在 cur，插件碰不到
+            var committed = raw.bytes, committedDrop = raw.drop, frozen = !copy && snapshot ? u8slice.call(committed) : null;
             try {
                 if (failure) {
                     if (isGuard) guard.threw.push(entry.spec.id);
@@ -705,19 +735,26 @@
                 raw.drop = committedDrop;
                 if (frozen && !sameBytes(frozen, committed)) u8set.call(committed, frozen);
             }
+            if (copy) {
+                if (changed) by.push(entry.spec.id);
+                if (changed && replaced) {
+                    // 換 buffer：send 換了 method 就停——後面的插件是照舊 method 的白名單選進鏈的
+                    env = parseEnvelope(cur);
+                    if (env.method !== method) break;
+                }
+                continue;
+            }
             if (raw.drop || raw.bytes !== before || (snapshot && !sameBytes(snapshot, raw.bytes))) by.push(entry.spec.id);
             if (raw.drop) break;   // drop 短路：後續插件不再收到
-            if (raw.bytes !== before) {
-                // 換 buffer：後續插件看新 bytes。send 換了 method 就停——後面的插件是照舊 method 的白名單選進鏈的
-                env = parseEnvelope(raw.bytes);
-                if (raw.direction === 'send' && env.method !== method) break;
-            }
+            if (raw.bytes !== before) env = parseEnvelope(raw.bytes);   // 換 buffer：後續插件看新 bytes
         }
         if (raw.direction === 'receive') {
             if (!raw.drop && raw.bytes === original) return undefined;
             return { reshape: true, drop: !!raw.drop, bytes: raw.drop ? null : raw.bytes, method: method, msgId: env.msgId, by: by };
         }
-        if (raw.bytes === original) return undefined;
+        // 送出：內容沒變就送原物件（插件從未拿到它）；變了就送宿主快照 cur
+        if (copy) raw.bytes = cur;
+        if (raw.bytes === original || (copy && sameBytes(cur, original))) { raw.bytes = original; return undefined; }
         // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致
         if (env && env.method) pendingMethods.set(msgKey(raw.wsId, env.msgId), env.method);
         return raw.bytes;

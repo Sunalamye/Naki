@@ -1292,7 +1292,116 @@ test('GG4-8 (Astra3 3): a later-resolving Promise resets the failure count, so 9
   assert.deepEqual(plain(t.c.__nakiPlugins.list()).map(e => e.id), ['lr']);
 });
 
-test('R6-4 (Astra5 5): a FastTest whose type byte an observer corrupts is refused by failSafe on a lobby, sent on a game connection', async () => {
+// ---- guard-gaps 第五輪（Astra guard-gaps 第四輪 1–4 條）：插件只拿副本，外送宿主快照 ----
+test('GG5-1 (Astra4 1): a constructor getter on ctx.bytes that rewrites into SKIN never runs in the host, on the game chain and on the Naki chain', () => {
+  for (const naki of [false, true]) {
+    const t = page();
+    const spec = { onSend(ctx) {
+      const b = ctx.bytes;
+      Object.defineProperty(b, 'constructor', { get() { b.set(sameLength(SKIN, b.length, ctx.msgId)); return Uint8Array; } }); } };
+    const g = gameWith(t, 'ctor', naki ? { observeNakiTraffic: true } : {}, spec);
+    const req = OPREQ(1101);
+    const original = Array.from(req);
+    if (naki) t.c.__nakiWebSocket.sendRaw(b64(req)); else g.send(req);
+    assert.deepEqual(g.committed[1], original, naki ? 'sendRaw' : 'game');
+    assert.deepEqual(swiftSends(t).slice(-1), [original], naki ? 'sendRaw' : 'game');
+  }
+});
+
+test('GG5-2 (Astra4 2 A): a byteLength getter on ctx.bytes is never read on the way out, with or without a legal change', () => {
+  for (const legal of [false, true]) {
+    const t = page();
+    const g = gameWith(t, 'bl', {}, { onSend(ctx) {
+      const b = ctx.bytes;
+      if (legal) b[b.length - 1] ^= 1;
+      Object.defineProperty(b, 'byteLength', { get() { b.set(sameLength(SKIN, b.length, ctx.msgId)); return b.length; } }); } });
+    const req = OPREQ(1102);
+    const expected = Array.from(req); if (legal) expected[expected.length - 1] ^= 1;
+    g.send(req);
+    assert.deepEqual(g.committed[1], expected, legal ? 'legal' : 'unchanged');
+    assert.deepEqual(swiftSends(t).slice(-1), [expected], legal ? 'legal' : 'unchanged');
+  }
+});
+
+test('GG5-3 (Astra4 2 B): a later plugin\'s onSend getter rewriting an earlier plugin\'s kept bytes does not change the send', () => {
+  const t = page();
+  let kept;
+  t.c.__nakiPlugins.setGrant('keep', { capabilities: ['observe'], methods: [OP], priority: 0 });
+  t.c.__nakiPlugins.register({ id: 'keep', onSend(ctx) { kept = ctx.bytes; } });
+  t.c.__nakiPlugins.setGrant('getr', { capabilities: ['observe'], methods: [OP], priority: 1 });
+  t.c.__nakiPlugins.register({ id: 'getr', get onSend() { if (kept) kept.set(sameLength(SKIN, kept.length, 1103)); return function () {}; } });
+  const g = gameSocket(t.c);
+  g.send(request(1100, AUTH));
+  const req = OPREQ(1103);
+  const original = Array.from(req);
+  g.send(req);
+  assert.deepEqual(g.committed[1], original);
+  assert.deepEqual(swiftSends(t).slice(-1), [original]);
+});
+
+test('GG5-4 (Astra4 4): the game\'s buffer is never handed to plugins, so reusing it after a deferred rewrite sends OP again', async () => {
+  const t = page();
+  let kept;
+  const g = gameWith(t, 'later', {}, { onSend(ctx) { kept = ctx.bytes; Promise.resolve().then(() => kept.set(sameLength(SKIN, kept.length, 1104))); } });
+  const req = OPREQ(1104);
+  const original = Array.from(req);
+  g.send(req);
+  await tick();
+  assert.deepEqual(Array.from(req), original, 'the game buffer is untouched');
+  g.send(req);
+  assert.deepEqual(g.committed.slice(1), [original, original]);
+  assert.deepEqual(swiftSends(t).slice(-2), [original, original]);
+});
+
+test('GG5-5 (Astra4 3): the error message getter is read exactly once', () => {
+  const t = page();
+  let reads = 0;
+  const g = gameWith(t, 'msg', {}, { onSend() { throw { get message() { reads++; return reads === 1 ? 'first' : 'second'; } }; } });
+  g.send(OPREQ(1105));
+  assert.equal(reads, 1);
+  assert.equal(plain(t.c.__nakiPlugins.diagnostics()).runtime.lastError.message, 'first');
+  assert.equal(t.events('log').some(e => e.data.id === 'msg' && /第 1 次）：first/.test(e.data.msg)), true);
+});
+
+test('GG5-6: detaching the copy\'s buffer is a hook failure and the original goes out', () => {
+  const t = page();
+  const g = gameWith(t, 'det', {}, { onSend(ctx) { ctx.bytes.buffer.transfer(); } });
+  const req = OPREQ(1106);
+  const original = Array.from(req);
+  g.send(req);
+  assert.deepEqual(g.committed[1], original);
+  assert.equal(t.events('log').some(e => e.data.id === 'det' && /無法讀取/.test(e.data.msg)), true);
+});
+
+test('GG5-7: an own length property on the copy cannot truncate or extend what is sent', () => {
+  for (const delta of [-1, 1]) {
+    const t = page();
+    const g = gameWith(t, 'len', {}, { onSend(ctx) {
+      const b = ctx.bytes, n = b.length;
+      b[n - 1] ^= 1;
+      Object.defineProperty(b, 'length', { value: n + delta }); } });
+    const req = OPREQ(1107);
+    const expected = Array.from(req); expected[expected.length - 1] ^= 1;
+    g.send(req);
+    assert.deepEqual(g.committed[1], expected, String(delta));
+  }
+});
+
+test('GG5-8: on the send chain ctx.bytes is a copy; a legal in-place change reaches the wire without touching the game\'s buffer', () => {
+  const t = page();
+  let seen;
+  const g = gameWith(t, 'cp', {}, { onSend(ctx) { seen = ctx.bytes; ctx.bytes[ctx.bytes.length - 1] ^= 1; } });
+  const req = OPREQ(1108);
+  const original = Array.from(req);
+  const expected = original.slice(); expected[expected.length - 1] ^= 1;
+  g.send(req);
+  assert.notEqual(seen.buffer, req.buffer);
+  assert.deepEqual(Array.from(req), original);
+  assert.deepEqual(g.committed[1], expected);
+  assert.deepEqual(swiftSends(t).slice(-1), [expected]);
+});
+
+test('R6-4 (Astra5 5, revised in guard-gaps round 5): an observer corrupting a FastTest only touches its copy, so on a bridge error the pristine original goes out on lobby and game', async () => {
   for (const onLobby of [true, false]) {
     const t = page(source('naki-websocket.js'), { breakBase64: true });
     guardPlugin(t.c);
@@ -1300,9 +1409,12 @@ test('R6-4 (Astra5 5): a FastTest whose type byte an observer corrupts is refuse
     t.c.__nakiPlugins.register({ id: 'obs', onSend(ctx) { ctx.bytes[0] = 9; } });
     const ws = onLobby ? t.lobby : gameSocket(t.c);
     ws.send(request(730, onLobby ? BEAT : AUTH));
-    ws.send(request(731, OP));
+    const req = request(731, OP);
+    const original = Array.from(req);
+    ws.send(req);
     await tick();
-    assert.equal(ws.sent.length, onLobby ? 1 : 2, onLobby ? 'lobby' : 'game');
+    assert.equal(ws.sent.length, 2, onLobby ? 'lobby' : 'game');
+    assert.deepEqual(ws.committed[1], original, onLobby ? 'lobby' : 'game');
   }
 });
 
