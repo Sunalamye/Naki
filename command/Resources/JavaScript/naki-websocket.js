@@ -106,11 +106,12 @@
             isMajsoul: isMajsoul
         });
 
-        // 監聽訊息
+        // 監聽訊息。capture：WebKit 在 target 上先跑 capture listener（live probe (d)），建構當下註冊又排在所有 capture 之首，
+        // 遊戲日後不論怎麼註冊都在 Naki 之後（Phase 4 攔原事件的前提）。合成事件（本地回應、變長改寫）的 Swift 那份已顯式送過
         ws.addEventListener('message', function(event) {
-            if (localEvents.has(event)) return;   // 本地回應：Swift 那份由 respondLocal 顯式送過
-            handleMessage(ws, wsId, event.data, 'receive', isMajsoul);
-        });
+            if (syntheticEvents.has(event)) return;
+            handleMessage(ws, wsId, event.data, 'receive', isMajsoul, event);
+        }, true);
 
         // 監聽打開
         ws.addEventListener('open', function() {
@@ -416,7 +417,8 @@
     // 保證「插件出錯絕不影響封包本身」（fail-open）。
     //
     // 回傳：send 方向被 rewriteSend 換掉時的新 Uint8Array，其餘 undefined。
-    function dispatchToPlugins(direction, wsId, info, bytes, mutable) {
+    // receive 變長 replace／drop 回 { drop:true } 或新 Uint8Array（reshape：只有 ArrayBuffer 原事件且未鎖死才給）。
+    function dispatchToPlugins(direction, wsId, info, bytes, mutable, reshape) {
         if (!window.__nakiPlugins || typeof window.__nakiPlugins.dispatch !== 'function') return;
         try {
             const out = window.__nakiPlugins.dispatch({
@@ -424,9 +426,11 @@
                 wsId: wsId,
                 url: info ? info.url : '',
                 bytes: bytes,
-                mutable: mutable !== false
+                mutable: mutable !== false,
+                reshape: !!reshape && !reshapeLocked
             });
-            return direction === 'send' && (out instanceof Uint8Array || (out && out.block)) ? out : undefined;
+            if (direction === 'receive') return out instanceof Uint8Array || (out && out.drop) ? out : undefined;
+            return out instanceof Uint8Array || (out && out.block) ? out : undefined;
         } catch (e) {
             console.error('[Naki WS] 插件 dispatch 錯誤:', e);
             // 派發本身出錯：守衛方法（或有守衛者時認不出的封包）仍要擋下
@@ -438,7 +442,7 @@
     // Swift 成對交付：原 REQUEST 與 RESPONSE 放在同一則 bridge 訊息（localResponse 欄位），兩份都編碼成功才送；
     // postMessage 失敗時兩份一起不見，不會只到一半（審查第三輪第 3 條）。遊戲在 ws.send 回傳後才收到另一份複本，
     // Naki listener 略過它；交付後以擋下當時的連線、msgId、原方法與自己的快照結案。
-    const localEvents = new WeakSet();
+    const syntheticEvents = new WeakSet();
     function respondLocal(ws, wsId, verdict) {
         let response = null;
         try {
@@ -458,7 +462,7 @@
             setTimeout(function () {
                 try {
                     const ev = new MessageEvent('message', { data: forGame.buffer });
-                    localEvents.add(ev);
+                    syntheticEvents.add(ev);
                     ws.dispatchEvent(ev);
                 } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
                 try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response); }
@@ -467,11 +471,47 @@
         } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
     }
 
+    // receive 變長 replace／drop（Phase 4，docs/plan/plugin-v2-phase4.md §2）。合成事件建好、原事件攔下之後才改交付；任一步失敗
+    // 就讓原事件照常交付、Swift 收原 bytes（fail-open）。Swift 先收再同步重派：遊戲 handler 因這筆送出的請求不會排到它前面。
+    // drop 時兩邊都不交付。
+    // 遊戲處理合成事件時拋錯 ⇒ 本頁面鎖死，之後不再給插件變長 replace／drop（kill-switch，頁面重載才解）。
+    let reshapeLocked = false, inSynthetic = false;
+    const reshapeStats = { replaced: 0, dropped: 0, fallback: 0, gameErrors: 0 };
+    if (typeof window.addEventListener === 'function') {
+        window.addEventListener('error', function () {
+            if (!inSynthetic) return;
+            reshapeStats.gameErrors++;
+            if (reshapeLocked) return;
+            reshapeLocked = true;
+            if (window.__nakiPlugins && window.__nakiPlugins.reshapeLocked) window.__nakiPlugins.reshapeLocked();
+        });
+    }
+    function deliverReshaped(ws, wsId, event, out) {
+        let ev = null, stopped = false;
+        try {
+            if (!out.drop) {
+                ev = new MessageEvent('message', { data: out.slice().buffer, origin: event.origin, lastEventId: event.lastEventId });
+                syntheticEvents.add(ev);
+            }
+            event.stopImmediatePropagation();
+            stopped = true;
+        } catch (e) { console.error('[Naki WS] 無法改交付，原事件照常交付:', e); }
+        reshapeStats[!stopped ? 'fallback' : (ev ? 'replaced' : 'dropped')]++;
+        const sent = !stopped ? new Uint8Array(event.data) : ev ? out : null;
+        if (sent) {
+            sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(sent),
+                type: 'binary', size: sent.byteLength });
+        }
+        if (!stopped || !ev) return;
+        inSynthetic = true;
+        try { ws.dispatchEvent(ev); } finally { inSynthetic = false; }
+    }
+
     const messageTypes = {
         receive: { ArrayBuffer: 0, TypedArray: 0, Blob: 0, String: 0, Other: 0 },
         send: { ArrayBuffer: 0, TypedArray: 0, Blob: 0, String: 0, Other: 0 }
     };
-    function handleMessage(ws, wsId, data, direction, isMajsoul) {
+    function handleMessage(ws, wsId, data, direction, isMajsoul, event) {
         // 只處理雀魂連接的訊息
         if (!isMajsoul) return;
         const dataType = data instanceof ArrayBuffer ? 'ArrayBuffer'
@@ -502,8 +542,9 @@
             if (data instanceof ArrayBuffer) {
                 const pluginBytes = new Uint8Array(data);
                 nakiNicknameMask.observe(pluginBytes, direction);
-                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes);
+                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes, true, !!event);
                 if (rewritten && rewritten.block) return rewritten;
+                if (direction === 'receive' && rewritten) return deliverReshaped(ws, wsId, event, rewritten);
                 // ArrayBuffer：轉成 Base64（pluginBytes 是 data 的 view，插件若就地改過這裡編碼的是改後的；
                 // rewriteSend 整包換掉時編碼新 bytes，Swift 與伺服器看到同一份）
                 const sent = rewritten || data;
@@ -581,7 +622,7 @@
     // ========================================
 
     window.__nakiWebSocket = {
-        diagnostics: function () { return JSON.parse(JSON.stringify(messageTypes)); },
+        diagnostics: function () { return JSON.parse(JSON.stringify(Object.assign({ reshape: reshapeStats, reshapeLocked: reshapeLocked }, messageTypes))); },
         isNakiSent: isNakiSent,
         // 獲取連接信息
         getConnections: function() {

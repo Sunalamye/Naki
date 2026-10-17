@@ -391,6 +391,22 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
 
 ---
 
+## v2 Phase 4（草案，未定案）
+
+> **本段未定案**：只描述分支 `plugin-v2-phase4` 的 spike，設計見 `docs/plan/plugin-v2-phase4.md`。沒有 live 驗證，合併前可能改動。上面各節仍是現行契約。
+
+- **`ctx.replace(bytes)` 長度不等時整包替換**（`rewriteReceive`）。v1 是回 `false`。條件：
+  - 原事件的 data 是 ArrayBuffer。Blob 不提供。
+  - method 不在下方禁改名單。不成立時回 `false`。
+  - 新 bytes 每個欄位在界內；type、msgId 不變；NOTIFY 的 method 不變且非空；RESPONSE 不得帶非空 method，field 1 可省。不成立時回 `false`，計一次 `replace` 失敗。
+  - 等長仍是就地改，與 v1 相同。
+- **`ctx.drop()`**（`dropReceive`，L3）：只有 NOTIFY 有。每次呼叫檢查總開關，關著回 `false`。成功後遊戲與 Naki 都收不到這則，後續插件也收不到。
+- **禁改名單**（變長 `replace` 與 `drop` 共用，`rewriteAllow` 解不開）：`.lq.ActionPrototype`、`.lq.NotifyGameEndResult`、全部 `.lq.FastTest.*`、全部 `.lq.Route.*`、method 對不回的 RESPONSE。`isNaki` 流量照舊沒有 `replace`、`drop`。
+- **拋錯撤回**：hook 拋錯時，它這次的整包替換、就地改寫與 `drop` 全部撤回，原事件照常交付。
+- **頁面鎖死**：遊戲處理改寫後的封包時若拋錯，本頁面之後不再提供變長 `replace` 與 `drop`，頁面重載才恢復。log 會出現插件 id `naki` 的一行。
+- **送出守衛**：宣告 `sendGuard` 的插件在大廳連線上變長改寫或 `drop` 一則，與等長改寫一樣會污染到頁面重載。
+- **`injectReceive`**：只有設計，未實作。
+
 ## 附錄：與設計文件的對應
 
 | 本文件 | 設計文件 |

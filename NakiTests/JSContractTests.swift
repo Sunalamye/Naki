@@ -159,6 +159,19 @@ final class JSContractTests: XCTestCase {
         XCTAssertEqual(NakiWebSocketScript.sendResult(from: reached).detail, "invalid_base64")
     }
 
+    /// Phase 4：message listener 以 capture 註冊，且只有一個（攔原事件、重派合成事件的前提，docs/plan/plugin-v2-phase4.md §2）。
+    func testMessageListenerIsRegisteredInCapturePhase() throws {
+        let page = try loadedPage()
+        _ = page.evaluateScript("""
+            var registered = [];
+            WebSocket.prototype.addEventListener = function (type, fn, capture) { registered.push(type + ':' + (capture === true)); };
+            new window.WebSocket("wss://example.invalid/gateway");
+            """)
+        XCTAssertNil(page.exception)
+        XCTAssertEqual(page.evaluateScript(
+            "registered.filter(function (r) { return r.indexOf('message:') === 0; }).join()")?.toString(), "message:true")
+    }
+
     /// 抽取與查找都不能空轉：已知呼叫要抓得到，別的物件的同名方法不能算數。
     func testExtractionIsNotVacuous() throws {
         let calls = try swiftCalls()

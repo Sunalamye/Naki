@@ -115,16 +115,12 @@ test('rewriting into a forbidden method is refused', () => {
   }
 });
 
-test('rewriteReceive alone does not grant send-side replace; receive replace stays equal-length only', () => {
+// receive 變長 replace 改由 Phase 4 定義（scripts/plugin-v2-p4-regression.cjs）
+test('rewriteReceive alone does not grant send-side replace', () => {
   const { c, ws } = page(); c.__nakiPluginsMayModifyOutbound = true;
   const { seen } = rewriter(c, { caps: ['observe', 'rewriteReceive'], make: ctx => request(ctx.msgId, BEAT) });
   ws.send(request(156, SKIN));
   assert.equal(seen[0].hasReplace, false);
-  const got = [];
-  c.__nakiPlugins.setGrant('both', { capabilities: ['observe', 'rewriteReceive', 'rewriteSend'], methods: ['.lq.NotifyFoo'] });
-  c.__nakiPlugins.register({ id: 'both', onReceive(ctx) { got.push(ctx.replace(notify('.lq.NotifyFoo', [1, 2, 3]))); } });
-  ws.listeners.message({ data: notify('.lq.NotifyFoo', [1]).buffer });
-  assert.deepEqual(got, [false]);
 });
 
 test('Naki\'s own sendRaw is never offered rewriteSend; the socket gets exactly the decoded bytes', () => {
