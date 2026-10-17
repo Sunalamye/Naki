@@ -1012,3 +1012,15 @@ test('ctx.taint(): a guard plugin tainting from game-gateway onSend is tainted',
   new t.c.WebSocket('wss://route-4.maj-soul.com/game-gateway').send(request(79, '.lq.FastTest.authGame'));
   assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, { [ID]: [SKIN] });
 });
+
+test('ctx.taint(): extra arguments are ignored, a plugin can only taint itself', () => {
+  const t = page();
+  t.c.__nakiPlugins.setGrant('other', { capabilities: ['observe'], methods: [SKIN, INFO], sendGuard: [SKIN] });
+  let otherTainted;
+  t.c.__nakiPlugins.register({ id: 'other', onReceive(ctx) { otherTainted = ctx.isTainted(); } });
+  t.c.__nakiPlugins.setGrant(ID, { capabilities: ['observe'], methods: [SKIN, INFO], sendGuard: [SKIN] });
+  t.c.__nakiPlugins.register({ id: ID, onReceive(ctx) { ctx.taint('other'); } });
+  pollute(t);
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, { [ID]: [SKIN] });
+  assert.equal(otherTainted, false);
+});

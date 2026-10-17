@@ -108,6 +108,8 @@ ctx = {
   isNaki    : boolean,             // 這筆是 Naki 或插件自己送的：當前 (socketId, msgId) 在 sendRaw 送出登記表內（REQUEST 只認尚未收到 RESPONSE 的），或是你注入請求的回應（見 §5）
   settings  : object,              // manifest 有宣告 settings 才存在，唯讀快照（見 §6）
   log(msg)  : void,                // 進 Naki 的 log，自動帶你的 id 前綴
+  taint()   : boolean,             // 把自己標成已污染（僅宣告 sendGuard 者回 true，見下方「送出守衛」）；不可解除
+  isTainted(): boolean,            // 自己是否已污染
 
   // 以下需要對應 capability，否則不存在或一律回 false：
   replace(newBytes) : boolean,     // 需要 rewriteReceive（rewriteSend 未實作）；isNaki 流量不提供
@@ -412,7 +414,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
 - **hook 拋錯**：鏈回到該 hook 進入前的狀態。它這次的整包替換、就地改寫與 `drop` 都撤回；先前插件成功的改寫保留並照常交付。只有它一個插件時，等於原事件照常交付。
 - **交付故障與頁面鎖死**：改寫後的交付若在攔下原事件之後失敗（Swift 拒收、派發拋錯、派發期間有 listener 拋錯、原事件攔不住），本頁面之後不再提供變長 `replace` 與 `drop`，頁面重載才恢復，停用插件也不會解除。鎖定只停這兩個原語，不重同步、不停遊戲與自動操作。Swift 拒收時遊戲仍收到改寫後的版本，這是已記錄的降級交付。log 出現插件 id `naki` 的一行，列出故障種類、method、msgId 與候選改寫者。候選不等於元兇。
 - **送出守衛**：宣告 `sendGuard` 的插件在大廳連線上變長改寫或 `drop` 一則，與等長改寫一樣會污染到頁面重載。
-  - **`ctx.taint()`**：任何 hook 的 ctx 都有。把呼叫的插件自己標成已污染，不必等大廳改寫（對局連線上的長改寫不會自動污染，應先呼叫）。只能污染自己，沒有宣告 `sendGuard` 的插件回 `false` 且不做事，否則回 `true`。污染後的行為與大廳改寫造成的污染完全相同。重複呼叫沒有副作用，也不重發事件。
+  - **`ctx.taint()`**：`onReceive`、`onSend`、`onInjectResponse` 的 ctx 有；`onRecommendations`、`onDisable` 沒有。把呼叫的插件自己標成已污染，不必等大廳改寫（對局連線上的長改寫不會自動污染，應先呼叫）。只能污染自己，沒有宣告 `sendGuard` 的插件回 `false` 且不做事，否則回 `true`。污染後的行為與大廳改寫造成的污染完全相同。重複呼叫沒有副作用，也不重發事件。
   - **`ctx.isTainted()`**：回傳自己是否已污染。曾污染的插件重新註冊後仍為 `true`，即使新的 grant 不再宣告 `sendGuard`。
   - **污染不可解除，頁面重載才清**：停用、熱重載、自動停用、`setGrant` 都不會解除。
   - 沒有 `api.taint`：`register` 沒有回傳每個插件專屬的物件，全域 `__nakiPlugins` 不能辨識呼叫者。`guardState()` 是診斷用，不屬於契約，插件不得依賴。
