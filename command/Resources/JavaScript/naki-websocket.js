@@ -112,6 +112,11 @@
             if (syntheticEvents.has(event)) return;
             handleMessage(ws, wsId, event.data, 'receive', isMajsoul, event);
         }, true);
+        // 哨兵：排在所有非 capture 之首。看到已攔下的原事件 ⇒ stopImmediatePropagation 沒生效，遊戲收到兩份
+        ws.addEventListener('message', function(event) {
+            const meta = stoppedEvents.get(event);
+            if (meta) reshapeFault('stop_ineffective', meta, '原事件在攔下後仍被派發');
+        });
 
         // 監聽打開
         ws.addEventListener('open', function() {
@@ -417,7 +422,7 @@
     // 保證「插件出錯絕不影響封包本身」（fail-open）。
     //
     // 回傳：send 方向被 rewriteSend 換掉時的新 Uint8Array，其餘 undefined。
-    // receive 變長 replace／drop 回 { drop:true } 或新 Uint8Array（reshape：只有 ArrayBuffer 原事件且未鎖死才給）。
+    // receive 變長 replace／drop 回 { reshape:true, bytes, drop, method, msgId, by }（reshape：只有 ArrayBuffer 原事件且未鎖死才給）。
     function dispatchToPlugins(direction, wsId, info, bytes, mutable, reshape) {
         if (!window.__nakiPlugins || typeof window.__nakiPlugins.dispatch !== 'function') return;
         try {
@@ -429,7 +434,7 @@
                 mutable: mutable !== false,
                 reshape: !!reshape && !reshapeLocked
             });
-            if (direction === 'receive') return out instanceof Uint8Array || (out && out.drop) ? out : undefined;
+            if (direction === 'receive') return out && out.reshape ? out : undefined;
             return out instanceof Uint8Array || (out && out.block) ? out : undefined;
         } catch (e) {
             console.error('[Naki WS] 插件 dispatch 錯誤:', e);
@@ -471,40 +476,57 @@
         } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
     }
 
-    // receive 變長 replace／drop（Phase 4，docs/plan/plugin-v2-phase4.md §2）。合成事件建好、原事件攔下之後才改交付；任一步失敗
-    // 就讓原事件照常交付、Swift 收原 bytes（fail-open）。Swift 先收再同步重派：遊戲 handler 因這筆送出的請求不會排到它前面。
-    // drop 時兩邊都不交付。
-    // 遊戲處理合成事件時拋錯 ⇒ 本頁面鎖死，之後不再給插件變長 replace／drop（kill-switch，頁面重載才解）。
-    let reshapeLocked = false, inSynthetic = false;
-    const reshapeStats = { replaced: 0, dropped: 0, fallback: 0, gameErrors: 0 };
+    // receive 變長 replace／drop（Phase 4，docs/plan/plugin-v2-phase4.md §1–§2、§5）。
+    // 建構期（編碼、建合成事件、攔下原事件）任一步失敗 ⇒ 原事件照常交付、Swift 收原 bytes（fail-open）。
+    // 攔下之後 bridge 拒收或 dispatch 拋錯 ⇒ 故障：頁面鎖死＋診斷，不重送原事件（遊戲可能已收到一部分）。
+    // bridge 拒收時仍把合成事件交給遊戲：Swift 已經缺這一則，遊戲至少不卡在等它。
+    // 合成派發期間有 listener 拋錯、或原事件攔不住（哨兵看到它）也記故障並鎖死，頁面重載才解。
+    let reshapeLocked = false, dispatching = null;
+    const reshapeStats = { attempted: 0, delivered: 0, dropped: 0, fallback: 0, faults: 0 };
+    const reshapeFaults = [];
+    const stoppedEvents = new WeakMap();
+    function reshapeFault(kind, meta, err) {
+        reshapeStats.faults++;
+        reshapeFaults.push({ kind: kind, socketId: meta.socketId, method: meta.method, msgId: meta.msgId, candidates: meta.by,
+            error: String((err && (err.message || err.error && err.error.message)) || err || ''), at: Date.now() });
+        if (reshapeFaults.length > 32) reshapeFaults.shift();
+        if (reshapeLocked) return;
+        reshapeLocked = true;
+        if (window.__nakiPlugins && window.__nakiPlugins.reshapeLocked) window.__nakiPlugins.reshapeLocked(kind, meta);
+    }
     if (typeof window.addEventListener === 'function') {
-        window.addEventListener('error', function () {
-            if (!inSynthetic) return;
-            reshapeStats.gameErrors++;
-            if (reshapeLocked) return;
-            reshapeLocked = true;
-            if (window.__nakiPlugins && window.__nakiPlugins.reshapeLocked) window.__nakiPlugins.reshapeLocked();
-        });
+        window.addEventListener('error', function (e) { if (dispatching) reshapeFault('synthetic_dispatch_error', dispatching, e); });
     }
     function deliverReshaped(ws, wsId, event, out) {
-        let ev = null, stopped = false;
+        const meta = { socketId: wsId, method: out.method, msgId: out.msgId, by: out.by };
+        let ev = null, b64 = null;
+        reshapeStats.attempted++;
         try {
             if (!out.drop) {
-                ev = new MessageEvent('message', { data: out.slice().buffer, origin: event.origin, lastEventId: event.lastEventId });
+                b64 = arrayBufferToBase64(out.bytes);
+                ev = new MessageEvent('message', { data: out.bytes.slice().buffer, origin: event.origin, lastEventId: event.lastEventId });
                 syntheticEvents.add(ev);
             }
             event.stopImmediatePropagation();
-            stopped = true;
-        } catch (e) { console.error('[Naki WS] 無法改交付，原事件照常交付:', e); }
-        reshapeStats[!stopped ? 'fallback' : (ev ? 'replaced' : 'dropped')]++;
-        const sent = !stopped ? new Uint8Array(event.data) : ev ? out : null;
-        if (sent) {
-            sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(sent),
-                type: 'binary', size: sent.byteLength });
+        } catch (e) {
+            console.error('[Naki WS] 變長改寫建構失敗，原事件照常交付:', e);
+            reshapeStats.fallback++;
+            sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(event.data),
+                type: 'binary', size: event.data.byteLength });
+            return;
         }
-        if (!stopped || !ev) return;
-        inSynthetic = true;
-        try { ws.dispatchEvent(ev); } finally { inSynthetic = false; }
+        stoppedEvents.set(event, meta);
+        if (out.drop) { reshapeStats.dropped++; return; }
+        let sent = false, bridgeError = 'sendToSwift 未送達';
+        try { sent = sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: b64, type: 'binary', size: out.bytes.byteLength }) !== false; }
+        catch (e) { bridgeError = e; }
+        if (!sent) reshapeFault('bridge_rejected', meta, bridgeError);
+        dispatching = meta;
+        try {
+            ws.dispatchEvent(ev);
+            if (sent) reshapeStats.delivered++;
+        } catch (e) { reshapeFault('dispatch_threw', meta, e); }
+        finally { dispatching = null; }
     }
 
     const messageTypes = {
@@ -622,7 +644,9 @@
     // ========================================
 
     window.__nakiWebSocket = {
-        diagnostics: function () { return JSON.parse(JSON.stringify(Object.assign({ reshape: reshapeStats, reshapeLocked: reshapeLocked }, messageTypes))); },
+        diagnostics: function () {
+            return JSON.parse(JSON.stringify(Object.assign({ reshape: reshapeStats, reshapeLocked: reshapeLocked, reshapeFaults: reshapeFaults }, messageTypes)));
+        },
         isNakiSent: isNakiSent,
         // 獲取連接信息
         getConnections: function() {

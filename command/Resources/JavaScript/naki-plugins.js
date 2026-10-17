@@ -11,7 +11,7 @@
 //    window.__nakiPluginGrants = { id: {...} };   // 先設
 //    window.__nakiPlugins.register({ id, onReceive, ... });   // 插件自己呼叫
 //
-//  observe 唯讀；rewriteReceive → ctx.replace（等長就地改寫；Phase 4 草案起長度不等時整包換掉，isNaki 流量不給）、
+//  observe 唯讀；rewriteReceive → ctx.replace（等長就地改寫；另宣告 reshapeReceive 才可長度不等整包換掉，Phase 4 草案；isNaki 流量不給）、
 //  dropReceive → ctx.drop（只限 NOTIFY，受 L3 總開關把關；Phase 4 草案，docs/plan/plugin-v2-phase4.md）、
 //  rewriteSend → send 方向的 ctx.replace（可改長度與 method，受 L3 總開關把關；v2 草案，docs/plan/plugin-v2.md §B）、
 //  injectSend → ctx.sendRequest（受 L3 總開關把關）。
@@ -345,8 +345,10 @@
             && !isForbiddenMethod(method, grant)) {
             ctx.replace = function (newBytes) {
                 if (!newBytes || typeof newBytes.length !== 'number') return false;
-                // 長度不等走 Phase 4 整包替換（攔原事件、重派合成事件）；等長仍就地改，不碰事件
-                if (newBytes.length !== raw.bytes.length) return reshapeReceive(raw, env, method, grant, newBytes);
+                // 長度不等：宣告 reshapeReceive 才走 Phase 4 整包替換（攔原事件、重派合成事件），否則照 v1 回 false。等長仍就地改
+                if (newBytes.length !== raw.bytes.length) {
+                    return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, grant, newBytes);
+                }
                 var original = raw.bytes.slice();
                 try {
                     raw.bytes.set(newBytes);
@@ -479,10 +481,15 @@
             || SEND_FORBIDDEN_METHODS.indexOf(method) !== -1;
     }
 
-    // Phase 4 變長 replace／drop 的禁改名單：live probe 只驗過對局 heartbeat RESPONSE，牌局真相來源與連線層一律不給，
-    // rewriteAllow 解不開（docs/plan/plugin-v2-phase4.md §4）。
+    // Phase 4 變長 replace／drop 的禁改名單（docs/plan/plugin-v2-phase4.md §4），rewriteAllow 解不開，canonical 全名比對。
+    // 來源是 Swift 消費端清單：Swift 據以改牌局、帳號或匹配狀態的 NOTIFY／RESPONSE（MajsoulBridge、LiqiParser、
+    // LiqiResponseStore 表情廣播）；JSContractTests 從 Swift 原始碼反查，缺一即紅。另加對局與連線層兩個前綴。
+    var RESHAPE_FORBIDDEN_METHODS = [
+        '.lq.ActionPrototype', '.lq.NotifyGameEndResult', '.lq.NotifyGameTerminate', '.lq.NotifyGameBroadcast',
+        '.lq.Lobby.login', '.lq.Lobby.oauth2Login', '.lq.Lobby.emailLogin', '.lq.Lobby.oauth2Auth', '.lq.Lobby.startUnifiedMatch'
+    ];
     function isReshapeForbidden(method) {
-        return typeof method !== 'string' || !method || method === '.lq.ActionPrototype' || method === '.lq.NotifyGameEndResult'
+        return typeof method !== 'string' || !method || RESHAPE_FORBIDDEN_METHODS.indexOf(method) !== -1
             || method.indexOf('.lq.FastTest.') === 0 || method.indexOf('.lq.Route.') === 0;
     }
 
@@ -588,7 +595,7 @@
             return a.spec.id < b.spec.id ? -1 : (a.spec.id > b.spec.id ? 1 : 0);
         });
 
-        var original = raw.bytes;
+        var original = raw.bytes, by = [];
         for (var k = 0; k < chain.length; k++) {
             var entry = chain[k];
             var hook = raw.direction === 'receive' ? 'onReceive' : 'onSend';
@@ -630,6 +637,7 @@
                 if (isGuard) guard.threw.push(entry.spec.id);
                 noteFailure(entry.spec.id, hook, e);
             }
+            if (raw.drop || raw.bytes !== before || (snapshot && !sameBytes(snapshot, raw.bytes))) by.push(entry.spec.id);
             if (raw.drop) break;   // drop 短路：後續插件不再收到
             if (raw.bytes !== before) {
                 // 換 buffer：後續插件看新 bytes。send 換了 method 就停——後面的插件是照舊 method 的白名單選進鏈的
@@ -637,7 +645,10 @@
                 if (raw.direction === 'send' && env.method !== method) break;
             }
         }
-        if (raw.direction === 'receive') return raw.drop ? { drop: true } : (raw.bytes !== original ? raw.bytes : undefined);
+        if (raw.direction === 'receive') {
+            if (!raw.drop && raw.bytes === original) return undefined;
+            return { reshape: true, drop: !!raw.drop, bytes: raw.drop ? null : raw.bytes, method: method, msgId: env.msgId, by: by };
+        }
         if (raw.bytes === original) return undefined;
         // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致
         if (env && env.method) pendingMethods.set(msgKey(raw.wsId, env.msgId), env.method);
@@ -747,8 +758,14 @@
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
         closed: function (socketId) { roles.delete(socketId); },
 
-        // naki-websocket 在遊戲處理改寫後的封包拋錯、鎖死變長改寫時呼叫（只記 log）
-        reshapeLocked: function () { pluginLog('naki', '遊戲處理改寫後的封包時拋錯，本頁面停用變長 replace／drop'); },
+        // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
+        reshapeLocked: function (kind, meta) {
+            pluginLog('naki', '變長交付故障（' + kind + '，' + (meta.method || '?') + ' msgId=' + meta.msgId
+                + '，候選改寫者 ' + (meta.by || []).join(',') + '），本頁面停用變長 replace／drop');
+        },
+
+        // 唯讀：變長 replace／drop 是否禁改這個 method（契約測試從 Swift 消費端反查用）
+        isReshapeForbidden: function (method) { return isReshapeForbidden(method); },
 
         // 本地回應交給遊戲之後呼叫：清 msgId 對照，插件注入的請求把本地結果交回發起插件（審查第 8 條）。
         // msgId 與原方法來自擋下當時的判定，bytes 是交付前另存的快照（第二輪第 5 條）。不跑改寫鏈、不送 Swift。

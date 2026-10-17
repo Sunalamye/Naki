@@ -159,7 +159,8 @@ final class JSContractTests: XCTestCase {
         XCTAssertEqual(NakiWebSocketScript.sendResult(from: reached).detail, "invalid_base64")
     }
 
-    /// Phase 4：message listener 以 capture 註冊，且只有一個（攔原事件、重派合成事件的前提，docs/plan/plugin-v2-phase4.md §2）。
+    /// Phase 4：主 listener 以 capture 註冊（攔原事件、重派合成事件的前提），另有一個非 capture 哨兵偵測攔截失效
+    /// （docs/plan/plugin-v2-phase4.md §1、§5）。
     func testMessageListenerIsRegisteredInCapturePhase() throws {
         let page = try loadedPage()
         _ = page.evaluateScript("""
@@ -169,7 +170,31 @@ final class JSContractTests: XCTestCase {
             """)
         XCTAssertNil(page.exception)
         XCTAssertEqual(page.evaluateScript(
-            "registered.filter(function (r) { return r.indexOf('message:') === 0; }).join()")?.toString(), "message:true")
+            "registered.filter(function (r) { return r.indexOf('message:') === 0; }).join()")?.toString(), "message:true,message:false")
+    }
+
+    /// Phase 4 變長 replace／drop 的禁改名單來源是 Swift 消費端：Swift 據以改牌局、帳號或匹配狀態的 method
+    /// （`MajsoulBridge`、`LiqiParser` 的字面值，加上回應路徑的 startUnifiedMatch、登入回應與表情廣播）必須全部被 JS 禁改，缺一即紅。
+    func testReshapeForbiddenListCoversEverySwiftConsumedMethod() throws {
+        let bridge = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("command/Services/Bridge")
+        let regex = try NSRegularExpression(pattern: #""(\.lq\.[A-Za-z0-9_.]+)""#)
+        var methods: Set<String> = [LiqiRequestBuilder.startUnifiedMatchMethod, LiqiResponseStore.broadcastMethod]
+        methods.formUnion(LiqiParser.loginResponseMethods)
+        for file in ["MajsoulBridge.swift", "LiqiParser.swift"] {
+            let text = try String(contentsOf: bridge.appendingPathComponent(file), encoding: .utf8)
+            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                if let range = Range(match.range(at: 1), in: text) { methods.insert(String(text[range])) }
+            }
+        }
+        for known in [".lq.NotifyGameTerminate", ".lq.ActionPrototype", ".lq.Lobby.oauth2Login", ".lq.Lobby.oauth2Auth"] {
+            XCTAssertTrue(methods.contains(known), "抽不到 \(known)，regex 或掃描路徑壞了")
+        }
+        let page = try loadedPage()
+        let missing = methods.sorted().filter {
+            page.evaluateScript("window.__nakiPlugins.isReshapeForbidden('\($0)')")?.toBool() != true
+        }
+        XCTAssertEqual(missing, [], "Swift 會消費的 method 沒進 JS 的變長改寫禁改名單")
     }
 
     /// 抽取與查找都不能空轉：已知呼叫要抓得到，別的物件的同名方法不能算數。

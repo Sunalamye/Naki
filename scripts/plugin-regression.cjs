@@ -90,7 +90,7 @@ test('Swift hot-enable script disables old registration before installing grant'
 });
 test('Blob dispatch is observable but never grants rewriteReceive; counters report actual types',async()=>{
   const {c}=setup(); const observed=[];
-  class Socket { constructor(){this.listeners={};} addEventListener(k,f){this.listeners[k]=f;} send(){} }
+  class Socket { constructor(){this.listeners={};} addEventListener(k,f){this.listeners[k]=this.listeners[k]||f;} send(){} }
   c.WebSocket=Socket;
   c.__nakiPlugins.setGrant('observer',{capabilities:['observe','rewriteReceive'],methods:['.lq.ActionPrototype'],rewriteAllow:['.lq.ActionPrototype']});
   c.__nakiPlugins.register({id:'observer',onReceive(ctx){observed.push(ctx);}});
@@ -183,7 +183,7 @@ function page(random) {
   const s = setup();
   if (random != null) vm.runInContext('Math.random = () => ' + random, s.c);
   class Socket { constructor(url) { this.url = url; this.readyState = 1; this.listeners = {}; this.sent = []; }
-    addEventListener(k, f) { this.listeners[k] = f; } send(d) { this.sent.push(new Uint8Array(d)); } }
+    addEventListener(k, f) { this.listeners[k] = this.listeners[k] || f; } send(d) { this.sent.push(new Uint8Array(d)); } }
   Socket.OPEN = 1; Socket.CLOSED = 3; s.c.WebSocket = Socket;
   vm.runInContext(source('naki-websocket.js'), s.c);
   return { ...s, socket: url => new s.c.WebSocket(url) };

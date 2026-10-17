@@ -53,3 +53,24 @@
 
 - 未決問題清單在設計 §8。
 - 合併前的 live 驗收在設計 §7 末段。
+
+## 第二輪（回應 Astra 第一輪，主線裁決全採納）
+
+逐條處理與證據見 `docs/plan/plugin-v2-phase4-review-response.md`。
+
+| 檔案 | 改動 |
+|---|---|
+| `naki-core.js` | `sendToSwift` 回傳是否送達 |
+| `naki-websocket.js` | 建構期前置（編碼、建事件、攔下）；攔後故障狀態與 `reshapeFaults`；嘗試／交付分計；合成派發期間錯誤；stop 失效哨兵 |
+| `naki-plugins.js` | 名單改 Swift 消費端清單；`reshapeReceive` 選用；回傳 method、msgId、候選改寫者；`isReshapeForbidden` 唯讀 API；鎖死 log 帶中繼資料 |
+| `PluginRegistry.swift` | `reshapeReceive` 必須與 `rewriteReceive` 一起宣告 |
+| 測試 | p4 回歸 17→23；兩個舊 harness 保留第一個 message listener；JSContract 新增一致性測試並更新 listener 期望；PluginManifestValidation 新增 1 條 |
+
+驗證：node 五套 23／21／68／38／11、JS 變異 26／26、目標 Swift 57／0、NakiTests 全量 1181／0（`.swfd/logs/p4/r2-*`、`mutation-r2.log`）。live 未做，合併 gate 在設計 §8。
+
+### Deviations（第二輪）
+
+10. **bridge 拒收時仍交付合成事件給遊戲**。裁決只說「不盲目重送原事件」，沒說要不要交付合成事件。Swift 已經缺這一則，不交付會讓遊戲也缺，可能卡在等回應。選讓遊戲繼續，並記故障、鎖死。
+11. **新增 stop 失效哨兵**。裁決允許「偵測即鎖死」或「至少文件說明」，選前者。代價是主路徑多一個非 capture listener 與一次 WeakMap 查找，並連帶修改兩個舊 harness。
+12. **名單另加 `oauth2Auth` 與 `NotifyGameBroadcast`**。前者 Swift 刻意不解析 token，後者只是紀錄而非牌局狀態。兩者都是 Swift 消費端，依「Swift 消費端清單」的定義一併納入，選較嚴的一側。
+13. **故障診斷只保留最近 32 筆**。避免長時間對局無限增長；鎖死後通常只會再多幾筆。

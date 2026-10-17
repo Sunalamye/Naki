@@ -14,7 +14,7 @@ function page() {
     btoa: s => Buffer.from(s, 'binary').toString('base64'), atob: s => Buffer.from(s, 'base64').toString('binary'),
     document: { getElementById: () => null }, __nakiPluginGrants: {} };
   class Socket { constructor(url) { this.url = url; this.readyState = 1; this.listeners = {}; this.sent = []; }
-    addEventListener(k, f) { this.listeners[k] = f; } send(d) { this.sent.push(d); } }
+    addEventListener(k, f) { this.listeners[k] = this.listeners[k] || f; } send(d) { this.sent.push(d); } }
   Socket.OPEN = 1;
   c.window = c; c.WebSocket = Socket; vm.createContext(c);
   vm.runInContext(source('naki-core.js'), c);

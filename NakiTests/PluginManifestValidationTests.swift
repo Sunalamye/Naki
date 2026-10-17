@@ -13,18 +13,28 @@ import XCTest
 final class PluginManifestValidationTests: XCTestCase {
 
     private func manifest(id: String = "p", entry: String = "plugin.js", apiVersion: Int = 1,
-                          settings: String? = nil) throws -> PluginManifest {
+                          settings: String? = nil, capabilities: [String] = ["observe"]) throws -> PluginManifest {
         try JSONDecoder().decode(PluginManifest.self, from: manifestJSON(
-            id: id, entry: entry, apiVersion: apiVersion, settings: settings))
+            id: id, entry: entry, apiVersion: apiVersion, settings: settings, capabilities: capabilities))
     }
 
     private func manifestJSON(id: String = "p", entry: String = "plugin.js", apiVersion: Int = 1,
-                              settings: String? = nil) -> Data {
+                              settings: String? = nil, capabilities: [String] = ["observe"]) -> Data {
         let settingsPart = settings.map { ",\"settings\":\($0)" } ?? ""
+        let caps = capabilities.map { "\"\($0)\"" }.joined(separator: ",")
         return Data("""
         {"schemaVersion":1,"apiVersion":\(apiVersion),"id":"\(id)","name":"n","version":"1.0",
-        "entry":"\(entry)","capabilities":["observe"],"methods":[".lq.Foo"]\(settingsPart)}
+        "entry":"\(entry)","capabilities":[\(caps)],"methods":[".lq.Foo"]\(settingsPart)}
         """.utf8)
+    }
+
+    /// Phase 4：reshapeReceive 是 rewriteReceive 的選用語意，單獨宣告無效；兩者一起才有效
+    func testReshapeReceiveRequiresRewriteReceive() throws {
+        XCTAssertTrue(isManifestInvalid(try manifest(capabilities: ["observe", "reshapeReceive"]).validate()))
+        XCTAssertNil(try manifest(capabilities: ["observe", "rewriteReceive", "reshapeReceive"]).validate())
+        XCTAssertNil(try manifest(capabilities: ["observe", "rewriteReceive"]).validate())
+        let grant = PluginRegistry.grantDict(for: try manifest(capabilities: ["observe", "rewriteReceive", "reshapeReceive"]))
+        XCTAssertEqual(grant["capabilities"] as? [String], ["observe", "rewriteReceive", "reshapeReceive"], "grant 要原樣帶到 JS")
     }
 
     private func isManifestInvalid(_ failure: PluginLoadFailure?) -> Bool {

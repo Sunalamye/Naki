@@ -1,7 +1,7 @@
 // Run: node scripts/plugin-v2-p4-regression.cjs
 // Phase 4 receive 變長 replace／drop（docs/plan/plugin-v2-phase4.md）。假 dispatcher 照 live probe 的三種：
 // capture（target 上 capture 先跑，WebKit 實測）、order（照註冊順序）、nostop（stopImmediatePropagation 無效）。
-// NAKI_JS_DIR 可指向變異後的 JS 目錄。
+// NAKI_JS_DIR 可指向變異後的 JS 目錄；main 差異比較從 git 取 main（2d02a03）的 JS。
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -9,8 +9,11 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const jsDir = process.env.NAKI_JS_DIR || path.resolve(__dirname, '../command/Resources/JavaScript');
 const source = name => fs.readFileSync(path.join(jsDir, name), 'utf8');
+const mainSource = name => require('node:child_process').execFileSync('git',
+  ['-C', path.resolve(__dirname, '..'), 'show', `2d02a03:command/Resources/JavaScript/${name}`], { encoding: 'utf8' });
 
-function page(mode = 'capture', { url = 'wss://route-2.maj-soul.com/gateway', noMessageEvent = false } = {}) {
+function page(mode = 'capture', { url = 'wss://route-2.maj-soul.com/gateway', noMessageEvent = false, src = source,
+  encodeFails = () => false, swiftFails = () => false } = {}) {
   const swift = [], errorListeners = [];
   class MessageEvent {
     constructor(type, init = {}) {
@@ -39,15 +42,20 @@ function page(mode = 'capture', { url = 'wss://route-2.maj-soul.com/gateway', no
     }
   }
   Socket.OPEN = 1; Socket.CLOSED = 3;
-  const c = { console: { log() {}, error() {} }, Uint8Array, ArrayBuffer, DataView, Blob, MessageEvent, setTimeout,
+  class FileReader {
+    readAsDataURL(blob) { blob.arrayBuffer().then(b => { this.result = 'data:;base64,' + Buffer.from(b).toString('base64'); this.onloadend(); }); }
+  }
+  const c = { console: { log() {}, error() {} }, Uint8Array, ArrayBuffer, DataView, Blob, MessageEvent, FileReader, setTimeout,
     btoa: s => Buffer.from(s, 'binary').toString('base64'), atob: s => Buffer.from(s, 'base64').toString('binary'),
     document: { getElementById: () => null }, __nakiPluginGrants: {},
     addEventListener: (k, f) => { if (k === 'error') errorListeners.push(f); } };
   c.window = c; c.WebSocket = Socket; vm.createContext(c);
-  vm.runInContext(source('naki-core.js'), c);
-  c.__nakiCore.sendToSwift = (type, data) => swift.push({ type, data });
-  vm.runInContext(source('naki-websocket.js'), c);
-  vm.runInContext(source('naki-plugins.js'), c);
+  vm.runInContext(src('naki-core.js'), c);
+  c.__nakiCore.sendToSwift = (type, data) => swiftFails(type, data) ? false : swift.push({ type, data });
+  const encode = c.__nakiCore.arrayBufferToBase64;
+  c.__nakiCore.arrayBufferToBase64 = b => { if (encodeFails(Array.from(new Uint8Array(b)))) throw new Error('encode failed'); return encode(b); };
+  vm.runInContext(src('naki-websocket.js'), c);
+  vm.runInContext(src('naki-plugins.js'), c);
   const ws = new c.WebSocket(url);
   const game = [];
   ws.onmessage = ev => game.push(ev);
@@ -69,7 +77,7 @@ const response = (msgId, payload = [], method = '') => new Uint8Array([3, msgId 
 const canonicalResponse = (msgId, payload) => new Uint8Array([3, msgId & 0xff, msgId >> 8, ...field(2, payload)]);
 const NOTE = '.lq.NotifyAccountUpdate', INFO = '.lq.Lobby.fetchCharacterInfo', SKIN = '.lq.Lobby.changeCharacterSkin';
 
-function plugin(c, id, { caps = ['observe', 'rewriteReceive'], methods = [NOTE], priority, extra = {}, onReceive }) {
+function plugin(c, id, { caps = ['observe', 'rewriteReceive', 'reshapeReceive'], methods = [NOTE], priority, extra = {}, onReceive }) {
   const calls = [];
   c.__nakiPlugins.setGrant(id, { capabilities: caps, methods, priority, ...extra });
   assert.equal(c.__nakiPlugins.register({ id, onReceive(ctx) {
@@ -110,7 +118,7 @@ test('variable-length NOTIFY replace: the game gets one synthetic ArrayBuffer ev
     assert.equal(t.game[0].origin, ev.origin, mode);
     assert.deepEqual(lateCapture, [t.game[0]], `${mode}: later game capture listeners only see the synthetic event`);
     assert.deepEqual(t.toSwift(), [['receive', Array.from(longer)]], mode);
-    assert.deepEqual(t.stats().reshape, { replaced: 1, dropped: 0, fallback: 0, gameErrors: 0 }, mode);
+    assert.deepEqual(t.stats().reshape, { attempted: 1, delivered: 1, dropped: 0, fallback: 0, faults: 0 }, mode);
   }
 });
 
@@ -182,7 +190,7 @@ test('chain: a later plugin sees the replaced bytes and payload; drop after repl
 test('fail-open: a hook that throws after replace or drop has both undone; the original event goes through', () => {
   const t = page();
   t.c.__nakiPluginsMayModifyOutbound = true;
-  plugin(t.c, 'a', { caps: ['observe', 'rewriteReceive', 'dropReceive'], onReceive: ctx => {
+  plugin(t.c, 'a', { caps: ['observe', 'rewriteReceive', 'reshapeReceive', 'dropReceive'], onReceive: ctx => {
     ctx.replace(notify(NOTE, [1, 2, 3, 4]));
     ctx.drop();
     throw new Error('boom');
@@ -191,16 +199,17 @@ test('fail-open: a hook that throws after replace or drop has both undone; the o
   assert.deepEqual(t.game, [ev]);
   assert.deepEqual(arr(ev), Array.from(notify(NOTE, [1])));
   assert.deepEqual(t.toSwift(), [['receive', Array.from(notify(NOTE, [1]))]]);
-  assert.deepEqual(t.stats().reshape, { replaced: 0, dropped: 0, fallback: 0, gameErrors: 0 });
+  assert.deepEqual(t.stats().reshape, { attempted: 0, delivered: 0, dropped: 0, fallback: 0, faults: 0 });
 });
 
 test('forbidden methods: no variable-length replace or drop even with rewriteAllow; equal-length authGame still works', () => {
   const t = page('capture', { url: 'wss://x.maj-soul.com/game-gateway' });
   t.c.__nakiPluginsMayModifyOutbound = true;
-  const RES = ['.lq.FastTest.authGame', '.lq.FastTest.syncGame', '.lq.FastTest.enterGame', '.lq.Route.heartbeat'];
-  const NOTES = ['.lq.ActionPrototype', '.lq.NotifyGameEndResult'];
+  const RES = ['.lq.FastTest.authGame', '.lq.FastTest.syncGame', '.lq.FastTest.enterGame', '.lq.Route.heartbeat',
+    '.lq.Lobby.login', '.lq.Lobby.oauth2Login', '.lq.Lobby.emailLogin', '.lq.Lobby.oauth2Auth', '.lq.Lobby.startUnifiedMatch'];
+  const NOTES = ['.lq.ActionPrototype', '.lq.NotifyGameEndResult', '.lq.NotifyGameTerminate', '.lq.NotifyGameBroadcast'];
   const results = [];
-  plugin(t.c, 'p', { caps: ['observe', 'rewriteReceive', 'dropReceive'], methods: RES.concat(NOTES),
+  plugin(t.c, 'p', { caps: ['observe', 'rewriteReceive', 'reshapeReceive', 'dropReceive'], methods: RES.concat(NOTES),
     extra: { rewriteAllow: NOTES.concat('.lq.FastTest.syncGame') }, onReceive: ctx => {
       const bigger = ctx.type === 1 ? notify(ctx.method, [1, 2, 3, 4]) : canonicalResponse(ctx.msgId, [1, 2, 3, 4, 5, 6]);
       const same = ctx.bytes.slice(); same[same.length - 1] ^= 1;
@@ -209,8 +218,8 @@ test('forbidden methods: no variable-length replace or drop even with rewriteAll
   RES.forEach((m, i) => { t.ws.send(request(50 + i, m)); t.recv(response(50 + i, [8, 1])); });
   NOTES.forEach(m => t.recv(notify(m, [8, 1])));
   assert.deepEqual(results, RES.concat(NOTES).map(m => [m, false, 'undefined', true]));
-  assert.equal(t.game.length, 6);
-  assert.equal(t.stats().reshape.replaced, 0);
+  assert.equal(t.game.length, RES.length + NOTES.length);
+  assert.equal(t.stats().reshape.attempted, 0);
 });
 
 test('Naki\'s own RESPONSE (sendRaw registration) never offers replace or drop, not even to a Naki-traffic observer', () => {
@@ -260,7 +269,7 @@ test('fail-open: if the synthetic event cannot be built, the original is deliver
   assert.equal(t.stats().reshape.fallback, 1);
 });
 
-test('kill-switch: a game error on a synthetic event locks reshaping for the page; later messages pass untouched', () => {
+test('kill-switch: an error during synthetic dispatch is recorded with metadata and candidates, and locks reshaping for the page', () => {
   const t = page();
   const results = [];
   plugin(t.c, 'p', { onReceive: ctx => { results.push(ctx.replace(notify(NOTE, [1, 2, 3]))); } });
@@ -270,35 +279,45 @@ test('kill-switch: a game error on a synthetic event locks reshaping for the pag
   assert.deepEqual(results, [true, false]);
   assert.equal(t.game[1], ev);
   assert.equal(t.stats().reshapeLocked, true);
-  assert.equal(t.stats().reshape.gameErrors, 1);
-  assert.equal(t.logs().filter(m => /停用變長/.test(m)).length, 1);
+  assert.equal(t.stats().reshape.faults, 1);
+  assert.deepEqual(t.stats().reshapeFaults.map(f => [f.kind, f.method, f.candidates, f.error]),
+    [['synthetic_dispatch_error', NOTE, ['p'], 'game decode failed']]);
+  assert.equal(t.logs().filter(m => /變長交付故障（synthetic_dispatch_error.*候選改寫者 p）.*停用變長/.test(m)).length, 1);
 });
 
-test('Blob events stay observe-only: no replace, the game gets the original Blob event', async () => {
+test('Blob events stay observe-only: no replace, the game gets the original Blob event, Swift gets its full bytes', async () => {
   const t = page();
   const seen = [];
-  t.c.__nakiPlugins.setGrant('p', { capabilities: ['observe', 'rewriteReceive', 'dropReceive'], methods: [NOTE] });
-  t.c.__nakiPlugins.register({ id: 'p', onReceive(ctx) { seen.push([typeof ctx.replace, typeof ctx.drop]); } });
-  const ev = new t.c.MessageEvent('message', { data: new Blob([notify(NOTE, [1])]) });
+  t.c.__nakiPlugins.setGrant('p', { capabilities: ['observe', 'rewriteReceive', 'reshapeReceive', 'dropReceive'], methods: [NOTE] });
+  t.c.__nakiPlugins.register({ id: 'p', onReceive(ctx) { seen.push([typeof ctx.replace, typeof ctx.drop, Array.from(ctx.bytes)]); } });
+  const bytes = notify(NOTE, [1, 2, 3]);
+  const ev = new t.c.MessageEvent('message', { data: new Blob([bytes]) });
   t.ws.dispatchEvent(ev);
-  await new Promise(r => setTimeout(r, 10));
-  assert.deepEqual(seen, [['undefined', 'undefined']]);
-  assert.deepEqual(t.game, [ev]);
+  assert.deepEqual(t.game, [ev], 'the game receives the Blob event first, synchronously');
+  await new Promise(r => setTimeout(r, 20));
+  assert.deepEqual(seen, [['undefined', 'undefined', Array.from(bytes)]]);
   assert.ok(t.game[0].data instanceof Blob);
+  assert.deepEqual(t.toSwift(), [['receive', Array.from(bytes)]]);
+  assert.equal(t.swift.find(e => e.type === 'websocket_message').data.type, 'blob');
 });
 
-test('nostop dispatcher: the game would get both the original and the synthetic event (why probe (a) is the gate)', () => {
+test('nostop dispatcher: the duplicate cannot be prevented, but the sentinel records stop_ineffective and locks reshaping', () => {
   const t = page('nostop');
-  plugin(t.c, 'p', { onReceive: ctx => { ctx.replace(notify(NOTE, [1, 2, 3])); } });
+  const results = [];
+  plugin(t.c, 'p', { onReceive: ctx => { results.push(ctx.replace(notify(NOTE, [1, 2, 3]))); } });
   const ev = t.recv(notify(NOTE, [1]));
   assert.deepEqual(t.game.map(e => e === ev), [false, true]);
+  assert.deepEqual(t.stats().reshapeFaults.map(f => f.kind), ['stop_ineffective']);
+  const next = t.recv(notify(NOTE, [2]));
+  assert.deepEqual(results, [true, false]);
+  assert.equal(t.game[2], next);
 });
 
 test('taint: a guard plugin that replaces (variable length) or drops lobby traffic is tainted until reload', () => {
   for (const act of ['replace', 'drop']) {
     const t = page();
     t.c.__nakiPluginsMayModifyOutbound = true;
-    plugin(t.c, 'g', { caps: ['observe', 'rewriteReceive', 'dropReceive'], methods: [SKIN, NOTE], extra: { sendGuard: [SKIN] },
+    plugin(t.c, 'g', { caps: ['observe', 'rewriteReceive', 'reshapeReceive', 'dropReceive'], methods: [SKIN, NOTE], extra: { sendGuard: [SKIN] },
       onReceive: ctx => { act === 'replace' ? ctx.replace(notify(NOTE, [1, 2, 3])) : ctx.drop(); } });
     t.ws.send(request(80, INFO));
     t.recv(notify(NOTE, [1]));
@@ -315,4 +334,102 @@ test('guard local response still reaches the game once through the capture liste
   await new Promise(r => setTimeout(r, 0));
   assert.equal(t.game.length, 1);
   assert.equal(t.toSwift().filter(e => e[0] === 'receive').length, 0, 'the local pair travels as one send message; the listener skips the copy');
+});
+
+test('without reshapeReceive a different-length replace still returns false (v1 semantics); equal length still works', () => {
+  const t = page();
+  const results = [];
+  plugin(t.c, 'old', { caps: ['observe', 'rewriteReceive'], onReceive: ctx => {
+    results.push(ctx.replace(notify(NOTE, [1, 2, 3])));
+    const same = ctx.bytes.slice(); same[same.length - 1] = 9;
+    results.push(ctx.replace(same));
+  } });
+  const ev = t.recv(notify(NOTE, [1]));
+  assert.deepEqual(results, [false, true]);
+  assert.deepEqual(t.game, [ev]);
+  assert.deepEqual(arr(ev), Array.from(notify(NOTE, [9])));
+  assert.equal(t.stats().reshape.attempted, 0);
+});
+
+test('a throwing hook returns the chain to its state before that hook: A\'s replacement is still delivered', () => {
+  const t = page();
+  t.c.__nakiPluginsMayModifyOutbound = true;
+  const longer = notify(NOTE, [7, 7, 7, 7]);
+  plugin(t.c, 'a', { priority: 1, onReceive: ctx => { ctx.replace(longer); } });
+  plugin(t.c, 'b', { caps: ['observe', 'rewriteReceive', 'reshapeReceive', 'dropReceive'], priority: 2, onReceive: ctx => {
+    ctx.bytes[ctx.bytes.length - 1] = 0;
+    ctx.replace(notify(NOTE, [5, 5, 5, 5, 5, 5]));
+    ctx.drop();
+    throw new Error('boom');
+  } });
+  t.recv(notify(NOTE, [1]));
+  assert.equal(t.game.length, 1);
+  assert.deepEqual(arr(t.game[0]), Array.from(longer));
+  assert.deepEqual(t.toSwift(), [['receive', Array.from(longer)]]);
+  assert.deepEqual(t.stats().reshape, { attempted: 1, delivered: 1, dropped: 0, fallback: 0, faults: 0 });
+});
+
+test('fault injection: encoding failure before the stop is fail-open — original delivered, not counted as delivered, not locked', () => {
+  const longer = Array.from(notify(NOTE, [1, 2, 3]));
+  const t = page('capture', { encodeFails: b => JSON.stringify(b) === JSON.stringify(longer) });
+  plugin(t.c, 'p', { onReceive: ctx => { ctx.replace(new Uint8Array(longer)); } });
+  const ev = t.recv(notify(NOTE, [1]));
+  assert.deepEqual(t.game, [ev]);
+  assert.deepEqual(t.toSwift(), [['receive', Array.from(notify(NOTE, [1]))]]);
+  assert.deepEqual(t.stats().reshape, { attempted: 1, delivered: 0, dropped: 0, fallback: 1, faults: 0 });
+  assert.equal(t.stats().reshapeLocked, false);
+});
+
+test('fault injection: bridge refuses after the stop — fault recorded and locked, the game still gets the synthetic once, no original resend', () => {
+  const longer = notify(NOTE, [1, 2, 3]);
+  const t = page('capture', { swiftFails: (type, data) => type === 'websocket_message' && data.size === longer.length });
+  plugin(t.c, 'p', { onReceive: ctx => { ctx.replace(longer); } });
+  const ev = t.recv(notify(NOTE, [1]));
+  assert.equal(t.game.length, 1);
+  assert.notEqual(t.game[0], ev);
+  assert.deepEqual(arr(t.game[0]), Array.from(longer));
+  assert.deepEqual(t.toSwift(), []);
+  assert.deepEqual(t.stats().reshape, { attempted: 1, delivered: 0, dropped: 0, fallback: 0, faults: 1 });
+  assert.deepEqual(t.stats().reshapeFaults.map(f => [f.kind, f.method, f.candidates]), [['bridge_rejected', NOTE, ['p']]]);
+  assert.equal(t.stats().reshapeLocked, true);
+});
+
+test('fault injection: dispatch throws after the stop — fault recorded and locked, Swift has the new bytes once, no original resend', () => {
+  const longer = notify(NOTE, [1, 2, 3]);
+  const t = page();
+  plugin(t.c, 'p', { onReceive: ctx => { ctx.replace(longer); } });
+  const real = t.ws.dispatchEvent.bind(t.ws);
+  let first = null;
+  t.ws.dispatchEvent = ev => { if (first && ev !== first) throw new Error('dispatch failed'); first = first || ev; return real(ev); };
+  t.recv(notify(NOTE, [1]));
+  assert.deepEqual(t.game, []);
+  assert.deepEqual(t.toSwift(), [['receive', Array.from(longer)]]);
+  assert.deepEqual(t.stats().reshape, { attempted: 1, delivered: 0, dropped: 0, fallback: 0, faults: 1 });
+  assert.deepEqual(t.stats().reshapeFaults.map(f => [f.kind, f.error]), [['dispatch_threw', 'dispatch failed']]);
+  assert.equal(t.stats().reshapeLocked, true);
+});
+
+test('main parity: zero plugins and equal-length rewriting deliver the same bytes in the same order as main (game onmessage, ArrayBuffer and offset TypedArray)', () => {
+  const run = (src, equalLength) => {
+    const t = page('capture', { src });
+    if (equalLength) {
+      t.c.__nakiPlugins.setGrant('eq', { capabilities: ['observe', 'rewriteReceive'], methods: [NOTE, INFO] });
+      t.c.__nakiPlugins.register({ id: 'eq', onReceive(ctx) { const b = ctx.bytes.slice(); b[b.length - 1] ^= 0x40; ctx.replace(b); } });
+    }
+    const big = new Uint8Array(64);
+    const req = request(33, INFO, [8, 1]);
+    big.set(req, 5);
+    const view = new Uint8Array(big.buffer, 5, req.length);
+    t.recv(notify(NOTE, [1, 2]));
+    t.ws.send(view);
+    t.recv(response(33, [8, 7]));
+    t.recv(notify(NOTE, [3]));
+    return { game: t.game.map(arr), swift: t.toSwift(), sent: t.ws.sent.map(d => d === view) };
+  };
+  for (const equalLength of [false, true]) {
+    const head = run(source, equalLength), main = run(mainSource, equalLength);
+    assert.deepEqual(head, main, `equalLength=${equalLength}`);
+    assert.deepEqual(head.sent, [true], 'the offset TypedArray goes out as the same object');
+    assert.deepEqual(head.swift[1], ['send', Array.from(request(33, INFO, [8, 1]))], 'Swift gets exactly the view, not the whole buffer');
+  }
 });

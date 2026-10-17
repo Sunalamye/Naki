@@ -175,6 +175,10 @@ extension PluginManifest {
                 return .manifestInvalid(L10n.text("宣告 settingsUI 必須同時宣告 settings"))
             }
         }
+        // reshapeReceive 是 rewriteReceive 的選用語意（長度不等時整包替換，Phase 4 草案），單獨宣告沒有意義
+        if capabilities.contains("reshapeReceive") && !capabilities.contains("rewriteReceive") {
+            return .manifestInvalid(L10n.text("reshapeReceive 必須與 rewriteReceive 一起宣告"))
+        }
         if let sendGuard, sendGuard.isEmpty || sendGuard.contains(where: { !$0.hasPrefix(".lq.Lobby.") || !methods.contains($0) }) {
             return .manifestInvalid(L10n.text("sendGuard 必須非空，且每個方法都是 .lq.Lobby.* 並列在 methods"))
         }
