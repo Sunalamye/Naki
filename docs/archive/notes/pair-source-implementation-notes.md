@@ -100,3 +100,59 @@ PS-5 修前的紅只來自缺診斷欄位，不是行為紅：連線關閉後舊
 - 同號兩則 RESPONSE 依送出順序抵達的假設未驗證。歧義的那一則只觀察，不派給一般鏈。
 - 連線數超過 2 且各自大量未答時，可用號碼可能被占滿而回 `msgid_busy`（PS-9 驗了失準路徑，占滿路徑沒有獨立測試）。
 - 未 live 驗證。
+
+## 第三輪（Astra 第二輪 8～14 條；主線裁決：注入身分改為宿主交易代號）
+
+審查原文：主 repo `.swfd/logs/pair-source-review/astra-review2.md`。main 仍在 `13abe49`。第二輪 Deviations 採納；第二輪應修 3 的 bytes 比對被本輪的代號方案取代。
+
+### 做了什麼
+
+- `naki-websocket.js`：
+  - `sendRaw(base64, sender)` 把送進 `ws.send` 的 buffer 記進 `WeakMap`：注入記代號，Swift 呼叫記 `'naki'`。
+  - `handleMessage` 查出送出者，傳給 `dispatch`（`raw.sender`）與 `failSafe`（第三參數）。
+- `naki-plugins.js`：
+  - `sendRequest` 配代號 `{ id, method }`，記進 `WeakSet`，注入登記的值就是代號。`raw.injected` 只看代號是否存活。`injecting` 只剩守衛用途：相同 bytes 的重入派發一併做注入退回判定。
+  - `api.dispatch` 包一層：送出判決確定外送後才記遊戲未答；原派發本體移為閉包內的 `dispatchRaw`。`failSafe` 照送出口也記。`blockSend` 對注入不撤銷 `pendingMethods`，對遊戲撤回已記的未答。
+  - RESPONSE 沒被同鍵注入登記認領才消耗遊戲未答。非大廳鏈尾 `pairWith` 跳過注入。
+  - 歧義鍵超過 256 個時，有鍵的連線整條標成歧義到關閉。零消耗者早退的清理也看歧義標記。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 8 | 遊戲＝沒有送出者，不看 `isNakiSent`；注入回應不碰遊戲未答 | PS-15 |
+| 應修 9 | `blockSend` 依代號，不撤銷同鍵遊戲配對 | PS-16 |
+| 應修 10 | 非大廳鏈尾依 `raw.injected`（入口固定，不受鏈中改動影響） | PS-17 |
+| 應修 11 | 歧義滿時整條連線只觀察到關閉 | PS-18 |
+| 應修 12 | 判決確定外送後才記未答；派發後 `failSafe` 才擋的由 `blockSend` 撤回 | PS-19、PS-22 |
+| 應修 13 | 配對來源看代號，相同 bytes 的遊戲請求照常登記；守衛仍兩筆都擋 | PS-20、GG4-6 |
+| 應修 14 | 零消耗者清理含歧義標記 | PS-21 |
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| 第三輪測試套在 `85c6fd1` 的 JS | PS-15～PS-21 共 7 紅，皆為審查反例的語意紅：PS-15 配號序列再次出現 64000；PS-16 配對被撤銷；PS-17 配對 2→3；PS-18 改寫鏈收到 64000、1990；PS-19 `msgid_busy`；PS-20、PS-21 回呼缺失 | `r3-red-b2-on-85c6fd1.log` |
+| PS-22 | 本輪補，殺變異 PS11（派發後 `failSafe` 才擋的撤回路徑） | — |
+| 實作後 | b2 198／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9 | `r3-final-*.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| 全量 0–58、58–115 | 56/58、57/57；存活只有 U10、T7；本包 PS1～PS25 全殺（新增 PS18～PS25 共 8 條） | `r3-mutate-full-a.log`、`r3-mutate-full-b.log` |
+
+既有變異隨程式碼更新替換字串：BB3、AA4、AA5、X1、N3、M1、M2、PS8、PS10、PS16、PS17。P2、P3 改定義：bytes 比對已不是來源判定，所以改成「注入退回只認代號」（`GG4-6` 殺）與「相同 bytes 也當注入來源」（`PS-20` 殺）。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r3-test-targeted.log`），全量 `NakiTests` 1184／0（`r3-test-full.log`）。Swift 呼叫 `sendRaw` 仍只傳一個參數，送出者記為 Naki。
+
+### 第三輪 Deviations
+
+1. **`failSafe` 照送記未答沒有獨立變異**：只有「派發本身拋錯」才走這個出口。現有 harness 沒有能讓 `dispatch` 拋錯、又照送的情境，所以未加這條變異。「派發後才擋」的撤回由 PS-22 覆蓋。
+2. **偽造代號**：插件直接呼叫 `sendRaw(b64, 任意物件)` 時，物件不在 `WeakSet` 內，會被當成 Naki 自送（不是遊戲，也不是注入）。這不影響其他插件或遊戲的配對，只讓那筆請求的回應對不回方法。
+
+### 第三輪已知風險
+
+- 歧義滿時整條連線只觀察，代價是該連線之後所有 RESPONSE 都沒有一般鏈與 `replace`，直到關閉。只在 256 個歧義鍵同時存在時觸發。
+- 第二輪列的 live 前提仍未驗證：計數器步進、繞回、重連、陌生 msgId 回應的客戶端行為、回應順序。
+- 未 live 驗證。

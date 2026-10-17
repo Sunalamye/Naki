@@ -364,6 +364,8 @@
     // RESPONSE 到了就標記已答：之後同線同號的 REQUEST 是遊戲自己的；同號 RESPONSE 仍算 Naki（分不出是哪一筆的回應）。
     // seq：登記序號。RESPONSE 只能回答它抵達前就存在的登記（Blob 異步展開期間的重送不算）
     const nakiSent = new Map();
+    // sendRaw 送進 ws.send 的 buffer → 送出者（插件注入的交易代號，或 NAKI_SENDER）。來源判定只看這裡，不比 msgId、不比內容（pair-source）
+    const rawSenders = new WeakMap(), NAKI_SENDER = 'naki';
     let nakiSentSeq = 0;
     function rememberNakiSent(socketId, bytes) {
         if (bytes[0] !== 2 || bytes.length < 3) return;
@@ -424,7 +426,8 @@
     //
     // 回傳：send 方向被 rewriteSend 換掉時的新 Uint8Array，其餘 undefined。
     // receive 變長 replace／drop 回 { reshape:true, bytes, drop, method, msgId, by }（reshape：只有 ArrayBuffer 原事件且未鎖死才給）。
-    function dispatchToPlugins(direction, wsId, info, bytes, mutable, reshape) {
+    // sender：sendRaw 送出的 buffer 才有（插件注入是宿主配的代號、Naki 自送是 NAKI_SENDER），遊戲送出是 undefined
+    function dispatchToPlugins(direction, wsId, info, bytes, mutable, reshape, sender) {
         if (!window.__nakiPlugins || typeof window.__nakiPlugins.dispatch !== 'function') return;
         try {
             const out = window.__nakiPlugins.dispatch({
@@ -433,14 +436,15 @@
                 url: info ? info.url : '',
                 bytes: bytes,
                 mutable: mutable !== false,
-                reshape: !!reshape && !reshapeLocked
+                reshape: !!reshape && !reshapeLocked,
+                sender: sender
             });
             if (direction === 'receive') return out && out.reshape ? out : undefined;
             return out instanceof Uint8Array || (out && out.block) ? out : undefined;
         } catch (e) {
             console.error('[Naki WS] 插件 dispatch 錯誤:', e);
             // 派發本身出錯：守衛方法（或有守衛者時認不出的封包）仍要擋下
-            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, wsId);
+            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, wsId, sender);
         }
     }
 
@@ -541,6 +545,7 @@
             : ArrayBuffer.isView(data) ? 'TypedArray'
             : data instanceof Blob ? 'Blob' : typeof data === 'string' ? 'String' : 'Other';
         messageTypes[direction][dataType]++;
+        const sender = direction === 'send' && data && typeof data === 'object' ? rawSenders.get(data) : undefined;
         // 大廳連線上有守衛者時，無法同步辨識的送出一律拒送（Blob 等）
         if (direction === 'send' && (dataType === 'Blob' || dataType === 'Other')
             && window.__nakiPlugins && window.__nakiPlugins.refuseOpaqueSend && window.__nakiPlugins.refuseOpaqueSend(wsId)) {
@@ -565,7 +570,7 @@
             if (data instanceof ArrayBuffer) {
                 const pluginBytes = new Uint8Array(data);
                 nakiNicknameMask.observe(pluginBytes, direction);
-                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes, true, !!event);
+                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes, true, !!event, sender);
                 if (rewritten && rewritten.block) return rewritten;
                 if (direction === 'receive' && rewritten) return deliverReshaped(ws, wsId, event, rewritten);
                 // ArrayBuffer：轉成 Base64（pluginBytes 是 data 的 view，插件若就地改過這裡編碼的是改後的；
@@ -585,7 +590,7 @@
                 //  連帶讓 LiqiParser 收不到 REQUEST、無法配對 RESPONSE）
                 const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
                 nakiNicknameMask.observe(view, direction);
-                const rewritten = dispatchToPlugins(direction, wsId, info, view);
+                const rewritten = dispatchToPlugins(direction, wsId, info, view, true, false, sender);
                 if (rewritten && rewritten.block) return rewritten;
                 const sent = rewritten || view;
                 sendToSwift('websocket_message', {
@@ -606,7 +611,7 @@
                 data.arrayBuffer().then(function(buffer) {
                     const view = new Uint8Array(buffer);
                     if (direction === 'receive') markNakiAnswered(wsId, view, arrivedAtSeq);   // 記帳處讀不到 Blob，展開後補標記
-                    dispatchToPlugins(direction, wsId, info, view, false);
+                    dispatchToPlugins(direction, wsId, info, view, false, false, sender);
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);
                 });
@@ -635,7 +640,7 @@
             console.error('[Naki WS] 處理訊息錯誤:', e);
             // 派發前出錯：守衛方法（或已污染時認不出的封包）仍要擋下
             if (direction === 'send' && window.__nakiPlugins && window.__nakiPlugins.failSafe) {
-                return window.__nakiPlugins.failSafe(data, wsId);
+                return window.__nakiPlugins.failSafe(data, wsId, sender);
             }
         }
     }
@@ -697,7 +702,8 @@
          * @param {string} base64 - 完整 envelope 的 base64
          * @returns {{success: boolean, bytes?: number, socketId?: number, reason?: string}}
          */
-        sendRaw: function(base64) {
+        // sender：插件層 sendRequest 傳入的交易代號；Swift 呼叫時省略，記成 Naki 自送
+        sendRaw: function(base64, sender) {
             if (typeof base64 !== 'string' || base64.length === 0) {
                 return { success: false, reason: 'invalid_base64' };
             }
@@ -763,6 +769,7 @@
 
             // 選定連線後、送出前登記：包過的 send 會同步跑 attributeSend 與插件 dispatch
             rememberNakiSent(conn.id, bytes);
+            rawSenders.set(bytes.buffer, sender || NAKI_SENDER);
             try {
                 conn.ws.send(bytes.buffer);
             } catch (e) {
