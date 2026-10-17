@@ -960,7 +960,14 @@
             // 沒有插件也鎖定角色（每條連線只解析到鎖定為止），之後才啟用的守衛一開始就認得大廳
             var env = send && !roles.has(raw.wsId) ? parseEnvelope(raw.bytes) : undefined;
             if (send) lockRole(raw.wsId, env);
-            if (noConsumers()) return;
+            if (noConsumers()) {
+                // 配對的新增看有沒有人消耗，消耗不看：RESPONSE 到達、或同鍵送出新請求，舊配對一律清掉（第十四輪第 1 條）
+                if (pendingMethods.size) {
+                    var e = env === undefined ? parseEnvelope(raw.bytes) : env;
+                    if (e && e.msgId != null && e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) pendingMethods.delete(msgKey(raw.wsId, e.msgId));
+                }
+                return;
+            }
             if (env === undefined) env = parseEnvelope(raw.bytes);
             if (send && env && injecting && env.msgId === injecting.msgId && sameBytes(raw.bytes, injecting.bytes)) {
                 var fallback = isLobby(raw.wsId) ? undefined : injectedFallback(raw, env);

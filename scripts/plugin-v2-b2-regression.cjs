@@ -2777,3 +2777,28 @@ test('GG13-2 (Astra12 2): a page with taint but no registered plugin still has c
   t.lobby.receive(response(2010, [8, 1]));
   assert.equal(pendingPairs(t), 0);
 });
+
+// ---- guard-gaps 第十四輪（Astra guard-gaps 第十三輪 1 條）：沒人消耗時，配對的消耗照常 ----
+test('GG14-1 (Astra13 1): INFO sent, the only plugin disabled, INFO answered to the game, the msgId reused for loginBeat — a later observer never sees INFO (answered or not, observer before or after the reuse)', async () => {
+  for (const [answered, early] of [[true, false], [true, true], [false, false]]) {
+    const label = (answered ? 'INFO answered' : 'INFO unanswered') + (early ? ', observer before reuse' : ', observer after reuse');
+    const t = page();
+    seen11(t, [INFO]);
+    t.lobby.send(request(2100, INFO));
+    assert.equal(pendingPairs(t), 1, label);
+    plain(t.c.__nakiPlugins.list()).forEach(p => t.c.__nakiPlugins.disable(p.id));
+    if (answered) {
+      t.lobby.receive(response(2100, [8, 1]));
+      assert.equal(t.game.length, 1, label);
+      assert.equal(pendingPairs(t), 0, label + ': the RESPONSE consumes the pairing even with no consumers');
+    }
+    let got = early ? seen11(t, [INFO, BEAT]) : null;
+    t.lobby.send(request(2100, BEAT));
+    if (!early) {
+      assert.equal(pendingPairs(t), 0, label + ': the reused msgId revokes the old pairing');
+      got = seen11(t, [INFO, BEAT]);
+    }
+    t.lobby.receive(response(2100, [8, 1]));
+    assert.deepEqual(plain(got), early ? [BEAT] : [], label);
+  }
+});

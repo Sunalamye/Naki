@@ -493,5 +493,35 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 ### 第十三輪未驗證與風險
 
-- 送出時沒人消耗（含唯一插件在鏈中停用自己）的請求，回應前才註冊的插件看不到它的 RESPONSE（Dev 60，不會看到錯的 method）。
+- 送出時沒人消耗（含唯一插件在鏈中停用自己）的請求，回應前才註冊的插件看不到它的 RESPONSE（Dev 60）。是否會看到錯的 method 見第十四輪。
+- WebKit、live 未驗證（I2）。
+
+## 第十四輪（Astra 第十三輪審查：1【應修】，主線採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review13.md`。Deviations 60–62 主線採納。main 仍是 `d95d5b1`，不需 rebase。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 應修 1 | 送 INFO → 停用唯一插件 → INFO 回應交遊戲（配對沒清）→ 同連線重用 msgId 送 loginBeat → 註冊觀察者 → 回應派成 INFO。收、送都在 `dispatch` 的零消耗者早退處跳過配對，`remember` 的撤銷到不了。`190d97e`、`e18ce82` 已存在 | `dispatch` 在 `noConsumers()` 早退前，表內有配對時解析一次：RESPONSE 刪同鍵配對，REQUEST 也刪同鍵舊配對（與 `remember` 沒人消耗時的撤銷一致）。契約、§1.4、第十三輪 notes 的「不會看到錯的 method」改成有條件敘述（`GG14-1` 三情境） |
+
+### 第十四輪 Deviations
+
+63. **零消耗者的送出也撤銷同鍵舊配對。** 主線點名的是 RESPONSE 消耗。實測舊配對未答時（INFO 沒有回應就重用 msgId），只清 RESPONSE 不夠，觀察者仍收到 INFO；所以送出方向也比照 `remember`，同鍵新請求撤銷舊配對。`GG14-1` 的「INFO 未答」情境鎖住這條，變異 BB2 由它殺掉。
+64. **只在表內有配對時才解析。** 零插件頁面的表一直是空的（第十二輪），所以平常不多解析；只有插件剛停用、表內還有殘留時才解析一次。
+65. **「不會派成錯的 method」的保證範圍。** 同一來源依序重用 msgId 時成立：RESPONSE 只會派成最後送出那筆的 method，或對不回（送出時沒人消耗）。例外有兩種：跨來源同號碰撞可能派錯或對不回（§1.4 第 5 項）；表滿淘汰只會移除配對，被淘汰那筆的 RESPONSE 對不回 method，不會派錯。主線列的「容量淘汰」殘餘因此寫成「對不回」，不寫成「派錯」。
+
+### 第十四輪驗證（log：主 repo `.swfd/logs/guard-gaps/r14-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第十三輪 HEAD `127b058` 的 JS | 1 紅：`GG14-1`。逐情境探針：INFO 已答／未答且觀察者在重用後註冊時，修前收到 INFO、修後收不到；觀察者在重用前註冊時兩版都收到 loginBeat | `r14-red-b2-on-127b058.log` |
+| 變異（b2＋v2＋p4，扣基線） | 87／89 被殺。新增 BB1–BB4 全殺（RESPONSE 不消耗、送出不撤銷、完全不碰、方向對調）；AA4、AA5 改成新字串仍被殺；存活的 `T7`、`U10` 為既有等價變異 | `r14-mutation.log` |
+| node 五套 | b2 176／0（0 略過）、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r14-green-*.log` |
+| naki-plugins `local-unlock-naki.cjs` | 9／0（`NAKI_ROOT` 指向本 worktree，0 略過） | `r14-green-local-unlock-naki.log` |
+| Swift | 本輪只改 JS 與文件，沒有改 Swift 檔，依主線指示未重跑 | |
+| `git diff main --check` | 無警告 | |
+
+### 第十四輪未驗證與風險
+
+- 跨來源同號碰撞可能派錯或對不回；表滿淘汰的配對對不回 method（Dev 65）。
 - WebKit、live 未驗證（I2）。
