@@ -510,22 +510,34 @@ return JSON.stringify(P.sockets.map(function (s) {
 
 ### 9.6 live 結果（2026-10-17）
 
-結論：**(a)(b)(c)(d) 全部未驗證**。兩個目標 method 在整場對局都沒有出現，攔截器沒有觸發，沒有合成事件。
+結論：第二輪（heartbeat 目標）**(a)(b)(c) 綠，(d) 為 true**。只有一次命中、一種 method 的樣本，見下方限制。第一輪（規格原目標）四項都未驗證。
 
-| 項 | 結果 | 依據 |
+**第一輪：規格原目標，未命中**
+
+- probe 在大廳、進場前安裝，`room_quick_test` 四人南人機房＋`bot_sync` 進場，約 9 分鐘打到有人被飛終局。
+- game-gateway 全場收到 `.lq.ActionPrototype` 693、`inputOperation` 87、`.lq.Route.heartbeat` 31，`.lq.FastTest.checkNetworkDelay` 0 筆。現行 Unity 客戶端不送 checkNetworkDelay，改以 `.lq.Route.heartbeat` 保活。`NotifyGameBroadcast` 要送表情，沒有授權送。
+- 攔截器沒有觸發，四項無從判讀。對局照常。證據 `03-probe-1..10.json`、`03-probe-11-final.json`。
+
+**第二輪：目標加上 game-gateway 的 heartbeat RESPONSE**
+
+| 項 | 結果 | 依據（`r2-03-probe-1.json`，命中後 12 秒） |
 |---|---|---|
-| (a) | 未驗證 | game-gateway `target` 全程為 null |
-| (b) | 未驗證 | 同上；沒有合成事件可吃 |
-| (c) | 未驗證；只得到註冊方式的事實 | 遊戲對每條連線（game-gateway 與三條 gateway）都只用 `onmessage` 註冊 1 次，`addEventListener` 0 次 |
-| (d) | 未驗證 | 同 (a) |
+| (a) | 綠 | `a_blocked: true`。唯一的遊戲 handler `game:onmessage` 沒收到原事件 |
+| (b) | 綠 | `b_auto: true`，遊戲 handler 恰收到一次合成事件、無拋錯。人工條件見下 |
+| (c) | 綠 | `c_onmessage` 與 `c_addEventListener` 皆 true。遊戲每條連線只用 `onmessage` 註冊 1 次，`addEventListener` 路徑只由 probe 自己的 handler 代表 |
+| (d) | true | 攔截器（後註冊的 capture）tick 17 先看到原事件；Naki 的非 capture listener（較早註冊）只在 tick 19 看到合成事件 |
 
-- **環境**：Naki 2.18.0（`/Applications/Naki.app`），測試帳號，`room_quick_test` 四人南人機房＋`bot_sync`。probe 在大廳、進場前安裝（`02-install.json`，第二次回 `already: true`），game-gateway 進場後即 `armed`。
-- **命中的 method**：無。game-gateway 全場收到 `.lq.ActionPrototype` 693、`inputOperation` 87、`.lq.Route.heartbeat` 31、`inputChiPengGang` 28 等，`.lq.FastTest.checkNetworkDelay` 0 筆。Naki all.log 裡唯一的 `checkNetworkDelay` 字樣是 probe 腳本本身。現行 Unity 客戶端以 `.lq.Route.heartbeat` 保活，§9.2 的「checkNetworkDelay 會週期性送」不成立。`.lq.NotifyGameBroadcast` 需要送表情，本次不授權送。
-- **對局是否照常**：照常。東1局起打到有人被飛終局（約 9 分鐘），自動打牌全程有 `inputOperation`／RESPONSE，`/game/state` 持續前進，game-gateway 沒有重連（probe 只記到一條 game-gateway、`requestConnection` 1 次），probe 沒記到遊戲 handler 拋錯。03:43:33 有一筆 `WebSocket error`，是 `bot_sync` 強制重連後一條 lobby `/gateway` 連線失敗（readyState 3、零訊息），不是 game-gateway，發生時攔截器尚未觸發過。
-- **收尾**：終局後重載頁面，`window.__nakiP4` 已不存在。
-- **原始資料**：`.swfd/logs/phase4-probe-live/`（`02-install*.json`、`03-probe-1..10.json` 每 30 秒一次、`03-probe-11-final.json`、`04-naki-log-grep.txt`、截圖）。
-- **要讓 probe 能判讀，需要另擇目標**（待主線與用戶裁決，本次未做）：game-gateway 的 `.lq.Route.heartbeat` RESPONSE（約每 15 秒一筆、不在禁止清單），或授權送一次表情觸發 `NotifyGameBroadcast`。
-- **Deviations**：工作包要求的節號是 9.4，但 9.4 已是「判準」，為免重編號改用 9.6。
+- **命中的 method**：`.lq.Route.heartbeat` RESPONSE，game-gateway 上第一筆（序號 18），進場後約 15 秒內。
+- **(b) 的人工條件**：命中後 57、87、117 秒各讀一次（`r2-04-after-{1,2,3}.json`），連線都是 OPEN、無拋錯；game-gateway 訊息持續增加（ActionPrototype 77→125→165，heartbeat 4→6→8）；`/game/state` 從東1局前進到東2局、分數變動（`r2-04-game-state-*.json`）；截圖 `r2-04-after-hit.png` 顯示正常打牌。§9.4 的「畫面上表情正常顯示」不適用，因為目標不是表情。
+- **對局是否照常**：照常。自動打牌持續有 `inputOperation` 與 RESPONSE，game-gateway 只有一條、沒有重連。Naki log 自 03:55 起只有 `bot_sync` 預期內的強制重連，沒有 error／fault（`r2-04-naki-log-grep.txt`）。約 2 分鐘後 `game_vote_game_end` 被伺服器受理（`r2-05-vote-end.json`），對局關閉，重載頁面回大廳，`__nakiP4` 已不存在。
+- **限制**：每條連線只攔一筆，樣本數 1。heartbeat 回應不帶牌局資料；遊戲對 `ActionPrototype` 等牌局訊息是否同樣吃合成事件，本次沒有直接證據，只能由「同一個 `onmessage` handler 不看 `isTrusted`」推論。
+- **原始資料**：`.swfd/logs/phase4-probe-live/`。第二輪是 `r2-*`，腳本差異在 `r2-script.diff`，遮罩後的 Naki log 在 `naki-all.log`。
+
+**Deviations**
+
+- 對 §9.2：現行客戶端不送 checkNetworkDelay，probe 目標加上 game-gateway 的 `.lq.Route.heartbeat` RESPONSE（主線裁決）。heartbeat 不在禁止清單，內容不變重新 dispatch。
+- 對「只改 TARGETS」：heartbeat 在每條連線上都有，而 `bot_sync` 會讓大廳連線在 probe 安裝後重建並被掛上。為了只動 game-gateway，攔截器多加一個條件：連線 URL 不含 `game-gateway` 就不攔。大廳連線因此沒有被攔（`target` 為 null）。
+- 節號：工作包要求 9.4，但 9.4 已是「判準」，改用 9.6。
 
 ---
 
