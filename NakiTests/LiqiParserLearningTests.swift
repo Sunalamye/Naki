@@ -158,4 +158,22 @@ final class LiqiParserLearningTests: XCTestCase {
         ObservedMatchSids.shared.gameDidStart(is3P: true)
         XCTAssertEqual(ObservedMatchSids.shared.observations[0].is3P, true)
     }
+
+    /// BR-01 × D22：Naki 自送（已綁定 socket 3）的 startUnifiedMatch 在同線被拒，不是遊戲被拒，不得清待回填
+    func testNakiSentStartUnifiedMatchRejectedOnItsSocketKeepsAwaitingGameKind() {
+        isolateSharedObservedMatchSids(self)
+        ObservedMatchSids.shared.record(sid: "ranked", clientVersionString: "v1")
+        let issued = LiqiMsgIdAllocator.shared.next()
+        defer { LiqiMsgIdAllocator.shared.revoke(issued) }
+        LiqiMsgIdAllocator.shared.bind(issued, socketId: 3)
+        let parser = LiqiParser()
+        let start = LiqiRequestBuilder.startUnifiedMatch(matchSid: "guess")
+        _ = parser.parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: issued)), socketId: 3)
+        let error = LiqiEncoder.encodeLengthDelimited(field: 1, bytes: LiqiEncoder.encodeVarintField(field: 1, value: 1303))
+        _ = parser.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: issued, method: "", payload: error)), socketId: 3)
+
+        ObservedMatchSids.shared.gameDidStart(is3P: true)
+        XCTAssertEqual(ObservedMatchSids.shared.observations.map(\.sid), ["ranked"])
+        XCTAssertEqual(ObservedMatchSids.shared.observations[0].is3P, true)
+    }
 }
