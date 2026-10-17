@@ -370,11 +370,63 @@ PS11（擋下不消耗遊戲未答）隨 `blockSend` 的 `gameDone` 移除；它
 
 ### 第七輪 Deviations
 
-1. **延後派發拋錯不走 `failSafe`**：Blob 早已外送，`failSafe` 沒有可擋的送出，原本只會照送路徑替它補記帳。這條沒有變異：現有 harness 無法讓延後派發本身拋錯。
+1. **（已被第八輪撤回）延後派發拋錯不走 `failSafe`**：Blob 早已外送，`failSafe` 沒有可擋的送出，原本只會照送路徑替它補記帳。原說法「harness 無法讓延後派發本身拋錯」不成立：observer 的 `onSend` getter 拋錯即可，第八輪已補 PS-48 與變異 PS62。
 2. **底層 send 拋錯的 Blob 仍標不可信**：標記在送出前完成，送出失敗不撤回標記，較保守。
 3. **接收方向的 Blob 也套用釋放檢查**：主線要求「所有非同步派發」，D22 的已答標記也在檢查之後，關閉後不再寫入。
 
 ### 第七輪已知風險
 
 - 若客戶端改用 Blob 送出，該連線存在期間所有注入都回 `msgid_busy`，需另開包做可信配號。
+- 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。
+
+## 第八輪（Astra 第七輪 31～33 條；全採納）
+
+審查原文：主 repo `.swfd/logs/pair-source-review/astra-review7.md`。main 仍在 `13abe49`，不需 rebase。第七輪 Deviations 採納，Deviation 1 由第 33 條撤回。
+
+### 做了什麼
+
+- `naki-plugins.js`：
+  - 遊戲提交與配對共用序號 `gameSeq`。`pendingMethods` 的值改為 `{ method, seq }`。
+  - 新增 `watermark()` 回傳目前序號，以及 `newerThan(watermark, seq)`。
+  - `gameDone`、暫時淘汰項作廢、`resolveMethod`、零消耗者的配對消耗都帶 `raw.watermark`：比水位新的不消耗。沒有水位（同步派發）時行為不變。
+- `naki-websocket.js`：
+  - 接收 Blob 抵達時同步取水位，展開後以 `{ watermark }` 延後派發。
+  - `ws.send` 入口：連線不在 `wsConnections` 就直接 `originalSend`，不標記、不記帳。
+- `scripts/plugin-v2-b2-regression.cjs`：harness 補 `FileReader` 模型。`blobToBase64` 讀原型的 `arrayBuffer`，不受測試替換的展開影響。以前缺 `FileReader` 時，每個 Blob 送出都會在同步轉碼拋錯、多走一次 `failSafe`，與延後派發的例外混在一起。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 31 | 延後回應只消耗水位以下的未答、淘汰項與配對 | PS-46（有消耗者，含 payload 區分）、PS-49（零消耗者） |
+| 應修 32 | `ws.send` 入口排除已釋放連線；§1.4 第 4 項改寫 | PS-47 |
+| 建議 33 | Dev 1 撤回；補延後派發拋錯回歸與變異；harness 補 FileReader | PS-48 |
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-46～PS-48 套在 `db788ea` 的 JS | PS-46、PS-47 紅，皆為行為紅：INFO 未答被晚到回應消耗（1→0）、已釋放連線留下不可信標記。PS-48 綠：舊版已有 `!deferred`，這條是回歸，由變異 PS62 驗有效 | `r8-red-on-db788ea.log` |
+| PS-49、PS-46 的 payload 斷言 | 實作後補，殺變異 PS57、PS59 | — |
+| 實作後 | b2 224／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r8-final-*.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| 本輪新增 PS56～PS62 | 7/7 殺 | `r8-mutate-new.log` |
+| 全量 0–147 | 145/147；存活只有 U10、T7 | `r8-mutate-full.log` |
+
+替換字串隨程式更新：BB1、BB2、BB4、AA2、AA3、Z1、PS6、PS10、PS39、PS43。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r8-test-targeted.log`），全量 `NakiTests` 1184／0（`r8-test-full.log`）。
+
+### 第八輪 Deviations
+
+1. **水位不套用在注入登記與歧義標記**：注入配號會避開遊戲未答與未答注入，水位以下的同號注入不會在 Blob 抵達後新建。歧義標記只在注入回應時建立，同理。
+2. **延後回應遇到較新配對時方法對不回**：BEAT 的回應若晚於同號 INFO 送出才展開，BEAT 的配對已被 INFO 覆寫，這則回應以無方法派發。這是 D22 同鍵覆寫的既有限制，本輪只保證不消耗 INFO。
+
+### 第八輪已知風險
+
+- 水位只涵蓋接收方向的 Blob。同步派發的 RESPONSE 不帶水位，依現行順序消耗。
 - 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。

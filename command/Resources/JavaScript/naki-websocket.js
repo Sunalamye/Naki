@@ -168,6 +168,8 @@
             // rewriteSend（L3）換掉時改送新 bytes；沒換就是原物件，Naki 自送（isNaki）永遠沒換
             // 守衛擋下（block）時一律不送出：交付失敗也不退回 originalSend
             // tx：這一筆的送出交易，涵蓋底層 send；拋錯時撤回這筆的遊戲未答提交，原例外照拋（pair-source 第六輪第 24 條）
+            // 已釋放的連線：交給底層（CLOSED 時不外送），不標記、不記帳（pair-source 第八輪第 32 條）
+            if (!wsConnections.has(ws)) return originalSend(data);
             const tx = {};
             let failed = true;
             try {
@@ -438,7 +440,7 @@
     // receive 變長 replace／drop 回 { reshape:true, bytes, drop, method, msgId, by }（reshape：只有 ArrayBuffer 原事件且未鎖死才給）。
     // sender：sendRaw 送出的 buffer 才有（插件注入是宿主配的代號、Naki 自送是 NAKI_SENDER），遊戲送出是 undefined
     // tx：送出時 handleMessage 為這一筆建立的交易物件，dispatch 與 failSafe 共用，撤回只認它
-    // deferred：Blob 展開後的非同步派發（不進遊戲記帳）
+    // deferred：Blob 展開後的非同步派發（不進遊戲記帳）；接收方向帶抵達時的水位 { watermark }
     function dispatchToPlugins(direction, wsId, info, bytes, mutable, reshape, sender, tx, deferred) {
         if (!window.__nakiPlugins || typeof window.__nakiPlugins.dispatch !== 'function') return;
         try {
@@ -451,7 +453,8 @@
                 reshape: !!reshape && !reshapeLocked,
                 sender: sender,
                 tx: tx,
-                deferred: !!deferred
+                deferred: !!deferred,
+                watermark: deferred ? deferred.watermark : undefined
             });
             if (direction === 'receive') return out && out.reshape ? out : undefined;
             return out instanceof Uint8Array || (out && out.block) ? out : undefined;
@@ -629,12 +632,13 @@
                 // Blob 只能異步展開；拿到的是副本，已經來不及改遊戲真正收到的 event.data，
                 // 所以這條只允許 observe，不提供 rewriteReceive。
                 const arrivedAtSeq = nakiSentSeq;
+                const watermark = direction === 'receive' && window.__nakiPlugins && window.__nakiPlugins.watermark ? window.__nakiPlugins.watermark() : undefined;
                 // 展開是非同步：連線若已釋放（close／error）就丟棄，不重建已清掉的配對、角色與記帳
                 data.arrayBuffer().then(function(buffer) {
                     if (!wsConnections.has(ws)) return;
                     const view = new Uint8Array(buffer);
                     if (direction === 'receive') markNakiAnswered(wsId, view, arrivedAtSeq);   // 記帳處讀不到 Blob，展開後補標記
-                    dispatchToPlugins(direction, wsId, info, view, false, false, sender, undefined, true);
+                    dispatchToPlugins(direction, wsId, info, view, false, false, sender, undefined, { watermark: watermark });
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);
                 });

@@ -25,7 +25,13 @@ function page(wiring = source('naki-websocket.js'), { breakBase64 = false, encod
     receive(u8) { this.dispatchEvent(new MessageEvent('message', { data: u8.buffer.slice(0) })); }
   }
   Socket.OPEN = 1;
-  const c = { console: { log() {}, error() {} }, Uint8Array, ArrayBuffer, DataView, Blob, MessageEvent, setTimeout,
+  // FileReader 模型：naki-core 的 blobToBase64 用它轉碼給 Swift；讀原型的 arrayBuffer，不受測試替換的展開影響
+  class FileReader {
+    readAsDataURL(blob) {
+      Blob.prototype.arrayBuffer.call(blob).then(ab => { this.result = 'data:application/octet-stream;base64,' + Buffer.from(ab).toString('base64'); if (this.onloadend) this.onloadend(); });
+    }
+  }
+  const c = { console: { log() {}, error() {} }, Uint8Array, ArrayBuffer, DataView, Blob, MessageEvent, FileReader, setTimeout,
     btoa: s => Buffer.from(s, 'binary').toString('base64'), atob: s => Buffer.from(s, 'base64').toString('binary'),
     document: { getElementById: () => null }, __nakiPluginGrants: {} };
   c.window = c; c.WebSocket = Socket; vm.createContext(c);
@@ -3359,6 +3365,82 @@ test('PS-43 (r6 23): a request committed by the dispatch and then sent as-is by 
   t.lobby.send(request(64000, BEAT));
   assert.equal(sentOn(t.lobby).includes(64000), true);
   assert.deepEqual(gameDiag(t), [1, 0]);
+});
+
+function heldBlob(t, bytes) {
+  const blob = new t.c.Blob([bytes]);
+  let open = null;
+  blob.arrayBuffer = () => new Promise(resolve => { open = () => resolve(Blob.prototype.arrayBuffer.call(blob)); });
+  return { blob, open: () => open() };
+}
+
+test('PS-46 (r8 31): BEAT#64000 goes out as TypedArray, its RESPONSE arrives as a Blob still unexpanded, the game then sends INFO#64000, and only then the Blob expands — the late RESPONSE consumes neither INFO\'s unanswered record nor its pairing', async () => {
+  const t = page();
+  const { inject } = injector11(t);
+  const got = seen11(t, [INFO, BEAT]), payloads = [];
+  t.c.__nakiPlugins.setGrant('pay46', { capabilities: ['observe'], methods: [INFO], priority: 400 });
+  t.c.__nakiPlugins.register({ id: 'pay46', onReceive(ctx) { payloads.push(ctx.bytes[ctx.bytes.length - 1]); } });
+  t.lobby.send(request(64000, BEAT));
+  const held = heldBlob(t, response(64000, [8, 1]));
+  t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
+  t.lobby.send(request(64000, INFO));
+  held.open();
+  await tick(); await tick();
+  assert.deepEqual(gameDiag(t), [1, 0], 'INFO is still unanswered');
+  assert.equal(untrusted(t), 0, 'a received Blob does not distrust the connection');
+  assert.notEqual(inject(FST).msgId, 64000);
+  t.lobby.receive(response(64000, [8, 2]));
+  assert.deepEqual(plain(got), [INFO], 'the real INFO RESPONSE still resolves to INFO');
+  assert.deepEqual(plain(payloads), [2], 'only the real INFO RESPONSE (payload 2), not the late Blob (payload 1)');
+  assert.deepEqual(gameDiag(t), [0, 0]);
+});
+
+test('PS-49 (r8 31, no consumers): the same late Blob RESPONSE expanding while no plugin is active does not clear INFO\'s newer pairing — an observer registered afterwards still resolves the real RESPONSE to INFO', async () => {
+  const t = page();
+  injector11(t);
+  t.lobby.send(request(64000, BEAT));
+  const held = heldBlob(t, response(64000, [8, 1]));
+  t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
+  t.lobby.send(request(64000, INFO));
+  assert.equal(pendingPairs(t), 1);
+  t.c.__nakiPlugins.disable('inj11');
+  held.open();
+  await tick(); await tick();
+  assert.equal(pendingPairs(t), 1, 'the newer INFO pairing survives the late RESPONSE');
+  assert.deepEqual(gameDiag(t), [1, 0]);
+  const got = seen11(t, [INFO]);
+  t.lobby.receive(response(64000, [8, 2]));
+  assert.deepEqual(plain(got), [INFO]);
+});
+
+test('PS-47 (r8 32): a Blob sent on a released socket goes to the underlying send without marking anything — no lasting untrusted mark, injections on a new connection work', () => {
+  const t = page();
+  const { inject } = injector11(t);
+  const old = t.lobby;
+  old.close();
+  old.send(new t.c.Blob([request(64000, BEAT)]));
+  assert.equal(untrusted(t), 0);
+  assert.deepEqual(gameDiag(t), [0, 0]);
+  const fresh = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+  fresh.send(request(1950, BEAT));
+  fresh.receive(response(1950, [8, 1]));
+  const r = inject(FST);
+  assert.equal(r.ok, true, JSON.stringify(plain(r)));
+});
+
+test('PS-48 (r8 33): the deferred dispatch of a Blob send throws (an observer whose onSend getter throws) — no failSafe, nothing counted, the connection only stays untrusted', async () => {
+  const t = page();
+  injector11(t);
+  let armed = false;
+  t.c.__nakiPlugins.setGrant('bad33', { capabilities: ['observe'], methods: [BEAT] });
+  t.c.__nakiPlugins.register({ id: 'bad33', get onSend() { if (armed) throw new Error('getter broke'); return () => {}; } });
+  const before = t.lobby.sent.length;
+  armed = true;
+  t.lobby.send(new t.c.Blob([request(64000, BEAT)]));
+  await tick(); await tick();
+  assert.equal(t.lobby.sent.length, before + 1);
+  assert.deepEqual(gameDiag(t), [0, 0]);
+  assert.equal(untrusted(t), 1);
 });
 
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {

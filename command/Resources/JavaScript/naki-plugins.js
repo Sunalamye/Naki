@@ -91,7 +91,9 @@
     var pluginMsgId = PLUGIN_MSGID_FIRST;
     var gameSends = new Map();   // socketId -> { last, inflight: Map(msgId -> 提交序號), lost, version }
     var gameDispatching = [];    // 派發中的遊戲請求 { msgId }
-    var gameSeq = 0;
+    var gameSeq = 0;   // 遊戲提交與配對共用的序號：延後派發的回應只消耗抵達時已存在的（第八輪第 31 條）
+    // 延後派發的 RESPONSE 帶抵達時的水位；比水位新的提交或配對屬於之後送出的同號請求，不歸它
+    function newerThan(watermark, seq) { return watermark != null && seq > watermark; }
     var openCommits = new Set();   // 送出交易還沒結束的提交紀錄：撤回資料只活在交易期間，未答表只存序號（第六輪第 23 條）
     var untrustedSockets = new Set();   // 遊戲送過 Blob 的連線
     // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
@@ -112,11 +114,16 @@
         return c;
     }
     // 已被進行中交易暫時淘汰的號碼收到回答：作廢那筆淘汰，撤回時不放回（第六輪第 22 條）
-    function gameDone(socketId, msgId) {
+    function gameDone(socketId, msgId, watermark) {
         var g = gameSends.get(socketId);
         if (!g) return;
-        if (g.inflight.delete(msgId)) { g.version++; return; }
-        openCommits.forEach(function (c) { if (c.g === g && c.evicted && c.evicted[0] === msgId) c.evicted = null; });
+        if (g.inflight.has(msgId)) {
+            if (newerThan(watermark, g.inflight.get(msgId))) return;
+            g.inflight.delete(msgId);
+            g.version++;
+            return;
+        }
+        openCommits.forEach(function (c) { if (c.g === g && c.evicted && c.evicted[0] === msgId && !newerThan(watermark, c.evicted[1])) c.evicted = null; });
     }
     // 撤回只動自己：msgId 仍是這筆提交的才移除（先前提交放回，排到最新，不恢復原 FIFO 位置）。
     // 之後表有變動（版本不符）就不回復淘汰與失準，寧可保守失準
@@ -461,7 +468,7 @@
         raw.injected = send && liveTokens.has(raw.sender);
         // 遊戲的回答：沒被同鍵注入登記認領的 RESPONSE 才消耗遊戲未答（與 runChain、零消耗者同序，第三輪第 8 條）
         var b = raw.bytes;
-        if (!send && b.length >= 3 && b[0] === TYPE_RESPONSE && !injectedMsgIds.has(msgKey(raw.wsId, b[1] | (b[2] << 8)))) gameDone(raw.wsId, b[1] | (b[2] << 8));
+        if (!send && b.length >= 3 && b[0] === TYPE_RESPONSE && !injectedMsgIds.has(msgKey(raw.wsId, b[1] | (b[2] << 8)))) gameDone(raw.wsId, b[1] | (b[2] << 8), raw.watermark);
         if (noConsumers()) {
             // 配對的新增看有沒有人消耗，消耗不看：RESPONSE 到達、或同鍵送出新請求，舊配對一律清掉（第十四輪第 1 條）。
             // 注入登記與歧義標記同樣消耗：RESPONSE 先歸同鍵的注入，遊戲配對留給下一則（與 runChain 同序，第二輪第 4 條、第三輪第 14 條）
@@ -469,7 +476,7 @@
                 var e = env === undefined ? parseEnvelope(raw.bytes) : env;
                 var k = e && e.msgId != null ? msgKey(raw.wsId, e.msgId) : null;
                 if (k && !send && e.type === TYPE_RESPONSE && injectedMsgIds.delete(k)) { if (pendingMethods.has(k)) markAmbiguous(raw.wsId, k); }
-                else if (k && e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) { pendingMethods.delete(k); if (!send) ambiguousPairs.delete(k); }
+                else if (k && e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE) && !(pendingMethods.has(k) && newerThan(raw.watermark, pendingMethods.get(k).seq))) { pendingMethods.delete(k); if (!send) ambiguousPairs.delete(k); }
             }
             return;
         }
@@ -499,7 +506,7 @@
         var key = msgKey(socketId, msgId);
         pendingMethods.delete(key);
         if (noConsumers()) return;
-        pendingMethods.set(key, method);
+        pendingMethods.set(key, { method: method, seq: ++gameSeq });
         if (pendingMethods.size > PENDING_LIMIT) pendingMethods.delete(pendingMethods.keys().next().value);
     }
 
@@ -514,11 +521,12 @@
     }
 
     // RESPONSE envelope 不帶 method，靠送出時記下的 msgId 對回（可能對不上 → null）
-    function resolveMethod(env, direction, socketId) {
+    // watermark：延後派發的回應只認抵達時已存在的配對
+    function resolveMethod(env, direction, socketId, watermark) {
         if (env.method) return env.method;
         if (direction === 'receive' && env.type === TYPE_RESPONSE && env.msgId != null) {
-            var m = pendingMethods.get(msgKey(socketId, env.msgId));
-            if (m != null) { pendingMethods.delete(msgKey(socketId, env.msgId)); return m; }
+            var p = pendingMethods.get(msgKey(socketId, env.msgId));
+            if (p && !newerThan(watermark, p.seq)) { pendingMethods.delete(msgKey(socketId, env.msgId)); return p.method; }
         }
         return null;
     }
@@ -795,7 +803,7 @@
         var ambiguous = injected ? pendingMethods.has(injectedKey) : (injectedKey != null && consumeAmbiguous(raw.wsId, injectedKey));
         if (injected && ambiguous) markAmbiguous(raw.wsId, injectedKey);
         // 注入回應用注入自己的方法、只消耗注入登記；同號的遊戲配對留給遊戲的回應
-        var method = injected ? injection.method : resolveMethod(env, raw.direction, raw.wsId);
+        var method = injected ? injection.method : resolveMethod(env, raw.direction, raw.wsId, raw.watermark);
         diagnostics.lastMethod = method;
         // 注入登記還在就是插件自送，即使 sendRaw 登記已被淘汰（D22 第二輪第 1 條）
         var isNaki = injected || ambiguous || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
@@ -1145,6 +1153,9 @@
 
         // naki-websocket 在 ws.send 入口看到遊戲的 Blob 送出時同步呼叫：這條連線的號碼不可信直到關閉
         markUntrusted: function (socketId) { untrustedSockets.add(socketId); },
+
+        // naki-websocket 在接收的 Blob 抵達時同步取水位，展開後隨延後派發帶回
+        watermark: function () { return gameSeq; },
 
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
         // 這條連線的回應不會再來，配對一併清掉（第十二輪第 1 條）
