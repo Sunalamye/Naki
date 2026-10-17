@@ -12,3 +12,5 @@
 - 沒有為 begin／end 加防偽簽章：同 realm 無法防惡意插件（契約 §8），改以「每頁一輪」避免熱插件重入 document-start。
 - 頁面無啟用插件，或注入 script 語法錯時，begin 從未被呼叫，狀態維持 idle；之後任何同 realm 程式呼叫 `beginBootstrap()` 可取得 `'document-start'`。跳出 try 讓 end 不執行同理。兩者皆屬 §8 信任邊界內的刻意繞過，`loadSource` 不是安全證明。
 - 第二輪：`pluginLog` 回傳 `sendToSwift` 的真實投遞結果，`devLog` 失敗不佔配額；測試用的 `sendToSwift` 假件改回傳 true 以貼近真實實作。
+
+- 復驗第二輪殘留：`pluginLog` 以 `=== true` 判定；naki-core 缺席時第 28 行退回的空函式回 undefined，若改成 `!== false` 會誤判已送達。三模組一起注入，此路徑正式環境走不到，未加測試。
