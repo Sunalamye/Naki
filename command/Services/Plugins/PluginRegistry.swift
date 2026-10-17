@@ -367,6 +367,7 @@ nonisolated enum PluginRegistry {
         parts.append("// === Naki 插件注入（第二個 WKUserScript，共 \(active.count) 個）===")
         parts.append("window.__nakiPluginsMayModifyOutbound = \(mayModifyOutbound ? "true" : "false");")
         parts.append("window.__nakiPluginGrants = \(grantsJSON);")
+        parts.append("if (window.__nakiPlugins && window.__nakiPlugins.beginBootstrap) { window.__nakiPlugins.beginBootstrap(); }")
         for d in active {
             guard let source = d.entrySource else { continue }
             // 每個插件的**執行**包在 try/catch（runtime 錯誤隔離；語法錯見上方 Phase 1 限制）
@@ -374,6 +375,7 @@ nonisolated enum PluginRegistry {
             parts.append("// --- plugin: \(idLit) ---")
             parts.append("try {\n\(source)\n} catch (e) { console.error('[Naki Plugin]', \(idLit), '載入錯誤', e); }")
         }
+        parts.append("if (window.__nakiPlugins && window.__nakiPlugins.endBootstrap) { window.__nakiPlugins.endBootstrap(); }")
         return parts.joined(separator: "\n")
     }
 

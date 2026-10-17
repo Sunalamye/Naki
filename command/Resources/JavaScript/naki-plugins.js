@@ -662,7 +662,35 @@
         return raw.bytes;
     }
 
+    // 載入來源：宿主注入 script 開頭呼叫 beginBootstrap、結尾呼叫 endBootstrap；兩者每頁只能成功一輪，
+    // 之後（含熱啟用）一律 'hot'，插件無法重新進入 document-start 狀態。
+    var bootstrapState = 'idle';   // idle → loading → done
+    var DEV_LOG_LIMIT = 500;
+    var devLogCounts = new Map();
+
     var api = {
+        get loadSource() { return bootstrapState === 'loading' ? 'document-start' : 'hot'; },
+
+        beginBootstrap: function () {
+            if (bootstrapState !== 'idle') return false;
+            bootstrapState = 'loading';
+            return true;
+        },
+        endBootstrap: function () {
+            if (bootstrapState === 'loading') bootstrapState = 'done';
+            return bootstrapState === 'done';
+        },
+
+        // 拿到 ctx.log 之前就能寫宿主 log（同一管道、同一前綴）。只收已註冊或持有宿主 grant 的 id，每插件每頁 500 行。
+        devLog: function (pluginId, line) {
+            if (typeof pluginId !== 'string' || !(registry.has(pluginId) || grantFor(pluginId))) return false;
+            var n = devLogCounts.get(pluginId) || 0;
+            if (n >= DEV_LOG_LIMIT) return false;
+            devLogCounts.set(pluginId, n + 1);
+            pluginLog(pluginId, line);
+            return true;
+        },
+
         // 插件進入點自己呼叫。manifest（grant）是權威。
         register: function (spec) {
             if (!spec || typeof spec.id !== 'string') {

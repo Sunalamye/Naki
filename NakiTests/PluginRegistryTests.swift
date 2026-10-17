@@ -98,6 +98,20 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertFalse(script.contains("\nalert(1)"))
     }
 
+    func testInjectionScriptBracketsPluginSourceWithBootstrapMarks() throws {
+        let manifest = try JSONDecoder().decode(PluginManifest.self, from: manifestJSON(id: "x"))
+        let d = PluginDescriptor(id: "x", directory: root, manifest: manifest,
+                                 entrySource: "PLUGIN_BODY();", failure: nil)
+        let script = try XCTUnwrap(PluginRegistry.buildInjectionScript(descriptors: [d], enabled: [d.id]))
+        let begin = try XCTUnwrap(script.range(of: "__nakiPlugins.beginBootstrap()"))
+        let body = try XCTUnwrap(script.range(of: "PLUGIN_BODY();"))
+        let end = try XCTUnwrap(script.range(of: "__nakiPlugins.endBootstrap()"))
+        XCTAssertLessThan(begin.lowerBound, body.lowerBound)
+        XCTAssertLessThan(body.lowerBound, end.lowerBound)
+        let hot = try XCTUnwrap(PluginRegistry.enableScript(for: d))
+        XCTAssertFalse(hot.contains("Bootstrap"), "熱啟用不得帶 document-start 標記")
+    }
+
     // MARK: - 移除以實際目錄為準
 
     func testApiVersionMismatchDescriptorKeepsDirectoryIdentity() throws {

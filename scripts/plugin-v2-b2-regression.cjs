@@ -1024,3 +1024,71 @@ test('ctx.taint(): extra arguments are ignored, a plugin can only taint itself',
   assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, { [ID]: [SKIN] });
   assert.equal(otherTainted, false);
 });
+
+test('loadSource: document-start only while the host bootstrap runs, hot otherwise', () => {
+  const t = page();
+  const p = t.c.__nakiPlugins;
+  assert.equal(p.loadSource, 'hot', 'before any bootstrap');
+  assert.equal(p.beginBootstrap(), true);
+  t.c.__nakiPlugins.setGrant('boot', { capabilities: ['observe'], methods: [] });
+  t.c.seen = null;
+  vm.runInContext(`window.seen = window.__nakiPlugins.loadSource; window.__nakiPlugins.register({ id: 'boot' });`, t.c);
+  assert.equal(t.c.seen, 'document-start');
+  assert.equal(p.endBootstrap(), true);
+  assert.equal(p.loadSource, 'hot');
+  assert.equal(p.beginBootstrap(), false, 'a second bootstrap is refused, hot plugins cannot re-enter document-start');
+  assert.equal(p.loadSource, 'hot');
+  assert.equal(p.list().some(x => x.id === 'boot'), true, 'registration survives');
+});
+
+test('loadSource: re-registering after disable is hot, and the property is read-only', () => {
+  const t = page();
+  const p = t.c.__nakiPlugins;
+  p.beginBootstrap();
+  p.endBootstrap();
+  p.setGrant('h', { capabilities: ['observe'], methods: [] });
+  try { p.loadSource = 'document-start'; } catch (e) { /* strict mode throws, sloppy ignores */ }
+  assert.equal(p.loadSource, 'hot');
+  p.disable('h');
+  p.setGrant('h', { capabilities: ['observe'], methods: [] });
+  vm.runInContext(`window.seen = window.__nakiPlugins.loadSource`, t.c);
+  assert.equal(t.c.seen, 'hot');
+});
+
+test('devLog: unknown id is dropped, known id shares the ctx.log channel and format', () => {
+  const t = page();
+  const p = t.c.__nakiPlugins;
+  assert.equal(p.devLog('ghost', 'x'), false);
+  assert.equal(p.devLog(42, 'x'), false);
+  assert.equal(t.events('log').length, 0);
+  p.setGrant('dev', { capabilities: ['observe'], methods: [] });
+  p.register({ id: 'dev' });
+  t.events('log').length = 0;
+  t.swift.length = 0;
+  assert.equal(p.devLog('dev', 'early'), true);
+  const [e] = t.events('log');
+  assert.deepEqual(plain(e.data), { id: 'dev', kind: 'log', msg: 'early' });
+});
+
+test('devLog: works for a granted plugin that has not registered yet (loading)', () => {
+  const t = page();
+  const p = t.c.__nakiPlugins;
+  p.setGrant('pre', { capabilities: ['observe'], methods: [] });
+  assert.equal(p.devLog('pre', 'before register'), true);
+  assert.equal(t.events('log').length, 1);
+  p.disable('pre');
+  assert.equal(p.devLog('pre', 'after disable'), false, 'grant removed and not registered');
+});
+
+test('devLog: capped at 500 lines per plugin per page, other plugins unaffected', () => {
+  const t = page();
+  const p = t.c.__nakiPlugins;
+  p.setGrant('a', { capabilities: ['observe'], methods: [] });
+  p.setGrant('b', { capabilities: ['observe'], methods: [] });
+  let ok = 0;
+  for (let i = 0; i < 520; i++) if (p.devLog('a', 'l' + i)) ok++;
+  assert.equal(ok, 500);
+  assert.equal(p.devLog('a', 'more'), false);
+  assert.equal(p.devLog('b', 'fine'), true);
+  assert.equal(t.events('log').filter(e => e.data.id === 'a').length, 500);
+});

@@ -302,6 +302,14 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 
 要解除必須在 manifest 逐一列出，Naki UI 會以紅字警告使用者「這個插件會改動 Naki 用來判斷牌局的資料」。
 
+### 載入來源與早期 log：`__nakiPlugins.loadSource` / `devLog`
+
+- `window.__nakiPlugins.loadSource`：唯讀屬性。只有在**宿主注入階段**（Naki 以 document-start user script 串接所有啟用插件源碼，頁面載入時一起執行）載入的插件，於其頂層程式碼執行期間讀到 `'document-start'`；其餘任何時刻（熱啟用、停用後重新註冊、`register` 之後的 hook 內）一律 `'hot'`。要判斷自己的載入來源，請在頂層同步讀取並自行保存。
+- 這是宿主標記，不是頁面側推論：Naki 在注入 script 前後各呼叫一次內部的開始／結束標記，每頁只成功一輪，熱啟用路徑不經過它。
+- 權限邊界同 §8：標記與其他 `__nakiPlugins` 成員在同一 realm，惡意插件仍能繞過。這個值用於「防誤用」（例如測試專用插件拒絕在不可信的載入來源執行），不是安全邊界。
+- `window.__nakiPlugins.devLog(pluginId, line)`：任何時候可呼叫，寫進宿主 log，管道與前綴格式同 `ctx.log`。只收已註冊，或持有宿主下發 grant 的 `pluginId`（含載入中、熱啟用 `register` 之前）；其他回 `false` 並丟棄。每插件每頁最多 500 行，超過回 `false`。回 `true` 代表已交給宿主。
+- 兩者都不屬於 hook 契約的一部分，僅供載入期與早期診斷使用。
+
 ### 授權防誤用，不防惡意插件
 
 `capabilities`、`methods` 與 L3 總開關在 JS 這側的實體，是頁面 realm 裡**可寫的全域變數**：授權表 `window.__nakiPluginGrants`（Swift 注入，熱插拔時 `setGrant` 寫入）與總開關 `window.__nakiPluginsMayModifyOutbound`。同一個 realm 的任何插件都能直接改寫它們，或乾脆呼叫 `window.__nakiWebSocket.sendRaw`。所以這套機制的定位是**防誤用**（manifest 與 UI 把「這個插件宣稱要做什麼」寫清楚、讓正常插件各守本分、讓 log 可稽核），**不是**防惡意插件的安全邊界。插件由使用者自行安裝，信任邊界本來就包含插件（2026-10-12 用戶裁決 U4：只改文件，不加防護）。
