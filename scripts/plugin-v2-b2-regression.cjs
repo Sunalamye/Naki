@@ -1132,7 +1132,7 @@ test('GG3-4b (Astra2 4): after sendRaw reports failure, the game\'s identical re
   assert.deepEqual(guardLog(t), []);
 });
 
-test('GG3-4c (Astra2 4): a near-miss method from one hook completed into TITLE by another is reverted in both priority orders', () => {
+test('GG3-4c (Astra2 4; guard-gaps round 7): a near-miss method from one hook is itself an in-place method change and is reverted, so TITLE never forms in either order', () => {
   const NEAR = '.lq.Lobby.useTitlX';
   for (const nearFirst of [true, false]) {
     const t = page();
@@ -1143,7 +1143,7 @@ test('GG3-4c (Astra2 4): a near-miss method from one hook completed into TITLE b
     const g = gameSocket(t.c);
     g.send(request(930, AUTH));
     g.send(request(931, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]));
-    assert.equal(methodOf(g.sent[1]), NEAR, nearFirst ? 'near first' : 'fix first');
+    assert.equal(methodOf(g.sent[1]), OP, nearFirst ? 'near first' : 'fix first');
   }
 });
 
@@ -2012,4 +2012,187 @@ test('GG6-6: the hook-end check of a replace is not skipped — a guard for the 
   assert.deepEqual(results, [true, true]);
   assert.equal(t.lobby.sent[0], req);
   assert.equal(failedHook(t, 'rw6'), true);
+});
+
+// ---- guard-gaps 第七輪（Astra guard-gaps 第六輪 1–4 條）：就地改不得換 method、鏈尾以目前狀態終判、receive 先物化 ----
+const FST7 = '.lq.Lobby.fetchServerTime', OAUTH7 = '.lq.Lobby.fetchOauth2Info';
+const fst7 = (msgId, last = 8) => { const b = sameLength(FST7, N6, msgId); b[N6 - 1] = last; return b; };
+function observer7(t, id, methods, onSend, priority = 0) {
+  t.c.__nakiPlugins.setGrant(id, { capabilities: ['observe'], methods, priority });
+  assert.equal(t.c.__nakiPlugins.register({ id, onSend }), true);
+}
+
+test('GG7-1 (Astra6 2): an in-place rewrite of fetchServerTime into the same-length forbidden fetchOauth2Info, or into loginBeat, is reverted and counted, on lobby and game', () => {
+  for (const target of [OAUTH7, BEAT]) {
+    for (const onLobby of [true, false]) {
+      const t = page();
+      observer7(t, 'ip7', [FST7], ctx => { ctx.bytes.set(sameLength(target, N6, ctx.msgId)); });
+      const seen = [];
+      observer7(t, 'after7', [FST7], ctx => { seen.push(ctx.method); ctx.bytes[N6 - 1] = 9; }, 1);
+      const ws = onLobby ? t.lobby : gameSocket(t.c);
+      if (!onLobby) ws.send(request(1300, AUTH));
+      ws.send(fst7(1301));
+      const label = target + (onLobby ? ' lobby' : ' game');
+      assert.deepEqual(ws.committed.slice(-1), [Array.from(fst7(1301, 9))], label + ': the later legal payload change stays, the method change does not');
+      assert.deepEqual(t.toSwift('send').slice(-1), [Array.from(fst7(1301, 9))], label);
+      assert.deepEqual(seen, [FST7], label);
+      assert.equal(t.events('log').some(e => e.data.id === 'ip7' && /onSend 拋錯（第 1 次）.*method 變了/.test(e.data.msg)), true, label);
+    }
+  }
+});
+
+test('GG7-2 (Astra6 3): after a legal in-place payload change, later hooks see the wire method and payload, and the RESPONSE goes to the plugin of the method on the wire', () => {
+  const t = page();
+  const seen = [], got = { fst: 0, beat: 0 };
+  const reg = (id, methods, priority, spec) => { t.c.__nakiPlugins.setGrant(id, { capabilities: ['observe'], methods, priority }); t.c.__nakiPlugins.register({ id, ...spec }); };
+  reg('pay7', [FST7], 0, { onSend(ctx) { ctx.bytes[N6 - 1] = 9; } });
+  reg('look7', [FST7], 1, { onSend(ctx) { seen.push([ctx.method, ctx.bytes[ctx.payload.to - 1]]); }, onReceive() { got.fst++; } });
+  reg('swap7', [FST7], 2, { onSend(ctx) { ctx.bytes.set(sameLength(BEAT, N6, ctx.msgId)); } });
+  reg('beat7', [BEAT], 0, { onReceive() { got.beat++; } });
+  t.lobby.send(fst7(1302));
+  assert.deepEqual(t.lobby.committed[0], Array.from(fst7(1302, 9)));
+  assert.deepEqual(seen, [[FST7, 9]]);
+  t.lobby.receive(response(1302, [8, 1]));
+  assert.deepEqual(got, { fst: 1, beat: 0 });
+});
+
+test('GG7-3 (Astra6 1): a TITLE guard registered later in the chain cannot let an earlier in-place change to TITLE out, with or without a later payload change', () => {
+  for (const bTouches of [false, true]) {
+    const t = page();
+    observer7(t, 'a7', [FST7], ctx => { ctx.bytes.set(sameLength(TITLE, N6, ctx.msgId)); });
+    observer7(t, 'b7', [FST7], ctx => {
+      t.c.__nakiPlugins.setGrant('tg7', { capabilities: ['observe'], methods: [TITLE], sendGuard: [TITLE] });
+      assert.equal(t.c.__nakiPlugins.register({ id: 'tg7', onSend() {} }), true);
+      if (bTouches) ctx.bytes[N6 - 1] = 9;
+    }, 1);
+    t.lobby.send(fst7(1303));
+    const expected = Array.from(fst7(1303, bTouches ? 9 : 8));
+    assert.deepEqual(t.lobby.committed, [expected], String(bTouches));
+    assert.equal(t.toSwift('send').some(b => methodOf(Uint8Array.from(b)) === TITLE), false, String(bTouches));
+  }
+});
+
+test('GG7-4 (Astra6 1): a guard for the request\'s own method that appears mid-chain (registered, or tainted by a synchronous receive re-entry) is judged at chain end — not on chain ⇒ local error', async () => {
+  for (const how of ['register', 'taint']) {
+    for (const touch of [false, true]) {
+      const t = page();
+      t.c.__nakiPluginsMayModifyOutbound = true;
+      observer7(t, 'a7', [SKIN], ctx => { if (touch) ctx.bytes[ctx.bytes.length - 1] ^= 1; });
+      if (how === 'taint') t.lobby.send(request(1304, INFO));
+      observer7(t, 'b7', [SKIN], () => {
+        t.c.__nakiPlugins.setGrant('g7', { capabilities: ['observe'], methods: [INFO, SKIN], sendGuard: [SKIN] });
+        assert.equal(t.c.__nakiPlugins.register({ id: 'g7', onReceive(ctx) { ctx.taint(); } }), true);
+        if (how === 'taint') { t.lobby.receive(response(1304, [8, 1])); t.c.__nakiPlugins.disable('g7'); }
+      }, 1);
+      const req = request(1305, SKIN, [8, 1]);
+      t.lobby.send(req);
+      await tick();
+      const label = how + (touch ? ' touched' : ' untouched');
+      if (how === 'taint') assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).tainted, { g7: [SKIN] }, label);
+      assert.equal(sentIds(t).includes(1305), false, label);
+      assert.deepEqual(t.game.slice(-1), [errorResponse(1305)], label);
+      assert.deepEqual(guardLog(t).slice(-1).map(e => [e[1], e[2], e[3]]), [[1305, 'local_error', 'not_on_chain']], label);
+    }
+  }
+});
+
+test('GG7-5 (Astra6 1): the chain-end verdict reverts to the game\'s original bytes, not an intermediate snapshot, and charges the last modifier', () => {
+  const t = page();
+  observer7(t, 'a7', [OAUTH7], ctx => { ctx.bytes[ctx.bytes.length - 1] = 9; });
+  observer7(t, 'b7', [OAUTH7], ctx => { ctx.bytes[ctx.bytes.length - 2] = 9; }, 1);
+  const req = request(1306, OAUTH7, [8, 1, 8, 1]);
+  t.lobby.send(req);
+  assert.equal(t.lobby.sent[0], req);
+  assert.deepEqual(t.lobby.committed[0], Array.from(request(1306, OAUTH7, [8, 1, 8, 1])));
+  assert.equal(t.events('log').some(e => e.data.id === 'b7' && /鏈尾終判/.test(e.data.msg)), true);
+  assert.equal(t.events('log').some(e => e.data.id === 'a7' && /拋錯/.test(e.data.msg)), false);
+});
+
+test('GG7-6 (Astra6 4): receive equal-length replace materializes first; a 9-byte RESPONSE claiming length 15 is false without reshapeReceive and leaves the original bytes, and routes by its real length with it', () => {
+  for (const reshape of [false, true]) {
+    const t = page();
+    const results = [], seen = [];
+    t.c.__nakiPlugins.setGrant('rr7', { capabilities: ['observe', 'rewriteReceive'].concat(reshape ? ['reshapeReceive'] : []), methods: [INFO] });
+    t.c.__nakiPlugins.register({ id: 'rr7', onReceive(ctx) { results.push(ctx.replace(withLength(response(ctx.msgId, [8, 9]), 15))); } });
+    t.c.__nakiPlugins.setGrant('see7', { capabilities: ['observe'], methods: [INFO], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'see7', onReceive(ctx) { seen.push(Array.from(ctx.bytes)); } });
+    t.lobby.send(request(1307, INFO));
+    const original = response(1307, [8, 1, 16, 2, 24, 3, 32, 4]);
+    assert.equal(original.length, 15);
+    t.lobby.receive(original);
+    const label = reshape ? 'reshape' : 'plain';
+    assert.deepEqual(results, [reshape], label);
+    assert.deepEqual(seen, [reshape ? Array.from(response(1307, [8, 9])) : Array.from(original)], label);
+    if (!reshape) {
+      assert.deepEqual(t.game.slice(-1), [Array.from(original)], label);
+      assert.deepEqual(t.toSwift('receive').slice(-1), [Array.from(original)], label);
+    }
+  }
+});
+
+test('GG7-4b (Astra6 1): when the method already had an approving guard, a second guard added mid-chain must approve too ⇒ not on chain, local error', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  observer7(t, 'b7', [SKIN], () => {
+    t.c.__nakiPlugins.setGrant('g7b', { capabilities: ['observe'], methods: [SKIN], sendGuard: [SKIN] });
+    assert.equal(t.c.__nakiPlugins.register({ id: 'g7b', onSend() {} }), true);
+  }, 1);
+  t.lobby.send(request(1308, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(sentIds(t), []);
+  assert.deepEqual(guardLog(t).map(e => [e[1], e[2], e[3]]), [[1308, 'local_error', 'not_on_chain']]);
+  t.lobby.send(request(1309, SKIN, [8, 1]));
+  assert.deepEqual(sentIds(t), [1309], 'next time both guards are on the chain and approve');
+});
+
+test('GG7-7: hook-end violations are reverted by the hook-end check (earlier legal changes kept), not left to the chain-end verdict', () => {
+  const hookEnd = (t, id) => t.events('log').some(e => e.data.id === id && /拋錯（第 1 次）：改寫成守衛方法/.test(e.data.msg));
+  const chainEnd = t => t.events('log').some(e => /鏈尾終判/.test(e.data.msg));
+  {
+    const t = page();
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    observer7(t, 'a7', [FST7], ctx => { ctx.bytes[N6 - 1] = 9; });
+    t.c.__nakiPlugins.setGrant('rw7', { capabilities: ['observe', 'rewriteSend'], methods: [FST7], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'rw7', onSend(ctx) {
+      assert.equal(ctx.replace(request(ctx.msgId, TITLE, [8, 9])), true);
+      t.c.__nakiPlugins.setGrant('tg7', { capabilities: ['observe'], methods: [TITLE], sendGuard: [TITLE] });
+      t.c.__nakiPlugins.register({ id: 'tg7', onSend() {} });
+    } });
+    t.lobby.send(fst7(1310));
+    assert.deepEqual(t.lobby.committed[0], Array.from(fst7(1310, 9)), 'lobby replace + late guard');
+    assert.equal(hookEnd(t, 'rw7') && !chainEnd(t), true, 'lobby replace + late guard');
+  }
+  {
+    const t = page();
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    observer7(t, 'a7', [INFO], ctx => { ctx.bytes[N6 - 1] = 9; });
+    t.c.__nakiPlugins.setGrant('rw7', { capabilities: ['observe', 'rewriteSend'], methods: [INFO], priority: 1 });
+    t.c.__nakiPlugins.register({ id: 'rw7', onSend(ctx) { ctx.replace(request(ctx.msgId, TITLE, [8, 9])); } });
+    const g = gameSocket(t.c);
+    g.send(request(1311, AUTH));
+    g.send(info6(1312));
+    assert.deepEqual(g.committed[1], Array.from(info6(1312, 9)), 'game replace into TITLE');
+    assert.equal(hookEnd(t, 'rw7') && !chainEnd(t), true, 'game replace into TITLE');
+  }
+  {
+    const t = page();
+    observer7(t, 'a7', [SKIN], ctx => { ctx.bytes[ctx.bytes.length - 1] ^= 1; });
+    const g = gameSocket(t.c);
+    g.send(request(1313, AUTH));
+    g.send(request(1314, SKIN, [8, 1]));
+    assert.deepEqual(g.committed[1], Array.from(request(1314, SKIN, [8, 1])), 'game SKIN payload');
+    assert.equal(hookEnd(t, 'a7') && !chainEnd(t), true, 'game SKIN payload');
+  }
+});
+
+test('GG7-6b (Astra6 4): overriding set on the receive ctx.bytes does not change what an equal-length replace writes', () => {
+  const t = page();
+  const results = [];
+  t.c.__nakiPlugins.setGrant('rr7', { capabilities: ['observe', 'rewriteReceive'], methods: [INFO] });
+  t.c.__nakiPlugins.register({ id: 'rr7', onReceive(ctx) { ctx.bytes.set = () => {}; results.push(ctx.replace(response(ctx.msgId, [8, 9]))); } });
+  t.lobby.send(request(1315, INFO));
+  t.lobby.receive(response(1315, [8, 1]));
+  assert.deepEqual(results, [true]);
+  assert.deepEqual(t.game.slice(-1), [Array.from(response(1315, [8, 9]))]);
+  assert.deepEqual(t.toSwift('receive').slice(-1), [Array.from(response(1315, [8, 9]))]);
 });

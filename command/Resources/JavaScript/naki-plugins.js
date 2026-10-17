@@ -311,6 +311,10 @@
                 return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'naki_traffic', guard.ids);
             }
             var out = runChain(raw, env, guard, true);
+            // 鏈尾以目前的守衛者終判（第七輪第 1 條）：鏈中才出現的守衛者（註冊或經重入污染）沒有在鏈上放行，視同 not_on_chain
+            var late = guard || !env.method ? null : guardFor(env.method);
+            if (late) guard = late;
+            else if (guard) guardFor(env.method).ids.forEach(function (id) { if (guard.ids.indexOf(id) === -1) guard.ids.push(id); });
             if (!guard) return out;
             var reason = guardFailure(guard) || (!sameBytes(original, raw.bytes) ? 'rewritten' : null);
             if (reason) return blockSend(raw, origObj, original, env.msgId, env.method, env.method, reason, guard.ids);
@@ -399,24 +403,22 @@
             && caps.indexOf('rewriteReceive') !== -1
             && !isForbiddenMethod(method, grant)) {
             ctx.replace = function (newBytes) {
-                if (!newBytes || typeof newBytes.length !== 'number') return false;
+                // 先物化再以實際長度選路（第七輪第 4 條）：自有 length 騙不過，只收 TypedArray。raw.bytes 也只讀內部槽
+                var next;
+                try { next = hostCopy(newBytes); } catch (e) { return false; }
                 // 長度不等：宣告 reshapeReceive 才走 Phase 4 整包替換（攔原事件、重派合成事件），否則照 v1 回 false。等長仍就地改
-                if (newBytes.length !== raw.bytes.length) {
-                    return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, grant, newBytes);
+                if (taLength.call(next) !== taLength.call(raw.bytes)) {
+                    return caps.indexOf('reshapeReceive') !== -1 && reshapeReceive(raw, env, method, grant, next);
                 }
-                var original = raw.bytes.slice();
-                try {
-                    raw.bytes.set(newBytes);
-                } catch (e) {
-                    return false;
-                }
+                var original = hostCopy(raw.bytes);
+                u8set.call(raw.bytes, next);
                 // 等長改寫可以把整個 envelope 換掉：改後重新解析，method 變了或落進禁改名單
                 // 就還原並計一次失敗（禁改名單只擋改寫前的 method 等於沒擋）。
                 var after = parseEnvelope(raw.bytes);
                 var afterMethod = after && (after.method || method);
                 if (!after || after.type !== env.type || after.msgId !== env.msgId
                     || afterMethod !== method || isForbiddenMethod(afterMethod, grant)) {
-                    raw.bytes.set(original);
+                    u8set.call(raw.bytes, original);
                     noteFailure(grant.__id, 'replace', new Error('改寫換掉了 method 或觸及禁改名單，已還原'));
                     return false;
                 }
@@ -552,10 +554,9 @@
     }
 
     // 整包替換 receive：type、msgId 不變；NOTIFY 的 method 不變，RESPONSE 不得帶 method（field 1 可省，Naki 按欄位號取 payload）
-    function reshapeReceive(raw, env, method, grant, newBytes) {
+    // next 是 replace 入口已物化的宿主副本（第六、七輪），插件拿不到
+    function reshapeReceive(raw, env, method, grant, next) {
         if (!raw.reshape || isReshapeForbidden(method)) return false;
-        var next;
-        try { next = hostCopy(newBytes); } catch (e) { return false; }   // 與送出 replace 同：先物化再驗證（第六輪）
         var after = parseEnvelope(next);
         if (!after || !isWellFormed(next) || after.type !== env.type || after.msgId !== env.msgId
             || (env.type === TYPE_RESPONSE ? !!after.method : after.method !== method)) {
@@ -571,6 +572,17 @@
     function sendViolation(next, msgId) {
         var after = parseEnvelope(next);
         return !after || !isWellFormed(next) || after.type !== TYPE_REQUEST || after.msgId !== msgId || isSendForbidden(after.method);
+    }
+
+    function finalViolation(fin, type, msgId, method, lobby) {
+        if (!fin || fin.type !== type || fin.msgId !== msgId) return 'type／msgId 變了或無法解析';
+        if (SEND_FORBIDDEN_METHODS.indexOf(fin.method) !== -1 || (fin.method !== method && isSendForbidden(fin.method))) {
+            return '觸及送出禁改名單 ' + fin.method;
+        }
+        if (lobby ? fin.method !== method && guardFor(fin.method) : GUARDABLE_METHODS.indexOf(fin.method) !== -1) {
+            return '改寫成守衛方法 ' + fin.method;
+        }
+        return null;
     }
 
     // envelope 逐欄位走到結尾、沒有越界、field 1（method）非空（RESPONSE 可省）。parseEnvelope 對截斷的 fixed32／fixed64
@@ -691,16 +703,16 @@
                     try { staged = hostCopy(raw.bytes); } catch (x) { staged = null; }   // 副本的 buffer 被分離時原生 set 會拋錯
                     if (!staged) throw new Error('送出內容無法讀取（buffer 已分離），已撤回');
                     // 物化後的快照一律完整重驗，replace 入口驗過也重驗（第六輪第 1 條）：經 replace 的照 rewriteSend 規則，
-                    // 就地改的 type／msgId 不得變。不合規或改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
+                    // 就地改的 type／msgId／method 都不得變，換 method 只能經 replace（第七輪第 2 條）。不合規或改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
                     // 大廳（guardedSend 的鏈）：改成另一個守衛方法（第三輪第 5 條），改動有守衛者的方法本身由鏈後判定。
                     // 其他連線：改後是 GUARDABLE_METHODS 就撤回，只看閉包常數、不讀 sendGuard（第四輪第 2 條，guard-gaps b、第二輪第 1 條）
                     if (!sameBytes(staged, cur)) {
                         var now = parseEnvelope(staged);
-                        if (replaced ? sendViolation(staged, msgId) : !now || now.type !== type || now.msgId !== msgId) {
-                            throw new Error('送出改寫不合規（type／msgId 變了、envelope 不完整或觸及送出禁改名單），已撤回');
-                        }
-                        if (now.method && (lobby ? now.method !== method && guardFor(now.method) : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
+                        if (now && now.method && (lobby ? now.method !== method && guardFor(now.method) : GUARDABLE_METHODS.indexOf(now.method) !== -1)) {
                             throw new Error('改寫成守衛方法 ' + now.method + '，已撤回');
+                        }
+                        if (replaced ? sendViolation(staged, msgId) : !now || now.type !== type || now.msgId !== msgId || now.method !== method) {
+                            throw new Error('送出改寫不合規（type／msgId／method 變了、envelope 不完整或觸及送出禁改名單），已撤回');
                         }
                     }
                 }
@@ -747,9 +759,9 @@
                 if (frozen && !sameBytes(frozen, committed)) u8set.call(committed, frozen);
             }
             if (copy) {
-                if (changed) by.push(entry.spec.id);
-                if (replaced) {
-                    // 換 buffer：send 換了 method 就停——後面的插件是照舊 method 的白名單選進鏈的
+                if (changed) {
+                    // 後續插件的 ctx 依目前快照解析；換了 method（只可能經 replace）就停——後面的插件是照舊 method 的白名單選進鏈的
+                    by.push(entry.spec.id);
                     env = parseEnvelope(cur);
                     if (env.method !== method) break;
                 }
@@ -762,6 +774,15 @@
         if (raw.direction === 'receive') {
             if (!raw.drop && raw.bytes === original) return undefined;
             return { reshape: true, drop: !!raw.drop, bytes: raw.drop ? null : raw.bytes, method: method, msgId: env.msgId, by: by };
+        }
+        // 鏈尾終判（第七輪第 1 條）：最終候選以目前狀態再判一次，任一不過整筆退回遊戲原內容（不是中間快照），記在最後改動的 hook
+        if (copy && by.length && !sameBytes(cur, original)) {
+            var bad = finalViolation(parseEnvelope(cur), type, msgId, method, lobby);
+            if (bad) {
+                cur = original;
+                env = parseEnvelope(original);
+                try { noteFailure(by[by.length - 1], 'onSend', new Error('鏈尾終判：' + bad + '，整筆退回原內容')); } catch (x) { /* 退回不受記帳影響 */ }
+            }
         }
         // 送出：內容沒變就送原物件（插件從未拿到它）；變了就送宿主快照 cur
         if (copy) raw.bytes = cur;

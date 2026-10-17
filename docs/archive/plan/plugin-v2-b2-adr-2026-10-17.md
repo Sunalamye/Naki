@@ -31,7 +31,7 @@ plugin-v2-b2 61／61、plugin-regression 29／29、plugin-v2-regression 21／21�
 
 ## 保證範圍（設計 §1.4，確認稿必須逐條揭露）
 
-守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。原本七項不在保證內；sendRaw 退回對局、不經 `ctx.replace` 的就地改寫、Blob 空窗三項已於 2026-10-17 由 guard-gaps 修掉（見文末）。剩四項：lobby 上被改壞的 FastTest 會被拒送、已鎖 game 的連線上 Naki 自送或遊戲自送的 Lobby 請求不守衛、unknown 上 Naki 解析不出而伺服器解得開的守衛方法照送、角色清除只靠接線呼叫 `closed`。不宣稱 I2 全域成立。
+守衛保證「已鎖定為 lobby 的連線上，同步可解析、經 `ctx.replace` 契約改寫的守衛方法不原樣外送」。原本七項不在保證內；sendRaw 退回對局、不經 `ctx.replace` 的就地改寫、Blob 空窗三項已於 2026-10-17 由 guard-gaps 修掉（見文末）。剩四項：lobby 上同步可辨識的 FastTest 不守衛（observer 只改得到副本，bridge 出錯時照送遊戲未被碰過的原內容；guard-gaps 第五輪前是拒送改壞的 bytes）、已鎖 game 的連線上 Naki 自送或遊戲自送的 Lobby 請求不守衛、unknown 上 Naki 解析不出而伺服器解得開的守衛方法照送、角色清除只靠接線呼叫 `closed`（`close` 與 `error` 都經 `release` 呼叫一次）。不宣稱 I2 全域成立。
 
 ## 下一個節點
 
@@ -101,3 +101,5 @@ Astra 第三輪（`astra-review3.md`）：1【擋】1【應修】1【建議】�
 Astra 第四輪（`astra-review4.md`）：2【擋】2【應修】，主線全採納並撤回第四輪 Deviation 13（「記帳後還原到快照、保留原物件同一性」與外送等價）：插件在副本實例上定義 `constructor`／`byteLength` getter，或後插件的 `onSend` getter 改前插件保留的 bytes，都能在快照之後改到實際外送內容。改採根治：送出鏈上插件只拿宿主副本，宿主只讀內部槽物化成自有快照再驗證，外送只用未外露的原物件或宿主快照。主線同時解除原 D28「`naki-websocket.js` 不得改」的限制（理由：Astra 兩輪證明同一性保留無法成立）；實作最後不需要改它，既有的「鏈回傳值取代原物件」路徑已足夠。
 
 Astra 第五輪（`astra-review5.md`）：1【擋】1【建議】，主線全採納。擋 1：送出 `ctx.replace` 以 `new Uint8Array(newBytes)` 包裝插件的 `ArrayBuffer`／SAB／resizable，與插件共用記憶體；入口驗過後插件改成 SKIN 或改 msgId，hook 結束因 `replaced` 跳過守衛檢查，照樣外送。修法：入口先以宿主 `hostCopy` 物化，只收 TypedArray，驗證與採用同一份；hook 結束一律完整重驗。receive 變長 `replace` 一併先物化。建議 2 的入口型別矩陣以測試固定，表列在 notes 第六輪。
+
+Astra 第六輪（`astra-review6.md`）：2【擋】2【應修】1【建議】，主線全採納，撤回 notes Deviation 22、24。擋 2（主裁決）：就地改不得換 method，換 method 只能經 `replace` 走完整 `rewriteSend` 規則；同時消除應修 3 的回應配對過期。擋 1：鏈尾對最終候選以目前狀態終判（送出禁改名單、type／msgId、守衛規則），不過就整筆退回遊戲原內容並記在最後改動的 hook；大廳上鏈中才出現的守衛者（註冊或經同步 receive 重入污染）未在鏈上放行，視同 `not_on_chain` 擋下。應修 4：receive 等長 `replace` 先物化，以實際長度選路。建議 5：本 ADR 保證範圍段與設計 §1.4 第 4 項更正。

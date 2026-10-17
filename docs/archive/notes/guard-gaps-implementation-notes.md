@@ -7,7 +7,7 @@
 | 項 | 判斷 | 依據 |
 |---|---|---|
 | (a) `sendRaw` 退回對局，共存插件 `sendRequest` 外送守衛方法 | 可修 | `sendRaw` 同步呼叫包裝過的 `ws.send`，會在同一個呼叫堆疊回到 `dispatch`。插件層在 `sendRequest` 期間記下 msgId，就能在 `dispatch` 認出注入，不必改選線 |
-| (b) 不經 `ctx.replace` 的就地改寫 | 可修 | 送出方向沒有就地的 `replace`（`rewriteSend` 換 buffer），所以「物件沒換、內容變了」就是不經契約。判斷只用閉包常數 `GUARDABLE_METHODS`，不讀 `sendGuard`，第四輪第 2 條不衝突 |
+| (b) 不經 `ctx.replace` 的就地改寫 | 可修（第七輪起：就地改不得換 type／msgId／method，鏈尾另以目前狀態終判） | 送出方向沒有就地的 `replace`（`rewriteSend` 換 buffer），所以「物件沒換、內容變了」就是不經契約。判斷只用閉包常數 `GUARDABLE_METHODS`，不讀 `sendGuard`，第四輪第 2 條不衝突 |
 | (c) 角色未定時的第一筆 Blob | 可修，有代價 | Blob 無法同步解析。插件層拿不到 `originalSend`，延後送出會打亂順序。改為比照 lobby 規則拒送 |
 
 ## 做法
@@ -220,9 +220,9 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 20. **`GG6-1` 斷言「守衛紀錄為空」，不是主線寫的「非空」。** 修後 `replace` 收到 buffer 就回 `false`，INFO 照原樣送出，SKIN 從未形成，守衛沒有東西可記。測試改斷言更強的條件：wire 與 Swift 都是原 INFO，且 Swift 收到的請求沒有任何一筆是 SKIN。
 21. **receive 方向的變長 `replace`（`reshapeReceive`）一併改為先物化。** 主線只點名送出。它有同樣的共用記憶體問題：驗證後改傳入的 buffer，後續插件與遊戲看到的就不是驗過的內容。改法相同，保守處理（`GG6-5`）。
-22. **就地改的完整重驗只驗 type 與 msgId，不套送出禁改名單與 envelope 完整性。** 主線寫「完整重驗（type／msgId／method／守衛）」。就地改沒有 `rewriteSend` 能力也能做，既有測試（`GG5-8`、`guard-gaps b`、`GG2-6c` 等）鎖住「合法就地改照送」，FastTest 與 Route 方法都不在 `.lq.Lobby.` 底下，套禁改名單會全數撤回。method 由守衛規則把關。經 `replace` 的內容照 `rewriteSend` 規則全驗。
+22. **（第七輪撤回，見 Deviation 26）就地改的完整重驗只驗 type 與 msgId，不套送出禁改名單與 envelope 完整性。** 主線寫「完整重驗（type／msgId／method／守衛）」。就地改沒有 `rewriteSend` 能力也能做，既有測試（`GG5-8`、`guard-gaps b`、`GG2-6c` 等）鎖住「合法就地改照送」，FastTest 與 Route 方法都不在 `.lq.Lobby.` 底下，套禁改名單會全數撤回。method 由守衛規則把關。經 `replace` 的內容照 `rewriteSend` 規則全驗。
 23. **就地改的新增撤回會計 hook 失敗。** 改 type 或 msgId 的就地改寫從「照送」變成「撤回並計一次 onSend 失敗」，連續 10 次自動停用。遊戲在等原 msgId 的回應，照送會讓遊戲掛住，撤回較保守（`GG6-2b`）。
-24. **鏈中斷條件不變。** 只有經 `replace` 換了 method 才停止後續插件；就地改 method 照舊繼續。試過改成一律中斷，會改變 `GG3-4c` 的既有語意，已回退。
+24. **（第七輪撤回，見 Deviation 26）鏈中斷條件不變。** 只有經 `replace` 換了 method 才停止後續插件；就地改 method 照舊繼續。試過改成一律中斷，會改變 `GG3-4c` 的既有語意，已回退。
 25. **`T7` 為等價變異，不計入。** hook 結束對 `replace` 內容跑的 `sendViolation` 與入口是同一個純函式、同一份宿主副本（插件拿不到它）、同一個 msgId，結果必然相同。主線要求一律重驗，程式保留，作為縱深防禦。守衛規則那一半（`T8`）不等價：入口之後新出現的守衛會被 hook 結束的重驗擋下，由 `GG6-6` 殺掉。
 
 ### 第六輪驗證（log：主 repo `.swfd/logs/guard-gaps/r6-*`）
@@ -245,3 +245,45 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 - 插件在別的執行緒經 SAB 改內容與 `hostCopy` 的競態未測。複製後的副本與 SAB 無關，競態只影響「複製到哪一刻的內容」，複製後的內容仍會完整驗證。
 - 就地改 type／msgId 由「照送」改為「撤回並計失敗」。既有插件若依賴這種改寫會開始累計失敗，naki-plugins 回歸 39／0，未見依賴。
 - live 擋下未驗證（I2）。
+
+## 第七輪（Astra 第六輪審查：2【擋】2【應修】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review6.md`。主線撤回 Deviation 22、24，採納 20、21、23、25。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 擋 2（主裁決） | 就地改可把 `fetchServerTime` 換成同長的禁改方法 `fetchOauth2Info`，type／msgId 不變就外送且不計失敗 | hook 結束時就地改的 method 與原 method 不同即撤回、計 onSend 失敗，與 type／msgId 同級。換 method 只能經 `replace`（`GG7-1`，`fetchOauth2Info` 與 `loginBeat` 兩例、大廳與對局） |
+| 擋 1 | 前 hook 就地改成當時未受守衛的 `useTitle`，後 hook 註冊守衛；最終候選不再判定，撤回點停在違規的中間快照；同步 receive 重入污染亦同 | 鏈尾終判 `finalViolation`：最終候選須 type／msgId 不變、不在送出禁改名單、過守衛規則，不過就整筆退回遊戲原內容，失敗記在最後改動者（`GG7-5`）。`guardedSend` 鏈後以目前 `guardFor` 重算守衛者，鏈中新增者未放行即 `not_on_chain`（`GG7-3`、`GG7-4`、`GG7-4b`） |
+| 應修 3 | 就地換 method 後回應配對與後續 hook 的 `ctx.method` 過期 | 擋 2 之後就地改不會換 method；另外每次採用改動都重新解析 `env`，後續 hook 的 `ctx.method`／`ctx.payload` 依當前快照（`GG7-2`：RESPONSE 交給 wire 上的方法的插件） |
+| 應修 4 | receive 假 `length` 讓 9-byte RESPONSE 走等長路徑，原生 `set` 只覆寫前段，殘留尾碼成為第二個 payload | 入口先 `hostCopy`，以實際長度選路；寫入與還原用保存的原生 `set`，`raw.bytes` 的長度也只讀內部槽（`GG7-6`、`GG7-6b`） |
+| 建議 5 | ADR 保證範圍段仍寫「lobby 上被改壞的 FastTest 會被拒送」；§1.4 角色回收未提 `error` | 兩處已更正 |
+
+### 第七輪 Deviations
+
+26. **撤回 22、24 後的規則。** 就地改不得換 method，所以「就地換 method 後鏈繼續」的情況不再存在；鏈只在經 `replace` 換了 method 時停止。`GG3-4c` 的期望改為原 OP：近似方法那一步本身就是就地換 method，第一步就撤回。
+27. **hook 層撤回仍回到前一個快照，只有鏈尾終判退回原始。** 主線寫「撤回永遠回到原始快照」。hook 層若也退回原始，會丟掉前面插件的合法改動，違反契約「前面插件的合法改寫保留」與 `GG4-7`、`GG7-7` 等既有測試。Astra 的反例是「撤回停在已變成違規的中間快照」，鏈尾終判對最終候選以目前狀態再判，任何留下的違規都會整筆退回原始，已涵蓋。採這個解讀。
+28. **「B 再改 payload ⇒ 退回原始」在新規則下結果不同。** A 就地換成 `useTitle` 在 A 的 hook 結束就撤回，B 的合法 payload 改動作用在原 `fetchServerTime` 上，照送。`GG7-3` 斷言 wire 是「原 method＋B 的 payload」、沒有任何 `useTitle`。
+29. **主線的 replace 版反例（A `replace` 成 `useTitle`、B 再註冊守衛）走不到 B。** `replace` 換了 method 鏈就停，B 不會執行。鏈中新增守衛者改以同 method 的版本驗：`GG7-4` 用 `changeCharacterSkin`，分註冊與同步 receive 重入 `ctx.taint()` 再停用兩種，各含有改／沒改內容；`GG7-4b` 是原本已有守衛者、鏈中再加一個。
+30. **鏈中才出現的守衛者，即使內容沒改也擋。** 新守衛者的 hook 不在這次的鏈上，無法放行。依 N1「守衛者全部放行才送」擋下並回本地錯誤。下一筆兩者都在鏈上，正常放行（`GG7-4b`）。
+31. **鏈尾的送出禁改名單也套在「同 method 改內容」。** 原本就地改禁改方法（登入、憑證類）的 payload 沒有任何檢查。鏈尾終判一律不讓禁改方法帶著改動外送（`GG7-5`）。FastTest、Route 不在名單內，照舊可就地改 payload。
+32. **receive `replace` 只收 TypedArray。** 先物化的直接結果。普通陣列以前可以，現在回 `false`。p4、v2、naki-plugins 回歸都沒有傳陣列。
+33. **`reshapeReceive` 不再自己複製。** 它只由 receive `replace` 呼叫，收到的已是入口物化的副本。第六輪的 `T5` 因此不再適用，已自變異清單移除。
+34. **兩個等價變異不計入。** `T7` 同第六輪 Deviation 25。新加的 `U10`（變長入口改傳 `new Uint8Array(newBytes)`）也等價：入口已確認是 TypedArray，以 TypedArray 建構時同樣只讀內部槽並複製。第六輪 `T8`、第二輪 `N6`、`M11` 在加了鏈尾終判後一度存活，因為鏈尾會接住同一個違規；`GG7-7` 斷言 hook 層撤回會保留前面插件的合法改動，而且沒有鏈尾終判紀錄，三者重新被殺。
+
+### 第七輪驗證（log：主 repo `.swfd/logs/guard-gaps/r7-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第六輪 HEAD `87f7d73` 的 JS | 8 紅：`GG7-1`～`GG7-6`、`GG7-4b`、改寫後的 `GG3-4c`。`GG7-6b`、`GG7-7` 修前即綠，用來固定 hook 層行為 | `r7-red-b2-on-87f7d73.log` |
+| rebase | main 仍是 `92dbe39`，分支已在其上，無需再 rebase | |
+| 變異（b2＋v2＋p4，扣基線） | 46／48 被殺。新增 U1～U9 全殺；存活的 `T7`、`U10` 為等價變異（Deviation 34） | `r7-mutation.log` |
+| node 五套 | b2 136／0、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r7-green-*.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 19／0 | `r7-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1184／0，無 test host 重啟 | `r7-test-full.log` |
+| `git diff main --check` | 無警告 | |
+
+### 第七輪未驗證與風險
+
+- 鏈中才出現的守衛者會讓當筆守衛方法改回本地錯誤，即使內容沒改。實務上熱啟用由 Swift 的 `evaluateJavaScript` 觸發，不會在同步派發中途發生；同步 receive 重入污染只在插件於 `onSend` 裡同步派發 receive 時出現，live 未見。
+- 就地改登入、憑證類禁改方法的 payload，從照送改為整筆退回並計失敗。naki-plugins 回歸 39／0，未見依賴。
+- WebKit、live 未驗證（I2）。
