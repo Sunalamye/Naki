@@ -1,5 +1,5 @@
 // Run: node scripts/guard-gaps-mutate.cjs [--from N] [--to M] [--log <path>]
-// guard-gaps 送出守衛的變異測試：逐一把 MUTANTS 的字串替換套到 naki-plugins.js，跑 b2／v2／p4 三套 node 回歸，
+// guard-gaps 送出守衛的變異測試：逐一把 MUTANTS 的字串替換套到 naki-plugins.js（第三欄指定時改套該檔，如 naki-websocket.js），跑 b2／v2／p4 三套 node 回歸，
 // 至少一條 not ok 才算殺掉。先跑未變異基線，基線必須 0 fail；存活只准 EQUIVALENT 內的等價變異，否則 exit 1。
 // b2 需要 naki-plugins repo（NAKI_PLUGINS_DIR，預設 ../naki-plugins）。--from／--to 分段（索引以 MUTANTS 為準，含頭不含尾）。
 // 用法與歷史見 docs/archive/notes/guard-gaps-implementation-notes.md「變異 harness」。
@@ -114,7 +114,7 @@ const MUTANTS = [
   ["PS6 注入回應改用 resolveMethod", [["var method = injected ? injection.method : resolveMethod(env, raw.direction, raw.wsId);", "var method = resolveMethod(env, raw.direction, raw.wsId);"]]],
   ["PS7 關閉不清注入登記", [["            Array.from(injectedMsgIds.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) injectedMsgIds.delete(k); });\n", ""]]],
   ["PS8 Naki 自送也算遊戲號碼", [["raw.direction === 'send' && raw.sender === undefined && !!raw.bytes", "raw.direction === 'send' && typeof raw.sender !== 'object' && !!raw.bytes"]]],
-  ["PS9 失準不拒發", [["if (lost || blobSends.size) return null;", "if (blobSends.size) return null;"]]],
+  ["PS9 失準不拒發", [["if (lost || untrustedSockets.size) return null;", "if (untrustedSockets.size) return null;"]]],
   ["PS10 RESPONSE 不消耗遊戲未答", [["        if (!send && b.length >= 3 && b[0] === TYPE_RESPONSE && !injectedMsgIds.has(msgKey(raw.wsId, b[1] | (b[2] << 8)))) gameDone(raw.wsId, b[1] | (b[2] << 8));\n", ""]]],
   ["PS12 關閉不清遊戲紀錄", [["            gameSends.delete(socketId);\n", ""]]],
   ["PS13 零消耗者不消耗注入登記", [["if (k && !send && e.type === TYPE_RESPONSE && injectedMsgIds.delete(k))", "if (false)"]]],
@@ -144,29 +144,32 @@ const MUTANTS = [
   ["PS38 撤回不比版本", [["clean = g.version === c.version;", "clean = true;"]]],
   ["PS39 消耗不推版本", [["if (g.inflight.delete(msgId)) { g.version++; return; }", "if (g.inflight.delete(msgId)) return;"]]],
   ["PS40 撤回用整表快照", [["        if (g.inflight.get(c.msgId) === c.seq) {", "        if (true) { g.inflight = new Map(Array.from(g.inflight).filter(function (e) { return e[1] < c.seq; })); }\n        if (false) {"]]],
-  ["PS41 Blob 待展開不拒發", [["if (lost || blobSends.size) return null;", "if (lost) return null;"]]],
-  ["PS42 Blob 計數不歸零", [["if (n > 0) blobSends.set(socketId, n); else blobSends.delete(socketId);", "blobSends.set(socketId, n);"]]],
   ["PS43 暫時淘汰項被回答不作廢", [["        openCommits.forEach(function (c) { if (c.g === g && c.evicted && c.evicted[0] === msgId) c.evicted = null; });\n", ""]]],
   ["PS44 交易結束不釋放撤回資料", [["            else openCommits.delete(tx.commit);\n", ""]]],
-  ["PS45 底層 send 失敗不撤回", [["if (failed) { revertGameSend(tx.commit); tx.aborted = true; }", "if (failed) { tx.aborted = true; }"]]],
-  ["PS46 失敗交易仍提交晚到的 Blob", [["        if (tx && tx.aborted) return;\n", ""]]],
-  ["PS47 晚到的 Blob 留撤回資料", [["if (!c || !tx || tx.settled) return;", "if (!c || !tx) return;"]]],
+  ["PS45 底層 send 失敗不撤回", [["if (failed) revertGameSend(tx.commit);\n            else openCommits.delete(tx.commit);", "openCommits.delete(tx.commit);"]]],
   ["PS48 failSafe 照送重複提交", [["if (sender === undefined && original && !(tx && tx.commit)) commitGameSend", "if (sender === undefined && original) commitGameSend"]]],
+  ["PS49 標不可信無效", [["markUntrusted: function (socketId) { untrustedSockets.add(socketId); }", "markUntrusted: function (socketId) { }"]]],
+  ["PS50 不可信連線不拒發", [["if (lost || untrustedSockets.size) return null;", "if (lost) return null;"]]],
+  ["PS51 關閉不清不可信", [["            untrustedSockets.delete(socketId);\n", ""]]],
+  ["PS52 延後派發也記帳", [["&& !!raw.bytes && !raw.deferred;", "&& !!raw.bytes;"]]],
+  ["PS53 連線釋放後仍派發 Blob", [["                    if (!wsConnections.has(ws)) return;\n", ""]], "naki-websocket.js"],
+  ["PS54 入口不標不可信", [["            window.__nakiPlugins.markUntrusted(wsId);\n", ""]], "naki-websocket.js"],
+  ["PS55 標記延到展開後", [["            window.__nakiPlugins.markUntrusted(wsId);\n", ""], ["                    if (!wsConnections.has(ws)) return;\n", "                    if (!wsConnections.has(ws)) return;\n                    if (direction === 'send' && sender === undefined) window.__nakiPlugins.markUntrusted(wsId);\n"]], "naki-websocket.js"],
   ["PS35 擋下仍消耗遊戲未答", [["            if (msgId != null && !raw.injected) pendingMethods.delete(msgKey(raw.wsId, msgId));\n", "            if (msgId != null && !raw.injected) { pendingMethods.delete(msgKey(raw.wsId, msgId)); gameDone(raw.wsId, msgId); }\n"]]],
   ["VB2 同鍵覆寫不移到最新（只在零消耗者時刪舊鍵）", [["        var key = msgKey(socketId, msgId);\n        pendingMethods.delete(key);\n        if (noConsumers()) return;\n", "        var key = msgKey(socketId, msgId);\n        if (noConsumers()) { pendingMethods.delete(key); return; }\n"]]]
 ];
 
-const src = fs.readFileSync(path.join(jsDir, 'naki-plugins.js'), 'utf8');
+const read = file => fs.readFileSync(path.join(jsDir, file), 'utf8');
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-gaps-mutate-'));
 const log = line => { console.log(line); if (logPath) fs.appendFileSync(logPath, line + '\n'); };
 
-function run(code) {
+function run(code, file = 'naki-plugins.js') {
   const dir = path.join(work, 'tree');
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
   fs.cpSync(jsDir, path.join(dir, 'command/Resources/JavaScript'), { recursive: true });
   for (const s of ['plugin-v2-b2-regression.cjs', 'plugin-v2-regression.cjs']) fs.copyFileSync(path.join(root, 'scripts', s), path.join(dir, 'scripts', s));
-  fs.writeFileSync(path.join(dir, 'command/Resources/JavaScript/naki-plugins.js'), code);
+  fs.writeFileSync(path.join(dir, 'command/Resources/JavaScript', file), code);
   const env = { ...process.env, NAKI_PLUGINS_DIR: pluginsDir };
   const suites = [
     ['b2', path.join(dir, 'scripts/plugin-v2-b2-regression.cjs'), env],
@@ -184,18 +187,18 @@ function run(code) {
   return fails;
 }
 
-const base = run(src);
+const base = run(read('naki-plugins.js'));
 log('BASE（未變異）: ' + base.length + ' fail' + base.map(f => '\n   ' + f).join(''));
 if (base.length) { log('基線不是 0 fail，停止'); process.exit(1); }
 let killed = 0, survivors = [];
-MUTANTS.forEach(([name, pairs], i) => {
+MUTANTS.forEach(([name, pairs, file = 'naki-plugins.js'], i) => {
   if (i < from || i >= to) return;
-  let code = src;
+  let code = read(file);
   for (const [a, b] of pairs) {
     if (code.split(a).length !== 2) { log(`[${i}] ${name}: 替換字串不唯一或不存在，變異定義過期`); process.exitCode = 1; return; }
     code = code.replace(a, () => b);
   }
-  const fails = run(code);
+  const fails = run(code, file);
   if (fails.length) killed++; else survivors.push(name);
   log(`[${i}] ${name}: ${fails.length ? 'KILLED' : 'SURVIVED'} (${fails.length} fail)` + fails.slice(0, 4).map(f => '\n   ' + f).join(''));
 });

@@ -3217,24 +3217,83 @@ test('PS-36 (r5 20, consume at capacity): 256 unanswered, the 257th overflows an
 
 const gameDiag = t => { const d = t.c.__nakiPlugins.diagnostics(); return [d.gameInflight, d.openCommits]; };
 
-test('PS-37 (r6 21): a game Blob goes out and an injection follows at once — refused msgid_busy until the Blob is expanded, then the injection avoids its number (unguarded lobby, guarded game connection)', async () => {
+const untrusted = t => t.c.__nakiPlugins.diagnostics().untrustedSockets;
+
+test('PS-37 (r7 26-30): a game Blob send marks its connection untrusted until close — injections stay msgid_busy even after expansion, the expanded Blob is observed and paired as usual but never counted, and a new connection after close works (unguarded lobby, guarded game connection)', async () => {
   for (const guarded of [false, true]) {
     const label = guarded ? 'guarded' : 'unguarded';
     const t = page();
     if (guarded) guard11(t);
     const { inject } = injector11(t);
-    let ws = t.lobby;
-    if (guarded) { ws = gameSocket(t.c); ws.send(request(700, AUTH)); ws.receive(response(700, [8, 1])); }
-    const before = ws.sent.length;
-    ws.send(new t.c.Blob([request(64000, guarded ? OP : BEAT)]));
+    let ws = t.lobby, method = BEAT;
+    if (guarded) {
+      ws = gameSocket(t.c); method = OP;
+      ws.send(request(700, AUTH)); ws.receive(response(700, [8, 1]));
+      const refused = t.lobby.sent.length;
+      t.lobby.send(new t.c.Blob([request(1900, SKIN)]));
+      assert.equal(t.lobby.sent.length, refused, label + ': the guard still refuses a lobby Blob');
+      assert.equal(untrusted(t), 0, label + ': a refused Blob never went out, nothing to distrust');
+    }
+    const got = seen11(t, [method]);
+    const before = ws.sent.length, inflight = gameDiag(t)[0];
+    ws.send(new t.c.Blob([request(64000, method)]));
     assert.equal(ws.sent.length, before + 1, label + ': the Blob went out');
-    assert.equal(inject(FST).reason, 'msgid_busy', label);
+    assert.equal(untrusted(t), 1, label);
+    assert.equal(inject(FST).reason, 'msgid_busy', label + ': before expansion');
     await tick();
+    assert.equal(inject(FST).reason, 'msgid_busy', label + ': after expansion');
+    assert.deepEqual(gameDiag(t), [inflight, 0], label + ': the Blob is not counted');
+    ws.receive(response(64000, [8, 1]));
+    assert.deepEqual(plain(got), [method], label + ': the Blob request is paired as usual');
+    ws.close();
+    assert.equal(untrusted(t), 0, label);
+    const fresh = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+    fresh.send(request(1950, BEAT));
+    fresh.receive(response(1950, [8, 1]));
     const r = inject(FST);
     assert.equal(r.ok, true, label + ' ' + JSON.stringify(plain(r)));
-    assert.notEqual(r.msgId, 64000, label);
-    assert.equal(gameDiag(t)[1], 0, label + ': a late Blob commit keeps no rollback record');
   }
+});
+
+test('PS-44 (r7 26, 30): a Blob whose expansion rejects, or throws synchronously, keeps only the untrusted mark — nothing counted, no pairing, injections refused until close', async () => {
+  for (const kind of ['reject', 'throw']) {
+    const t = page();
+    const { inject } = injector11(t);
+    const blob = new t.c.Blob([request(64000, BEAT)]);
+    blob.arrayBuffer = kind === 'reject' ? () => Promise.reject(new Error('read failed')) : () => { throw new Error('read failed'); };
+    const before = t.lobby.sent.length;
+    t.lobby.send(blob);
+    await tick();
+    assert.equal(t.lobby.sent.length, before + 1, kind + ': the Blob still went out');
+    assert.deepEqual(gameDiag(t), [0, 0], kind);
+    assert.equal(pendingPairs(t), 0, kind);
+    assert.equal(untrusted(t), 1, kind);
+    assert.equal(inject(FST).reason, 'msgid_busy', kind);
+  }
+});
+
+test('PS-45 (r7 28): 257 Blobs pending expansion, then close, then a new connection, then all old Blobs expand — the released connection gets no role, pairing or count back, and the new connection injects', async () => {
+  const t = page();
+  const { inject } = injector11(t);
+  const old = t.lobby, oldId = idOf(t, old), opens = [];
+  for (let i = 0; i < 257; i++) {
+    const blob = new t.c.Blob([request(64000 + i, BEAT)]);
+    const real = blob.arrayBuffer.bind(blob);
+    blob.arrayBuffer = () => new Promise(resolve => opens.push(() => resolve(real())));
+    old.send(blob);
+  }
+  old.close();
+  const fresh = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+  fresh.send(request(1950, BEAT));
+  fresh.receive(response(1950, [8, 1]));
+  opens.forEach(f => f());
+  await tick(); await tick();
+  assert.equal((plain(t.c.__nakiPlugins.guardState()).roles || {})[oldId], undefined, 'no role rebuilt');
+  assert.equal(pendingPairs(t), 0, 'no pairing rebuilt');
+  assert.deepEqual(gameDiag(t), [0, 0]);
+  assert.equal(untrusted(t), 0);
+  const r = inject(FST);
+  assert.equal(r.ok, true, JSON.stringify(plain(r)));
 });
 
 test('PS-38 (r6 22): 256 unanswered, the 257th is committed and fails, and the RESPONSE of the evicted #64000 arrives inside failSafe — the rollback does not revive 64000, so the next real send does not overflow', async () => {
@@ -3290,20 +3349,6 @@ test('PS-41 (r6 25): at full capacity, re-sending the oldest number and failing 
   const r = inject(FST);
   assert.equal(r.ok, true, JSON.stringify(plain(r)));
   assert.equal(r.msgId >= 64256, true, String(r.msgId));
-});
-
-test('PS-42 (r6 24): a Blob sent on a CONNECTING socket throws, and its expansion arrives after the failure — the failed send is never committed', async () => {
-  const t = page();
-  const { inject } = injector11(t);
-  const proto = Object.getPrototypeOf(t.lobby), send = proto.send;
-  proto.send = function (d) { if (this.readyState === 0) { const e = new Error('still connecting'); e.name = 'InvalidStateError'; throw e; } return send.call(this, d); };
-  const ws = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
-  ws.readyState = 0;
-  assert.throws(() => ws.send(new t.c.Blob([request(64000, BEAT)])), { name: 'InvalidStateError' });
-  await tick();
-  assert.deepEqual(gameDiag(t), [0, 0]);
-  ws.readyState = 1;
-  assert.equal(inject(FST).msgId, 64000);
 });
 
 test('PS-43 (r6 23): a request committed by the dispatch and then sent as-is by failSafe (bridge error, no guard) is counted once and leaves no rollback record', () => {

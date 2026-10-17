@@ -85,14 +85,15 @@
     // 不看 D22 身分。記帳分兩段：派發一進入就保留號碼（同步 hook 內的注入要避開，第四輪第 15 條），判決外送後才提交進未答容量；
     // 提交後 failSafe 或底層 send 失敗時，只撤回這筆送出交易的增量（第五輪第 19、20 條，第六輪第 24 條）。沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
     // 每連線未答上限 GAME_INFLIGHT_LIMIT，超過就失準，該連線關閉前一律拒發（msgid_busy）；不可用號碼占滿號段也回 msgid_busy。
-    // 遊戲 Blob 送出要等 arrayBuffer() 才知道號碼：任一連線有待展開的遊戲 Blob 時也回 msgid_busy（第六輪第 21 條）
+    // 遊戲以 Blob 送出的連線，號碼在送出當下不可知：標成不可信直到關閉，任一連線不可信就回 msgid_busy。
+    // Blob 送出展開後照常派發，但不進遊戲記帳（第七輪主線裁決；live 未見遊戲 Blob 送出，Unity 走 TypedArray）
     var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500, GAME_AHEAD = 256, GAME_INFLIGHT_LIMIT = 256;
     var pluginMsgId = PLUGIN_MSGID_FIRST;
     var gameSends = new Map();   // socketId -> { last, inflight: Map(msgId -> 提交序號), lost, version }
     var gameDispatching = [];    // 派發中的遊戲請求 { msgId }
     var gameSeq = 0;
     var openCommits = new Set();   // 送出交易還沒結束的提交紀錄：撤回資料只活在交易期間，未答表只存序號（第六輪第 23 條）
-    var blobSends = new Map();     // socketId -> 待展開的遊戲 Blob 送出數
+    var untrustedSockets = new Set();   // 遊戲送過 Blob 的連線
     // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
     function gameSent(socketId, msgId) {
         var g = gameSends.get(socketId);
@@ -129,11 +130,10 @@
     }
     function requestMsgId(b) { return b && b.length >= 3 && b[0] === TYPE_REQUEST ? b[1] | (b[2] << 8) : null; }
     function noteGameSend(socketId, b) { var id = requestMsgId(b); return id == null ? null : gameSent(socketId, id); }
-    // 提交掛到這筆送出交易上；交易已失敗不提交，已結束（晚到的 Blob）只提交不留撤回資料
+    // 提交掛到這筆送出交易上（只在 ws.send 同步期間發生；Blob 的延後派發不提交）
     function commitGameSend(tx, socketId, b) {
-        if (tx && tx.aborted) return;
         var c = noteGameSend(socketId, b);
-        if (!c || !tx || tx.settled) return;
+        if (!c || !tx) return;
         tx.commit = c;
         openCommits.add(c);
     }
@@ -142,7 +142,7 @@
         injectedMsgIds.forEach(function (v, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
         gameSends.forEach(function (g) { lost = lost || g.lost; lasts.push(g.last); g.inflight.forEach(function (c, id) { busy.add(id); }); });
         gameDispatching.forEach(function (d) { busy.add(d.msgId); lasts.push(d.msgId); });
-        if (lost || blobSends.size) return null;
+        if (lost || untrustedSockets.size) return null;
         for (var n = PLUGIN_MSGID_LAST - PLUGIN_MSGID_FIRST + 1; n > 0; n--) {
             var v = pluginMsgId;
             pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
@@ -1076,7 +1076,7 @@
         // 遊戲送出：派發期間保留號碼，判決確定外送後才記入未答（被擋的不算，第三輪第 12 條）；派發拋錯時由 failSafe 記。
         // 提交記在呼叫端為這筆送出建立的交易 raw.tx，同一筆的 failSafe 才撤得回（第五輪第 19 條）
         dispatch: function (raw) {
-            var game = !!raw && raw.direction === 'send' && raw.sender === undefined && !!raw.bytes;
+            var game = !!raw && raw.direction === 'send' && raw.sender === undefined && !!raw.bytes && !raw.deferred;
             var mark = game && requestMsgId(raw.bytes) != null ? { msgId: requestMsgId(raw.bytes) } : null;
             if (mark) gameDispatching.push(mark);
             try { var result = dispatchRaw(raw); }
@@ -1138,17 +1138,13 @@
         // naki-websocket 的 ws.send 包裝在每筆送出結束時呼叫（含底層 send 拋錯）：失敗撤回這筆的提交，成功只釋放撤回資料
         sendSettled: function (tx, failed) {
             if (!tx) return;
-            if (failed) { revertGameSend(tx.commit); tx.aborted = true; }
+            if (failed) revertGameSend(tx.commit);
             else openCommits.delete(tx.commit);
             tx.commit = null;
-            tx.settled = true;
         },
 
-        // naki-websocket 在遊戲 Blob 送出待展開時 +1、派發後（或展開失敗）-1
-        blobSend: function (socketId, delta) {
-            var n = (blobSends.get(socketId) || 0) + delta;
-            if (n > 0) blobSends.set(socketId, n); else blobSends.delete(socketId);
-        },
+        // naki-websocket 在 ws.send 入口看到遊戲的 Blob 送出時同步呼叫：這條連線的號碼不可信直到關閉
+        markUntrusted: function (socketId) { untrustedSockets.add(socketId); },
 
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
         // 這條連線的回應不會再來，配對一併清掉（第十二輪第 1 條）
@@ -1160,7 +1156,7 @@
             Array.from(ambiguousPairs).forEach(function (k) { if (k.indexOf(prefix) === 0) ambiguousPairs.delete(k); });
             ambiguousSockets.delete(String(socketId));
             gameSends.delete(socketId);
-            blobSends.delete(socketId);
+            untrustedSockets.delete(socketId);
         },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
@@ -1217,6 +1213,7 @@
                 pendingInjections: injectedMsgIds.size,
                 gameInflight: Array.from(gameSends.values()).reduce(function (n, g) { return n + g.inflight.size; }, 0),
                 openCommits: openCommits.size,
+                untrustedSockets: untrustedSockets.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,

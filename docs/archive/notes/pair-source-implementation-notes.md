@@ -310,7 +310,7 @@ PS11（擋下不消耗遊戲未答）隨 `blockSend` 的 `gameDone` 移除；它
 
 ### 第六輪 Deviations
 
-1. **Blob 拒發不分連線**：主線指示「該連線有 pending Blob」。注入配號時還不知道 `sendRaw` 會選哪條連線，所以任一連線有待展開的遊戲 Blob 就拒發，較保守。
+1. **（已被第七輪取代）Blob 拒發不分連線**：主線指示「該連線有 pending Blob」。注入配號時還不知道 `sendRaw` 會選哪條連線，所以任一連線有待展開的遊戲 Blob 就拒發，較保守。
 2. **CONNECTING 拋錯的路徑未經真 WebKit 驗證**：PS-40、PS-42 用假 socket 在 `readyState === 0` 時拋 `InvalidStateError`。真 WebKit 在 CONNECTING 時是否同步拋錯、拋什麼，沒有 live 證據。
 3. **可達紀錄數以診斷欄位量測**：測試無法走訪閉包，改以 `gameInflight`（未答）與 `openCommits`（撤回資料）兩個計數斷言。未答表的值是數字，不可能形成 `prev` 鏈。
 4. **底層 send 拋錯時，`handleMessage` 已送給 Swift 的那一筆不收回**：本包只管插件層的未答記帳，Swift 端的觀察紀錄維持原樣。
@@ -318,4 +318,63 @@ PS11（擋下不消耗遊戲未答）隨 `blockSend` 的 `gameDone` 移除；它
 ### 第六輪已知風險
 
 - Blob 送出頻繁的頁面，注入會在展開期間反覆收到 `msgid_busy`。現行 Unity 客戶端送出是 TypedArray，live 未觀察到遊戲 Blob 送出。
+- 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。
+
+## 第七輪（Astra 第六輪 26～30 條；主線裁決 Blob 連線不可信）
+
+審查原文：主 repo `.swfd/logs/pair-source-review/astra-review6.md`。main 仍在 `13abe49`，不需 rebase。第六輪 Deviations 採納；Deviation 1 與 Blob 待展開計數器被本輪取代。
+
+### 做了什麼
+
+- `naki-websocket.js`：
+  - `handleMessage` 在守衛拒送檢查之後、`try` 之前，看到遊戲的 Blob 送出就呼叫 `markUntrusted(wsId)`。
+  - Blob 展開後先檢查 `wsConnections.has(ws)`，連線已釋放就丟棄（送出與接收兩方向）。之後以 `deferred` 派發；拋錯時不呼叫 `failSafe`。
+  - 移除 `blobSend` 計數。
+- `naki-plugins.js`：
+  - `untrustedSockets` 取代 `blobSends`：`markUntrusted` 加入，`closed` 清除，任一連線不可信時 `nextPluginMsgId` 回 null。
+  - `dispatch` 的遊戲判定排除 `raw.deferred`，所以 Blob 不保留號碼、不提交。
+  - Blob 不再提交後，`commitGameSend` 的「交易已失敗／已結束」檢查與 `sendSettled` 的 `aborted`、`settled` 旗標成了死碼，一併移除。
+  - `diagnostics()` 新增 `untrustedSockets`。
+- `scripts/guard-gaps-mutate.cjs`：變異可用第三欄指定目標檔（預設 `naki-plugins.js`），本輪三個變異套在 `naki-websocket.js`。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 26 | 展開 reject 不解除：不可信只在關閉時清除 | PS-44（reject） |
+| 擋 27 | Blob 不更新 `last`，窗口不會倒退 | PS-37（展開後不記帳） |
+| 應修 28 | 非同步派發先確認連線未釋放 | PS-45 |
+| 應修 29 | Blob 不提交，不會復活已答請求 | PS-37 |
+| 建議 30 | 標記在入口同步完成，與展開成敗無關 | PS-44（同步拋錯） |
+| 補測 | Blob 後注入 busy、關閉後新連線恢復、守衛拒送的 Blob 不標、展開後配對照常 | PS-37 |
+
+第六輪的 PS-37（展開後恢復配號）依裁決改寫，PS-42（CONNECTING 的 Blob 不補提交）因 Blob 不再提交而刪除。
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-37、PS-44、PS-45 套在 `752bb3b` 的 JS | 3 紅。先遇到新診斷欄位不存在；拿掉 `untrustedSockets` 斷言後仍 3 紅，皆為行為紅：展開後注入恢復、reject 後注入恢復、舊連線角色被重建為 lobby | `r7-red-on-752bb3b.log`、`r7-red-behavior-on-752bb3b.log` |
+| 實作後 | b2 220／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r7-final-*.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| 本輪新增 PS49～PS55 | 7/7 殺 | `r7-mutate-full.log` |
+| 全量 0–140 | 138/140；存活只有 U10、T7 | `r7-mutate-full.log` |
+
+刪除 PS41、PS42（計數器）、PS46、PS47（晚到提交，程式已移除）。PS9、PS45 替換字串隨程式更新。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r7-test-targeted.log`），全量 `NakiTests` 1184／0（`r7-test-full.log`）。
+
+### 第七輪 Deviations
+
+1. **延後派發拋錯不走 `failSafe`**：Blob 早已外送，`failSafe` 沒有可擋的送出，原本只會照送路徑替它補記帳。這條沒有變異：現有 harness 無法讓延後派發本身拋錯。
+2. **底層 send 拋錯的 Blob 仍標不可信**：標記在送出前完成，送出失敗不撤回標記，較保守。
+3. **接收方向的 Blob 也套用釋放檢查**：主線要求「所有非同步派發」，D22 的已答標記也在檢查之後，關閉後不再寫入。
+
+### 第七輪已知風險
+
+- 若客戶端改用 Blob 送出，該連線存在期間所有注入都回 `msgid_busy`，需另開包做可信配號。
 - 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。
