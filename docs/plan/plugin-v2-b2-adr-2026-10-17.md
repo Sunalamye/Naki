@@ -54,3 +54,5 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 **未驗證：守衛「真的擋下」。** `GUARDABLE_METHODS` 19 個全是換裝、稱號、角色、領獎類，I2 禁止對真伺服器送出，主線不授權用無效 payload 試；本機 sink 變體被 WebKit 擋下（https 頁面連 `ws://127.0.0.1` 只得 readyState 3）。實擋目前只有 `PluginSendGuardTests` 11、`plugin-v2-b2-regression` 60、變異 13 覆蓋。裁決全文 `.swfd/logs/pv2-b2-live/decision-live-guard-test.md`。
 
 合併：用戶裁決 2026-10-17 合併進 main 並移除 worktree；確認稿與發版說明須揭露上述未驗證項與 §1.4 七項限定。
+
+連線失敗不觸發 close 的殘留已於 fix/ws-error-cleanup 修正（commit 見該分支，error 且 readyState 為 CLOSED 時與 close 同路徑清理，只執行一次）。

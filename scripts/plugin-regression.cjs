@@ -184,7 +184,7 @@ function page(random) {
   if (random != null) vm.runInContext('Math.random = () => ' + random, s.c);
   class Socket { constructor(url) { this.url = url; this.readyState = 1; this.listeners = {}; this.sent = []; }
     addEventListener(k, f) { this.listeners[k] = f; } send(d) { this.sent.push(new Uint8Array(d)); } }
-  Socket.OPEN = 1; s.c.WebSocket = Socket;
+  Socket.OPEN = 1; Socket.CLOSED = 3; s.c.WebSocket = Socket;
   vm.runInContext(source('naki-websocket.js'), s.c);
   return { ...s, socket: url => new s.c.WebSocket(url) };
 }
@@ -374,3 +374,19 @@ test('D22-3 residual: with its sendRaw registration evicted, a game RESPONSE on 
   assert.deepEqual(general.filter(x => x === 64000), [64000], 'only the game REQUEST reached the general chain');
 });
 
+test('handshake failure: error with readyState CLOSED releases the connection and notifies plugins once', () => {
+  const { c, socket } = page(); let closed = 0, ids = []; const orig = c.__nakiPlugins.closed;
+  c.__nakiPlugins.closed = id => { closed++; ids.push(id); return orig.call(c.__nakiPlugins, id); };
+  const ws = socket(GATEWAY); const id = c.__nakiWebSocket.getConnections()[0].id;
+  ws.listeners.error({}); assert.equal(c.__nakiWebSocket.getConnections().length, 1, 'error while not CLOSED keeps it');
+  ws.readyState = 3; ws.listeners.error({});
+  assert.equal(c.__nakiWebSocket.getConnections().some(x => x.id === id), false);
+  assert.deepEqual([closed, ids[0]], [1, id]);
+});
+test('close then error releases only once', () => {
+  const { c, socket } = page(); let closed = 0; const orig = c.__nakiPlugins.closed;
+  c.__nakiPlugins.closed = id => { closed++; return orig.call(c.__nakiPlugins, id); };
+  const ws = socket(GATEWAY); ws.readyState = 3;
+  ws.listeners.close({ code: 1006, reason: '' }); ws.listeners.error({});
+  assert.equal(closed, 1); assert.equal(c.__nakiWebSocket.getConnections().length, 0);
+});

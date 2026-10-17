@@ -124,6 +124,15 @@
             sendToSwift('websocket_connected', { socketId: wsId, url: url, isMajsoul: isMajsoul });
         });
 
+        // 連線紀錄只清一次：握手失敗只會觸發 error（readyState 直接為 CLOSED，不一定有 close）
+        let released = false;
+        const release = function() {
+            if (released) return;
+            released = true;
+            wsConnections.delete(ws);
+            if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
+        };
+
         // 監聽關閉
         ws.addEventListener('close', function(event) {
             console.log('[Naki WS] 已關閉:', wsId, event.code, event.reason);
@@ -133,8 +142,7 @@
                 reason: event.reason,
                 isMajsoul: isMajsoul
             });
-            wsConnections.delete(ws);
-            if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
+            release();
         });
 
         // 監聽錯誤
@@ -144,6 +152,7 @@
                 socketId: wsId,
                 error: 'WebSocket error'
             });
+            if (ws.readyState === OriginalWebSocket.CLOSED) release();
         });
 
         // 攔截 send 方法
