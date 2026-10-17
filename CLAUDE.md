@@ -41,7 +41,7 @@ curl -X POST http://127.0.0.1:8765/js \
 
 | Property | Current value |
 |----------|---------------|
-| App version | 2.19.0（`MARKETING_VERSION`；MCP `serverInfo.version`／`get_status.appVersion`／Debug 首頁都讀 `NakiAppVersion` 這一份） |
+| App version | 2.20.0（`MARKETING_VERSION`；MCP `serverInfo.version`／`get_status.appVersion`／Debug 首頁都讀 `NakiAppVersion` 這一份） |
 | macOS target | 26.0 |
 | iOS target | 17.0 |
 | Swift | 5.0 project setting |
@@ -221,7 +221,7 @@ resolver 純邏輯會讓 server tsumo／ron 凌駕 AI；下面兩個 integration
 
 ## 2026-09-30 審查修正後的行為
 
-以下都有單測（NakiTests 1138 個、0 failures（2026-10-15，2.19.0 發版前全量，`.swfd/logs/rel219/test-full.log`；前一次 1130 個，2026-10-15，IRC 第二輪三包整合閘，`.swfd/logs/irc2-integrate/test-full.log`；再前一次 1091 個，2026-10-14，WP-F2 合併後，`.swfd/logs/wp-f2-takeover/fixup-nakitests.log`；再前一次 1074 個，irc-integrate b2d7d73；更早 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
+以下都有單測（NakiTests 1181 個、0 failures（2026-10-17，2.20.0 發版前全量，`.swfd/logs/release-v2.20.0/test-full.log`；前一次 1138 個，2026-10-15，2.19.0 發版前全量，`.swfd/logs/rel219/test-full.log`；再前一次 1130 個，2026-10-15，IRC 第二輪三包整合閘，`.swfd/logs/irc2-integrate/test-full.log`；再前一次 1091 個，2026-10-14，WP-F2 合併後，`.swfd/logs/wp-f2-takeover/fixup-nakitests.log`；再前一次 1074 個，irc-integrate b2d7d73；更早 1010 個，2026-10-13，main 8b51848；WP-0p 時 996，init-guard 加 1，WP-0 加 13），**除非註明否則沒有 live 驗證**。
 
 - **背景保活**：`naki-core.js` 的 `__nakiKeepAlive`（隱藏時以計時器驅動 rAF、對頁面偽裝可見）＋ `WebSession` 的 tick 迴圈（`callJavaScript` 定期喚醒被系統暫停的 WebContent）；`SettingsStore.keepAliveInBackground` 預設開、設定頁可關。**live 效果未驗證**：短時間對照（隱藏 60 秒）開關的心跳一樣，長時間對照結果未定（見 `code-audit-implementation-notes.md`），之前不得宣稱有效。
 - **插件**：插件 script 只注入 main frame（`WebSession.setPluginInjection`）；內建 WS 攔截仍是 `forMainFrameOnly: false`（`WebSocketInterceptor.createUserScript`）。匯入的 `id`／`entry` 限 `[A-Za-z0-9._-]`（`PluginRegistry.isSafeName`／`isSafeEntry`），不合即 `manifestInvalid`。「檢查更新」先預覽再確認，確認前不落地（`PluginImportSource.fetchUpdate` 只取回、不安裝）。
