@@ -471,7 +471,7 @@
                     syntheticEvents.add(ev);
                     ws.dispatchEvent(ev);
                 } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
-                try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response); }
+                try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response, verdict.injected); }
                 catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
             }, 0);
         } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }

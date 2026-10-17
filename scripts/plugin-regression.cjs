@@ -358,20 +358,25 @@ test('D22-3 the same Naki msgId on two /gateway sockets, only one answered: isNa
   other.send(request(60012, LOBBY));
   assert.deepEqual(watcher.at(-1), [60012, true]);
 });
-test('D22-3 residual + pair-source: with its sendRaw registration evicted, the first RESPONSE on the injected pair is still claimed by the injection; the second resolves to the game method and reaches the general chain', () => {
-  const { c, ws, general, socket } = traffic(); let notify; const got = [];
+test('D22-3 residual + pair-source: with its sendRaw registration evicted and a game fetchInfo on the injected pair, the game RESPONSE arriving first is claimed by the injection; the real injection RESPONSE after it is ambiguous — Naki observers only, no rewrite', () => {
+  const { c, ws, general, watcher, socket } = traffic(); let notify; const got = [], rewriters = [];
+  const FST = '.lq.Lobby.fetchServerTime';
   c.__nakiPluginsMayModifyOutbound = true;
-  c.__nakiPlugins.setGrant('injector', { capabilities: ['observe', 'injectSend'], methods: ['.lq.NotifyFoo', LOBBY] });
-  c.__nakiPlugins.register({ id: 'injector', onReceive(ctx) { notify = ctx; }, onInjectResponse(ctx) { got.push(ctx.isNaki); } });
+  c.__nakiPlugins.setGrant('injector', { capabilities: ['observe', 'injectSend'], methods: ['.lq.NotifyFoo'] });
+  c.__nakiPlugins.register({ id: 'injector', onReceive(ctx) { notify = ctx; }, onInjectResponse(ctx) { got.push([ctx.isNaki, ctx.method, Array.from(ctx.bytes.slice(-1))]); } });
+  c.__nakiPlugins.setGrant('rw', { capabilities: ['observe', 'rewriteReceive'], methods: [LOBBY] });
+  c.__nakiPlugins.register({ id: 'rw', onReceive(ctx) { rewriters.push([ctx.msgId, typeof ctx.replace]); } });
   ws.listeners.message({ data: notifyEnvelope('.lq.NotifyFoo').buffer });
-  assert.equal(notify.sendRequest(LOBBY, new Uint8Array(0)).msgId, 64000);
+  assert.equal(notify.sendRequest(FST, new Uint8Array(0)).msgId, 64000);
   const other = socket(GATEWAY); other.send(request(100, LOBBY));
   for (let id = 60100; id < 60356; id++) c.__nakiWebSocket.sendRaw(b64(request(id, LOBBY)));
   ws.send(request(64000, LOBBY));
-  ws.listeners.message({ data: response(64000).buffer });
-  ws.listeners.message({ data: response(64000).buffer });
-  assert.deepEqual(got, [true], 'the first RESPONSE on the pair is taken as the injected one');
-  assert.deepEqual(general.filter(x => x === 64000), [64000, 64000], 'the game REQUEST and, with its own pairing kept, the game RESPONSE reach the general chain');
+  ws.listeners.message({ data: response(64000, [8, 1]).buffer });
+  ws.listeners.message({ data: response(64000, [8, 2]).buffer });
+  assert.deepEqual(got, [[true, FST, [1]]], 'the first RESPONSE on the pair goes to the injection by send order');
+  assert.deepEqual(general.filter(x => x === 64000), [64000], 'only the game REQUEST reaches the general chain');
+  assert.deepEqual(rewriters.filter(x => x[0] === 64000), [], 'the ambiguous RESPONSE never reaches a rewriteReceive plugin');
+  assert.deepEqual(watcher.filter(x => x[0] === 64000), [[64000, false], [64000, true]], 'the ambiguous RESPONSE is Naki-attributed');
 });
 
 // WebKit 握手失敗兩種情境（live 2026-10-17）：error 當下 readyState 仍是 0；(a) 之後完全沒有 close（live 紀錄）、(b) 下個 tick 變 3 並補 close
