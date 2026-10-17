@@ -136,10 +136,26 @@ final class LiqiParserLearningTests: XCTestCase {
         let issued = LiqiMsgIdAllocator.shared.next()
         defer { LiqiMsgIdAllocator.shared.revoke(issued) }
         LiqiMsgIdAllocator.shared.bind(issued, socketId: 3)
-        let start = LiqiRequestBuilder.startUnifiedMatch(matchSid: "ranked")
-        _ = LiqiParser().parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: issued)), socketId: 4)
+        let game = LiqiRequestBuilder.startUnifiedMatch(matchSid: "ranked")
+        let naki = LiqiRequestBuilder.startUnifiedMatch(matchSid: "guess")
+        _ = LiqiParser().parse(Data(LiqiEncoder.encodeRequest(method: game.method, payload: game.payload, msgId: issued)), socketId: 4)
+        _ = LiqiParser().parse(Data(LiqiEncoder.encodeRequest(method: naki.method, payload: naki.payload, msgId: issued)), socketId: 3)
+        XCTAssertEqual(ObservedMatchSids.shared.observations.map(\.sid), ["ranked"], "Naki 自己這條線上的不學")
+    }
+
+    /// D22 殘留（設計 §8）：Swift 沒有插件登記，插件號段整段當 Naki。遊戲在號段內的 startUnifiedMatch 不學，被拒也不清待回填
+    func testGameStartUnifiedMatchInPluginRangeIsTreatedAsNaki() {
+        isolateSharedObservedMatchSids(self)
+        ObservedMatchSids.shared.record(sid: "ranked", clientVersionString: "v1")
+        let parser = LiqiParser()
+        let start = LiqiRequestBuilder.startUnifiedMatch(matchSid: "other")
+        let msgId = LiqiMsgIdAllocator.pluginRangeStart
+        _ = parser.parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: msgId)), socketId: 4)
+        let error = LiqiEncoder.encodeLengthDelimited(field: 1, bytes: LiqiEncoder.encodeVarintField(field: 1, value: 1303))
+        _ = parser.parse(Data(LiqiEncoder.encodeEnvelope(type: .response, msgId: msgId, method: "", payload: error)), socketId: 4)
+
         XCTAssertEqual(ObservedMatchSids.shared.observations.map(\.sid), ["ranked"])
-        _ = LiqiParser().parse(Data(LiqiEncoder.encodeRequest(method: start.method, payload: start.payload, msgId: issued)), socketId: 3)
-        XCTAssertEqual(ObservedMatchSids.shared.observations.count, 1, "Naki 自己這條線上的不學")
+        ObservedMatchSids.shared.gameDidStart(is3P: true)
+        XCTAssertEqual(ObservedMatchSids.shared.observations[0].is3P, true)
     }
 }

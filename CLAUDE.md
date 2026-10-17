@@ -105,7 +105,7 @@ OptionalOperationList
 | decision | `command/Services/Bot/AutoPlayDecisionResolver.swift` |
 | 自動打牌狀態機 | `command/Services/Bot/AutoPlayEngine.swift`（單一 Task 迴圈：輪詢＋延遲＋重試都用 `Task.sleep`；執行狀態是 enum，進出只有 `occupy(...)` 一個作用域） |
 | 對局結束後自動排下一場 | `command/Services/Bot/AutoRematchEngine.swift`（只有 `.fullAuto` 會動；`end_game` 或大廳按「開始」觸發） |
-| match_sid 觀察／持久化 | `command/Services/Bridge/ObservedMatchSids.swift`（只學**遊戲自己送的**：msgId 不在 `LiqiMsgIdAllocator` 登記、也不在插件號段 64000–65500，見 `LiqiParser.isNakiSent`） |
+| match_sid 觀察／持久化 | `command/Services/Bridge/ObservedMatchSids.swift`（只學**遊戲自己送的**：(連線, msgId) 不在 `LiqiMsgIdAllocator` 登記、也不在插件號段 64000–65500，見 `LiqiParser.isNakiSent`） |
 | 段位場房間門檻表 | `command/Services/Bridge/MatchModeTable.swift`（`lqc.lqbin` 解出；只用來挑候選，權威仍在伺服器） |
 | action 送出 | `command/Services/Bot/AutoPlayActionExecutor.swift`（兩條 WebView path 共用的唯一動作 switch，9 種動作 + unknown；成功才 markHandled） |
 | AI | `command/Services/Bot/NativeBotController.swift` |
@@ -142,10 +142,14 @@ OptionalOperationList
   `"WebGL_2022-0.16.257"`——**不是** `version.json` 的 `0.11.252.w`。
   ⚠️ 記錄時必須濾掉 Naki 自送的，否則猜錯的嘗試值會被記成「觀察到的真值」再變成預設，
   錯誤自我餵養（2026-08-09 踩過）。判斷是 **msgId 登記制**而非號段：遊戲自己的 msgId
-  跑久了也會進 60000+。`LiqiMsgIdAllocator.isIssued`（未認領的 Naki 自送）或插件號段
-  （JS 自配發、不在登記表）＝ Naki 側（`LiqiMsgIdAllocator.isIssued`、`LiqiParser.isNakiSent`）；
-  `LiqiResponseStore` 只收登記過的回應（`LiqiResponseStore.capture` 內的 `allocator.claim`）。
+  跑久了也會進 60000+，而且計數器跨連線遞增（D22）。配發器登記帶連線：`next()` 先登記為未綁定，
+  `sendRaw` 回報連線後由 `LiqiActionSender.send` 呼叫 `LiqiMsgIdAllocator.bind`；已綁定的只認同一連線，
+  未綁定的任一連線都認（綁定前窗口，見 `docs/plan/d22-naki-identity.md` §8）。
+  Naki 側＝`LiqiMsgIdAllocator.isIssued(msgId, socketId:)` 或插件號段（Swift 沒有插件登記，整段排除，
+  只影響 `ObservedMatchSids`）；`LiqiResponseStore` 只收登記過的回應（`LiqiResponseStore.capture`
+  以解析結果的 `socketId` 呼叫 `allocator.claim`，沒有插件號段判斷）。
   回應到達時 `LiqiParser.parseResponse` 先以不消耗的 `isIssued` 判斷，之後 `capture` 才認領。
+  JS 側的 `ctx.isNaki` 規則不同（不含插件號段），以 `docs/plugin-api-v1.md` 為準。
 - **送出失敗的 msgId 登記**（BR-08）：`LiqiActionSender.send` 只對送出前即確定失敗撤銷登記
   （沒有 `sendHandler`，或 detail 開頭為 `no_open_majsoul_connection`、`no_game_gateway_connection`、
   `invalid_base64`、`decode_failed`、`empty_payload`、`send_failed`）。`js_error`、

@@ -77,6 +77,34 @@ final class LiqiResponseStoreTests: XCTestCase {
         XCTAssertTrue(allocator.claim(issued, socketId: 3))
     }
 
+    /// 綁定前窗口（設計 §8）：未綁定的登記給先到的同號回應。別條線先到就被它認領，之後的綁定與真回應都落空
+    func testUnboundRegistrationGoesToTheFirstResponseOnAnySocket() {
+        let allocator = LiqiMsgIdAllocator()
+        let issued = allocator.next()
+        XCTAssertTrue(allocator.claim(issued, socketId: 9))
+        allocator.bind(issued, socketId: 3)
+        XCTAssertFalse(allocator.claim(issued, socketId: 3))
+    }
+
+    func testTrueResponseBeforeBindIsClaimed() {
+        let allocator = LiqiMsgIdAllocator()
+        let issued = allocator.next()
+        XCTAssertTrue(allocator.claim(issued, socketId: 3))
+        allocator.bind(issued, socketId: 3)
+        XCTAssertFalse(allocator.isIssued(issued))
+    }
+
+    /// JS 結果無法解析時 JS 可能已送出：登記保留且不綁定，任一連線的回應都認
+    @MainActor
+    func testAmbiguousFailureKeepsAnUnboundRegistration() async {
+        let sender = LiqiActionSender()
+        sender.sendHandler = { _ in .failure("js_error: boom") }
+        let result = await sender.send(LiqiRequestBuilder.pon())
+        defer { LiqiMsgIdAllocator.shared.revoke(result.msgId) }
+        XCTAssertTrue(LiqiMsgIdAllocator.shared.isIssued(result.msgId, socketId: 3))
+        XCTAssertTrue(LiqiMsgIdAllocator.shared.isIssued(result.msgId, socketId: 4))
+    }
+
     func testCaptureClaimsOnlyOnTheBoundSocket() {
         let allocator = LiqiMsgIdAllocator()
         let store = LiqiResponseStore(allocator: allocator)

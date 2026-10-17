@@ -194,10 +194,11 @@
         return ids.length ? { method: method, ids: ids, approved: [], threw: [], async: [] } : null;
     }
 
-    // Naki 與插件都經 sendRaw 送出、以 (連線, msgId) 登記；插件號段本身不算（D22：遊戲 msgId 會跑進號段）
-    function isNakiMsgId(msgId, socketId) {
+    // Naki 與插件都經 sendRaw 送出、以 (連線, msgId) 登記；插件號段本身不算（D22：遊戲 msgId 會跑進號段）。
+    // REQUEST 只認還沒收到 RESPONSE 的登記
+    function isNakiMsgId(msgId, socketId, request) {
         var ws = window.__nakiWebSocket;
-        return msgId != null && !!(ws && ws.isNakiSent && ws.isNakiSent(msgId, socketId));
+        return msgId != null && !!(ws && ws.isNakiSent && ws.isNakiSent(msgId, socketId, request));
     }
 
     // 守衛者全部有效放行才回 null。已污染者的放行另外要求：仍守衛這個方法、L3 開著（審查第 1 條）
@@ -270,7 +271,7 @@
         if (!env) return guardActive() ? blockSend(raw, origObj, original, null, null, null, 'guard_error', []) : undefined;
         try {
             guard = env.type === TYPE_REQUEST && env.method ? guardFor(env.method) : null;
-            if (guard && isNakiMsgId(env.msgId, raw.wsId)) {
+            if (guard && isNakiMsgId(env.msgId, raw.wsId, true)) {
                 return blockSend(raw, origObj, original, env.msgId, env.method, env.method, 'naki_traffic', guard.ids);
             }
             var out = runChain(raw, env, guard, true);
@@ -513,13 +514,16 @@
         rememberIfRequest(env, raw.direction, raw.wsId);
         var method = resolveMethod(env, raw.direction, raw.wsId);
         diagnostics.lastMethod = method;
-        var isNaki = isNakiMsgId(env.msgId, raw.wsId);
+        var injectedKey = raw.direction === 'receive' && env.msgId != null ? msgKey(raw.wsId, env.msgId) : null;
+        var injected = injectedKey != null && injectedMsgIds.has(injectedKey);
+        // 注入登記還在就是插件自送，即使 sendRaw 登記已被淘汰（D22 第二輪第 1 條）
+        var isNaki = injected || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
 
         // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
         // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
-        if (raw.direction === 'receive' && env.msgId != null && injectedMsgIds.has(msgKey(raw.wsId, env.msgId))) {
-            var originId = injectedMsgIds.get(msgKey(raw.wsId, env.msgId));
-            injectedMsgIds.delete(msgKey(raw.wsId, env.msgId));
+        if (injected) {
+            var originId = injectedMsgIds.get(injectedKey);
+            injectedMsgIds.delete(injectedKey);
             var origin = registry.get(originId);
             if (origin && typeof origin.spec.onInjectResponse === 'function') {
                 var rctx = makeCtx(raw, env, method, isNaki, origin.grant);

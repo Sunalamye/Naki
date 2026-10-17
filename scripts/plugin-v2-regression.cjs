@@ -139,12 +139,14 @@ test('Naki\'s own sendRaw is never offered rewriteSend; the socket gets exactly 
 
 test('D22: injected sends (via sendRaw) are Naki traffic and never rewritten; the plugin range alone is not', () => {
   const { c, ws } = page(); c.__nakiPluginsMayModifyOutbound = true;
-  const { seen } = rewriter(c, { extra: { observeNakiTraffic: true } });
+  const rw = rewriter(c, { make: ctx => request(ctx.msgId, SKIN, [8, 1]), extra: { observeNakiTraffic: true } }), { seen } = rw;
   const original = request(64002, SKIN);
   assert.equal(c.__nakiWebSocket.sendRaw(b64(original)).success, true);
   assert.equal(seen[0].hasReplace, false); assert.deepEqual(Array.from(new Uint8Array(ws.sent[0])), Array.from(original));
+  rw.results.length = 0;
   ws.send(request(64003, SKIN));
-  assert.equal(seen[1].hasReplace, true, 'the game\'s own msgId in the plugin range');
+  assert.deepEqual(rw.results, [true], 'the game\'s own msgId in the plugin range is rewritable');
+  assert.deepEqual(bytes(ws.sent[1]), Array.from(request(64003, SKIN, [8, 1])));
 });
 
 test('no plugins: send passes the very same object through (zero-plugin regression)', () => {

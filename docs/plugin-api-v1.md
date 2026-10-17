@@ -105,7 +105,7 @@ ctx = {
   method    : string | null,       // REQUEST 直接解出；RESPONSE 由 pending 對回（可能 null）
   bytes     : Uint8Array,          // 完整 envelope。可就地改（等長，見 §4）
   payload   : { from, to } | null, // envelope 內 field 2 的 byte range，不必自己再剝 wrapper
-  isNaki    : boolean,             // 這筆是 Naki 或插件自己送的：msgId 在 sendRaw 送出登記表（上限 256 筆，FIFO）或插件號段 64000–65500（見 §5）
+  isNaki    : boolean,             // 這筆是 Naki 或插件自己送的：當前 (socketId, msgId) 在 sendRaw 送出登記表內（REQUEST 只認尚未收到 RESPONSE 的），或是你注入請求的回應（見 §5）
   settings  : object,              // manifest 有宣告 settings 才存在，唯讀快照（見 §6）
   log(msg)  : void,                // 進 Naki 的 log，自動帶你的 id 前綴
 
@@ -201,9 +201,22 @@ L3 只能在使用者的**測試帳號**上用（Naki 的既有邊界）。
 
 ### msgId 號段（injectSend）
 
-你注入的 request 用 **64000–65500** 號段（Naki 自送的是 60000–63999，遊戲自己的是低位遞增，跑久了也可能進入 60000+）。Swift 端（`ObservedMatchSids`、`LiqiResponseStore`）判斷「是不是 Naki 自己送的」靠配發器登記（插件號段另計）。
+你注入的 request 用 **64000–65500** 號段（Naki 自送的是 60000–63999，遊戲自己的是低位遞增，跑久了也可能進入 60000+）。Swift 端（`ObservedMatchSids`、`LiqiResponseStore`）判斷「是不是 Naki 自己送的」靠配發器登記；Swift 沒有插件登記，`ObservedMatchSids` 仍把插件號段整段當成 Naki 側。
 
-**`ctx.isNaki` 的語意（2026-10-13 起，D9 契約變更）**：不再是「msgId ≥ 60000」的號段猜測（遊戲自己的 msgId 跑久了也會進 60000+），而是「`sendRaw` 送出登記表 ∪ 插件號段 64000–65500」。`sendRaw` 每送一筆就把 msgId 記進登記表，**上限 256 筆，FIFO 淘汰**；被淘汰的 id 之後再出現，一律當成遊戲自己的。頁面 API `window.__nakiWebSocket.isNakiSent(msgId)` 回傳該 msgId 此刻是否在登記表內（只含 `sendRaw` 送出的，不含插件號段）。符號 `ctx.isNaki` 不變，但實作它的語意變了：頁面自己送出的 60000+ 不再被誤認成 Naki；繞過 `sendRaw` 直接 `ws.send` 的送出會被當成遊戲自己的。這些 msgId 都是 Naki 自動分配的，你不用管。
+**`ctx.isNaki` 的語意（D9 起登記制；D22 起加上連線）**：不是號段猜測。遊戲自己的 msgId 計數器跨連線遞增，跑久了會進 60000–65500。判斷規則如下：
+- `sendRaw`（Naki 自送與你的 `sendRequest` 都走它）每送一筆，就把 **(socketId, msgId)** 記進登記表。表的**上限 256 筆，所有連線共用**，FIFO 淘汰；同一配對重送會刷新成最新。
+- REQUEST：配對在表內、且這個配對**還沒收到 RESPONSE** 才算 Naki。Naki 的 RESPONSE 到了以後，同一連線上同號的 REQUEST 是遊戲自己的。
+- RESPONSE：配對在表內就算 Naki。你注入請求的回應只要注入登記還在，即使送出登記已被淘汰，也算 Naki。
+- 插件號段 64000–65500 本身**不再**算 Naki。別條連線上的同號也不算。
+- 頁面 API `window.__nakiWebSocket.isNakiSent(msgId, socketId?, pendingOnly?)`：省略 `socketId` 時查任一連線；`pendingOnly` 為真時只認還沒收到 RESPONSE 的配對。
+
+**D22 對既有插件的可見差異**：遊戲在 64000–65500 的流量原本被當成 Naki，只有宣告 `observeNakiTraffic` 的 observer 看得到。現在它走一般鏈，可被 observe／rewrite。審查時以實際插件重現了兩例：
+- 遊戲 `authGame#64003` 的回應現在會觸發 name-hider 關閉遮罩。
+- 同一個回應現在會讓 gist-logger 新增一筆紀錄。
+
+tile-highlighter 的 ActionPrototype 與推薦更新路徑不受影響。
+
+**仍會誤認的情況**：Naki 的請求還在路上時，遊戲在同一連線送出同號請求，這筆仍被當成 Naki。若之後兩個同號 RESPONSE 都到，兩個都算 Naki。繞過 `sendRaw` 直接 `ws.send` 的送出會被當成遊戲自己的。這些 msgId 都是 Naki 自動分配的，你不用管。
 
 ### 收自己請求的回應（`onInjectResponse`）
 
@@ -258,7 +271,7 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 - **drop 短路**（規格保留，`drop` 目前未實作）：任一插件 `drop()` 成功 ⇒ 鏈**立即中止**，後續插件不再收到這則。
 - **replace 換 buffer**：`replace()` 成功後，後續插件的 `ctx.bytes` 指向新 buffer。
 - **isNaki 分流**：Naki／插件自送的封包（`isNaki===true`）走**另一條只含 observer 的鏈**——只有在 manifest 宣告 `observeNakiTraffic: true` 且**僅** `observe` 的插件收得到，永遠不給 rewrite。
-  - **溢出邊界**：`isNaki` 依賴上述 256 筆登記表。若 Naki 送出一筆後，又經 `sendRaw` 送了 ≥256 筆且全部往返完成，那筆的回應才到，登記已被淘汰，該回應的 `isNaki` 會是 `false`，等於違反「isNaki 流量永不給 rewrite」。這需要回應延遲到數百次往返之後，實務上不可達（判定為推測，未實測）；插件自己的 `sendRequest` 與 Naki 共用同一個登記表，只會更快湊滿，不是新的觸發路徑。
+  - **溢出邊界**：`isNaki` 依賴上述 256 筆登記表，所有連線共用。若 Naki 送出一筆後，又經 `sendRaw` 送了 ≥256 筆，那筆的回應才到，登記已被淘汰，該回應的 `isNaki` 會是 `false`，等於違反「isNaki 流量永不給 rewrite」。這需要回應延遲到數百次送出之後，實務上不可達（判定為推測，未實測）。你注入請求的回應不受這個邊界影響，它以注入登記判斷（另有 256 筆上限，只計插件注入）。
 - **錯誤隔離**：你的 hook throw ⇒ 這一則跳過你、記一行 log（同 id 同錯只記一次），**封包原樣通過**（fail-open）。其他插件不受影響。
 - **自動停用**：失敗計數**按 hook 分開**（`onReceive`／`onSend`／`onRecommendations`／`onInjectResponse`／`replace` 各算各的），某個 hook 連續失敗 10 次 ⇒ 該插件在本次頁面生命週期內整個停用；該 hook 成功一次（`replace` 以一次成功改寫算）就把它自己的計數歸零。
 - **注入範圍**：插件 script 只注入 main frame，不跑進第三方 iframe。

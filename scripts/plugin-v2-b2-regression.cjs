@@ -872,3 +872,16 @@ test('D22: a Naki msgId sent on the game connection does not mark the same msgId
   assert.deepEqual(sentIds(t), [60003]);
   assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.map(e => [e.msgId, e.outcome]), [[60003, 'sent']]);
 });
+
+test('D22-2: a game guarded request on the same line and msgId as a Naki send is blocked only until the Naki RESPONSE arrives', () => {
+  const t = page();
+  guardPlugin(t.c);
+  t.c.__nakiWebSocket.sendRaw(Buffer.from(request(60003, BEAT)).toString('base64'));
+  t.lobby.send(request(60003, SKIN, [8, 1]));
+  t.lobby.receive(response(60003, []));
+  t.lobby.send(request(60003, SKIN, [8, 1]));
+  assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log.map(e => [e.msgId, e.outcome, e.reason]),
+    [[60003, 'local_error', 'naki_traffic'], [60003, 'sent', null]]);
+  assert.deepEqual(sentIds(t), [60003, 60003]);
+});
+

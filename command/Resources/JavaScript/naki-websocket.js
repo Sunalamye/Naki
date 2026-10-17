@@ -344,19 +344,28 @@
 
 
     // Naki 自送登記（bridge D9、D22）：遊戲自己的 msgId 跑久了也會進 60000+，號段猜不準；
-    // 遊戲的計數器跨連線遞增，所以以 (連線, msgId) 為鍵。只記最近 256 筆，被淘汰的一律當成遊戲自己的。
+    // 遊戲的計數器跨連線遞增，所以以 (連線, msgId) 為鍵。只記最近 256 筆（所有連線共用），被淘汰的一律當成遊戲自己的。
+    // RESPONSE 到了就標記已答：之後同線同號的 REQUEST 是遊戲自己的；同號 RESPONSE 仍算 Naki（分不出是哪一筆的回應）。
     const nakiSent = new Map();
     function rememberNakiSent(socketId, bytes) {
         if (bytes[0] !== 2 || bytes.length < 3) return;
         const msgId = bytes[1] | (bytes[2] << 8), key = socketId + ':' + msgId;
         nakiSent.delete(key);
-        nakiSent.set(key, msgId);
+        nakiSent.set(key, { msgId: msgId, answered: false });
         if (nakiSent.size > 256) nakiSent.delete(nakiSent.keys().next().value);
     }
-    // 不給連線時回答「任一條連線上有沒有」（頁面 API 相容）
-    function isNakiSent(msgId, socketId) {
-        if (socketId != null) return nakiSent.has(socketId + ':' + msgId);
-        for (const id of nakiSent.values()) if (id === msgId) return true;
+    function markNakiAnswered(socketId, data) {
+        const b = data instanceof ArrayBuffer ? new Uint8Array(data)
+                : (ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
+        if (!b || b.length < 3 || b[0] !== 3) return;
+        const entry = nakiSent.get(socketId + ':' + (b[1] | (b[2] << 8)));
+        if (entry) entry.answered = true;
+    }
+    // 不給連線時回答「任一條連線上有沒有」（頁面 API 相容）；pendingOnly 只認還沒收到 RESPONSE 的（判斷 REQUEST 用）
+    function isNakiSent(msgId, socketId, pendingOnly) {
+        const hit = e => !!e && e.msgId === msgId && !(pendingOnly && e.answered);
+        if (socketId != null) return hit(nakiSent.get(socketId + ':' + msgId));
+        for (const e of nakiSent.values()) if (hit(e)) return true;
         return false;
     }
 
@@ -368,7 +377,7 @@
                        ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null);
             if (!b || b.length < 6 || b[0] !== 2 || b[3] !== 0x0a) return;
             const msgId = b[1] | (b[2] << 8);
-            if (isNakiSent(msgId, info.id)) return;   // Naki 自己送的，不能當證據
+            if (isNakiSent(msgId, info.id, true)) return;   // Naki 自己送的，不能當證據
             const len = b[4];
             let m = '';
             for (let i = 0; i < len; i++) m += String.fromCharCode(b[5 + i]);
@@ -474,7 +483,7 @@
         // 否則會把自己送錯的那次記成正確答案，錯誤自我強化。
         const info = wsConnections.get(ws);
         if (info) {
-            if (direction === 'receive') info.lastRecvAt = Date.now();
+            if (direction === 'receive') { info.lastRecvAt = Date.now(); markNakiAnswered(info.id, data); }
             else if (direction === 'send') attributeSend(info, data);
         }
 

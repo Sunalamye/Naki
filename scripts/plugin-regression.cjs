@@ -179,8 +179,9 @@ test('failures are counted per hook: a healthy hook does not reset a failing one
   assert.equal(c.__nakiPlugins.list().length, 0);
 });
 // ---- envelope 解析（naki-core 共用一份，websocket 遮名與插件派發都走它）----
-function page() {
+function page(random) {
   const s = setup();
+  if (random != null) vm.runInContext('Math.random = () => ' + random, s.c);
   class Socket { constructor(url) { this.url = url; this.readyState = 1; this.listeners = {}; this.sent = []; }
     addEventListener(k, f) { this.listeners[k] = f; } send(d) { this.sent.push(new Uint8Array(d)); } }
   Socket.OPEN = 1; s.c.WebSocket = Socket;
@@ -287,3 +288,48 @@ test('D22 registry is per connection: the same msgId on another socket is the ga
   ws.listeners.message({ data: response(60005).buffer });
   assert.deepEqual(watcher.at(-1), [60005, true]);
 });
+const GATEWAY = 'wss://game.example/gateway';
+test('D22-2 an injected RESPONSE stays Naki after its sendRaw registration is evicted by the other /gateway', () => {
+  const { c, ws, socket } = traffic(); let notify; const got = [];
+  c.__nakiPluginsMayModifyOutbound = true;
+  c.__nakiPlugins.setGrant('injector', { capabilities: ['observe', 'injectSend', 'rewriteReceive'], methods: ['.lq.NotifyFoo', LOBBY] });
+  c.__nakiPlugins.register({ id: 'injector', onReceive(ctx) { notify = ctx; },
+    onInjectResponse(ctx) { got.push([ctx.isNaki, typeof ctx.replace]); } });
+  ws.listeners.message({ data: notifyEnvelope('.lq.NotifyFoo').buffer });
+  assert.equal(notify.sendRequest(LOBBY, new Uint8Array(0)).msgId, 64000);
+  const other = socket(GATEWAY); other.send(request(100, LOBBY));
+  for (let id = 60100; id < 60356; id++) c.__nakiWebSocket.sendRaw(b64(request(id, LOBBY)));
+  const [a, b] = c.__nakiWebSocket.getMajsoulConnections().map(x => x.id);
+  assert.equal(other.sent.length, 257);
+  assert.equal(c.__nakiWebSocket.isNakiSent(64000, a), false, '256 slots are shared by both sockets');
+  assert.equal(c.__nakiWebSocket.isNakiSent(60100, b), true);
+  ws.listeners.message({ data: response(64000).buffer });
+  assert.deepEqual(got, [[true, 'undefined']]);
+});
+test('D22-2 same socket, same msgId: Naki until its RESPONSE arrives, the game\'s own after; the RESPONSE stays Naki', () => {
+  const { c, ws, watcher, lobbySendAt } = traffic();
+  c.__nakiWebSocket.sendRaw(b64(request(60007, LOBBY)));
+  ws.send(request(60007, LOBBY));
+  assert.deepEqual(watcher.at(-1), [60007, true], 'residual: collision while the Naki request is in flight');
+  assert.equal(lobbySendAt(), 0);
+  ws.listeners.message({ data: response(60007).buffer });
+  assert.deepEqual(watcher.at(-1), [60007, true]);
+  ws.send(request(60007, LOBBY));
+  assert.deepEqual(watcher.at(-1), [60007, false]); assert.ok(lobbySendAt() > 0);
+  ws.listeners.message({ data: response(60007).buffer });
+  assert.deepEqual(watcher.at(-1), [60007, true], 'a RESPONSE on a registered pair is never handed out as the game\'s');
+  assert.equal(c.__nakiWebSocket.isNakiSent(60007), true); assert.equal(c.__nakiWebSocket.isNakiSent(60007, null, true), false);
+});
+test('D22-2 socket ids: a random start per page, so a reload with the same random value repeats ids; a reconnect never does', () => {
+  const first = page(0.25), again = page(0.25), other = page(0.5);
+  const ws = first.socket(GATEWAY); again.socket(GATEWAY); other.socket(GATEWAY);
+  const id = p => p.c.__nakiWebSocket.getMajsoulConnections()[0].id;
+  assert.equal(id(first), id(again)); assert.notEqual(id(first), id(other));
+  first.c.__nakiWebSocket.sendRaw(b64(request(60009, LOBBY)));
+  assert.equal(again.c.__nakiWebSocket.isNakiSent(60009), false, 'the registry does not survive a reload');
+  const before = id(first); ws.readyState = 3; first.socket(GATEWAY);
+  assert.notEqual(id(first), before);
+  assert.equal(first.c.__nakiWebSocket.isNakiSent(60009, id(first)), false);
+  assert.equal(first.c.__nakiWebSocket.isNakiSent(60009, before), true);
+});
+

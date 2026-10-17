@@ -160,7 +160,7 @@ iOS 實機。
 | 副露搶先送「過」、首選未授權時亂退次選 | 寬限期 8 秒（不足 timeFixed 時夾小）；退次選只退到同批 oplist 的 discard／none | `AutoPlayEngine.swift`、`AutoPlayDecisionResolver.swift` |
 | 手動 `game_action(hora)` 無 snapshot 猜 tsumo | fail-closed | `GameTools.swift` |
 | `LiqiResponseStore` 一律讀 field 1 當 error | 依 method 查 error 欄位號（21 個 method） | `LiqiResponseStore.swift` |
-| 用號段（≥ 60000）判斷 Naki 自送 | msgId 登記制（插件號段另計） | `LiqiMsgIdAllocator.isIssued`、`LiqiParser.isNakiSent` |
+| 用號段（≥ 60000）判斷 Naki 自送 | (連線, msgId) 登記制（D22）；JS 不含插件號段，Swift 的 match_sid 學習仍排除插件號段；同線在途碰撞與 Swift 綁定前窗口為已知殘留 | `LiqiMsgIdAllocator.isIssued`、`LiqiParser.isNakiSent`、`naki-websocket.js` 的 `isNakiSent` |
 | Bot 推論失敗仍合成推薦／失敗無提示 | 不合成推薦；`GameStore.botFailure` 顯示橫幅 | `BundledCoreMLBot.swift`、`GameStore.swift` |
 | Retry-After、`/js` 非 JSON 型別、MCP 參數轉型、⌘N 等崩潰點 | 已加守衛 | 見 `code-audit-implementation-notes.md` |
 | Debug server 無 Host 檢查、chunked 無界、連線可無限掛著 | Host 403、411、30 秒收齊期限 | `DebugServer.swift` |
