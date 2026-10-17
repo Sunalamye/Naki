@@ -302,6 +302,8 @@
     function blockSend(raw, origObj, original, msgId, method, origMethod, reason, ids) {
         var response = null;
         try {
+            // 擋下的請求不上 wire，它在鏈首登記的配對當場撤銷；本地結案不再刪配對，遊戲回呼內新送的同 msgId 請求才保得住（第十輪第 1 條）
+            if (msgId != null) pendingMethods.delete(msgKey(raw.wsId, msgId));
             restore(raw, origObj, original);
             recordGuard(msgId, method, 'local_error', reason, ids, raw.wsId);
             pluginLog(ids.join(','), '守衛擋下 ' + method + ' msgId=' + msgId + '（' + reason + '），改回本地錯誤');
@@ -318,7 +320,7 @@
     // 回應配對在守衛判決之後才提交，依最後真的上 wire 的內容（擋下、解除守衛、退回原內容時都是原請求）（第九輪第 1 條）
     function guardedSend(raw, env) {
         var result = guardedVerdict(raw, env);
-        pairWith(raw.wsId, raw.bytes);
+        if (!(result && result.block)) pairWith(raw.wsId, raw.bytes);
         return result;
     }
     function guardedVerdict(raw, env) {
@@ -1014,12 +1016,12 @@
         // 唯讀：變長 replace／drop 是否禁改這個 method（契約測試從 Swift 消費端反查用）
         isReshapeForbidden: function (method) { return isReshapeForbidden(method); },
 
-        // 本地回應交給遊戲之後呼叫：清 msgId 對照，插件注入的請求把本地結果交回發起插件（審查第 8 條）。
+        // 本地回應交給遊戲之後呼叫：插件注入的請求把本地結果交回發起插件（審查第 8 條）。
+        // 配對已在擋下當時撤銷，這裡不碰 pendingMethods：遊戲在回呼內可能已用同 msgId 送出新請求（第十輪第 1 條）。
         // msgId 與原方法來自擋下當時的判定，bytes 是交付前另存的快照（第二輪第 5 條）。不跑改寫鏈、不送 Swift。
         localResponse: function (socketId, msgId, method, bytes) {
             if (msgId == null) return;
             var key = msgKey(socketId, msgId);
-            pendingMethods.delete(key);
             var originId = injectedMsgIds.get(key);
             if (originId == null) return;
             injectedMsgIds.delete(key);
@@ -1095,12 +1097,15 @@
         },
 
         // 熱停用：從 registry 移除、清 grant、歸零失敗計數。回可觀測結果。
+        // onDisable 內可能已註冊同 id 的新實例（或換了 grant）：尾端清理只作用於被停用的這個實例與它的 grant（第十輪第 2 條）
         disable: function (id) {
             var entry = registry.get(id);
             var wasRegistered = registry.delete(id);
             cleanup(entry);
-            failures.delete(id);
-            if (window.__nakiPluginGrants) delete window.__nakiPluginGrants[id];
+            if (!registry.has(id)) {
+                failures.delete(id);
+                if (window.__nakiPluginGrants) delete window.__nakiPluginGrants[id];
+            }
             pluginLog(id, 'disabled（熱停用，免 reload）');
             return { ok: true, wasRegistered: wasRegistered };
         }

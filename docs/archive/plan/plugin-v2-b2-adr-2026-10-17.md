@@ -82,6 +82,7 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 裁決：Naki 新增 `__nakiPlugins.devLogSeal(pluginId, meta)`，由宿主落檔一行 seal（count 由宿主計、插件不可偽造），封存後該頁 devLog 一律拒收。插件側驗收改依 seal 行；匯入順序改依宿主時間戳排序、不可證則拒驗。
 
 取捨：多一個宿主 API（小包 plugin-devlog-seal），換掉三個 localStorage 鍵與一整套可被繞過的頁面側證明；不選「操作者手動 quit App 當封存」是因為時序無法由紀錄本身證明。
+
 ## 2026-10-17 後續裁決：保證範圍三條改為修掉（guard-gaps）
 
 用戶裁決「能修就修，不得只列限制」。D28–D30 三條改以程式修掉，只改 `naki-plugins.js`，`naki-websocket.js` 不動。設計細節在 `plugin-v2-b2.md` §1.4，判斷與 Deviations 在 `docs/archive/notes/guard-gaps-implementation-notes.md`。
@@ -107,3 +108,5 @@ Astra 第六輪（`astra-review6.md`）：2【擋】2【應修】1【建議】�
 Astra 第七輪（`astra-review7.md`）：1【擋】4【應修】，主線全採納，notes Deviation 26–34 採納。擋 1：守衛的放行沒有綁定狀態，守衛者在同一筆送出中被污染（含另一條大廳連線、實際 local-unlock 插件的 2301）或同 id 重新註冊後，舊放行仍有效。修法：放行綁定註冊實例代號與污染版本，鏈尾不符即 `not_on_chain`。應修：成功記帳等本筆鏈尾判定（鏈尾違規可累計到自動停用）；歸責用 register 時固定的 id；未污染守衛者在鏈中全部退出時本筆解除守衛、送原請求；就地改與等長 receive `replace` 補結構檢查。
 
 Astra 第八輪（`astra-review8.md`）：2【應修】1【建議】，主線全採納，notes Deviation 35–43 採納。應修 1：解除守衛退回原請求時，回應配對仍是被撤回的新 method；改為守衛判決後依實際上 wire 的內容提交。應修 2：記帳以 id 查表，舊實例能重設或停用同 id 的新實例；改為記帳一律綁註冊實例，實例已換掉就丟棄。建議 3：契約補「退出前已拋錯／回 thenable 的守衛者否決仍有效」。
+
+Astra 第九輪（`astra-review9.md`）：2【應修】1【建議】，主線全採納，notes Deviation 44–47 採納（45 前提被推翻、改寫）。應修 1：本地結案在遊戲回呼之後刪配對，會刪掉遊戲在合成錯誤回呼內以同 msgId 新送請求的配對；改為擋下當下撤銷被擋請求的配對、擋下不提交配對，本地結案不碰配對。應修 2：`disable` 尾端無條件清失敗計數與 grant，會清掉 `onDisable` 內同 id 新註冊的實例；改為 registry 沒有同 id 新實例時才清。建議 3：§1.4 區分原請求解析失敗（照送，殘餘風險）與 hook 產生的解析不出改寫（撤回）。

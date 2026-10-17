@@ -2508,3 +2508,59 @@ test('GG9-3 (Astra8 3): a guard that throws or returns a thenable and then leave
     assert.deepEqual(lastGuard(t), [[1640, 'local_error', kind === 'throw' ? 'hook_threw' : 'async_hook']], kind);
   }
 });
+
+// ---- guard-gaps 第十輪（Astra guard-gaps 第九輪 1–2 條）：本地結案不刪回呼內新配對、disable 尾端清理只管被停用的實例 ----
+test('GG10-1 (Astra9 1): the game resends loginBeat with the same msgId inside the synthetic error callback — the new pairing survives and the real RESPONSE routes as loginBeat (hook_threw / guard_error / dispatch_error)', async () => {
+  for (const reason of ['hook_threw', 'guard_error', 'dispatch_error']) {
+    const t = page();
+    guardPlugin(t.c, { behave: () => { if (reason === 'hook_threw') throw new Error('boom'); } });
+    let once = true;
+    const breakOnce = list => ({ indexOf(m) { if (once) { once = false; throw new Error('bad grant'); } return list.indexOf(m); } });
+    if (reason === 'guard_error') t.c.__nakiPluginGrants[ID].sendGuard = breakOnce([SKIN]);
+    if (reason === 'dispatch_error') {
+      t.c.__nakiPlugins.setGrant('broken10', { capabilities: ['observe'], methods: breakOnce([SKIN]) });
+      t.c.__nakiPlugins.register({ id: 'broken10', onSend() {} });
+    }
+    const got = responders9(t);
+    t.lobby.onmessage = ev => {
+      const b = Array.from(new Uint8Array(ev.data));
+      t.game.push(b);
+      if (JSON.stringify(b) === JSON.stringify(errorResponse(1700))) t.lobby.send(request(1700, BEAT));
+    };
+    t.lobby.send(request(1700, SKIN, [8, 1]));
+    await tick();
+    assert.deepEqual(lastGuard(t), [[1700, 'local_error', reason]], reason);
+    assert.deepEqual(t.lobby.committed.map(d => methodOf(Uint8Array.from(d))), [BEAT], reason);
+    t.lobby.receive(response(1700, [8, 1]));
+    assert.deepEqual(got, { skin: 0, beat: 1 }, reason);
+  }
+});
+
+test('GG10-2 (Astra9 2): an old instance\'s onDisable registers a new A under the same id and it fails nine times — disable keeps the new A\'s count and grant, the tenth failure disables it', () => {
+  const t = page();
+  const FIRE = '.lq.Lobby.fetchServerTime';
+  const countsOf = () => t.events('log').filter(e => e.data.id === 'a10').map(e => (/onSend 拋錯（第 (\d+) 次）/.exec(e.data.msg) || [])[1]).filter(Boolean).map(Number);
+  t.c.__nakiPlugins.setGrant('a10', { capabilities: ['observe'], methods: [FIRE] });
+  assert.equal(t.c.__nakiPlugins.register({ id: 'a10', onDisable() {
+    assert.equal(t.c.__nakiPlugins.register({ id: 'a10', onSend() { throw new Error('new A'); } }), true);
+    for (let i = 0; i < 9; i++) t.lobby.send(request(1710 + i, FIRE));
+  } }), true);
+  assert.deepEqual(plain(t.c.__nakiPlugins.disable('a10')), { ok: true, wasRegistered: true });
+  assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'a10'), true);
+  assert.ok(t.c.__nakiPluginGrants.a10, 'the new instance keeps its grant');
+  t.lobby.send(request(1719, FIRE));
+  assert.deepEqual(countsOf(), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(plain(t.c.__nakiPlugins.list()).some(p => p.id === 'a10'), false);
+});
+
+test('GG10-1b (Astra9 1): a blocked request leaves no pairing behind — a stray RESPONSE with its msgId is not routed to the SKIN plugin', async () => {
+  const t = page();
+  guardPlugin(t.c, { behave: () => { throw new Error('boom'); } });
+  const got = responders9(t);
+  t.lobby.send(request(1720, SKIN, [8, 1]));
+  t.lobby.receive(response(1720, [8, 1]));
+  await tick();
+  t.lobby.receive(response(1720, [8, 1]));
+  assert.deepEqual(lastGuard(t), [[1720, 'local_error', 'hook_threw']]);
+  assert.deepEqual(got, { skin: 0, beat: 0 });
+});

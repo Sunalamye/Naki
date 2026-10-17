@@ -344,7 +344,7 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 ### 第九輪 Deviations
 
 44. **配對以判決後的 `raw.bytes` 為準，不另算。** 擋下（`blockSend`）、`guard_left` 與例外路徑都先把 `raw.bytes` 還原成遊戲原物件，放行時 `raw.bytes` 是要送的快照，所以一個出口統一提交，不在每個分支各寫一次。
-45. **被擋下的請求沒有另補配對測試。** 擋下時本地錯誤回應經 `respondLocal` 交付，那條路先刪掉該 msgId 的配對，之後不會再有同 msgId 的伺服器回應，配對對不對外部觀察不到。原計畫的 `GG9-1b` 因此撤掉，改由 `GG9-1` 的「解除守衛」與「沒有守衛」兩情境驗。
+45. **（第十輪改寫，原前提被 Astra 第九輪推翻）** 原文說擋下後 `respondLocal` 結案「先刪」配對、因此觀察不到。實際順序是先把合成錯誤交給遊戲、再於 `localResponse` 刪配對，遊戲在回呼內以同 msgId 新送的請求配對會被刪掉，而且結案前抵達的同號 RESPONSE 會被派給被擋的方法。第十輪改成擋下當下撤銷配對、本地結案不碰配對，補 `GG10-1`（三種擋下原因）與 `GG10-1b`（擋下後不留配對）。Blob 與無法辨識、沒有回應的路徑不經這段，本來就不建立也不清配對。
 46. **實例核對放在 `noteFailure`／`noteSuccess` 裡，不只放在鏈上。** 主線點名鏈尾與 thenable。放在記帳函式本身，`replace`、`onInjectResponse`、`onRecommendations` 也一併受保護，第八輪 thenable 入口的個別核對就不需要了。第八輪變異 `V12` 因此不再適用，由 `W3`、`W4` 取代。
 47. **`runChain` 在大廳上也登記配對的變異是等價的。** `guardedSend` 判決後一定會用同一個 key 覆寫，所以不列入變異。
 
@@ -365,3 +365,37 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 
 - 舊實例的記帳整筆丟棄，包括 log。插件停用或重新註冊前一刻的失敗不會出現在 log。
 - WebKit、live 未驗證（I2）。
+
+## 第十輪（Astra 第九輪審查：2【應修】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review9.md`。Deviations 44–47 主線採納，45 前提被推翻，已改寫。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 應修 1 | 遊戲在合成錯誤回呼內以同 socket／msgId 送 loginBeat：wire 已送，但舊 `localResponse` 隨後刪掉新配對，真 RESPONSE 的 method 變成 null；`hook_threw`、`guard_error`、`dispatch_error` 都重現 | 採「擋下當下清舊配對」：`blockSend` 撤銷被擋請求在鏈首登記的配對，`guardedSend` 只在沒擋下時提交配對，`localResponse` 不再碰 `pendingMethods`。清理在 `ws.send` 同步返回前完成，早於任何遊戲回呼（`GG10-1` 三路、`GG10-1b`） |
+| 應修 2 | 舊 A 的 `onDisable` 註冊同 id 新 A 並連錯九次，外層 `disable` 返回時無條件刪掉新 A 的 failures 與 grant，第十次沒停用 | `disable` 在 `cleanup` 之後，只在 registry 沒有同 id 實例時才清 failures 與 grant（`GG10-2`） |
+| 建議 3 | §1.4 仍寫「就地改寫沒有結構檢查」，第 2 項亦引用 | §1.4 第 2、3 項與保證範圍第 8 項改寫：原請求在 unknown 上解析失敗照送（殘餘風險）；hook 產生的解析不出或結構不完整改寫一律撤回；殘餘只剩 parser 與伺服器的解析差異 |
+
+### 第十輪 Deviations
+
+48. **配對清理放在 `naki-plugins.js`，不改 `naki-websocket.js`。** 主線給兩個選項：拆開 `respondLocal` 的清理與通知，或刪除帶交易代號。本包可改清單不含 `naki-websocket.js`，所以採第一個選項的語意、在插件層完成：擋下當下（同步、在 `setTimeout` 排的遊戲回呼之前）就撤銷配對，結案時不刪。效果等於「先清舊配對，再通知遊戲」，不需要交易代號。
+49. **擋下的請求不提交配對，連 `failSafe`、`tainted_fallback` 路徑也一樣。** 三條路都經 `blockSend`，在那裡撤銷一次即可。被擋的請求不上 wire，留著配對只會讓同號的 RESPONSE 被派給被擋的方法（`GG10-1b` 修前即重現：結案前抵達的同號 RESPONSE 派給了 SKIN 插件）。撤銷依 (連線, msgId) 刪除；若同號有更早、仍在路上的請求，它的配對也會一併消失，這與修前 `localResponse` 的行為相同，遊戲在同連線重用未答的 msgId live 未見。
+50. **`onDisable` 內只換 grant、沒有重新註冊時，grant 照舊刪除。** 主線條件是「registry 沒有新實例才清」。沒有實例掛著的 grant 不屬於任何註冊，保守起見刪掉；要重新啟用由 Swift 照 `setGrant` → `register` 順序再做。
+51. **自動停用路徑不需要同樣修正。** `noteFailure` 達上限時只 `registry.delete`＋`cleanup`，之後不清 failures 或 grant；`onDisable` 內重新註冊會由 `register` 重設計數，與 `GG10-2` 的預期一致。
+
+### 第十輪驗證（log：主 repo `.swfd/logs/guard-gaps/r10-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第九輪 HEAD `a0e4930` 的 JS | 3 紅：`GG10-1`、`GG10-2`、`GG10-1b`。`GG10-1` 三種原因各自單跑：修前各 1 紅，修後各 0 | `r10-red-b2-on-a0e4930.log` |
+| rebase | main 前進到 `b35c57c`（只在 ADR 尾端加一段 devLogSeal 裁決），已 rebase。每個 commit 的 ADR 尾端附加衝突以「main 段在前、本包段在後」兩邊並存解決；rebase 後與 rebase 前的樹只差 main 那段 ADR。node 五套與 local-unlock 在 rebase 後重跑，結果同下表。Swift 指定與全量是 rebase 前跑的；rebase 只多了 ADR 文字，程式與測試檔逐位元相同，未重跑 | `r10-rebased-*.log` |
+| 變異（b2＋v2＋p4，扣基線，`NAKI_PLUGINS_DIR` 指向 naki-plugins） | 69／71 被殺。新增 X1–X5 全殺；W1 改成新字串仍被殺；存活的 `T7`、`U10` 為既有等價變異 | `r10-mutation.log` |
+| node 五套 | b2 157／0（0 略過）、v2 21／0、p4 24／0、plugin-regression 39／0、keepalive 11／0 | `r10-green-*.log` |
+| naki-plugins `local-unlock-naki.cjs` | 9／0（`NAKI_ROOT` 指向本 worktree，0 略過） | `r10-green-local-unlock-naki.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 19／0 | `r10-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1184／0 | `r10-test-full.log` |
+
+### 第十輪未驗證與風險
+
+- 擋下時依 (連線, msgId) 撤銷配對，同號更早的未答請求的配對會一併消失（Deviation 49）。
+- 遊戲在合成錯誤回呼內重送的行為只在 node 替身驗證；WebKit、live 未驗證（I2）。
