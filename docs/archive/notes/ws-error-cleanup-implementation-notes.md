@@ -12,9 +12,6 @@
 - `NakiWebSocketScriptTests` 與 `JSContractTests` 共 18 測試 0 失敗。
 - 未驗證：live 實機（未碰執行中的 Naki）。
 
-## Deviations
-無。
-
 ## 第二輪（2026-10-17 live 後修正，commit 5c41a4f）
 live 證實上面「error 且 readyState === CLOSED」條件不成立：WebKit 觸發 error 回呼時 readyState 仍是 0，下個 tick 才變 3（頁內失敗連線 3 次殘留 3 筆）。離線替身在 error 時就把 readyState 設 3，所以假綠。
 
@@ -26,4 +23,6 @@ live 證實上面「error 且 readyState === CLOSED」條件不成立：WebKit �
 - 未驗證：live 實機（未碰執行中的 Naki）。
 
 ## Deviations
-Swift 端新增的 log 測試靠 `LogManager` 以 main.async 寫入，測試用 200ms sleep 等待，屬 conservative 選擇而非重構 log 路徑。
+第一輪：無。
+第二輪：Swift 端新增的 log 測試靠 `LogManager` 以 main.async 寫入，測試用 200ms sleep 等待，屬 conservative 選擇而非重構 log 路徑；斷言只比對測試開始後新增的 entries。
+復驗後補強：Swift 測試加「無 reason → unknown」；替身註解明列兩種 WebKit 情境（a 無 close、b 補 close）。

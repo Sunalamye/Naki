@@ -374,9 +374,9 @@ test('D22-3 residual: with its sendRaw registration evicted, a game RESPONSE on 
   assert.deepEqual(general.filter(x => x === 64000), [64000], 'only the game REQUEST reached the general chain');
 });
 
-// WebKit 時序（live 2026-10-17）：握手失敗時 error 回呼當下 readyState 仍是 0，下個 tick 才變 3 並觸發 close
+// WebKit 握手失敗兩種情境（live 2026-10-17）：error 當下 readyState 仍是 0；(a) 之後完全沒有 close（live 紀錄）、(b) 下個 tick 變 3 並補 close
 function failHandshake(ws) { ws.readyState = 0; ws.listeners.error({}); }
-test('handshake failure: error while still CONNECTING releases the connection and notifies plugins once', () => {
+test('handshake failure (a): error with no close afterwards releases the connection and notifies plugins once', () => {
   const { c, events, socket } = page(); let closed = 0, ids = []; const orig = c.__nakiPlugins.closed;
   c.__nakiPlugins.closed = id => { closed++; ids.push(id); return orig.call(c.__nakiPlugins, id); };
   const ws = socket(GATEWAY); const id = c.__nakiWebSocket.getConnections()[0].id;
@@ -385,7 +385,7 @@ test('handshake failure: error while still CONNECTING releases the connection an
   assert.deepEqual([closed, ids[0]], [1, id]);
   assert.equal(events.filter(e => e.type === 'websocket_error').length, 1);
 });
-test('handshake failure: the close that follows the error neither releases nor notifies plugins twice, Swift still hears it', () => {
+test('handshake failure (b): the close that follows the error neither releases nor notifies plugins twice, Swift still hears it', () => {
   const { c, events, socket } = page(); let closed = 0; const orig = c.__nakiPlugins.closed;
   c.__nakiPlugins.closed = id => { closed++; return orig.call(c.__nakiPlugins, id); };
   const ws = socket(GATEWAY);
