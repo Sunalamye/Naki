@@ -83,35 +83,45 @@
     // 遊戲計數器會進這個號段（pair-source）：輪用時跳過未答的注入、各連線未答的遊戲請求，以及各連線遊戲最後號碼之後 GAME_AHEAD 個。
     // 遊戲請求另記，不靠 pendingMethods（零消耗者不登記、FIFO 會淘汰）：不論有沒有插件都記。遊戲＝沒有 sendRaw 送出者，
     // 不看 D22 身分。記帳分兩段：派發一進入就保留號碼（同步 hook 內的注入要避開，第四輪第 15 條），判決外送後才提交進未答容量；
-    // 提交後 failSafe 才擋下時，整個還原提交前的未答與失準（第四輪第 16 條）。沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
+    // 提交後 failSafe 才擋下時，只撤回這筆送出交易的增量（第五輪第 19、20 條）。沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
     // 每連線未答上限 GAME_INFLIGHT_LIMIT，超過就失準，該連線關閉前一律拒發（msgid_busy）；不可用號碼占滿號段也回 msgid_busy
     var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500, GAME_AHEAD = 256, GAME_INFLIGHT_LIMIT = 256;
     var pluginMsgId = PLUGIN_MSGID_FIRST;
-    var gameSends = new Map();   // socketId -> { last, inflight: Set, lost }
+    var gameSends = new Map();   // socketId -> { last, inflight: Map(msgId -> 提交紀錄), lost, version }
     var gameDispatching = [];    // 派發中的遊戲請求 { msgId }
-    var gameUndo = null;         // 最近一次提交前的未答與失準：只給同一筆送出的 failSafe 還原
+    // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交）、造成的淘汰與失準、提交後的版本
     function gameSent(socketId, msgId) {
         var g = gameSends.get(socketId);
-        if (!g) gameSends.set(socketId, g = { last: msgId, inflight: new Set(), lost: false });
-        var undo = { socketId: socketId, msgId: msgId, g: g, inflight: Array.from(g.inflight), lost: g.lost };
+        if (!g) gameSends.set(socketId, g = { last: msgId, inflight: new Map(), lost: false, version: 0 });
+        var c = { socketId: socketId, g: g, msgId: msgId, prev: g.inflight.get(msgId), evicted: null, lostSet: false };
         g.last = msgId;
         g.inflight.delete(msgId);
-        g.inflight.add(msgId);
-        if (g.inflight.size > GAME_INFLIGHT_LIMIT) { g.lost = true; g.inflight.delete(g.inflight.values().next().value); }
-        return undo;
+        g.inflight.set(msgId, c);
+        if (g.inflight.size > GAME_INFLIGHT_LIMIT) {
+            c.evicted = g.inflight.entries().next().value;
+            g.inflight.delete(c.evicted[0]);
+            c.lostSet = !g.lost;
+            g.lost = true;
+        }
+        c.version = ++g.version;
+        return c;
     }
-    function gameDone(socketId, msgId) { var g = gameSends.get(socketId); if (g) g.inflight.delete(msgId); }
-    function revertGameSend(undo, socketId, msgId) {
-        if (!undo || undo.socketId !== socketId || undo.msgId !== msgId || gameSends.get(socketId) !== undo.g) return;
-        undo.g.inflight = new Set(undo.inflight);
-        undo.g.lost = undo.lost;
+    function gameDone(socketId, msgId) { var g = gameSends.get(socketId); if (g && g.inflight.delete(msgId)) g.version++; }
+    // 撤回只動自己：msgId 仍是這筆提交的才移除（先前提交放回）。之後表有變動（版本不符）就不回復淘汰與失準，寧可保守失準
+    function revertGameSend(c) {
+        if (!c || gameSends.get(c.socketId) !== c.g) return;
+        var g = c.g, clean = g.version === c.version;
+        if (g.inflight.get(c.msgId) === c) { if (c.prev) g.inflight.set(c.msgId, c.prev); else g.inflight.delete(c.msgId); }
+        if (clean && c.evicted) g.inflight = new Map([c.evicted].concat(Array.from(g.inflight)));
+        if (clean && c.lostSet) g.lost = false;
+        g.version++;
     }
     function requestMsgId(b) { return b && b.length >= 3 && b[0] === TYPE_REQUEST ? b[1] | (b[2] << 8) : null; }
     function noteGameSend(socketId, b) { var id = requestMsgId(b); return id == null ? null : gameSent(socketId, id); }
     function nextPluginMsgId() {
         var busy = new Set(), lasts = [], lost = false;
         injectedMsgIds.forEach(function (v, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
-        gameSends.forEach(function (g) { lost = lost || g.lost; lasts.push(g.last); g.inflight.forEach(function (id) { busy.add(id); }); });
+        gameSends.forEach(function (g) { lost = lost || g.lost; lasts.push(g.last); g.inflight.forEach(function (c, id) { busy.add(id); }); });
         gameDispatching.forEach(function (d) { busy.add(d.msgId); lasts.push(d.msgId); });
         if (lost) return null;
         for (var n = PLUGIN_MSGID_LAST - PLUGIN_MSGID_FIRST + 1; n > 0; n--) {
@@ -1044,15 +1054,15 @@
         // raw = { direction:'send'|'receive', wsId:Number, url:String, bytes:Uint8Array, sender }
         // 回傳：send 方向被 rewriteSend 換掉時回新的 Uint8Array（呼叫端改送它），其餘一律 undefined。
         // 守衛方法的 REQUEST 被擋下時回 { block:true, reason, response }：呼叫端不得送出，改把 response 交給遊戲與 Swift。
-        // 遊戲送出：派發期間保留號碼，判決確定外送後才記入未答（被擋的不算，第三輪第 12 條）；派發拋錯時由 failSafe 記
+        // 遊戲送出：派發期間保留號碼，判決確定外送後才記入未答（被擋的不算，第三輪第 12 條）；派發拋錯時由 failSafe 記。
+        // 提交記在呼叫端為這筆送出建立的交易 raw.tx，同一筆的 failSafe 才撤得回（第五輪第 19 條）
         dispatch: function (raw) {
-            gameUndo = null;
             var game = !!raw && raw.direction === 'send' && raw.sender === undefined && !!raw.bytes;
             var mark = game && requestMsgId(raw.bytes) != null ? { msgId: requestMsgId(raw.bytes) } : null;
             if (mark) gameDispatching.push(mark);
             try { var result = dispatchRaw(raw); }
             finally { if (mark) gameDispatching.splice(gameDispatching.indexOf(mark), 1); }
-            if (game && !(result && result.block)) gameUndo = noteGameSend(raw.wsId, raw.bytes);
+            if (game && !(result && result.block)) { var c = noteGameSend(raw.wsId, raw.bytes); if (raw.tx) raw.tx.commit = c; }
             return result;
         },
 
@@ -1075,11 +1085,10 @@
         // 大廳上：守衛方法擋下；已知非守衛方法照送；查找出錯時只擋 GUARDABLE_METHODS；無法解析時有守衛者才擋下。
         // 回 undefined ＝照舊送出。自己不得拋錯。
         // 照送時上 wire 的是遊戲原 bytes：派發已依改寫後內容提交的配對改回原請求（第十一輪第 1 條）；擋下時由 blockSend 撤銷
-        failSafe: function (data, socketId, sender) {
+        // tx：handleMessage 為這筆送出建立的交易；派發已提交的遊戲未答在這裡擋下時只撤回它
+        failSafe: function (data, socketId, sender, tx) {
             var b = null, original = null, env = null, ids = [];
             var injected = liveTokens.has(sender);   // 這次注入：配對在注入登記，不寫 pendingMethods
-            var undo = gameUndo;   // 派發剛提交的遊戲未答：這裡擋下就還原
-            gameUndo = null;
             // 照送：遊戲的才登記配對並記入未答（派發已記過的同號只會刷新）
             function sendOriginal() {
                 try { if (env && !injected) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ }
@@ -1103,7 +1112,7 @@
             var empty = new Uint8Array(0);
             var verdict = blockSend({ bytes: b || empty, wsId: socketId, injected: injected }, b || empty, original || empty,
                 env ? env.msgId : null, env && env.method, env && env.method, 'bridge_error', ids);
-            if (sender === undefined) revertGameSend(undo, socketId, env ? env.msgId : null);
+            if (sender === undefined && tx) revertGameSend(tx.commit);
             return verdict;
         },
 

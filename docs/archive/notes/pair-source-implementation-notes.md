@@ -204,10 +204,59 @@ PS11（擋下不消耗遊戲未答）隨 `blockSend` 的 `gameDone` 移除；它
 2. **偽造代號的實際影響**：任何頁面程式都能呼叫 `sendRaw`。傳假物件時以 Naki 自送登記進共用表，可覆寫遊戲同號配對，屬 D22 共用配對限制。包裝全域 `sendRaw` 能在呼叫期間取得真代號並冒用。對齊 U4 同 realm 信任模型，不宣稱防惡意。
 3. **選做的呼叫者檢查不做**：同 realm 內 `sendRaw` 無法可靠分辨呼叫者，檢查只會給假保證。改做一次性代號，成本一行，只擋事後重放。
 4. **外層包裝遺失代號只揭露不修**：主線裁決為揭露。改以 `data.buffer` 查表可修好 `new Uint8Array(buffer)` 那一種，但 `slice` 與漏傳仍無解，故一併揭露。
-5. **復原紀錄的殘餘窗口**：紀錄在下一次派發入口清除。若遊戲連續兩次送同一 msgId，且第二次在派發前就出錯而由 `failSafe` 擋下，會套用第一次的紀錄。這需要遊戲重送同號又在派發前拋錯，未加測試。
+5. **（已被第五輪取代）復原紀錄的殘餘窗口**：紀錄在下一次派發入口清除。若遊戲連續兩次送同一 msgId，且第二次在派發前就出錯而由 `failSafe` 擋下，會套用第一次的紀錄。這需要遊戲重送同號又在派發前拋錯，未加測試。
 
 ### 第四輪已知風險
 
 - 保留清單不分連線：任一連線派發中的號碼對所有連線都避開，只會更保守。
 - 第二輪列的 live 前提仍未驗證：計數器步進、繞回、重連、陌生 msgId 回應的客戶端行為、回應順序。
 - 未 live 驗證。
+
+## 第五輪（Astra 第四輪 19～20 條；全採納）
+
+審查原文：主 repo `.swfd/logs/pair-source-review/astra-review4.md`。main 仍在 `13abe49`，不需 rebase。第四輪 Deviations 採納，Deviation 5 由本輪根治。
+
+### 做了什麼
+
+- `naki-websocket.js`：`handleMessage` 在送出入口建立交易物件 `tx`，傳給 `dispatch`（`raw.tx`）與兩處 `failSafe`（第四參數）。Blob 的非同步派發也帶同一個 `tx`，但之後沒有 `failSafe`。
+- `naki-plugins.js`：
+  - 移除共用槽位 `gameUndo`。`dispatch` 把提交記在 `raw.tx.commit`，`failSafe` 只撤 `tx.commit`。交易物件隨 `handleMessage` 結束即釋放。
+  - 未答 `inflight` 改為 Map：msgId → 提交紀錄 `{ msgId, prev, evicted, lostSet, version }`。每連線加 `version`，新增、消耗、撤回都遞增。
+  - `revertGameSend(c)`：msgId 仍屬 `c` 才移除，有 `prev` 就放回。版本等於提交當時才放回淘汰項、清除失準，否則保守不回復。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 19 | 逐筆交易物件，dispatch 與 failSafe 經參數共用，無「最近一次」槽位 | PS-29（BEAT 真外送後同號 SKIN 派發前故障）、PS-30（第 257 筆編碼期間另一連線重入並拋錯） |
+| 擋 20 | 只撤自己的增量；版本衝突不回復淘汰與失準 | PS-31（同線新增）、PS-32（同線消耗）、PS-33（同線容量）、PS-34（同號重入）、PS-35（先前同號提交放回）、PS-36（容量下消耗衝突） |
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-29～PS-33 套在 `686b4af` 的 JS | 5 紅，皆為反例語意紅：PS-29、PS-31 注入取得 64000；PS-30 `msgid_busy`；PS-32 取 64001（已答號碼被快照帶回）；PS-33 失準被清掉 | `r5-red.log` |
+| PS-34～PS-36 | 實作後補，殺新增變異 PS36、PS37、PS39 | — |
+| 實作後 | b2 212／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r5-final-*.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| 本輪新增 PS34、PS36～PS40，改寫 PS29～PS31 | 9/9 殺（另含 PS35 共 10/10） | `r5-mutate-new.log` |
+| 全量 0–129 | 127/129；存活只有 U10、T7 | `r5-mutate-full.log` |
+
+第四輪的 PS34（派發入口不清舊復原紀錄）隨共用槽位移除，改為「dispatch 不把提交記進交易」。PS2、PS23 替換字串隨程式更新。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r5-test-targeted.log`），全量 `NakiTests` 1184／0（`r5-test-full.log`）。
+
+### 第五輪 Deviations
+
+1. **衝突判定以整條連線的版本為單位**：同一條連線上，提交與撤回之間只要有任何新增、消耗或撤回，就不回復淘汰與失準，即使變動與這筆無關。這是主線指定的保守處理，代價是極少見的重入情境會失準到連線關閉。
+2. **自己的 msgId 撤回不看版本**：只看該號碼是否仍屬這筆提交，所以衝突時仍移除自己那筆，符合主線「只移除自己那筆」。
+3. **交易物件不主動清空**：它是 `handleMessage` 的區域變數，送出結束即不可達，不另設清理。
+
+### 第五輪已知風險
+
+- 直接呼叫 `__nakiPlugins.dispatch`／`failSafe` 而不帶交易的程式，提交無法撤回，只會更保守。
+- 未 live 驗證；第二輪列的計數器步進、繞回、重連、回應順序前提仍未驗證。

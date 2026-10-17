@@ -3102,6 +3102,119 @@ test('PS-28 (r4 16): a game request blocked locally on a number its earlier requ
   assert.notEqual(inject(FST).msgId, 64000);
 });
 
+// 第五輪：failSafe 查守衛時同步重入（encode 失敗後第一次查 sendGuard 才觸發 during）
+function reenterInFailSafe(during) {
+  let armed = 0, reenter = false;
+  const t = page(source('naki-websocket.js'), { encode: d => { if (armed && --armed === 0) { reenter = true; throw new Error('encode failed'); } return Buffer.from(d).toString('base64'); } });
+  guard11(t);
+  t.c.__nakiPluginGrants.g11.sendGuard = { indexOf(m) { if (reenter) { reenter = false; during(t); } return [SKIN].indexOf(m); } };
+  return { t, arm: () => { armed = 1; } };
+}
+
+test('PS-29 (r5 19): BEAT#64000 really goes out, then a SKIN on the same number fails before its dispatch — failSafe has no commit of its own to undo, so 64000 stays unanswered', async () => {
+  const t = page();
+  guard11(t);
+  const { inject } = injector11(t);
+  t.lobby.send(request(64000, BEAT));
+  const mask = t.c.__nakiHideNames, observe = mask.observe;
+  mask.observe = () => { mask.observe = observe; throw new Error('mask broke'); };
+  t.lobby.send(request(64000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64000, 'local_error', 'bridge_error']]);
+  assert.notEqual(inject(FST).msgId, 64000);
+});
+
+test('PS-30 (r5 19): with 256 unanswered, the 257th request is committed, a send on another connection re-enters during its encoding and fails too — the 257th still rolls back its own overflow, so injections recover once everything is answered', async () => {
+  let step = 0, g = null;
+  const t = page(source('naki-websocket.js'), { encode: d => {
+    if (step === 1) { step = 2; g.send(request(900, OP)); throw new Error('lobby encode failed'); }
+    if (step === 2) { step = 3; throw new Error('game encode failed'); }
+    return Buffer.from(d).toString('base64');
+  } });
+  guard11(t);
+  const { inject } = injector11(t);
+  g = gameSocket(t.c);
+  g.send(request(700, AUTH));
+  g.receive(response(700, [8, 1]));
+  for (let i = 0; i < 256; i++) t.lobby.send(request(64000 + i, BEAT));
+  step = 1;
+  t.lobby.send(request(64256, SKIN, [8, 1]));
+  await tick();
+  assert.equal(step, 3);
+  assert.deepEqual(lastGuard(t), [[64256, 'local_error', 'bridge_error']]);
+  g.receive(response(900, [8, 1]));
+  for (let i = 0; i < 256; i++) t.lobby.receive(response(64000 + i, [8, 1]));
+  const r = inject(FST);
+  assert.equal(r.ok, true, JSON.stringify(plain(r)));
+});
+
+test('PS-31 (r5 20, same-line add): SKIN#65000 is committed, its encoding fails and failSafe re-enters with a real BEAT#64000 — the rollback removes only 65000, 64000 stays unanswered', async () => {
+  const { t, arm } = reenterInFailSafe(t => t.lobby.send(request(64000, BEAT)));
+  const { inject } = injector11(t);
+  arm();
+  t.lobby.send(request(65000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[65000, 'local_error', 'bridge_error']]);
+  assert.equal(sentOn(t.lobby).includes(64000), true);
+  assert.notEqual(inject(FST).msgId, 64000);
+});
+
+test('PS-32 (r5 20, same-line consume): BEAT#64000 is unanswered, SKIN#65000 is committed and fails, and the 64000 RESPONSE arrives inside failSafe — the rollback does not bring 64000 back', async () => {
+  const { t, arm } = reenterInFailSafe(t => t.lobby.receive(response(64000, [8, 1])));
+  const { inject } = injector11(t);
+  t.lobby.send(request(64000, BEAT));
+  arm();
+  t.lobby.send(request(65000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[65000, 'local_error', 'bridge_error']]);
+  assert.equal(inject(FST).msgId, 64000, 'the answered number is free again');
+});
+
+test('PS-33 (r5 20, same-line capacity): 256 unanswered, the 257th overflows and fails, and failSafe re-enters with another real request on the same line — the conflict keeps the record lost (conservative), injections stay msgid_busy', async () => {
+  const { t, arm } = reenterInFailSafe(t => t.lobby.send(request(64300, BEAT)));
+  const { inject } = injector11(t);
+  for (let i = 0; i < 256; i++) t.lobby.send(request(64000 + i, BEAT));
+  arm();
+  t.lobby.send(request(64256, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64256, 'local_error', 'bridge_error']]);
+  assert.equal(inject(FST).reason, 'msgid_busy');
+});
+
+test('PS-34 (r5 20, same number re-entered): SKIN#64000 is committed and fails, and failSafe re-enters with a real BEAT#64000 — the rollback leaves the BEAT commit, 64000 stays unanswered', async () => {
+  const { t, arm } = reenterInFailSafe(t => t.lobby.send(request(64000, BEAT)));
+  const { inject } = injector11(t);
+  arm();
+  t.lobby.send(request(64000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64000, 'local_error', 'bridge_error']]);
+  assert.notEqual(inject(FST).msgId, 64000);
+});
+
+test('PS-35 (r5 20): BEAT#64000 really goes out, then a SKIN on the same number is committed and fails after its dispatch — the rollback puts the BEAT commit back', async () => {
+  let armed = 0;
+  const t = page(source('naki-websocket.js'), { encode: d => { if (armed && --armed === 0) throw new Error('encode failed'); return Buffer.from(d).toString('base64'); } });
+  guard11(t);
+  const { inject } = injector11(t);
+  t.lobby.send(request(64000, BEAT));
+  armed = 1;
+  t.lobby.send(request(64000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64000, 'local_error', 'bridge_error']]);
+  assert.notEqual(inject(FST).msgId, 64000);
+});
+
+test('PS-36 (r5 20, consume at capacity): 256 unanswered, the 257th overflows and fails, and a RESPONSE arrives inside failSafe — the conflict keeps the record lost (conservative), injections stay msgid_busy', async () => {
+  const { t, arm } = reenterInFailSafe(t => t.lobby.receive(response(64001, [8, 1])));
+  const { inject } = injector11(t);
+  for (let i = 0; i < 256; i++) t.lobby.send(request(64000 + i, BEAT));
+  arm();
+  t.lobby.send(request(64256, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(lastGuard(t), [[64256, 'local_error', 'bridge_error']]);
+  assert.equal(inject(FST).reason, 'msgid_busy');
+});
+
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
   const t = page();
   const { answers, inject } = injector11(t);

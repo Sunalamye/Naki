@@ -427,7 +427,8 @@
     // 回傳：send 方向被 rewriteSend 換掉時的新 Uint8Array，其餘 undefined。
     // receive 變長 replace／drop 回 { reshape:true, bytes, drop, method, msgId, by }（reshape：只有 ArrayBuffer 原事件且未鎖死才給）。
     // sender：sendRaw 送出的 buffer 才有（插件注入是宿主配的代號、Naki 自送是 NAKI_SENDER），遊戲送出是 undefined
-    function dispatchToPlugins(direction, wsId, info, bytes, mutable, reshape, sender) {
+    // tx：送出時 handleMessage 為這一筆建立的交易物件，dispatch 與 failSafe 共用，撤回只認它
+    function dispatchToPlugins(direction, wsId, info, bytes, mutable, reshape, sender, tx) {
         if (!window.__nakiPlugins || typeof window.__nakiPlugins.dispatch !== 'function') return;
         try {
             const out = window.__nakiPlugins.dispatch({
@@ -437,14 +438,15 @@
                 bytes: bytes,
                 mutable: mutable !== false,
                 reshape: !!reshape && !reshapeLocked,
-                sender: sender
+                sender: sender,
+                tx: tx
             });
             if (direction === 'receive') return out && out.reshape ? out : undefined;
             return out instanceof Uint8Array || (out && out.block) ? out : undefined;
         } catch (e) {
             console.error('[Naki WS] 插件 dispatch 錯誤:', e);
             // 派發本身出錯：守衛方法（或有守衛者時認不出的封包）仍要擋下
-            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, wsId, sender);
+            if (direction === 'send' && window.__nakiPlugins.failSafe) return window.__nakiPlugins.failSafe(bytes, wsId, sender, tx);
         }
     }
 
@@ -546,6 +548,7 @@
             : data instanceof Blob ? 'Blob' : typeof data === 'string' ? 'String' : 'Other';
         messageTypes[direction][dataType]++;
         const sender = direction === 'send' && data && typeof data === 'object' ? rawSenders.get(data) : undefined;
+        const tx = direction === 'send' ? {} : undefined;
         // 大廳連線上有守衛者時，無法同步辨識的送出一律拒送（Blob 等）
         if (direction === 'send' && (dataType === 'Blob' || dataType === 'Other')
             && window.__nakiPlugins && window.__nakiPlugins.refuseOpaqueSend && window.__nakiPlugins.refuseOpaqueSend(wsId)) {
@@ -570,7 +573,7 @@
             if (data instanceof ArrayBuffer) {
                 const pluginBytes = new Uint8Array(data);
                 nakiNicknameMask.observe(pluginBytes, direction);
-                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes, true, !!event, sender);
+                const rewritten = dispatchToPlugins(direction, wsId, info, pluginBytes, true, !!event, sender, tx);
                 if (rewritten && rewritten.block) return rewritten;
                 if (direction === 'receive' && rewritten) return deliverReshaped(ws, wsId, event, rewritten);
                 // ArrayBuffer：轉成 Base64（pluginBytes 是 data 的 view，插件若就地改過這裡編碼的是改後的；
@@ -590,7 +593,7 @@
                 //  連帶讓 LiqiParser 收不到 REQUEST、無法配對 RESPONSE）
                 const view = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
                 nakiNicknameMask.observe(view, direction);
-                const rewritten = dispatchToPlugins(direction, wsId, info, view, true, false, sender);
+                const rewritten = dispatchToPlugins(direction, wsId, info, view, true, false, sender, tx);
                 if (rewritten && rewritten.block) return rewritten;
                 const sent = rewritten || view;
                 sendToSwift('websocket_message', {
@@ -611,7 +614,7 @@
                 data.arrayBuffer().then(function(buffer) {
                     const view = new Uint8Array(buffer);
                     if (direction === 'receive') markNakiAnswered(wsId, view, arrivedAtSeq);   // 記帳處讀不到 Blob，展開後補標記
-                    dispatchToPlugins(direction, wsId, info, view, false, false, sender);
+                    dispatchToPlugins(direction, wsId, info, view, false, false, sender, tx);
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);
                 });
@@ -640,7 +643,7 @@
             console.error('[Naki WS] 處理訊息錯誤:', e);
             // 派發前出錯：守衛方法（或已污染時認不出的封包）仍要擋下
             if (direction === 'send' && window.__nakiPlugins && window.__nakiPlugins.failSafe) {
-                return window.__nakiPlugins.failSafe(data, wsId, sender);
+                return window.__nakiPlugins.failSafe(data, wsId, sender, tx);
             }
         }
     }
