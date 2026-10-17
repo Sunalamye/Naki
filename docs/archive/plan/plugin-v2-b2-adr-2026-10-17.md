@@ -88,9 +88,11 @@ live、WebKit runtime、App 內行為；對局中途重連握手；錯誤碼 6 �
 
 | 原條 | 修法 | 與先前裁決的關係 |
 |---|---|---|
-| D28 `sendRaw` 退回 | 注入標記綁定同 msgId 的第一次送出派發；落到非大廳連線、方法屬 `GUARDABLE_METHODS` 且有守衛者 ⇒ `tainted_fallback` 擋下，結果與大廳 `naki_traffic` 相同 | 不改 `naki-websocket.js`；Naki 自送不受影響 |
-| D29 就地改寫 | 非大廳連線上 hook 就地或經 `ctx.replace` 改成 `GUARDABLE_METHODS` 即撤回、計 hook 失敗，只用閉包常數 | 不讀 `sendGuard`，第四輪第 2 條不受影響（`R5-2b` 綠） |
+| D28 `sendRaw` 退回 | 注入標記帶 msgId 與注入 envelope bytes，兩者都相同的送出派發才算注入；落到非大廳連線、方法屬 `GUARDABLE_METHODS` 且有守衛者 ⇒ `tainted_fallback` 擋下，結果與大廳 `naki_traffic` 相同 | 不改 `naki-websocket.js`；Naki 自送不受影響 |
+| D29 就地改寫 | 非大廳連線上 hook 就地、經 `ctx.replace` 或在 thenable 的 `then` 裡同步改成 `GUARDABLE_METHODS` 即撤回、計 hook 失敗，只用閉包常數 | 不讀 `sendGuard`，第四輪第 2 條不受影響（`R5-2b` 綠） |
 | D30 Blob 空窗 | 角色未定的連線比照 lobby，有守衛者時拒送 Blob | 推翻原「unknown fail-open」的這一處。獨立風險：只有 `authGame` 改用 Blob 時，對局連線持續被拒、角色持續 unknown、不會自行恢復，大廳照常（`GG2-5`）。保留拒送策略 |
 
 Astra 第一輪（主 repo `.swfd/logs/guard-gaps-review/astra-review1.md`）：1【擋】5【應修】，主線全採納。擋 1 是 game 連線上的 `ctx.replace` 改成守衛方法仍外送，已併入 D29 的修法；其餘是注入標記綁定派發、常數先行排除、成功記帳順序、Blob 獨立風險揭露、補變異與固定回歸。
+
+Astra 第二輪（`astra-review2.md`）：2【擋】1【應修】1【建議】，主線全採納。兩個擋是第二輪引入的回歸（`65a7865` 不會發生）：thenable 的 `then` 在驗證之後才執行、可同步改回守衛方法；注入標記可被注入前的同號派發用掉。修法：先接管 thenable 再驗證；注入以 msgId＋bytes 綁定，不再「用掉」。
 

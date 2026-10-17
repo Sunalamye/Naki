@@ -84,3 +84,30 @@ log 都在主 repo `.swfd/logs/guard-gaps/`。
 | `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r2-swift-targeted.log` |
 | 全量 NakiTests（等另一個 xcodebuild 結束後跑，一次） | 1181／0，無 test host 重啟 | `r2-test-full.log` |
 
+## 第三輪（Astra 第二輪審查：2【擋】1【應修】1【建議】，主線全採納）
+
+審查原文：主 repo `.swfd/logs/guard-gaps-review/astra-review2.md`。Deviations 7–10 主線採納。兩個擋都是第二輪引入的回歸。
+
+| 條 | 內容 | 處理 |
+|---|---|---|
+| 擋 1 | 第二輪把記帳移到驗證之後，連 `settle()` 一起移了；`settle` 呼叫 `then`，而 `then` 同步改回 SKIN 時已過了驗證 | `settle` 移回驗證前：先接管 thenable，再驗證，再記帳。`then` 同步給出的結果先暫存，驗證通過才記；判違規後不再記（`GG3-1`、`GG3-1b`） |
+| 擋 2 | 「第一次派發用掉」可被注入前的同號派發（包裝選中 socket 的 `send`）用掉 | 標記改成 `{ msgId, bytes }`，同 msgId 且 bytes 與注入 envelope 完全相同才算注入，不再消耗（`GG3-2`）。第二輪 Deviation 8 的前提「除非替換 `sendRaw`」不成立，撤回 |
+| 應修 3 | 同步違規拋錯跳過 `settle`，回傳的 rejected Promise 無人接 | 因擋 1 的順序，違規前已接管；catch 判違規後 rejection 被接住、不再計數，同次違規只計 1 次（`GG3-3`） |
+| 建議 4 | 三個組合收進固定回歸 | `GG3-4a`（派發前內層注入拋錯、外層仍擋）、`GG3-4b`（`sendRaw` 回 `success:false` 後，同 bytes 的遊戲請求照送）、`GG3-4c`（近似方法＋補成 TITLE，兩種優先序都撤回） |
+
+另：`GG2-6a` 的遊戲請求改成與那次注入 bytes 完全相同，否則改用 bytes 綁定後它殺不到「只在正常返回時還原」的變異。
+
+### 第三輪 Deviations
+
+11. **bytes 綁定的副作用。** 注入期間若有別的派發送出與注入 envelope 完全相同的守衛方法（同 msgId、同方法、同 payload），會被當成注入，在非大廳連線上擋下。這比放行保守，而且遊戲恰好送出完全相同的 bytes 只是理論情況。
+12. **未採「保留參照比對」。** 主線給了「雜湊或參照」兩個選項。`sendRaw` 從 base64 重新解碼，送進 `dispatch` 的是新 buffer，參照不可能相同，所以比對內容。
+
+### 第三輪驗證（log：主 repo `.swfd/logs/guard-gaps/r3-*`）
+
+| 項目 | 結果 | log |
+|---|---|---|
+| 新測試套在第二輪 HEAD `8b7b097` 的 JS | 3 紅（`GG3-1`、`GG3-2`、`GG3-3`）；`GG3-1b`、`GG3-4a`～`GG3-4c` 鎖既有行為與殺變異，修前即綠 | `r3-red-b2-on-8b7b097.log` |
+| 修後 node 四套 | b2 93／0、v2 21／0、p4 24／0、plugin-regression 38／0 | `r3-green-*.log` |
+| 變異 | 23／23 被殺；新增 P1～P7，其中 P1、P2 是 Astra 兩個反例的變異形式 | `r3-mutation.log` |
+| `JSContractTests`＋`PluginSendGuardTests` | 18／0 | `r3-swift-targeted.log` |
+| 全量 NakiTests（一次） | 1181／0，無 test host 重啟 | `r3-test-full.log` |

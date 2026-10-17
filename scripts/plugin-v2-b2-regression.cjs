@@ -986,7 +986,7 @@ test('GG2-6a (Astra 6): when sendRaw throws, the injection marker is cleared, so
   t.c.__nakiWebSocket.sendRaw = () => { throw new Error('bridge gone'); };
   assert.throws(() => inject(SKIN), /bridge gone/);
   t.c.__nakiWebSocket.sendRaw = real;
-  g.send(request(64000, SKIN));
+  g.send(request(64000, SKIN, [8, 1]));   // 與那次注入的 bytes 完全相同：殘留標記才會命中
   await tick();
   assert.deepEqual(sentOn(g), [700, 701, 64000]);
   assert.deepEqual(guardLog(t), []);
@@ -1020,6 +1020,125 @@ test('GG2-6c (Astra 6): the in-place revert holds for ArrayBuffer, Uint8Array an
     g.send(data);
     assert.deepEqual(bytesOf(g.sent[1]), expected, kind);
     if (kind === 'DataView') assert.deepEqual([big[0], big[1], big[big.length - 2], big[big.length - 1]], [0, 0, 0, 0], 'bytes outside the view untouched');
+  }
+});
+
+// ---- guard-gaps 第三輪（Astra guard-gaps 第二輪 1–4 條）----
+const methodOf = d => { const b = bytesOf(d); return Buffer.from(b.slice(5, 5 + b[4])).toString(); };
+function rejections() {
+  const seen = [];
+  const on = r => seen.push(r);
+  process.on('unhandledRejection', on);
+  return { seen, off: () => process.off('unhandledRejection', on) };
+}
+
+test('GG3-1 (Astra2 1): a thenable whose then() rewrites the bytes into a guarded method synchronously is reverted, every time until auto-disable', async () => {
+  const t = page();
+  t.c.__nakiPlugins.setGrant('th', { capabilities: ['observe'], methods: [OP] });
+  t.c.__nakiPlugins.register({ id: 'th', onSend(ctx) {
+    return { then(resolve) { ctx.bytes.set(sameLength(SKIN, ctx.bytes.length, ctx.msgId)); resolve(); } }; } });
+  const g = gameSocket(t.c);
+  g.send(request(900, AUTH));
+  const originals = [];
+  for (let i = 0; i < 10; i++) { const req = request(901 + i, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]); originals.push(Array.from(req)); g.send(req); }
+  await tick();
+  assert.deepEqual(g.sent.slice(1).map(bytesOf), originals);
+  assert.equal(t.events('log').some(e => e.data.id === 'th' && /第 10 次.*改寫成守衛方法/.test(e.data.msg)), true);
+  assert.deepEqual(plain(t.c.__nakiPlugins.list()), [], 'the early sync resolve does not reset the count');
+});
+
+test('GG3-1b: a thenable rejecting synchronously inside then() with no violation is still counted, ten times auto-disable', () => {
+  const t = page();
+  t.c.__nakiPlugins.setGrant('rj', { capabilities: ['observe'], methods: [OP] });
+  t.c.__nakiPlugins.register({ id: 'rj', onSend() { return { then(resolve, reject) { reject(new Error('sync no')); } }; } });
+  const g = gameSocket(t.c);
+  g.send(request(910, AUTH));
+  for (let i = 0; i < 10; i++) g.send(request(911 + i, OP, [8, 1]));
+  assert.equal(g.sent.length, 11, 'nothing is rewritten, everything goes out');
+  assert.equal(t.events('log').some(e => e.data.id === 'rj' && /第 10 次.*sync no/.test(e.data.msg)), true);
+  assert.deepEqual(plain(t.c.__nakiPlugins.list()), []);
+});
+
+test('GG3-2 (Astra2 2): another dispatch of the same msgId before the injected one does not use up the injection binding', async () => {
+  const { t, g, inject } = fallbackPage();
+  const g2 = gameSocket(t.c);
+  g2.send(request(703, AUTH));
+  let busy = false;
+  for (const [ws, other] of [[g, g2], [g2, g]]) {
+    const orig = ws.send.bind(ws);
+    ws.send = d => { if (!busy && d instanceof ArrayBuffer) { busy = true; other.send(request(bytesOf(d)[1] | (bytesOf(d)[2] << 8), OP)); busy = false; } return orig(d); };
+  }
+  const r = inject(SKIN);
+  await tick();
+  const out = [...g.sent, ...g2.sent].filter(d => (bytesOf(d)[1] | (bytesOf(d)[2] << 8)) === r.msgId).map(methodOf);
+  assert.deepEqual(out, [OP], 'only the colliding OP goes out');
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[r.msgId, 'local_error', 'tainted_fallback']]);
+});
+
+test('GG3-3 (Astra2 3): an in-place violation that also returns a rejected Promise is counted once and leaves no unhandled rejection', async () => {
+  const rj = rejections();
+  try {
+    const t = page();
+    t.c.__nakiPlugins.setGrant('bad', { capabilities: ['observe'], methods: [OP] });
+    t.c.__nakiPlugins.register({ id: 'bad', onSend(ctx) {
+      ctx.bytes.set(sameLength(TITLE, ctx.bytes.length, ctx.msgId)); return Promise.reject(new Error('async no')); } });
+    const g = gameSocket(t.c);
+    g.send(request(920, AUTH));
+    const req = request(921, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]);
+    const original = Array.from(req);
+    g.send(req);
+    for (let i = 0; i < 5; i++) await tick();
+    assert.deepEqual(bytesOf(g.sent[1]), original);
+    const logs = t.events('log').filter(e => e.data.id === 'bad' && /拋錯/.test(e.data.msg)).map(e => e.data.msg);
+    assert.equal(logs.length, 1, logs.join(' | '));
+    assert.match(logs[0], /第 1 次.*改寫成守衛方法/);
+    assert.deepEqual(rj.seen, []);
+  } finally { rj.off(); }
+});
+
+test('GG3-4a (Astra2 4): an inner injection that throws before the outer dispatch leaves the outer injection guarded', async () => {
+  const { t, g, inject } = fallbackPage();
+  const real = t.c.__nakiWebSocket.sendRaw;
+  let depth = 0, innerError;
+  t.c.__nakiWebSocket.sendRaw = b => {
+    const d = depth++;
+    if (d === 1) throw new Error('inner bridge gone');
+    if (d === 0) { try { inject(TITLE); } catch (e) { innerError = e; } }
+    return real(b);
+  };
+  const outer = inject(SKIN);
+  await tick();
+  assert.match(String(innerError), /inner bridge gone/);
+  assert.equal(outer.ok, true);
+  assert.deepEqual(sentOn(g), [700, 701]);
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[outer.msgId, 'local_error', 'tainted_fallback']]);
+});
+
+test('GG3-4b (Astra2 4): after sendRaw reports failure, the game\'s identical request with that msgId is not judged as the injection', async () => {
+  const { t, g, inject } = fallbackPage();
+  const real = t.c.__nakiWebSocket.sendRaw;
+  t.c.__nakiWebSocket.sendRaw = () => ({ success: false, reason: 'no_open_majsoul_connection' });
+  const r = inject(SKIN);
+  assert.deepEqual(plain(r), { ok: false, reason: 'no_open_majsoul_connection' });
+  t.c.__nakiWebSocket.sendRaw = real;
+  g.send(request(64000, SKIN, [8, 1]));
+  await tick();
+  assert.deepEqual(sentOn(g), [700, 701, 64000]);
+  assert.deepEqual(guardLog(t), []);
+});
+
+test('GG3-4c (Astra2 4): a near-miss method from one hook completed into TITLE by another is reverted in both priority orders', () => {
+  const NEAR = '.lq.Lobby.useTitlX';
+  for (const nearFirst of [true, false]) {
+    const t = page();
+    t.c.__nakiPlugins.setGrant('near', { capabilities: ['observe'], methods: [OP], priority: nearFirst ? 0 : 1 });
+    t.c.__nakiPlugins.register({ id: 'near', onSend(ctx) { ctx.bytes.set(sameLength(NEAR, ctx.bytes.length, ctx.msgId)); } });
+    t.c.__nakiPlugins.setGrant('fix', { capabilities: ['observe'], methods: [OP], priority: nearFirst ? 1 : 0 });
+    t.c.__nakiPlugins.register({ id: 'fix', onSend(ctx) { ctx.bytes[5 + TITLE.length - 1] = 'e'.charCodeAt(0); } });
+    const g = gameSocket(t.c);
+    g.send(request(930, AUTH));
+    g.send(request(931, OP, [8, 1, 8, 1, 8, 1, 8, 1, 8, 1]));
+    assert.equal(methodOf(g.sent[1]), NEAR, nearFirst ? 'near first' : 'fix first');
   }
 });
 

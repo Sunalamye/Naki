@@ -77,7 +77,8 @@
     // 插件注入的 (連線, msgId) -> 發起插件 id（回應路由，§7.7b）
     var injectedMsgIds = new Map();
     // sendRequest 呼叫 sendRaw 期間的注入標記：sendRaw 同步經包裝的 ws.send 回到 dispatch。
-    // 只認同 msgId 的第一次送出派發，用過即失效：hook 在這次派發裡同步送出的同號請求不算注入（第二輪第 2 條）
+    // 同 msgId 且 bytes 與注入的 envelope 完全相同才算這次注入（第三輪第 2 條）：注入前後其他派發的同號請求，
+    // 內容不同就不算，也不消耗標記（第二輪第 2 條）
     var injecting = null;
 
     // 連線角色由協定握手鎖定，URL 不參與（審查第四輪第 1 條）：每條連線第一個請求是 .lq.Route.requestConnection，
@@ -171,9 +172,23 @@
         if (f) f[hook] = 0;
     }
 
-    function settle(thenable, id, hook) {
-        try { thenable.then(function () { noteSuccess(id, hook); }, function (e) { noteFailure(id, hook, e); }); }
-        catch (e) { noteFailure(id, hook, e); }
+    // 接管 hook 回傳的 thenable。then 會同步跑插件程式碼（可能改 bytes），所以先接管、再由呼叫端驗證（第三輪第 1 條）。
+    // 驗證結束前的結果先暫存；這次已判違規就不再記帳，rejection 仍被接住、不重複計失敗（第三輪第 3 條）
+    function settle(thenable, id, hook, state) {
+        function done(ok, e) {
+            if (!state.judged) { state.early = { ok: ok, e: e }; return; }
+            if (state.failed) return;
+            if (ok) noteSuccess(id, hook); else noteFailure(id, hook, e);
+        }
+        try { thenable.then(function () { done(true); }, function (e) { done(false, e); }); }
+        catch (e) { done(false, e); }
+    }
+    function judge(state, id, hook, failed) {
+        state.judged = true;
+        state.failed = failed;
+        if (!failed && state.early) {
+            if (state.early.ok) noteSuccess(id, hook); else noteFailure(id, hook, state.early.e);
+        }
     }
 
     function taint(id, grant) {
@@ -452,7 +467,7 @@
                 catch (e) { return { ok: false, reason: 'encode_failed' }; }
 
                 var ws = window.__nakiWebSocket, r, prev = injecting;
-                injecting = { msgId: msgId, used: false };
+                injecting = { msgId: msgId, bytes: envBytes };
                 try { r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' }; }
                 finally { injecting = prev; }
                 if (!r || !r.success) {
@@ -631,9 +646,15 @@
             var before = raw.bytes;
             var snapshot = raw.mutable === false ? null : before.slice();
             var isGuard = !!guard && guard.ids.indexOf(entry.spec.id) !== -1;
+            var state = { judged: false, failed: false, early: null };
             try {
                 diagnostics.hooks++;
                 var ret = fn(ctx);   // 改寫只能經 ctx.replace（見 makeCtx）；回傳 Promise／thenable 不算放行（審查第 2 條）
+                var thenable = !!ret && typeof ret.then === 'function';
+                if (thenable) {
+                    if (isGuard) guard.async.push(entry.spec.id);
+                    settle(ret, entry.spec.id, hook, state);
+                }
                 // 送出改寫成守衛方法：當成這個 hook 失敗，撤回它這次的改動，原請求照常送。
                 // 大廳（guardedSend 的鏈）：就地改成另一個守衛方法（第三輪第 5 條），其餘由鏈後判定。
                 // 其他連線：就地或經 ctx.replace，改後是 GUARDABLE_METHODS 就撤回，只看閉包常數、不讀 sendGuard（第四輪第 2 條，guard-gaps b、第二輪第 1 條）
@@ -649,12 +670,9 @@
                     && isLobby(raw.wsId) && (raw.drop || !sameBytes(snapshot, raw.bytes))) {
                     taint(entry.spec.id, entry.grant);
                 }
-                // 驗證都過了才記成功：先記會把違規前的連續失敗歸零（第二輪第 4 條）
-                if (ret && typeof ret.then === 'function') {
-                    // 結果出來才記成功或失敗：先記成功會把連續失敗歸零（第二輪第 6 條）
-                    if (isGuard) guard.async.push(entry.spec.id);
-                    settle(ret, entry.spec.id, hook);
-                } else {
+                // 驗證都過了才記成功：先記會把違規前的連續失敗歸零（第二輪第 4 條）；thenable 的結果出來才記（第二輪第 6 條）
+                judge(state, entry.spec.id, hook, false);
+                if (!thenable) {
                     noteSuccess(entry.spec.id, hook);
                     if (isGuard) guard.approved.push(entry.spec.id);
                 }
@@ -664,6 +682,7 @@
                 raw.drop = false;
                 if (snapshot) before.set(snapshot);
                 if (isGuard) guard.threw.push(entry.spec.id);
+                judge(state, entry.spec.id, hook, true);
                 noteFailure(entry.spec.id, hook, e);
             }
             if (raw.drop || raw.bytes !== before || (snapshot && !sameBytes(snapshot, raw.bytes))) by.push(entry.spec.id);
@@ -788,8 +807,7 @@
             if (send) lockRole(raw.wsId, env);
             if (registry.size === 0 && tainted.size === 0) return;
             if (env === undefined) env = parseEnvelope(raw.bytes);
-            if (send && env && injecting && !injecting.used && env.msgId === injecting.msgId) {
-                injecting.used = true;
+            if (send && env && injecting && env.msgId === injecting.msgId && sameBytes(raw.bytes, injecting.bytes)) {
                 var fallback = isLobby(raw.wsId) ? undefined : injectedFallback(raw, env);
                 if (fallback) return fallback;
             }
