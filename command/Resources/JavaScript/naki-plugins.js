@@ -167,10 +167,11 @@
     var injecting = null;
     // 注入與遊戲同鍵都在等的 (連線, msgId)：哪一則回應是誰的只能靠順序，下一則回應只給 Naki observer 看、不給改寫。
     // 容量滿時不忘記：改標整條連線全部歧義，直到連線關閉（第三輪第 11 條）
-    var ambiguousPairs = new Map(), ambiguousSockets = new Set();   // 鍵 -> 序號
+    // 標記記的是它保護的遊戲配對世代（該配對的序號），不是建立當下的新序號：延後回應以配對世代比水位（第十輪第 37 條）
+    var ambiguousPairs = new Map(), ambiguousSockets = new Set();   // 鍵 -> 所保護配對的序號
     function markAmbiguous(socketId, key) {
         if (ambiguousSockets.has(String(socketId))) return;
-        ambiguousPairs.set(key, nextSeq());
+        ambiguousPairs.set(key, pendingMethods.get(key).seq);
         if (ambiguousPairs.size <= PENDING_LIMIT) return;
         ambiguousPairs.forEach(function (s, k) { ambiguousSockets.add(k.slice(0, k.lastIndexOf(':'))); });
         ambiguousPairs.clear();

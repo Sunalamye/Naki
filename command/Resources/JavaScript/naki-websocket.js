@@ -96,7 +96,8 @@
             id: wsId,
             url: url,
             isMajsoul: isMajsoul,
-            created: Date.now()
+            created: Date.now(),
+            recvQueue: []
         });
 
         // 通知 Swift 新連接（此刻還沒 open；沒有後續 websocket_connected 就是握手失敗）
@@ -136,6 +137,8 @@
         const release = function() {
             if (released) return;
             released = true;
+            const info = wsConnections.get(ws);
+            if (info) info.recvQueue.length = 0;
             wsConnections.delete(ws);
             if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
         };
@@ -556,6 +559,47 @@
         receive: { ArrayBuffer: 0, TypedArray: 0, Blob: 0, String: 0, Other: 0 },
         send: { ArrayBuffer: 0, TypedArray: 0, Blob: 0, String: 0, Other: 0 }
     };
+    // 接收依抵達順序認領（pair-source 第十輪第 36 條）：Blob 要非同步展開，展開順序不等於抵達順序。
+    // 隊首 Blob 待展開時，後到的 Blob／ArrayBuffer／TypedArray 一律排在其後；展開完成（失敗＝未匹配，不派）後依序 flush。
+    // 排隊的同步封包已交給遊戲，插件只能觀察（不給 replace／變長改寫）；水位是抵達當下的序號。連線釋放即丟棄整個佇列
+    function enqueueReceive(ws, wsId, info, data) {
+        const entry = { view: null, ready: false, blob: data instanceof Blob, watermark: nakiSentSeq };
+        info.recvQueue.push(entry);
+        if (entry.blob) {
+            const settle = function(buffer) {
+                if (buffer) entry.view = new Uint8Array(buffer);
+                entry.ready = true;
+                flushReceive(wsId, info);
+            };
+            const failed = function(e) { console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e); settle(null); };
+            try { Promise.resolve(data.arrayBuffer()).then(settle, failed); } catch (e) { failed(e); }
+            blobToBase64(data, function(base64) {
+                sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: base64, type: 'blob', size: data.size });
+            });
+            return;
+        }
+        const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        entry.view = view.slice();
+        entry.ready = true;   // 先就緒：後面的步驟拋錯也不卡住佇列
+        nakiNicknameMask.observe(view, 'receive');
+        sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(view), type: 'binary', size: view.byteLength });
+    }
+    function flushReceive(wsId, info) {
+        if (info.flushing) return;
+        info.flushing = true;
+        try {
+            const q = info.recvQueue;
+            while (q.length && q[0].ready) {
+                const entry = q.shift();
+                if (!entry.view) continue;
+                try {
+                    if (entry.blob) markNakiAnswered(wsId, entry.view, entry.watermark);   // 記帳處讀不到 Blob，展開後補標記
+                    dispatchToPlugins('receive', wsId, info, entry.view, false, false, undefined, undefined, { watermark: entry.watermark });
+                } catch (e) { console.error('[Naki WS] 排隊接收 dispatch 失敗:', e); }
+            }
+        } finally { info.flushing = false; }
+    }
+
     function handleMessage(ws, wsId, data, direction, isMajsoul, event, tx) {
         // 只處理雀魂連接的訊息
         if (!isMajsoul) return;
@@ -591,6 +635,9 @@
         }
 
         try {
+            if (direction === 'receive' && info && (dataType === 'Blob' || (info.recvQueue.length && (dataType === 'ArrayBuffer' || dataType === 'TypedArray')))) {
+                return enqueueReceive(ws, wsId, info, data);
+            }
             if (data instanceof ArrayBuffer) {
                 const pluginBytes = new Uint8Array(data);
                 nakiNicknameMask.observe(pluginBytes, direction);
@@ -630,14 +677,11 @@
                 // 但插件只吃 ArrayBuffer / TypedArray，於是 iOS 會出現「插件已啟用卻沒事件」。
                 //
                 // Blob 只能異步展開；拿到的是副本，已經來不及改遊戲真正收到的 event.data，
-                // 所以這條只允許 observe，不提供 rewriteReceive。
-                const arrivedAtSeq = nakiSentSeq;
+                // 所以這條只允許 observe，不提供 rewriteReceive。接收方向走 enqueueReceive，這裡只剩送出（與已釋放連線上的接收）
                 // 展開是非同步：連線若已釋放（close／error）就丟棄，不重建已清掉的配對、角色與記帳
                 data.arrayBuffer().then(function(buffer) {
                     if (!wsConnections.has(ws)) return;
-                    const view = new Uint8Array(buffer);
-                    if (direction === 'receive') markNakiAnswered(wsId, view, arrivedAtSeq);   // 記帳處讀不到 Blob，展開後補標記
-                    dispatchToPlugins(direction, wsId, info, view, false, false, sender, undefined, { watermark: direction === 'receive' ? arrivedAtSeq : undefined });
+                    dispatchToPlugins(direction, wsId, info, new Uint8Array(buffer), false, false, sender, undefined, { watermark: undefined });
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);
                 });

@@ -2670,14 +2670,14 @@ test('GG11-3 (Astra10 2): onDisable that only swaps the grant without registerin
 const FST = '.lq.Lobby.fetchServerTime';
 function injector11(t) {
   t.c.__nakiPluginsMayModifyOutbound = true;
-  const answers = [];
+  const answers = [], answerPayloads = [];
   let send;
   t.c.__nakiPlugins.setGrant('inj11', { capabilities: ['observe', 'injectSend'], methods: [BEAT] });
   t.c.__nakiPlugins.register({ id: 'inj11', onSend(ctx) { send = ctx.sendRequest; },
-    onInjectResponse(ctx) { answers.push([ctx.inResponseTo, ctx.method]); } });
+    onInjectResponse(ctx) { answers.push([ctx.inResponseTo, ctx.method]); answerPayloads.push(ctx.bytes[ctx.bytes.length - 1]); } });
   t.lobby.send(request(1840, BEAT));
   t.lobby.receive(response(1840, [8, 1]));
-  return { answers, inject: (m, p = [8, 1]) => send(m, new t.c.Uint8Array(p)) };
+  return { answers, answerPayloads, inject: (m, p = [8, 1]) => send(m, new t.c.Uint8Array(p)) };
 }
 const pendingPairs = t => t.c.__nakiPlugins.diagnostics().pendingPairs;
 const pendingInjections = t => t.c.__nakiPlugins.diagnostics().pendingInjections;
@@ -3443,54 +3443,52 @@ test('PS-48 (r8 33): the deferred dispatch of a Blob send throws (an observer wh
   assert.equal(untrusted(t), 1);
 });
 
-test('PS-50 (r9 34): an old BEAT RESPONSE Blob expanding after INFO#64000 was answered and an injection took 64000 does not claim the injection — the real FST RESPONSE still reaches onInjectResponse and does not clear a later game INFO on the same number', async () => {
-  for (const consumers of [true, false]) {
-    const label = consumers ? 'with consumers' : 'zero-consumer branch';
-    const t = page();
-    const { answers, inject } = injector11(t);
-    t.lobby.send(request(64000, BEAT));
-    const held = heldBlob(t, response(64000, [8, 1]));
-    t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
-    t.lobby.send(request(64000, INFO));
-    t.lobby.receive(response(64000, [8, 2]));
-    const r = inject(FST);
-    assert.equal(r.msgId, 64000, label);
-    if (!consumers) t.c.__nakiPlugins.disable('inj11');
-    held.open();
-    await tick(); await tick();
-    assert.equal(pendingInjections(t), 1, label + ': the injection is still registered');
-    assert.deepEqual(plain(answers), [], label + ': the old BEAT content never reached onInjectResponse');
-    if (!consumers) continue;
-    t.lobby.send(request(64000, INFO));
-    t.lobby.receive(response(64000, [8, 3]));
-    assert.deepEqual(plain(answers), [[64000, FST]], label);
-    assert.equal(pendingInjections(t), 0, label);
-    assert.deepEqual(gameDiag(t), [1, 0], label + ': the later game INFO is still unanswered');
-  }
-});
-
-test('PS-51 (r9 35): an old BEAT RESPONSE Blob expanding after an ambiguity mark was created does not consume the mark — the real INFO RESPONSE stays Naki traffic without replace', async () => {
+test('PS-50 (r9 34, r10 36): an old BEAT RESPONSE Blob still unexpanded holds back the INFO RESPONSE that arrives after it — INFO stays unanswered so an injection avoids 64000; once the Blob expands it claims nothing and INFO resolves with its own payload', async () => {
   const t = page();
   const { answers, inject } = injector11(t);
-  const seen = [];
-  t.c.__nakiPlugins.setGrant('obs35', { capabilities: ['observe', 'rewriteReceive'], methods: [INFO], priority: 300, observeNakiTraffic: true });
-  t.c.__nakiPlugins.register({ id: 'obs35', onReceive(ctx) { seen.push([ctx.bytes[ctx.bytes.length - 1], ctx.isNaki, typeof ctx.replace === 'function']); } });
+  const payloads = [];
+  t.c.__nakiPlugins.setGrant('pay50', { capabilities: ['observe'], methods: [INFO, BEAT], priority: 400 });
+  t.c.__nakiPlugins.register({ id: 'pay50', onReceive(ctx) { payloads.push([ctx.method, ctx.bytes[ctx.bytes.length - 1]]); } });
   t.lobby.send(request(64000, BEAT));
   const held = heldBlob(t, response(64000, [8, 1]));
   t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
   t.lobby.send(request(64000, INFO));
   t.lobby.receive(response(64000, [8, 2]));
+  assert.deepEqual(plain(payloads), [], 'the INFO RESPONSE waits behind the Blob');
+  assert.deepEqual(gameDiag(t), [1, 0], 'INFO is unanswered until its RESPONSE is processed');
+  const r = inject(FST);
+  assert.notEqual(r.msgId, 64000);
+  held.open();
+  await tick(); await tick();
+  assert.deepEqual(plain(payloads), [[INFO, 2]], 'the late Blob claims nothing; the INFO RESPONSE gets INFO');
+  assert.deepEqual(gameDiag(t), [0, 0]);
+  assert.equal(pendingPairs(t), 0);
+  t.lobby.receive(response(r.msgId, [8, 1]));
+  assert.deepEqual(plain(answers), [[r.msgId, FST]]);
+  assert.equal(pendingInjections(t), 0);
+});
+
+test('PS-51 (r9 35, r10 36): with an old BEAT RESPONSE Blob still unexpanded, a later injection RESPONSE and the ambiguous INFO RESPONSE wait behind it — after the Blob expands the injection is answered first and the real INFO RESPONSE stays Naki traffic without replace', async () => {
+  const t = page();
+  const { answers, inject } = injector11(t);
+  const seen = [];
+  t.c.__nakiPlugins.setGrant('obs35', { capabilities: ['observe', 'rewriteReceive'], methods: [INFO], priority: 300, observeNakiTraffic: true });
+  t.c.__nakiPlugins.register({ id: 'obs35', onReceive(ctx) { seen.push([ctx.bytes[ctx.bytes.length - 1], ctx.isNaki, typeof ctx.replace === 'function']); } });
   const r = inject(FST);
   assert.equal(r.msgId, 64000);
   for (let id = 60100; id < 60356; id++) t.c.__nakiWebSocket.sendRaw(b64(request(id, BEAT)));
   assert.equal(t.c.__nakiWebSocket.isNakiSent(64000, idOf(t, t.lobby)), false, 'the injection D22 entry was evicted');
+  t.lobby.send(request(1960, BEAT));
+  const held = heldBlob(t, response(1960, [8, 1]));
+  t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: held.blob }));
   t.lobby.send(request(64000, INFO));
   t.lobby.receive(response(64000, [8, 3]));
-  assert.deepEqual(plain(answers), [[64000, FST]]);
+  t.lobby.receive(response(64000, [8, 4]));
+  assert.deepEqual(plain(answers), [], 'both RESPONSEs wait behind the Blob');
   held.open();
   await tick(); await tick();
-  t.lobby.receive(response(64000, [8, 4]));
-  assert.deepEqual(plain(seen).slice(-1), [[4, true, false]], 'the real INFO RESPONSE is observe-only Naki traffic');
+  assert.deepEqual(plain(answers), [[64000, FST]]);
+  assert.deepEqual(plain(seen), [[4, true, false]], 'the real INFO RESPONSE is observe-only Naki traffic');
 });
 
 test('PS-52 (r9 34, ambiguity): an injection RESPONSE arriving as a Blob and expanding after the game sent INFO on the same number claims the injection but marks no ambiguity — the real INFO RESPONSE goes to the general chain with replace', async () => {
@@ -3510,6 +3508,156 @@ test('PS-52 (r9 34, ambiguity): an injection RESPONSE arriving as a Blob and exp
   assert.deepEqual(plain(answers), [[64000, FST]]);
   t.lobby.receive(response(64000, [8, 2]));
   assert.deepEqual(plain(seen), [[2, false, true]], 'the game INFO RESPONSE is the game\'s own');
+});
+
+// ---- pair-source 第十輪：接收依抵達順序認領、歧義標記綁配對世代 ----
+function rejectingBlob(t, bytes, sync = false) {
+  const blob = new t.c.Blob([bytes]);
+  let fail = null;
+  blob.arrayBuffer = sync ? () => { throw new Error('expand broke'); } : () => new Promise((_, reject) => { fail = () => reject(new Error('expand broke')); });
+  return { blob, fail: () => fail() };
+}
+function nakiObserver(t, id) {
+  const seen = [];
+  t.c.__nakiPlugins.setGrant(id, { capabilities: ['observe', 'rewriteReceive'], methods: [INFO], priority: 300, observeNakiTraffic: true });
+  t.c.__nakiPlugins.register({ id, onReceive(ctx) { seen.push([ctx.bytes[ctx.bytes.length - 1], ctx.isNaki, typeof ctx.replace === 'function']); } });
+  return seen;
+}
+const arrive = (t, data) => t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data }));
+
+test('PS-53 (r10 36): injected FST#64000, then the game sends INFO#64000; the FST RESPONSE arrives first as a Blob still unexpanded, the INFO RESPONSE second (TypedArray, or a Blob expanding first) — the FST RESPONSE (11) goes to onInjectResponse and the INFO RESPONSE (22) to INFO', async () => {
+  for (const mode of ['blob then typed array', 'two blobs expanding in reverse']) {
+    const t = page();
+    const { answers, answerPayloads, inject } = injector11(t);
+    const seen = nakiObserver(t, 'obs53');
+    const r = inject(FST);
+    assert.equal(r.msgId, 64000, mode);
+    t.lobby.send(request(64000, INFO));
+    const fst = heldBlob(t, response(64000, [8, 11]));
+    arrive(t, fst.blob);
+    if (mode === 'blob then typed array') {
+      t.lobby.receive(response(64000, [8, 22]));
+    } else {
+      const info = heldBlob(t, response(64000, [8, 22]));
+      arrive(t, info.blob);
+      info.open();
+      await tick(); await tick();
+    }
+    assert.deepEqual(plain(answerPayloads), [], mode + ': nothing is claimed before the first RESPONSE expands');
+    fst.open();
+    await tick(); await tick();
+    assert.deepEqual(plain(answers), [[64000, FST]], mode);
+    assert.deepEqual(plain(answerPayloads), [11], mode);
+    assert.deepEqual(plain(seen), [[22, true, false]], mode + ': the INFO RESPONSE is INFO\'s, observe-only after the ambiguity');
+    assert.equal(pendingPairs(t), 0, mode);
+    assert.equal(pendingInjections(t), 0, mode);
+  }
+});
+
+test('PS-54 (r10 37): injection FST#64000 with its D22 entry evicted, the game sends INFO#64000, both RESPONSEs arrive as Blobs and expand in order — the second is Naki traffic kept out of the general hook, and the next round of INFO#64000 is the game\'s own again', async () => {
+  const t = page();
+  const { answerPayloads, inject } = injector11(t);
+  const seen = nakiObserver(t, 'obs54');
+  const general = [];
+  t.c.__nakiPlugins.setGrant('gen54', { capabilities: ['observe', 'rewriteReceive'], methods: [INFO], priority: 200 });
+  t.c.__nakiPlugins.register({ id: 'gen54', onReceive(ctx) { general.push([ctx.bytes[ctx.bytes.length - 1], ctx.isNaki, typeof ctx.replace === 'function']); } });
+  const r = inject(FST);
+  assert.equal(r.msgId, 64000);
+  for (let id = 60100; id < 60356; id++) t.c.__nakiWebSocket.sendRaw(b64(request(id, BEAT)));
+  assert.equal(t.c.__nakiWebSocket.isNakiSent(64000, idOf(t, t.lobby)), false, 'the injection D22 entry was evicted');
+  t.lobby.send(request(64000, INFO));
+  const first = heldBlob(t, response(64000, [8, 11])), second = heldBlob(t, response(64000, [8, 22]));
+  arrive(t, first.blob);
+  arrive(t, second.blob);
+  first.open();
+  await tick(); await tick();
+  second.open();
+  await tick(); await tick();
+  assert.deepEqual(plain(answerPayloads), [11]);
+  assert.deepEqual(plain(seen), [[22, true, false]]);
+  assert.deepEqual(plain(general), [], 'the second RESPONSE never reaches the general hook');
+  t.lobby.send(request(64000, INFO));
+  t.lobby.receive(response(64000, [8, 33]));
+  assert.deepEqual(plain(general), [[33, false, true]], 'the mark was consumed; the next INFO RESPONSE is the game\'s own');
+  assert.deepEqual(plain(seen), [[22, true, false], [33, false, true]]);
+});
+
+test('PS-55 (r10 36, failure): a received Blob whose expansion rejects (or throws synchronously) counts as unmatched — the TypedArray queued behind it is still dispatched in order, and nothing waits forever', async () => {
+  for (const sync of [false, true]) {
+    const label = sync ? 'sync throw' : 'rejected';
+    const t = page();
+    const got = seen11(t, [INFO]);
+    t.lobby.send(request(1970, INFO));
+    const bad = rejectingBlob(t, response(1970, [8, 1]), sync);
+    t.lobby.send(request(1971, INFO));
+    arrive(t, bad.blob);
+    t.lobby.receive(response(1971, [8, 2]));
+    if (!sync) { assert.deepEqual(plain(got), [], label + ': queued'); bad.fail(); }
+    await tick(); await tick();
+    assert.deepEqual(plain(got), [INFO], label + ': the TypedArray behind the failed Blob is dispatched');
+    t.lobby.receive(response(1972, [8, 3]));
+    assert.deepEqual(plain(got), [INFO], label + ': the queue is empty again (an unmatched RESPONSE dispatches nothing)');
+    t.lobby.send(request(1973, INFO));
+    t.lobby.receive(response(1973, [8, 4]));
+    assert.deepEqual(plain(got), [INFO, INFO], label + ': later traffic is synchronous again');
+  }
+});
+
+test('PS-56 (r10 36, close): the connection closes while a Blob is unexpanded with a TypedArray queued behind it — the queue is dropped, nothing is dispatched after the close', async () => {
+  const t = page();
+  const NOTE = '.lq.NotifyAccountUpdate', m = Buffer.from(NOTE);
+  const got = seen11(t, [INFO, NOTE]);
+  t.lobby.send(request(1980, INFO));
+  const held = heldBlob(t, response(1980, [8, 1]));
+  arrive(t, held.blob);
+  t.lobby.receive(new Uint8Array([1, 10, m.length, ...m, 18, 0]));
+  t.lobby.close();
+  held.open();
+  await tick(); await tick();
+  assert.deepEqual(plain(got), [], 'neither the Blob nor the NOTIFY queued behind it is dispatched');
+  assert.equal(pendingPairs(t), 0);
+});
+
+test('PS-57 (r10 36, bridge): a TypedArray queued behind an unexpanded Blob whose Swift delivery throws still takes its place in the queue — it is dispatched after the Blob and the queue drains', async () => {
+  let armed = false;
+  const t = page(source('naki-websocket.js'), { swiftFails: (type, d) => armed && type === 'websocket_message' && d.type === 'binary' && d.direction === 'receive' });
+  const got = seen11(t, [INFO]);
+  t.lobby.send(request(1990, INFO));
+  t.lobby.send(request(1991, INFO));
+  const held = heldBlob(t, response(1990, [8, 1]));
+  arrive(t, held.blob);
+  armed = true;
+  t.lobby.receive(response(1991, [8, 2]));
+  armed = false;
+  held.open();
+  await tick(); await tick();
+  assert.deepEqual(plain(got), [INFO, INFO]);
+  t.lobby.send(request(1992, INFO));
+  t.lobby.receive(response(1992, [8, 3]));
+  assert.deepEqual(plain(got), [INFO, INFO, INFO], 'later traffic is synchronous again');
+});
+
+test('PS-58 (r10 36, watermark kept): BEAT#64000 is answered, then a stray duplicate RESPONSE for 64000 arrives as a Blob still unexpanded and an injection takes the now free 64000 — the stray claims nothing (with and without consumers) and the real FST RESPONSE reaches onInjectResponse', async () => {
+  for (const consumers of [true, false]) {
+    const label = consumers ? 'with consumers' : 'zero-consumer branch';
+    const t = page();
+    const { answers, answerPayloads, inject } = injector11(t);
+    t.lobby.send(request(64000, BEAT));
+    t.lobby.receive(response(64000, [8, 1]));
+    const stray = heldBlob(t, response(64000, [8, 2]));
+    arrive(t, stray.blob);
+    const r = inject(FST);
+    assert.equal(r.msgId, 64000, label);
+    if (!consumers) t.c.__nakiPlugins.disable('inj11');
+    stray.open();
+    await tick(); await tick();
+    assert.equal(pendingInjections(t), 1, label + ': the injection is still registered');
+    assert.deepEqual(plain(answers), [], label);
+    if (!consumers) continue;
+    t.lobby.receive(response(64000, [8, 3]));
+    assert.deepEqual(plain(answers), [[64000, FST]], label);
+    assert.deepEqual(plain(answerPayloads), [3], label);
+  }
 });
 
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
