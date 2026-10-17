@@ -93,3 +93,66 @@
 - Swift 綁定前窗口的長度。
 - WebKit 的訊息先後順序。
 - 跨頁 socketId 撞號的實際機率。
+
+---
+
+# 第三輪（Astra 第二輪）
+
+審查原文：`.swfd/logs/d22-review/astra-review2.md` 第 5097–5172 行。第一輪 7 條中，1、2、5、6、7 判已修，3、4 判部分。新發現是 0【擋】、2【應修】、2【建議】。
+
+4 條全部採納。log 在 `.swfd/logs/d22/round3-*.log`。
+
+## 1.【應修】answered 漏掉 Blob；本地結案：採納
+
+**Blob**：在 `data.arrayBuffer()` 展開完成處補 `markNakiAnswered`（`naki-websocket.js`）。
+- b2 第 64 案例：Blob 的 `loginBeat#60003` RESPONSE 展開後，遊戲同線 `changeCharacterSkin#60003` 正常送出。
+- 這個案例對 84b1f7f 是紅的（`round3-red-b2.log`），變異 T3 會被它抓到。
+
+**本地結案**：維持不標記，在設計 §5、§8 與 API 列為例外。理由是：被擋下的也可能是被誤認的遊戲請求，此時真正的 Naki 請求仍在路上；全部當成已答會讓在途碰撞更鬆。
+- b2 第 65 案例鎖住例外：本地錯誤回應交付後，同號遊戲請求仍是 `naki_traffic`。
+- 變異 T4（本地結案也標記）會被它抓到。
+
+## 2.【應修】殘留敘述不足：採納（文件限定）
+
+設計 §1、§8、`plugin-api-v1.md` 與 `AUDIT.md` 第 163 行，都把殘留分成下列幾種，並寫明它們在 main 就存在：
+- REQUEST 在途碰撞。
+- REQUEST 本地結案例外。
+- RESPONSE 持續誤認：遊戲 REQUEST 恢復，但其 RESPONSE 仍算 Naki 直到淘汰或重送，一般 observer 收不到，也沒有 `replace`。
+- 注入錯認領。
+
+注入錯認領由 plugin-regression 第 36 案例鎖住：遊戲同號 RESPONSE 先被交給 `onInjectResponse`，真回應之後沒有 callback，也不會交給任何插件。變異 T5 會被它抓到。
+
+不建 session 身分。
+
+## 3.【建議】變異缺口：採納
+
+- **已答、重送、再次待答**：plugin-regression 第 34 案例，驗證 isNaki 與選線證據。Astra 的漏網變異「重送保留舊 answered」即 T1，已被抓到。
+- **雙 /gateway 同號、只一線已答**：plugin-regression 第 35 案例驗 isNaki 與選線證據，b2 第 66 案例驗守衛結果與實際外送。isNaki 決定是否給 `replace`。Astra 的漏網變異「標記所有連線同號」即 T2，兩案都抓到。
+- **Blob**：見第 1 條，T3。
+- **本地結案**：見第 1 條，T4。
+- **注入同號先到**：見第 2 條，T5。
+
+## 4.【建議】API 文字：採納
+
+`plugin-api-v1.md` 已補上下列內容：
+- 省略 `pendingOnly` 等同 `false`。
+- 省略 `socketId` 或傳 `null` 時查任一連線。
+- `isNakiSent(60003, null, true)` 的範例。
+- 同配對重送會變回待答。
+- 只有同一連線上的 RESPONSE 才標記已答。
+- Blob 也算。
+- 頁面 API 只查 `sendRaw` 登記、不含注入登記，所以不等於 `ctx.isNaki`，並附上淘汰情境的例子。
+
+## 結果
+
+| 項目 | 結果 |
+|---|---|
+| node 三套回歸 | 36／0、66／0、21／0 |
+| 全量 NakiTests | 1165 tests、0 failures |
+| 第三輪變異 | 5 個，全數被抓 |
+
+未驗證：
+- live。
+- WebKit 的訊息先後順序與綁定窗口。
+- 實機 Blob 的 binaryType：雀魂實際用 ArrayBuffer 還是 Blob，本輪沒有 live 查證。
+

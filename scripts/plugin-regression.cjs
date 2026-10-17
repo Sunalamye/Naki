@@ -332,4 +332,45 @@ test('D22-2 socket ids: a random start per page, so a reload with the same rando
   assert.equal(first.c.__nakiWebSocket.isNakiSent(60009, id(first)), false);
   assert.equal(first.c.__nakiWebSocket.isNakiSent(60009, before), true);
 });
+test('D22-3 a re-send of an answered pair is pending again: the game\'s same pair is Naki and not lobby evidence', () => {
+  const { c, ws, watcher, lobbySendAt } = traffic(); const id = () => c.__nakiWebSocket.getMajsoulConnections()[0].id;
+  c.__nakiWebSocket.sendRaw(b64(request(60011, LOBBY)));
+  ws.listeners.message({ data: response(60011).buffer });
+  assert.equal(c.__nakiWebSocket.isNakiSent(60011, id(), true), false);
+  c.__nakiWebSocket.sendRaw(b64(request(60011, LOBBY)));
+  assert.equal(c.__nakiWebSocket.isNakiSent(60011, id(), true), true);
+  ws.send(request(60011, LOBBY));
+  assert.deepEqual(watcher.at(-1), [60011, true]); assert.equal(lobbySendAt(), 0);
+});
+test('D22-3 the same Naki msgId on two /gateway sockets, only one answered: isNaki and lobby evidence follow each socket', () => {
+  const { c, ws, watcher, socket } = traffic();
+  c.__nakiWebSocket.sendRaw(b64(request(60012, LOBBY)));
+  const other = socket(GATEWAY); other.send(request(100, LOBBY));
+  c.__nakiWebSocket.sendRaw(b64(request(60012, LOBBY)));
+  assert.equal(other.sent.length, 2);
+  ws.listeners.message({ data: response(60012).buffer });
+  const conns = () => c.__nakiWebSocket.getMajsoulConnections(), [a, b] = conns().map(x => x.id);
+  assert.equal(c.__nakiWebSocket.isNakiSent(60012, a, true), false);
+  assert.equal(c.__nakiWebSocket.isNakiSent(60012, b, true), true);
+  assert.equal(conns()[0].lastLobbySendAt || 0, 0);
+  ws.send(request(60012, LOBBY));
+  assert.deepEqual(watcher.at(-1), [60012, false]); assert.ok(conns()[0].lastLobbySendAt > 0);
+  other.send(request(60012, LOBBY));
+  assert.deepEqual(watcher.at(-1), [60012, true]);
+});
+test('D22-3 residual: with its sendRaw registration evicted, a game RESPONSE on the injected pair is claimed first; the real one gets no callback and reaches no plugin', () => {
+  const { c, ws, general, socket } = traffic(); let notify; const got = [];
+  c.__nakiPluginsMayModifyOutbound = true;
+  c.__nakiPlugins.setGrant('injector', { capabilities: ['observe', 'injectSend'], methods: ['.lq.NotifyFoo', LOBBY] });
+  c.__nakiPlugins.register({ id: 'injector', onReceive(ctx) { notify = ctx; }, onInjectResponse(ctx) { got.push(ctx.isNaki); } });
+  ws.listeners.message({ data: notifyEnvelope('.lq.NotifyFoo').buffer });
+  assert.equal(notify.sendRequest(LOBBY, new Uint8Array(0)).msgId, 64000);
+  const other = socket(GATEWAY); other.send(request(100, LOBBY));
+  for (let id = 60100; id < 60356; id++) c.__nakiWebSocket.sendRaw(b64(request(id, LOBBY)));
+  ws.send(request(64000, LOBBY));
+  ws.listeners.message({ data: response(64000).buffer });
+  ws.listeners.message({ data: response(64000).buffer });
+  assert.deepEqual(got, [true], 'the first RESPONSE on the pair is taken as the injected one');
+  assert.deepEqual(general.filter(x => x === 64000), [64000], 'only the game REQUEST reached the general chain');
+});
 

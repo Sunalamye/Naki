@@ -20,6 +20,12 @@
 - **D11 Swift 綁定前窗口只在文件中限定範圍，不加嚴。** 加嚴的唯一做法是讓 `claim` 拒絕未綁定的登記，但那會讓先到的真回應遺失。Swift 端不知道「配號時的候選連線」。
 - **D12 socketId 以實作為準。** JS 每個 frame 以隨機起點遞增配發，同頁不重用，重載後起點重抽。不建 session 身分。
 
+第三輪（回應 Astra 第二輪 4 條）：
+
+- **D13 Blob RESPONSE 在異步展開完成處補標記 `answered`。** 收訊記帳處讀不到 Blob。RESPONSE 判斷不讀 `answered`，所以標記早於或晚於插件派發都不影響這則回應本身。
+- **D14 本地結案不標記 `answered`。** 被擋下的也可能是被誤認的遊戲請求，此時真正的 Naki 請求仍在路上。只標記「Naki 自己那筆」需要在 `sendRaw` 與 `respondLocal` 之間傳旗標，換到的只是少擋一些同線同號的遊戲請求。所以維持較嚴的一側，在設計與 API 列為例外。
+- **D15 同線同號的 RESPONSE 持續誤認與注入錯認領只在文件中限定。** 兩者在 main 就存在。注入錯認領之後，真回應的方法已對不回，不會交給任何插件，所以沒有新的改寫機會。
+
 
 ## Deviations
 
@@ -112,3 +118,27 @@
 - live。
 - WebKit 中 `sendRaw` 結果與 RESPONSE 抵達 Swift 的實際先後順序。
 - 跨頁 socketId 撞號的實際機率。
+
+## 第三輪測試與變異
+
+| 項目 | 結果 | log |
+|---|---|---|
+| node `plugin-regression.cjs <plugins>` | 36 pass、0 fail | `round3-plugin-regression.log` |
+| node `plugin-v2-b2-regression.cjs` | 66 pass、0 fail | `round3-b2.log` |
+| node `plugin-v2-regression.cjs` | 21 pass、0 fail | `round3-v2.log` |
+| 全量 NakiTests | 1165 tests、0 failures（Swift 本輪未改） | `round3-full-nakitests.log` |
+
+紅燈證據：
+- Blob 案例對 84b1f7f 是紅的（`round3-red-b2.log`）。
+- 其餘 4 個新案例鎖的是既有行為與殘留，以變異證明有效。
+
+| 變異 | 抓到的測試 |
+|---|---|
+| T1 同配對重送保留舊 `answered`（Astra 漏網變異之一） | plugin-regression 34 |
+| T2 收到回應時標記所有連線的同號（Astra 漏網變異之二） | plugin-regression 35、b2 66 |
+| T3 Blob 不標記 | b2 64 |
+| T4 本地結案也標記 `answered` | b2 65 |
+| T5 注入回應不消耗注入登記 | plugin-regression 36 |
+
+每個變異的 log 是 `round3-mut-*.log`。
+

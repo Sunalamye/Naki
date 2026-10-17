@@ -1,6 +1,6 @@
 # D22：Naki 自送身分加上連線
 
-**狀態**：方案 A 已有 spike（分支 `d22-naki-identity`，基準 main `f720dc1`），未合併。第二輪已回應 Astra 7 條，見 `d22-review-response.md`。
+**狀態**：方案 A 已有 spike（分支 `d22-naki-identity`，基準 main `f720dc1`），未合併。第二、三輪已回應 Astra，見 `d22-review-response.md`。
 **來源**：`plugin-v2-b2.md` §4.6；`plugin-v2-b2-review-response.md` 第三輪第 4 條；Astra 原文 `.swfd/logs/pv2-b2-review/astra-review3.md` 第 4 條。
 
 ## 1. 目標
@@ -9,7 +9,7 @@
 - **純號段誤判**：遊戲 msgId 落在插件號段 64000–65500，就被當成 Naki。
 - **跨連線誤判**：Naki 在 A 線用過的號，遊戲在 B 線用到同號，也被當成 Naki。
 
-**不在目標內**：同一連線上同號在途的碰撞無法區分，是殘留，見 §8。本設計不宣稱遊戲 msgId 進入 60000–65500 後一律不再被誤認。
+**不在目標內**：同一連線上的同號無法區分來源，留有四種殘留：REQUEST 在途碰撞、本地結案例外、RESPONSE 持續誤認、注入錯認領，見 §8。本設計不宣稱遊戲 msgId 進入 60000–65500 後一律不再被誤認。
 
 ## 2. 現況（main `f720dc1`）
 
@@ -46,7 +46,8 @@ live 事實（`.swfd/logs/unlock-handshake-20261017/README.md`）：遊戲 msgId
 **JS**（`naki-websocket.js`）
 - 登記表鍵為 `socketId:msgId`，值記 `answered`。上限 256 筆，**所有連線共用**，FIFO；同配對重送刷新成最新、`answered` 歸零。
 - `sendRaw` 先選連線（proven 或 recency），登記 `(conn.id, msgId)` 後才 `ws.send`。
-- 收到 RESPONSE 時，把同配對標成 `answered`。這一步放在 `handleMessage` 收訊記帳處，與 `lastRecvAt` 同一行，不在插件鏈內。
+- 收到 RESPONSE 時，把同一配對（只限同一連線）標成 `answered`。ArrayBuffer／TypedArray 在 `handleMessage` 收訊記帳處標記，與 `lastRecvAt` 同一行；Blob 讀不到，在異步展開完成處標記。兩處都在插件鏈之外，而 RESPONSE 的判斷不讀 `answered`，所以先標記不影響這則回應本身。
+- 本地結案（守衛擋下後的本地錯誤回應）不標記，理由見 §8。
 - `isNakiSent(msgId, socketId?, pendingOnly?)`：給連線時精確比對，不給時查任一連線。`pendingOnly` 為真時只認未答的配對。
 - `attributeSend` 以該連線、`pendingOnly` 查。
 
@@ -77,7 +78,12 @@ live 事實（`.swfd/logs/unlock-handshake-20261017/README.md`）：遊戲 msgId
 
 ## 8. 殘留與風險
 
-- **同線在途碰撞（JS）。** Naki 的 REQUEST 還沒收到 RESPONSE 時，遊戲在同一連線送出同號 REQUEST，這筆仍被當成 Naki，守衛方法得到本地錯誤。RESPONSE 到達後就恢復。若兩個同號 RESPONSE 都到，兩個都算 Naki：分不出是哪一筆的回應，所以寧可少給 rewrite。
+- **JS 同線同號的殘留。** 以下都只在遊戲用到「同一連線上、Naki 用過的同一 msgId」時發生。這些都存在於 main，D22 沒有讓它們更鬆。
+  - **REQUEST 在途碰撞**：Naki 的 REQUEST 還沒收到 RESPONSE 時，遊戲同號 REQUEST 仍被當成 Naki，守衛方法得到本地錯誤。RESPONSE 到達後恢復。
+  - **REQUEST 本地結案例外**：Naki（或注入）的守衛方法請求被擋下後，只有本地錯誤回應，配對維持待答，直到淘汰或重送。不標記的理由是：被擋下的也可能是被誤認的遊戲請求，此時真正的 Naki 請求仍在路上。把所有本地錯誤都當成已答，會讓在途碰撞更鬆。維持待答是較嚴的一側。
+  - **RESPONSE 持續誤認**：Naki 往返結束後，遊戲同號 REQUEST 會恢復，但它的 RESPONSE 仍算 Naki，直到淘汰或重送。一般 observer 收不到這則回應，也沒有 `replace`。RESPONSE 分不出是哪一筆的回應，所以寧可少給 rewrite。
+  - **注入錯認領**：注入的 `sendRaw` 登記已淘汰、注入登記還在時，遊戲同號 RESPONSE 先到，會被交給 `onInjectResponse` 並消耗注入登記。之後真回應不再有 callback，方法也對不回，所以不會交給任何插件。
+  - 不建 session 身分來消除這些殘留。
 - **Swift 綁定前窗口。** 保證只涵蓋「已綁定、而且查詢帶連線」。窗口內未綁定的登記交給先到的同號回應：
   - 別條線上遊戲的同號回應先到，就會被認領並存進以 msgId 為鍵的 store。之後的 `bind` 找不到登記，A 線的真回應也無法認領。
   - 真回應先到時正常認領，之後的 `bind` 不起作用。

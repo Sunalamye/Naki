@@ -529,6 +529,7 @@
                 // 所以這條只允許 observe，不提供 rewriteReceive。
                 data.arrayBuffer().then(function(buffer) {
                     const view = new Uint8Array(buffer);
+                    if (direction === 'receive') markNakiAnswered(wsId, view);   // 記帳處讀不到 Blob，展開後補標記
                     dispatchToPlugins(direction, wsId, info, view, false);
                 }).catch(function(e) {
                     console.error('[Naki WS] Blob 插件 dispatch 轉換失敗:', e);

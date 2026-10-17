@@ -885,3 +885,44 @@ test('D22-2: a game guarded request on the same line and msgId as a Naki send is
   assert.deepEqual(sentIds(t), [60003, 60003]);
 });
 
+const b64 = u8 => Buffer.from(u8).toString('base64');
+const guardLog = t => plain(t.c.__nakiPlugins.guardState()).log.map(e => [e.socketId, e.msgId, e.outcome, e.reason]);
+
+test('D22-3: a Blob RESPONSE marks the Naki pair answered once unwrapped, so the game\'s same pair goes out', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  t.c.__nakiWebSocket.sendRaw(b64(request(60003, BEAT)));
+  t.lobby.dispatchEvent(new t.c.MessageEvent('message', { data: new t.c.Blob([response(60003, [])]) }));
+  for (let i = 0; i < 5; i++) await tick();
+  t.lobby.send(request(60003, SKIN, [8, 1]));
+  assert.deepEqual(guardLog(t).map(e => e.slice(1)), [[60003, 'sent', null]]);
+  assert.deepEqual(sentIds(t), [60003, 60003]);
+});
+
+test('D22-3: a Naki guarded request answered locally stays pending (documented exception): the game\'s same pair is still naki_traffic', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  pollute(t);
+  t.c.__nakiWebSocket.sendRaw(b64(request(60001, SKIN)));
+  await tick();
+  assert.deepEqual(t.game.slice(-1), [errorResponse(60001)]);
+  t.lobby.send(request(60001, SKIN, [8, 1]));
+  assert.deepEqual(guardLog(t).map(e => e[3]), ['naki_traffic', 'naki_traffic']);
+});
+
+test('D22-3: the same Naki msgId on two lobbies with only one answered: only the answered lobby lets the game\'s same pair through', () => {
+  const t = page();
+  guardPlugin(t.c);
+  const lobby2 = new t.c.WebSocket('wss://route-4.maj-soul.com/gateway');
+  t.c.__nakiWebSocket.sendRaw(b64(request(60004, BEAT)));
+  lobby2.send(request(30, INFO));
+  t.c.__nakiWebSocket.sendRaw(b64(request(60004, BEAT)));
+  assert.equal(lobby2.sent.length, 2);
+  t.lobby.receive(response(60004, []));
+  t.lobby.send(request(60004, SKIN, [8, 1]));
+  lobby2.send(request(60004, SKIN, [8, 1]));
+  const [a, b] = t.c.__nakiWebSocket.getMajsoulConnections().map(x => x.id);
+  assert.deepEqual(guardLog(t), [[a, 60004, 'sent', null], [b, 60004, 'local_error', 'naki_traffic']]);
+  assert.equal(lobby2.sent.length, 2, 'the game request on the unanswered lobby never went out');
+});
+
