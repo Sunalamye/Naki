@@ -13,3 +13,6 @@
 - 沒有新增 Swift 測試：Swift 端未改動，既有 `plugin_event` 契約案（`BridgeMessageContractTests`）已涵蓋 `id`/`msg` 欄位；JSContractTests 無 `devLog` 案可延伸。
 - `ctx.log` 不受封存影響（範圍僅 `devLog`／`devLogSeal`）。
 - `beginBootstrap` 重設會讓重設前的計數歸零，屬「每頁一輪」語意，同 realm 程式可藉此重置，歸入 §8 信任邊界。
+- `disable` 後同頁重設同 id 的 grant，封存與計數沿用到換頁，不會因重設 grant 而解封。
+- `beginBootstrap` 的清空在正常流程是 no-op（每頁只成功一輪、之前沒有紀錄）；熱啟用頁面沒有開機標記時，同 realm 程式可呼叫 `beginBootstrap` 清掉封存與額度，屬 §8 信任邊界。
+- 復驗補修：meta 以 `JSON.stringify` 結果嵌入（字串值無法注入欄位，有測試）；送出前再檢查一次封存旗標，擋 meta getter／`toJSON` 重入造成雙封。

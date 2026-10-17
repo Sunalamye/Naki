@@ -1186,6 +1186,29 @@ test('devLogSeal: beginBootstrap resets seal state and counts', () => {
   assert.equal(JSON.parse(logs().pop()).count, 1);
 });
 
+test('devLogSeal: meta string values cannot inject fields; host count and meta survive JSON.parse', () => {
+  const { p, logs } = sealPage();
+  p.devLog('s', 'a');
+  const meta = { k: '"},"count":999,"z":{"a":"', n: { deep: ['x', 1] } };
+  assert.equal(p.devLogSeal('s', meta), true);
+  const o = JSON.parse(logs().pop());
+  assert.equal(o.count, 1);
+  assert.equal(o.plugin, 's');
+  assert.deepEqual(plain(o.meta), plain(meta));
+  assert.deepEqual(Object.keys(o).sort(), ['count', 'kind', 'meta', 'plugin']);
+});
+
+test('devLogSeal: reentrant seal from meta getter/toJSON is refused, only one seal line is sent', () => {
+  const { p, logs } = sealPage();
+  let inner;
+  const meta = { get a() { inner = p.devLogSeal('s', { inner: 1 }); return 1; } };
+  const outer = p.devLogSeal('s', meta);
+  const seals = logs().filter(m => m.includes('"kind":"seal"'));
+  assert.equal(seals.length, 1, 'exactly one seal line');
+  assert.equal(inner === true && outer === true, false, 'never both succeed');
+  assert.equal(p.devLogSeal('s', {}), false);
+});
+
 test('devLog: no webkit bridge at all returns false', () => {
   const t = page(undefined, { realCore: true });
   t.c.webkit = undefined;

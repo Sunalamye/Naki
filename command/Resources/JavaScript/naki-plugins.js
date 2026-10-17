@@ -706,6 +706,7 @@
             try { metaJson = JSON.stringify(meta); } catch (e) { return false; }
             if (typeof metaJson !== 'string' || unescape(encodeURIComponent(metaJson)).length > SEAL_META_MAX_BYTES) return false;
             var line = '{"kind":"seal","plugin":' + JSON.stringify(pluginId) + ',"count":' + (devLogCounts.get(pluginId) || 0) + ',"meta":' + metaJson + '}';
+            if (devLogSealed.has(pluginId)) return false;   // stringify 期間 getter／toJSON 可能重入並已封存
             if (!pluginLog(pluginId, line)) return false;
             devLogSealed.add(pluginId);
             return true;
