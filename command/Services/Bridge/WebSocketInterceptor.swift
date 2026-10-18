@@ -596,7 +596,7 @@ class WebSocketMessageHandler: NSObject, WKScriptMessageHandler {
         wsLog("[Liqi] socket \(socketId) \(method)")
 
         // 調試 ActionPrototype
-        if method == ".lq.ActionPrototype",
+        if method == LiqiSideEffectMethods.actionPrototype,
            let data = parsed["data"] as? [String: Any] {
             if let actionName = data["name"] as? String {
                 wsLog("[Action] socket \(socketId) \(actionName): \(data)")

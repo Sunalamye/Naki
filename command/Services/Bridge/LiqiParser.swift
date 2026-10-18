@@ -188,9 +188,6 @@ class LiqiParser {
         return result
     }
 
-    /// RESPONSE 帶 `account_id` 的登入方法（`ResLogin` 形狀）。bridge 以此判斷「這則回應該不該交給 parser 取 accountId」。
-    static let loginResponseMethods: Set<String> = [".lq.Lobby.login", ".lq.Lobby.oauth2Login", ".lq.Lobby.emailLogin"]
-
     /// 這筆請求是不是 Naki（自送或插件注入）發的，而非遊戲自己。自送以 (連線, msgId) 登記判斷（D22）；
     /// 插件號段 Swift 沒有登記可查，仍整段排除：寧可少學一次遊戲的 sid，也不學插件猜的值。
     nonisolated static func isNakiSent(msgId: Int, socketId: Int) -> Bool {
@@ -214,7 +211,7 @@ class LiqiParser {
         // 錯誤自我餵養。2026-08-09 實測踩過：連續 8 次失敗嘗試（sid "1".."18"）
         // 全被記進觀察表。Naki 自送的以配發器登記判斷（遊戲自己的 msgId 跑久了也會進
         // 60000+，不能看號段）；插件區段（JS 自配發，不在登記表）仍以號段排除。
-        if method == LiqiRequestBuilder.startUnifiedMatchMethod,
+        if method == LiqiSideEffectMethods.matchStart,
            !Self.isNakiSent(msgId: msgId, socketId: socketId) {
             let sid = parseStringField(payload, field: 1) ?? ""
             let version = parseStringField(payload, field: 2) ?? ""
@@ -224,7 +221,7 @@ class LiqiParser {
         }
 
         // 取消匹配（不論誰送的）：不會再有對局開出來，別讓下一局友人房被回填成這個 sid 的人數
-        if method == LiqiRequestBuilder.cancelUnifiedMatchMethod || method == LiqiRequestBuilder.cancelMatchMethod {
+        if LiqiSideEffectMethods.matchCancel.contains(method) {
             ObservedMatchSids.shared.cancelAwaitingGameKind()
         }
 
@@ -274,7 +271,7 @@ class LiqiParser {
         }
 
         // 遊戲自己的段位場請求被拒（`Error.code` 非 0）：不會有對局開出來。空 error 或 code 0 不算被拒
-        if methodName == LiqiRequestBuilder.startUnifiedMatchMethod, !Self.isNakiSent(msgId: msgId, socketId: socketId) {
+        if methodName == LiqiSideEffectMethods.matchStart, !Self.isNakiSent(msgId: msgId, socketId: socketId) {
             let record = LiqiResponseRecord(msgId: msgId, method: methodName,
                                             fields: result["data"] as? [String: Any] ?? [:], receivedAt: Date())
             if let code = record.errorCode, code != 0 {
@@ -327,12 +324,12 @@ class LiqiParser {
         }
 
         // 根據消息類型進行特定解析
-        if methodName == ".lq.ActionPrototype" {
+        if methodName == LiqiSideEffectMethods.actionPrototype {
             // Notify/request/response 路徑的 ActionPrototype 來自 WebSocket，需要 XOR 解碼
             return parseActionPrototype(innerBlocks, xorDecode: true)
         }
 
-        if methodName == ".lq.FastTest.authGame" {
+        if methodName == LiqiSideEffectMethods.authGame {
             if isResponse {
                 return parseAuthGameResponse(innerBlocks)
             } else {
@@ -340,17 +337,17 @@ class LiqiParser {
             }
         }
 
-        if methodName == ".lq.FastTest.syncGame" || methodName == ".lq.FastTest.enterGame" {
+        if LiqiSideEffectMethods.gameSync.contains(methodName) {
             return parseSyncGame(innerBlocks)
         }
 
         // 只有 ResLogin 形狀（liqi.json responseType == ResLogin）才有 account_id
-        if Self.loginResponseMethods.contains(methodName) && isResponse {
+        if LiqiSideEffectMethods.loginResponses.contains(methodName) && isResponse {
             return parseLoginResponse(innerBlocks)
         }
 
         // ResOauth2Auth 只有 error 與 access_token：token 不進 parsed dict，也不得被當成 account_id
-        if methodName == ".lq.Lobby.oauth2Auth" && isResponse {
+        if methodName == LiqiSideEffectMethods.oauth2Auth && isResponse {
             return [:]
         }
 

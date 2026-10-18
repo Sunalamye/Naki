@@ -4455,7 +4455,8 @@ test('IR-10 (ruling a): 300 local outcomes in a row (respondLocally, guard local
     t.lobby.receive(response(63600, [8, 1]));
     if (mode === 'guard local error') t.c.__nakiPluginsMayModifyOutbound = false;
     armed = true;
-    for (let i = 1; i <= 300; i++) ws.send(request(63600 + i, method, [8, 1]));
+    // 每 100 筆讓出一個 task：待交付的本地回應每連線上限 256（第三輪第 4 條）
+    for (let i = 1; i <= 300; i++) { ws.send(request(63600 + i, method, [8, 1])); if (i % 100 === 0) await tick(); }
     armed = false;
     t.c.__nakiPluginsMayModifyOutbound = true;
     await tick();
@@ -4787,5 +4788,85 @@ test('IR-25 (Astra 10, ruling): on a guarded method only a guard may propose —
     assert.equal(g.sent.length, sent0, 'game connection: answered locally');
     assert.deepEqual(game.slice(-1), [Array.from(response(1952, [8, 7]))]);
     assert.deepEqual(plain(t.c.__nakiPlugins.guardState()).log, [], 'no guard verdict on the game connection');
+  }
+});
+
+// ---- inject-receive 第三輪（Astra 第二輪第 2–4 條）----
+function twoGameSockets(t) {
+  const g1 = gameSocket(t.c), g2 = gameSocket(t.c);
+  for (const g of [g1, g2]) { g.send(request(700, AUTH)); g.receive(response(700, [8, 1])); }
+  const ids = plain(t.c.__nakiWebSocket.getMajsoulConnections().map(c => c.id));
+  return { g1, g2, ids };
+}
+
+test('IR-26 (Astra2 2): a degradation raised inside an onConnectionDegraded callback waits for the next task — the current batch and the microtasks it queued finish first', async () => {
+  const t = page();
+  const { g1, g2, ids } = twoGameSockets(t);
+  const order = [];
+  irPlugin(t, 'deg26', { capabilities: ['observe'], methods: [] }, { onConnectionDegraded(ctx) {
+    order.push(ctx.socketId);
+    if (order.length > 1) return;
+    Promise.resolve().then(() => order.push('micro'));
+    g2.send(new t.c.Blob([request(702, OP)]));
+  } });
+  g1.send(new t.c.Blob([request(701, OP)]));
+  await tick();
+  assert.deepEqual(order, [ids[1], 'micro'], 'the re-raised event is not in this batch');
+  await tick();
+  assert.deepEqual(order, [ids[1], 'micro', ids[2]]);
+});
+
+test('IR-27 (Astra2 3): a plugin whose onConnectionDegraded getter throws is charged once per event and does not stop the others — a healthy plugin still gets every event of the batch', async () => {
+  const t = page();
+  const { g1, g2 } = twoGameSockets(t);
+  let reads = 0;
+  t.c.__nakiPlugins.setGrant('bad27', { capabilities: ['observe'], methods: [] });
+  assert.equal(t.c.__nakiPlugins.register({ id: 'bad27', get onConnectionDegraded() { reads++; throw new Error('getter broke'); } }), true);
+  const got = [];
+  irPlugin(t, 'ok27', { capabilities: ['observe'], methods: [] }, { onConnectionDegraded(ctx) { got.push(ctx.socketId); } });
+  g1.send(new t.c.Blob([request(701, OP)]));
+  g2.send(new t.c.Blob([request(702, OP)]));
+  await tick();
+  assert.equal(got.length, 2, 'the healthy plugin gets both events');
+  assert.equal(reads, 2, 'the hook is read once per event');
+  assert.equal(t.events('log').filter(e => e.data.id === 'bad27' && /onConnectionDegraded 拋錯/.test(e.data.msg)).length, 2, 'charged to the failing plugin');
+});
+
+test('IR-28 (Astra2 4): reserved local numbers are bounded and released on every path — a failed schedule releases at once, the 257th pending respondLocally on a connection gets local_busy (that request goes out, nothing reserved is evicted), closing the connection clears them; diagnostics().localPending counts them', async () => {
+  const pending = t => t.c.__nakiPlugins.diagnostics().localPending;
+  { // 排程失敗：遊戲收不到本地回應，號碼立即釋放
+    const t = page();
+    const { inject } = injector11(t);
+    responder(t, 'ir28');
+    const timer = t.c.setTimeout;
+    t.c.setTimeout = () => { throw new Error('timer broke'); };
+    t.lobby.send(request(64000, INFO));
+    t.c.setTimeout = timer;
+    assert.equal(pending(t), 0, 'released when scheduling fails');
+    assert.equal(inject(FST).msgId, 64000, 'the number is free again');
+  }
+  { // 容量：每連線 256 筆待交付
+    const t = page();
+    const got = responder(t, 'ir28');
+    for (let i = 0; i < 257; i++) t.lobby.send(request(3000 + i, INFO));
+    assert.equal(got.slice(0, 256).every(r => r.ok), true);
+    assert.deepEqual(got[256], { ok: false, reason: 'local_busy' });
+    assert.deepEqual(sentIds(t), [3256], 'the refused request goes out');
+    assert.equal(pending(t), 256);
+    await tick();
+    assert.equal(pending(t), 0, 'released after delivery');
+    assert.equal(t.game.filter(b => b[0] === 3).length, 256, 'every reserved number was answered locally');
+    t.lobby.send(request(3300, INFO));
+    assert.deepEqual(got[257], { ok: true }, 'room again');
+  }
+  { // 關閉連線清除
+    const t = page();
+    responder(t, 'ir28');
+    t.lobby.send(request(3400, INFO));
+    assert.equal(pending(t), 1);
+    t.lobby.close();
+    assert.equal(pending(t), 0);
+    await tick();
+    assert.equal(pending(t), 0);
   }
 });

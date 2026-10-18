@@ -266,7 +266,7 @@ class MajsoulBridge {
         var results: [[String: Any]] = []
 
         // 處理登入響應 - 獲取帳號 ID
-        if LiqiParser.loginResponseMethods.contains(method) && msgType == "response" {
+        if LiqiSideEffectMethods.loginResponses.contains(method) && msgType == "response" {
             bridgeLog("[MajsoulBridge] 偵測到登入回應: \(method)")
             bridgeLog("[MajsoulBridge] 登入資料鍵: \(msgData.keys)")
 
@@ -282,7 +282,7 @@ class MajsoulBridge {
         }
 
         // 處理 authGame 響應
-        if method == ".lq.FastTest.authGame" && msgType == "response" {
+        if method == LiqiSideEffectMethods.authGame && msgType == "response" {
             bridgeLog("[MajsoulBridge] 偵測到 authGame 回應")
             bridgeLog("[MajsoulBridge] 目前 accountId: \(accountId)")
             bridgeLog("[MajsoulBridge] authGame 資料鍵: \(msgData.keys)")
@@ -357,7 +357,7 @@ class MajsoulBridge {
         }
 
         // 處理遊戲動作
-        if method == ".lq.ActionPrototype" {
+        if method == LiqiSideEffectMethods.actionPrototype {
             if let name = msgData["name"] as? String,
                let actionData = msgData["data"] as? [String: Any] {
                 if let events = parseAction(name: name, data: actionData) {
@@ -368,7 +368,7 @@ class MajsoulBridge {
 
         // 處理遊戲同步（活動模式、斷線重連等）
         // 重要：只處理 gameRestore.actions，不發送額外的 start_game（與 Akagi 行為一致）
-        if method == ".lq.FastTest.syncGame" || method == ".lq.FastTest.enterGame" {
+        if LiqiSideEffectMethods.gameSync.contains(method) {
             bridgeLog("[MajsoulBridge] 偵測到 syncGame/enterGame, hasReceivedAuthGame=\(hasReceivedAuthGame)")
             syncing = true
             if let gameRestore = msgData["gameRestore"] as? [String: Any] {
@@ -380,7 +380,7 @@ class MajsoulBridge {
         }
 
         // 處理遊戲結束
-        if method == ".lq.NotifyGameEndResult" || method == ".lq.NotifyGameTerminate" {
+        if LiqiSideEffectMethods.gameEnd.contains(method) {
             results.append(["type": "end_game"])
         }
 

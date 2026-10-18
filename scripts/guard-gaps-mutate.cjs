@@ -234,7 +234,7 @@ const MUTANTS = [
   ["DG7 漏發 ambiguity_overflow", [["        ambiguousSockets.forEach(function (id) { degrade(Number(id), 'ambiguity_overflow'); });\n", ""]]],
   ["DG8 漏發 reshape_locked", [["            degrade(meta.socketId, 'reshape_locked');\n", ""]]],
   ["DG9 交付後不重設排程（之後的退化事件不再交付）", [["        degradeScheduled = false;\n", ""]]],
-  ["DG10 退化 ctx 不凍結", [["var ctx = Object.freeze({ socketId: d.socketId", "var ctx = ({ socketId: d.socketId"]]],
+  ["DG10 退化 ctx 不凍結", [["fn.call(entry.spec, Object.freeze({ socketId: d.socketId", "fn.call(entry.spec, ({ socketId: d.socketId"]]],
   ["R2-1a injectReceive 接受不污染守衛插件", [["                if ((grant.sendGuard || []).length) taint(grant.__id, grant);\n                pluginLog(grant.__id, 'injectReceive '", "                pluginLog(grant.__id, 'injectReceive '"]]],
   ["R2-1b respondLocally 接受不污染守衛插件", [["                if ((grant.sendGuard || []).length) taint(grant.__id, grant);   // 同 injectReceive", "                // 同 injectReceive"]]],
   ["R2-2a 守衛者的拒絕只以目前守衛者過濾（退出即失效）", [["return r.guardian || guard.ids.indexOf(r.id) !== -1;", "return guard.ids.indexOf(r.id) !== -1;"]]],
@@ -250,6 +250,15 @@ const MUTANTS = [
   ["R2-10a 非守衛者在守衛方法上也收提案", [["                else if (guard && !guardian) reason = 'not_guardian';\n", ""]]],
   ["R2-10b 非守衛者的提案在終判時也走 3b", [["return tx.local.guardian ? null : 'not_guardian';", "return null;"]]],
   ["R2-10c 非大廳連線也查守衛身分", [["guard = raw.lobbyChain ? guardFor(method) : null;", "guard = guardFor(method);"]]],
+  ["R3-2 排空吃掉回呼內新觸發的退化（非批次快照）", [["        pendingDegraded.splice(0).forEach(function (d) {", "        for (var d0; (d0 = pendingDegraded.shift());) [d0].forEach(function (d) {"]]],
+  ["R3-3a hook 取得在隔離之外（getter 拋錯中斷整批）", [["                try {\n                    var fn = entry.spec.onConnectionDegraded;", "                var fn = entry.spec.onConnectionDegraded;\n                try {"]]],
+  ["R3-3b 退化 hook 失敗不記帳", [["                } catch (e) { noteFailure(entry, 'onConnectionDegraded', e); }", "                } catch (e) { }"]]],
+  ["R3-4a respondLocally 不設待交付上限", [["                else if (localCount(raw.wsId) >= LOCAL_PENDING_LIMIT) reason = 'local_busy';\n", ""]]],
+  ["R3-4b 上限差一（第 257 筆仍接受）", [["localCount(raw.wsId) >= LOCAL_PENDING_LIMIT", "localCount(raw.wsId) > LOCAL_PENDING_LIMIT"]]],
+  ["R3-4c localDropped 不釋放", [["localDropped: function (socketId, msgId) { if (msgId != null) releaseLocal(socketId, msgId); },", "localDropped: function () {},"]]],
+  ["R3-4d 排程失敗不通知插件層", [["        if (scheduled || !verdict.response) return;\n", "        return;\n"]], "naki-websocket.js"],
+  ["R3-4e 連線關閉不清保留號碼", [["            Array.from(localPending.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) localPending.delete(k); });\n", ""]]],
+  ["R3-5 丟棄合成通知不記 log", [["injectDropped: function (pluginId, why) { pluginLog(pluginId, 'injectReceive 未交付：' + why); },", "injectDropped: function () {},"]]],
 ];
 
 const read = file => fs.readFileSync(path.join(jsDir, file), 'utf8');

@@ -173,73 +173,58 @@ final class JSContractTests: XCTestCase {
             "registered.filter(function (r) { return r.indexOf('message:') === 0; }).join()")?.toString(), "message:true,message:false")
     }
 
-    /// Phase 4 變長 replace／drop 的禁改名單來源是 Swift 消費端：Swift 據以改牌局、帳號或匹配狀態的 method
-    /// （`MajsoulBridge`、`LiqiParser` 的字面值，加上回應路徑的 startUnifiedMatch、登入回應與表情廣播）必須全部被 JS 禁改，缺一即紅。
-    func testReshapeForbiddenListCoversEverySwiftConsumedMethod() throws {
+    /// Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`（inject-receive 第三輪第 1 條）：bridge 目錄裡，
+    /// 除了 `LiqiRequestBuilder.swift`（集合與 builder 常數的定義處），任何 `.lq.` 字面值都必須在集合內，也不得引用
+    /// `LiqiRequestBuilder` 的方法常數。新增分支不論寫成 `==`、反向比較、switch、Set 或字典，只要繞過集合就紅。
+    /// 例外逐檔列出且以實際值比對：`LiqiResponseStore` 的 error 欄位表（只用於 Naki 自送的回應）、動作頻道的兩個方法名、
+    /// `LiqiActionSender` 送心跳用的 builder 常數。字面值寫在註解裡也算（寧可誤紅）。
+    func testBridgeBranchesOnlyUseTheSideEffectMethodSet() throws {
         let bridge = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("command/Services/Bridge")
-        let regex = try NSRegularExpression(pattern: #""(\.lq\.[A-Za-z0-9_.]+)""#)
-        var methods: Set<String> = [LiqiRequestBuilder.startUnifiedMatchMethod, LiqiResponseStore.broadcastMethod]
-        methods.formUnion(LiqiParser.loginResponseMethods)
-        for file in ["MajsoulBridge.swift", "LiqiParser.swift"] {
-            let text = try String(contentsOf: bridge.appendingPathComponent(file), encoding: .utf8)
-            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                if let range = Range(match.range(at: 1), in: text) { methods.insert(String(text[range])) }
-            }
+        func captures(_ pattern: String, _ text: String) throws -> [String] {
+            try NSRegularExpression(pattern: pattern).matches(in: text, range: NSRange(text.startIndex..., in: text))
+                .compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
         }
-        for known in [".lq.NotifyGameTerminate", ".lq.ActionPrototype", ".lq.Lobby.oauth2Login", ".lq.Lobby.oauth2Auth"] {
-            XCTAssertTrue(methods.contains(known), "抽不到 \(known)，regex 或掃描路徑壞了")
+        let allowedLiterals: [String: Set<String>] = [
+            "LiqiResponseStore.swift": Set(LiqiResponseRecord.errorFieldNumbers.keys),
+            "LiqiOperationStore.swift": [LiqiActionChannel.selfOperation.method, LiqiActionChannel.chiPengGang.method],
+        ]
+        let allowedBuilderConstants: [String: Set<String>] = ["LiqiActionSender.swift": ["heatbeatMethod"]]
+        var strayLiterals: [String] = [], strayConstants: [String] = [], scanned = 0
+        for url in try FileManager.default.contentsOfDirectory(at: bridge, includingPropertiesForKeys: nil)
+        where url.pathExtension == "swift" && url.lastPathComponent != "LiqiRequestBuilder.swift" {
+            let file = url.lastPathComponent, text = try String(contentsOf: url, encoding: .utf8)
+            scanned += 1
+            let literals = Set(try captures(#""(\.lq\.[^"]*)""#, text))
+                .subtracting(LiqiSideEffectMethods.all).subtracting(allowedLiterals[file] ?? [])
+            strayLiterals += literals.sorted().map { "\(file): \($0)" }
+            let constants = Set(try captures(#"LiqiRequestBuilder\.(\w+Method)\b"#, text)).subtracting(allowedBuilderConstants[file] ?? [])
+            strayConstants += constants.sorted().map { "\(file): \($0)" }
         }
+        XCTAssertGreaterThan(scanned, 10, "掃描路徑壞了")
+        XCTAssertEqual(strayLiterals, [], "bridge 用了 LiqiSideEffectMethods 以外的 .lq. 字面值：有副作用就加進集合，否則列進例外")
+        XCTAssertEqual(strayConstants, [], "bridge 以 LiqiRequestBuilder 方法常數比較：改用 LiqiSideEffectMethods")
+    }
+
+    /// Phase 4 變長 replace／drop 的禁改名單涵蓋 Swift 會消費的回應與通知（`LiqiSideEffectMethods.consumed`），缺一即紅
+    /// （docs/archive/plan/plugin-v2-phase4.md §4）。
+    func testReshapeForbiddenListCoversEverySwiftConsumedMethod() throws {
+        XCTAssertTrue(LiqiSideEffectMethods.consumed.isSuperset(of: [".lq.NotifyGameTerminate", ".lq.ActionPrototype",
+                                                                     ".lq.Lobby.oauth2Login", ".lq.Lobby.oauth2Auth"]))
         let page = try loadedPage()
-        let missing = methods.sorted().filter {
+        let missing = LiqiSideEffectMethods.consumed.sorted().filter {
             page.evaluateScript("window.__nakiPlugins.isReshapeForbidden('\($0)')")?.toBool() != true
         }
         XCTAssertEqual(missing, [], "Swift 會消費的 method 沒進 JS 的變長改寫禁改名單")
     }
 
-    /// respondLocally 的禁用名單從 Swift 實際分支反查，不手列：bridge 目錄每個拿 method 比較的分支（`method ==`／`!=`、
-    /// `X.contains(method)`），比較對象解析成字面值或 bridge 檔裡的靜態常數；另加 LiqiParser、MajsoulBridge 的全部 `.lq.` 字面值。
-    /// 本地回應這些請求會讓 Swift 的匹配、牌局或帳號狀態與伺服器分岔：新增分支沒更新 JS 名單即紅，比較對象解析不了也紅
-    /// （plugin-v2-b2.md §5.3，inject-receive 第二輪第 9 條）。
-    func testRespondForbiddenListCoversEverySwiftMethodBranch() throws {
-        let bridge = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("command/Services/Bridge")
-        func groups(_ pattern: String, _ text: String) throws -> [[String]] {
-            try NSRegularExpression(pattern: pattern).matches(in: text, range: NSRange(text.startIndex..., in: text)).map { match in
-                (1..<match.numberOfRanges).map { Range(match.range(at: $0), in: text).map { String(text[$0]) } ?? "" }
-            }
-        }
-        let literal = #""(\.lq\.[A-Za-z0-9_.]+)""#
-        var sources: [String: String] = [:]
-        for url in try FileManager.default.contentsOfDirectory(at: bridge, includingPropertiesForKeys: nil) where url.pathExtension == "swift" {
-            sources[url.lastPathComponent] = try String(contentsOf: url, encoding: .utf8)
-        }
-        var constants: [String: Set<String>] = [:]
-        for text in sources.values {
-            for g in try groups(#"static let (\w+)\s*=\s*"# + literal, text) { constants[g[0]] = [g[1]] }
-            for g in try groups(#"static let (\w+): Set<String> = \[([^\]]*)\]"#, text) {
-                constants[g[0]] = Set(try groups(literal, g[1]).map { $0[0] })
-            }
-        }
-        var methods: Set<String> = [], unresolved: [String] = []
-        for (file, text) in sources {
-            let operands = try groups(#"\b(?:method|methodName)\s*[!=]=\s*("[^"]*"|[\w.]+)"#, text).map { $0[0] }
-                + groups(#"([\w.]+)\.contains\((?:method|methodName)\)"#, text).map { $0[0] }
-            for operand in operands {
-                if operand.hasPrefix("\"") { methods.insert(String(operand.dropFirst().dropLast())); continue }
-                if let values = constants[String(operand.split(separator: ".").last ?? "")] { methods.formUnion(values) }
-                else { unresolved.append("\(file): \(operand)") }
-            }
-            if file == "LiqiParser.swift" || file == "MajsoulBridge.swift" { methods.formUnion(try groups(literal, text).map { $0[0] }) }
-        }
-        XCTAssertEqual(unresolved, [], "method 分支的比較對象解析不了，反查會漏")
-        for known in [LiqiRequestBuilder.startUnifiedMatchMethod, LiqiRequestBuilder.cancelUnifiedMatchMethod,
-                      LiqiRequestBuilder.cancelMatchMethod, ".lq.Lobby.oauth2Auth", ".lq.FastTest.authGame"] {
-            XCTAssertTrue(methods.contains(known), "反查抓不到 \(known)，regex 或掃描路徑壞了")
-        }
-        XCTAssertTrue(methods.isSuperset(of: LiqiParser.loginResponseMethods), "反查抓不到登入回應方法")
+    /// respondLocally 的禁用名單涵蓋 Swift 依 method 分支的全部方法（`LiqiSideEffectMethods.all`）：本地回應這些請求
+    /// 會讓 Swift 的匹配、牌局或帳號狀態與伺服器分岔，缺一即紅（plugin-v2-b2.md §5.3）。
+    func testRespondForbiddenListCoversEverySwiftSideEffectMethod() throws {
+        XCTAssertTrue(LiqiSideEffectMethods.all.isSuperset(of: [LiqiRequestBuilder.startUnifiedMatchMethod,
+            LiqiRequestBuilder.cancelUnifiedMatchMethod, LiqiRequestBuilder.cancelMatchMethod, ".lq.Lobby.login"]))
         let page = try loadedPage()
-        let missing = methods.sorted().filter {
+        let missing = LiqiSideEffectMethods.all.sorted().filter {
             page.evaluateScript("window.__nakiPlugins.isRespondForbidden('\($0)')")?.toBool() != true
         }
         XCTAssertEqual(missing, [], "Swift 依 method 分支的方法沒進 JS 的 respondLocally 禁用名單")

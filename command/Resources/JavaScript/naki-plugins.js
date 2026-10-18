@@ -113,8 +113,14 @@
         return g;
     }
     // 本地回應（守衛擋下、respondLocally）交付前，它的號碼另行保留：遊戲還在等這個號碼，注入不得配發，
-    // 但不算伺服器未答；交付後（localResponse）釋放，連線關閉時清掉（第二輪第 4 條）。鍵 -> 待交付筆數
-    var localPending = new Map();
+    // 但不算伺服器未答；交付後（localResponse）或排程失敗（localDropped）釋放，連線關閉時清掉（第二輪第 4 條）。鍵 -> 待交付筆數。
+    // 每連線上限 LOCAL_PENDING_LIMIT 只限 respondLocally（滿了回 local_busy，不淘汰）；守衛擋下是強制結局，一律保留（第三輪第 4 條）
+    var localPending = new Map(), LOCAL_PENDING_LIMIT = 256;
+    function localCount(socketId) {
+        var prefix = socketId + ':', n = 0;
+        localPending.forEach(function (c, k) { if (k.indexOf(prefix) === 0) n += c; });
+        return n;
+    }
     function holdLocal(socketId, msgId) {
         if (msgId == null) return;
         var key = msgKey(socketId, msgId);
@@ -299,20 +305,23 @@
         degradeScheduled = true;
         setTimeout(deliverDegraded, 0);
     }
+    // 只交付本輪快照：回呼內新觸發的退化排到下一個 task（第三輪第 2 條）。hook 的取得與呼叫一起隔離、只讀一次，
+    // 單一插件失敗（含 getter 拋錯）只記它自己的失敗，不中斷其他插件與同批其他事件（第三輪第 3 條）
     function deliverDegraded() {
         degradeScheduled = false;
-        while (pendingDegraded.length) {
-            var d = pendingDegraded.shift();
+        pendingDegraded.splice(0).forEach(function (d) {
             pluginLog('naki', '連線退化：socket ' + d.socketId + ' ' + d.reason + '（' + d.effects.join(',') + '，恢復：' + d.recovery + '）');
             registry.forEach(function (entry) {
-                if (typeof entry.spec.onConnectionDegraded !== 'function') return;
-                var ctx = Object.freeze({ socketId: d.socketId, url: d.url, reason: d.reason, scope: d.scope,
-                    effects: Object.freeze(d.effects.slice()), recovery: d.recovery, at: d.at,
-                    log: function (msg) { pluginLog(entry.id, msg); } });
-                try { entry.spec.onConnectionDegraded(ctx); noteSuccess(entry, 'onConnectionDegraded'); }
-                catch (e) { noteFailure(entry, 'onConnectionDegraded', e); }
+                try {
+                    var fn = entry.spec.onConnectionDegraded;
+                    if (typeof fn !== 'function') return;
+                    fn.call(entry.spec, Object.freeze({ socketId: d.socketId, url: d.url, reason: d.reason, scope: d.scope,
+                        effects: Object.freeze(d.effects.slice()), recovery: d.recovery, at: d.at,
+                        log: function (msg) { pluginLog(entry.id, msg); } }));
+                    noteSuccess(entry, 'onConnectionDegraded');
+                } catch (e) { noteFailure(entry, 'onConnectionDegraded', e); }
             });
-        }
+        });
     }
 
     function encodeVarint(n) {
@@ -855,6 +864,7 @@
                 if (!window.__nakiPluginsMayModifyOutbound) reason = 'outbound_disabled';
                 else if (!openCtx.has(ctx)) reason = 'too_late';
                 else if (guard && !guardian) reason = 'not_guardian';
+                else if (localCount(raw.wsId) >= LOCAL_PENDING_LIMIT) reason = 'local_busy';
                 else {
                     try { next = hostCopy(responseBytes); } catch (e) { next = null; }
                     var after = next && taLength.call(next) <= SYNTHETIC_MAX_BYTES ? parseEnvelope(next) : null;
@@ -1435,6 +1445,12 @@
         // 配對已在擋下當時撤銷，這裡不碰 pendingMethods：遊戲在回呼內可能已用同 msgId 送出新請求（第十輪第 1 條）。
         // msgId 與原方法來自擋下當時的判定，bytes 是交付前另存的快照（第二輪第 5 條）。不跑改寫鏈、不送 Swift。
         // injected：被擋的是這次注入本身；遊戲被擋的本地錯誤不認領同鍵注入（第二輪第 5 條）
+        // naki-websocket 丟棄待交付的 injectReceive 時呼叫：記在發起插件的 log（bridge 訊息的欄位契約由本層的 pluginLog 負責）
+        injectDropped: function (pluginId, why) { pluginLog(pluginId, 'injectReceive 未交付：' + why); },
+
+        // naki-websocket 排不進本地回應的交付時呼叫：遊戲收不到這則，保留的號碼立即釋放（第三輪第 4 條）
+        localDropped: function (socketId, msgId) { if (msgId != null) releaseLocal(socketId, msgId); },
+
         localResponse: function (socketId, msgId, method, bytes, injected) {
             if (msgId == null) return;
             releaseLocal(socketId, msgId);   // 已交付給遊戲：保留的號碼釋放（第二輪第 4 條）
@@ -1480,6 +1496,7 @@
                 openCommits: openCommits.size,
                 untrustedSockets: untrustedSockets.size,
                 receiveLost: recvLostSockets.size,
+                localPending: Array.from(localPending.values()).reduce(function (n, c) { return n + c; }, 0),
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,

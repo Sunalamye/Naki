@@ -475,9 +475,10 @@
     // Swift 成對交付：原 REQUEST 與 RESPONSE 放在同一則 bridge 訊息（localResponse 欄位），兩份都編碼成功才送；
     // postMessage 失敗時兩份一起不見，不會只到一半（審查第三輪第 3 條）。遊戲在 ws.send 回傳後才收到另一份複本，
     // Naki listener 略過它；交付後以擋下當時的連線、msgId、原方法與自己的快照結案。
+    // 有回應卻排不進交付（複製或排程拋錯）時，通知插件層釋放保留的號碼（inject-receive 第三輪第 4 條）
     const syntheticEvents = new WeakSet();
     function respondLocal(ws, wsId, verdict) {
-        let response = null;
+        let response = null, scheduled = false;
         try {
             response = verdict.response ? verdict.response.slice() : null;
             if (verdict.request && response) {
@@ -489,19 +490,24 @@
                 }
             }
         } catch (e) { console.error('[Naki WS] 本地交易送 Swift 失敗（兩份都沒送）:', e); }
-        if (!response) return;
         try {
-            const forGame = response.slice();
-            setTimeout(function () {
-                try {
-                    const ev = new MessageEvent('message', { data: forGame.buffer });
-                    syntheticEvents.add(ev);
-                    ws.dispatchEvent(ev);
-                } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
-                try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response, verdict.injected); }
-                catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
-            }, 0);
+            if (response) {
+                const forGame = response.slice();
+                setTimeout(function () {
+                    try {
+                        const ev = new MessageEvent('message', { data: forGame.buffer });
+                        syntheticEvents.add(ev);
+                        ws.dispatchEvent(ev);
+                    } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
+                    try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response, verdict.injected); }
+                    catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
+                }, 0);
+                scheduled = true;
+            }
         } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
+        if (scheduled || !verdict.response) return;
+        try { window.__nakiPlugins.localDropped(verdict.socketId, verdict.msgId); }
+        catch (e) { console.error('[Naki WS] 本地回應釋放號碼失敗:', e); }
     }
 
     // receive 變長 replace／drop（Phase 4，docs/archive/plan/plugin-v2-phase4.md §1–§2、§5）。
@@ -644,7 +650,9 @@
         const at = info.injected.indexOf(item);
         if (at === -1) return;
         info.injected.splice(at, 1);
-        const drop = function(why) { sendToSwift('plugin_event', { id: item.pluginId, kind: 'log', msg: 'injectReceive 未交付：' + why }); };
+        const drop = function(why) {
+            try { window.__nakiPlugins.injectDropped(item.pluginId, why); } catch (e) { console.error('[Naki WS] injectReceive 未交付：' + why, e); }
+        };
         if (wsConnections.get(ws) !== info || ws.readyState !== OriginalWebSocket.OPEN) return drop('連線已關閉');
         if (info.recvLost) return drop('連線接收不可信');
         let sent = false;

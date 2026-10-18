@@ -365,8 +365,9 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
   3. 結局與交付一律 `{ block:true, request: original, response, msgId, method }`，與守衛擋下同一條路徑（§1.3）。
   4. 只有守衛者能在守衛方法上提案（§4.2 第 3b 步）；非守衛者回 `not_guardian`，不算第 3 步失敗。守衛者身分以呼叫當時為準：被拒後退出（停用、未污染）的守衛者，拒絕仍算第 3 步失敗，與退出前拋錯一致。
   5. 宣告 `sendGuard` 的插件，`respondLocally` 或 `injectReceive` 一被接受就污染（§3.2），之後停用、熱重載都保留守衛。合成內容可能展示未擁有的項目，不靠插件自己呼叫 `taint()`。
+  6. 每條連線待交付的本地回應超過 256 筆時回 `local_busy`（inject-receive 第三輪第 4 條）；守衛者在守衛方法上被這樣拒絕，同樣算第 3 步失敗。
 - 被拒：非守衛方法回 `{ ok:false, reason }`，REQUEST 照常送出（插件自行處理）；守衛方法上守衛者的呼叫被拒依 N2 改為本地錯誤，非守衛者的 `not_guardian` 不影響判定。
-- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。加一條契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）：從 `command/Services/Bridge` 的 Swift 原始碼反查每個依 method 分支的比較（`method ==`／`!=`、`X.contains(method)`，比較對象解析成字面值或 bridge 檔的靜態常數，解析不了即紅），加上 `LiqiParser`、`MajsoulBridge` 的全部 `.lq.` 字面值，全部出現在 JS 禁用名單（inject-receive 第二輪第 9 條；原本手列三個常數，新增分支抓不到）。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
+- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）以共用來源為準（inject-receive 第三輪第 1 條）：Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`，`all` 全部要在 JS 禁用名單。另一條原始碼規則：`command/Services/Bridge` 裡除定義處外，任何 `.lq.` 字面值都要在集合內（逐檔列出的例外以實際值比對），也不得引用 `LiqiRequestBuilder` 的方法常數，所以新增分支不論寫成哪種語法，繞過集合就紅。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
 
 ### 5.4 `injectReceive`
 

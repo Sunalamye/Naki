@@ -336,3 +336,11 @@ Astra 4【擋】7【應修】全採納、根治。下列各點取代本文件對
 - §3.3 交付順序：退化事件改在觸發後的下一個 task 交付，取代「最外層 dispatch 結束」的深度判斷。
 - §1 `injectReceive`：觀察項與網路接收共用佇列上限；交付當下重查連線仍是同一筆紀錄且 OPEN。
 - §4.1 I2：宣告 `sendGuard` 的插件，`injectReceive`／`respondLocally` 一被接受就污染。
+
+## 10. 第三輪修訂（Astra 第二輪，2026-10-18 主線裁決）
+
+0 擋 4 應修 1 建議全採納。取代對應段落：
+
+- Swift 副作用方法改為共用來源 `LiqiSideEffectMethods`（在 `LiqiRequestBuilder.swift`），bridge 分支只引用它；契約測試對照集合，另以原始碼規則禁止集合外的 `.lq.` 字面值與 builder 方法常數。
+- 退化事件一次只交付當時的批次，回呼內新觸發的排到下一個 task；hook 的取得與呼叫一起隔離。
+- 本地回應保留號碼加容量政策：每連線 256 筆待交付的 `respondLocally`，滿了回 `local_busy`；排程失敗立即釋放；`diagnostics().localPending`。

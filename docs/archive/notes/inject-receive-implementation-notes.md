@@ -1,6 +1,6 @@
 # inject-receive 實作筆記
 
-基底 main `d51e22b`，分支 `feat/inject-receive`。設計 `docs/archive/plan/inject-receive-design-2026-10-18.md`（a875ff3），主線 2026-10-18 裁決 15 項全採納、4 項待裁決定案如下。契約 `docs/plugin-api-v1.md` 文末「v2 Phase 4」。log 在主 repo `.swfd/logs/inject-receive/r1-*`（第一輪）、`r2-*`（第二輪）；Astra 原文在 `.swfd/logs/inject-receive-review/astra-review1.md`。
+基底 main `d51e22b`，分支 `feat/inject-receive`。設計 `docs/archive/plan/inject-receive-design-2026-10-18.md`（a875ff3），主線 2026-10-18 裁決 15 項全採納、4 項待裁決定案如下。契約 `docs/plugin-api-v1.md` 文末「v2 Phase 4」。log 在主 repo `.swfd/logs/inject-receive/r1-*`（第一輪）、`r2-*`（第二輪）、`r3-*`（第三輪）；Astra 原文在 `.swfd/logs/inject-receive-review/astra-review1.md`、`astra-review2.md`。
 
 ## 裁決（2026-10-18，主線）
 
@@ -28,9 +28,14 @@
 | 9 | — | `closed` 清 `degradedSeen` 不列變異 | socketId 每條連線唯一，關閉後不會再出現同 id，清除只為釋放記憶體，行為不可觀察 |
 | 10 | 設計 §1.5：`isReshapeForbidden`＋`FORBIDDEN_METHODS` | 照做 | 目前 `FORBIDDEN_METHODS` 是 `isReshapeForbidden` 的子集，拿掉後者那一半是等價變異，不列；保留是為了日後 receive 禁改名單新增項目時自動適用 |
 | 11 | 第二輪裁決第 8 條：統一回呼深度（涵蓋全部插件回呼）與排空邊界 | 不計深度，退化事件一律在觸發後的下一個 task（`setTimeout 0`）交付 | 插件程式碼的進入點不只 hook：getter、`toString`、thenable 的 `then`、`onDisable` 都會在宿主流程中執行，深度計數無法列舉完整，漏一個就回到第 3 條的空窗。task 邊界時堆疊上必然沒有插件回呼，也不在送出判決與上 wire 之間，比「延到 `ws.send` 返回後」更保守（`onRecommendations` 內的送出返回時仍在 hook 中）。代價是順序：觸發後同一個 task 裡排隊的項目會先派發，契約已改寫 |
-| 12 | 第二輪第 4 條 | `closed` 清 `localPending` 不列變異 | 本地回應的計時器在連線關閉後仍會執行並釋放號碼；只有排程本身拋錯時才靠關閉清除，node harness 造不出這個情況 |
+| 12 | ~~第二輪第 4 條：`closed` 清 `localPending` 不列變異~~ | **撤回（第三輪第 4 條）**：故障注入（替換 `setTimeout` 使排程拋錯）造得出來，`IR-28` 測關閉清除，變異 R3-4e 守住 | — |
 | 13 | 第二輪第 7 條：交付前重查連線身分與 OPEN | 兩項都查；身分檢查不列變異 | 連線釋放時先清空 `info.injected`，交付找不到項目就返回，身分不符的情況在身分檢查之前已攔下，拿掉身分檢查是等價變異。保留作為釋放順序改動時的防線 |
 | 14 | 第二輪第 1 條：合成能力成功後納入污染生命週期 | 宣告 `sendGuard` 的插件，`injectReceive`／`respondLocally` 被接受即污染，不分連線 | 既有的接收污染只看大廳；合成通知可能出現在任何連線，本地回應也可能在對局連線上。污染只讓守衛更嚴，不分連線比較保守 |
+| 15 | 第三輪第 1 條裁決：共用方法來源 | 新增 `LiqiSideEffectMethods`（放在 `LiqiRequestBuilder.swift`），改寫 `LiqiParser`、`MajsoulBridge`、`LiqiResponseStore`、`WebSocketInterceptor` 的分支改引用它，移除 `LiqiParser.loginResponseMethods`、`LiqiResponseStore.broadcastMethod` 兩個別名 | 改的是 Swift bridge 生產碼，但只換名稱來源、不改行為；涵蓋這四個檔的 21 個測試類別全綠（`r3-swift-targeted-final.log`）。集合放在 builder 檔，是因為它要引用 builder 的方法常數，而原始碼規則把 builder 檔當成唯一允許出現這些常數的地方 |
+| 16 | 第三輪第 1 條裁決：字面值比對 | 規則掃整個 `command/Services/Bridge`（builder 檔除外）的所有 `.lq.` 字面值，不只比較式；另禁止引用 builder 方法常數。例外逐檔以實際值比對：`LiqiResponseStore` 的 error 欄位表鍵、動作頻道兩個方法名、`LiqiActionSender` 的 `heatbeatMethod` | 只看字面值抓不到 Astra 列的四種寫法（它們都用 builder 常數），所以加常數規則。註解裡的字面值也算，寧可誤紅。範圍只到 bridge 目錄，其他目錄的 Swift 不掃（列已知風險） |
+| 17 | 第三輪第 4 條：超限回 `local_busy` | 上限只限 `respondLocally`；守衛擋下一律保留、不計上限 | 守衛擋下是強制結局，不能改成送出；遊戲每筆送出各占一個號碼，交付在下一個 task，量由遊戲自己的送出決定 |
+| 18 | — | 第一輪 `deliverInjected` 在 `naki-websocket.js` 直接送 `plugin_event` 並帶 `id`，違反 bridge 欄位契約（`BridgeMessageContractTests` 紅）；改經插件層 `injectDropped` 記 log | 第一、二輪的 Swift 指定測試沒納入 `BridgeMessageContractTests`，第三輪擴大範圍才抓到。log 行為不變（`IR-4`、`IR-24`），變異 R3-5 守住 |
+| 19 | — | `PluginSendGuardTests.testLogSaysBlockedForGuardedLocalExchangeAndSentOtherwise` 單獨跑 | 它以 `LogManager.entries` 的筆數切片，大批執行寫滿 5000 筆上限後切不到新行而紅；單獨跑 12/12 綠。這是既有測試的順序相依，與本包無關，本包不修 |
 
 ## 實作摘要
 
@@ -38,12 +43,12 @@
 - 合成觀察：`flushReceive` 把 `synthetic` 經 `dispatchToPlugins` 帶進 `raw`；`runChain` 的 `isNaki` 含 `raw.synthetic`；`makeCtx` 標 `ctx.synthetic`、`ctx.syntheticBy`，合成 ctx 沒有 `sendRequest`（其餘寫入函式本來就因 `isNaki` 或 `mutable:false` 不掛）。
 - `respondLocally`：提案存在 `raw.tx.local`，拒絕紀錄在 `raw.tx.refused`；`callHook` 以 `openCtx` 判斷 hook 是否仍在執行（`too_late`）；`raw.sendOriginal` 判 `rewritten`。守衛方法在 `guardedVerdict` 依 `guardFailure(guard, tx)`（第 3 步含 `respondFailure`，之後 3b）判，守衛者全部退出時有提案也本地成功；非守衛方法由 `api.dispatch` 在判決後改為 `localOk`；`failSafe` 的照送路徑看到提案改為 `localOk`。`localOk` 與 `blockSend` 同形狀，`local:'ok'`、`reason:'respond_locally'`，走既有 `respondLocal`。
 - 遊戲 `last`：`gameLast` 抽出；`dispatch` 對遊戲送出的本地結局、`failSafe` 擋下與本地成功都呼叫。第二輪起依進入順序：送出交易在第一次進入 `dispatch`（或派發前出錯時的 `failSafe`）取得序號 `tx.order`，`gameLast` 只接受不小於目前 `lastOrder` 的更新。
-- 本地回應保留號碼（第二輪）：`blockSend`（有合成回應時）與 `localOk` 呼叫 `holdLocal`，`localResponse` 開頭 `releaseLocal`，`nextPluginMsgId` 把 `localPending` 列為忙碌，`closed` 清掉該連線的保留。
+- 本地回應保留號碼（第二輪）：`blockSend`（有合成回應時）與 `localOk` 呼叫 `holdLocal`，`localResponse` 開頭 `releaseLocal`，`nextPluginMsgId` 把 `localPending` 列為忙碌，`closed` 清掉該連線的保留。第三輪：`respondLocal` 排不進交付時呼叫 `localDropped` 立即釋放；`respondLocally` 在該連線保留滿 `LOCAL_PENDING_LIMIT`（256）時回 `local_busy`；`diagnostics().localPending`。
 - 污染（第二輪）：`injectReceive` 回 `ok`、`respondLocally` 接受時，宣告 `sendGuard` 的插件立即 `taint`。
 - 守衛身分（第二輪）：`runChain` 記 `raw.lobbyChain`；`respondLocally` 以呼叫當時的 `guardFor(method)` 判定，非守衛者回 `not_guardian`；拒絕與提案都帶 `guardian`。`respondFailure` 計入 `guardian` 為真的拒絕（退出後仍算），`guardFailure` 對非守衛者的提案回 `not_guardian`。
-- 退化事件：`degrade` 只記入 `pendingDegraded`（每 (連線, reason) 一次）並排一個 `setTimeout 0`，`deliverDegraded` 在那個 task 排空（第二輪，取代第一輪的 `dispatchDepth` 與四個交付點）。ctx 凍結，`effects` 也凍結。
+- 退化事件：`degrade` 只記入 `pendingDegraded`（每 (連線, reason) 一次）並排一個 `setTimeout 0`，`deliverDegraded` 在那個 task 交付（第二輪，取代第一輪的 `dispatchDepth` 與四個交付點）。第三輪：只交付 `splice(0)` 取出的批次，回呼內新觸發的排到下一個 task；每個插件的 hook 取得與呼叫在同一個 try 內、只讀一次，失敗記在該插件。ctx 凍結，`effects` 也凍結。
 - 接收佇列（第二輪）：`checkOverflow` 抽出，網路接收與 `deliverInjected` 的觀察項共用；`deliverInjected` 先查 `wsConnections.get(ws) === info` 且 `readyState === OPEN`。
-- Swift：`JSContractTests.testRespondForbiddenListCoversEverySwiftMethodBranch`（第二輪取代第一輪手列三個常數的版本，改為從 `command/Services/Bridge` 反查）；`PluginsPageView` L3 說明與 `Localizable.xcstrings` 四語系同步。LiqiParser、bridge、AutoPlay 未改。
+- Swift：第三輪改為共用來源 `LiqiSideEffectMethods`（Deviation 15、16）；`JSContractTests` 三條：`testBridgeBranchesOnlyUseTheSideEffectMethodSet`（原始碼規則）、`testReshapeForbiddenListCoversEverySwiftConsumedMethod`（`consumed`）、`testRespondForbiddenListCoversEverySwiftSideEffectMethod`（`all`）。第二輪的正則反查已移除。`PluginsPageView` L3 說明與 `Localizable.xcstrings` 四語系同步。AutoPlay 未改。
 
 ## 驗證
 
@@ -73,6 +78,19 @@
 
 全量 NakiTests 仍未跑，live 仍未做。
 
+### 第三輪（Astra 第二輪）
+
+| 階段 | 結果 | log |
+|---|---|---|
+| 先紅（新測試對 31307ac） | 3 fail：`IR-26`（回呼內再退化在同一批交付）、`IR-27`（getter 拋錯後健康插件零通知）、`IR-28`（缺 `localPending` 診斷；排程失敗、上限、關閉三段的行為紅由 R3-4a～e 變異補證） | `r3-red.log` |
+| 實作後 | b2 271／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail。`IR-10` 改為每 100 筆讓出一個 task（一次 300 筆會撞上新的 256 上限） | `r3-final-*.log` |
+| 變異（新增 9＋DG10 改錨點） | 10/10 killed | `r3-mutate-new.log` |
+| 變異（全量 242） | 240/242，只剩等價 T7、U10 | `r3-mutate-final-1.log`、`-2.log` |
+| Swift 變異（Astra 四種寫法＋三條） | 七條全紅：以 builder 常數寫成 switch、Set、字典、反向比較（V1～V4，原始碼規則抓到）；`LiqiResponseStore` 新增集合外字面值（V5）；集合新增方法但 JS 未更新（V6）；JS 名單拿掉 `cancelMatch`（V7）。每條還原後 sha256 相同 | `r3-swift-mut-V1-builder-const.log`～`V7-js-list.log` |
+| Swift 指定（還原後重建） | 21 個類別（含 parser、bridge、ResponseStore、WebSocket 相關）275 tests 0 failures；`PluginSendGuardTests` 單獨 12/0（Deviation 19）；bundle 內兩個 JS 與 worktree 逐 byte 相同 | `r3-swift-build-final.log`、`r3-swift-targeted-final.log`、`r3-swift-sendguard-final.log` |
+
+可重現的故障測試（建議 5）：排程失敗（`IR-28` 以替換 `setTimeout` 注入）、getter 拋錯（`IR-27`）、號碼耗盡（`IR-28` 的 257 筆）。
+
 ## 審查回應（Astra 第一輪，主線 2026-10-18 裁決：4 擋 7 應修全採納、根治；4 建議照做）
 
 | # | 等級 | 回應 | 修正 | 反例測試（先紅） | 變異 |
@@ -93,6 +111,16 @@
 | 14 | 建議 | 照做 | 第一輪驗證表的行為紅收窄為八條，42 條變異註明只對準既有斷言 | — | — |
 | 15 | 應修 | 採納 | live 另案補五項（下節） | — | — |
 
+第三輪（Astra 第二輪，主線裁決 0 擋 4 應修 1 建議全採納）：
+
+| # | 等級 | 回應 | 修正 | 測試 | 變異 |
+|---|---|---|---|---|---|
+| 1 | 應修 | 採納（裁決：共用來源） | `LiqiSideEffectMethods`＋原始碼規則（Deviation 15、16） | Swift V1～V7 全紅 | V1～V7（Swift） |
+| 2 | 應修 | 採納 | 批次快照，回呼內新事件留給下一個 task | `IR-26` | R3-2 |
+| 3 | 應修 | 採納 | hook 取得與呼叫一起隔離、只讀一次、失敗記在該插件 | `IR-27` | R3-3a、R3-3b |
+| 4 | 應修 | 採納 | 每連線 256 上限與 `local_busy`、排程失敗立即釋放、`diagnostics().localPending`、契約改寫；撤回 Dev 12 | `IR-28` | R3-4a～R3-4e |
+| 5 | 建議 | 照做 | live 再補三項；三種故障本輪寫成可重現測試 | `IR-27`、`IR-28` | — |
+
 ## live 另案（測試帳號，未做）
 
 - 合成 NOTIFY 相對當前這則的抵達順序（`setTimeout 0` 的推論：capture listener 內的 microtask 仍早於遊戲 handler，依 HTML 規範，node harness 重現不了）。
@@ -104,12 +132,17 @@
 - 待交付本地回應撞號：本地回應交給遊戲之前發起注入，配到的號碼避開它，遊戲不會收到同號的兩則回應。
 - CLOSING 丟棄：排入後、交付前連線進入 CLOSING，遊戲與 Swift 都收不到合成通知。
 - Blob 混流的觀察順序：接收以 Blob 抵達、與合成通知交錯時，遊戲收到的順序與插件觀察順序一致。
+- WebKit 上退化通知的時機：相對造成它的送出與其 microtask，通知在之後的 task（第三輪建議 5）。
+- 回呼內再退化：`onConnectionDegraded` 內造成另一條連線退化，新事件在下一個 task 才到。
+- 對局合成後 kill-switch：守衛插件在對局連線上 `injectReceive`／`respondLocally` 被接受後關 L3，守衛方法仍不外送。
 
 ## 已知風險
 
 - 三個功能都只有單測，未 live 驗證。
 - 退化事件在下一個 task 才交付：同一個 task 裡排在後面的訊息會先派發（限制在觸發當下已生效，只是通知較晚）。
-- 本地回應的交付排程本身拋錯時，保留的號碼要到連線關閉才釋放（Deviation 12），期間注入少一個可用號碼。
+- 同一個 task 裡大量本地回應（守衛擋下不設上限）會暫時占住號段，注入可能回 `msgid_busy`，下一個 task 交付後恢復。
+- 原始碼規則只掃 `command/Services/Bridge`（Deviation 16）：bridge 目錄以外的 Swift 若依 method 分支，不在檢查內。
+- `PluginSendGuardTests` 的 log 測試在大批執行時因 `LogManager` 5000 筆上限而紅（Deviation 19，既有問題）。
 - 合成能力被接受即污染不分連線（Deviation 14）：守衛插件在對局連線上用 `respondLocally` 也會污染，之後停用要重載頁面才解除守衛。
 - `window.__nakiWebSocket.injectReceive` 頁面程式可直接呼叫，跳過 L3 與名單（同 realm 不防，契約已寫）。
 - Swift log 對本地成功仍印「Blocked request: <method> (respond_locally)」：沿用守衛擋下的字樣，未改 Swift。

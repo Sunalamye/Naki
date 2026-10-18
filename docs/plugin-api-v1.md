@@ -210,7 +210,7 @@ L3 只能在使用者的**測試帳號**上用（Naki 的既有邊界）。
 - 任一連線上遊戲還沒收到 RESPONSE 的請求號碼。Naki 不論頁面上有沒有插件都會記錄遊戲送出。只記確定外送的請求，被守衛擋下的不算。「遊戲」指不經 `sendRaw` 送出的請求，與 `ctx.isNaki` 的判斷無關。
 - 正在派發的遊戲請求號碼。你在 `onSend` 裡呼叫 `sendRequest` 時，觸發這次 `onSend` 的遊戲請求還沒外送，它的號碼與之後 256 個也會跳過。
 - 每條連線上遊戲最後一個號碼之後的 256 個號碼。遊戲被守衛擋下或以 `respondLocally` 本地回應的請求不上 wire、不算未答，但它的號碼算遊戲已用過，最後一個號碼照樣前進。「最後」依遊戲進入送出的順序：hook 內重入的較新送出先結案，外層較早的請求之後才本地結案，最後號碼不會倒退。
-- 本地回應還沒交給遊戲的號碼。遊戲在 `ws.send` 返回後的下一個 task 才收到本地回應，在那之前這個號碼不配發；交付後釋放。這些號碼不算未答，不會造成 `msgid_busy`。
+- 本地回應還沒交給遊戲的號碼。遊戲在 `ws.send` 返回後的下一個 task 才收到本地回應，在那之前這個號碼不配發；交付後釋放，排不進交付（排程失敗）時立即釋放，連線關閉時清掉。這些號碼不算未答，但同一個 task 裡大量本地回應占住號段時，注入可能暫時回 `msgid_busy`，交付後恢復。每條連線待交付的 `respondLocally` 上限 256 筆（見 `local_busy`）；守衛擋下是強制結局，不受上限限制，也不淘汰任何遊戲在等的號碼。`diagnostics().localPending` 是目前保留的筆數。
 
 所以你拿到的 msgId 不一定連續。下列情況 `sendRequest` 回 `{ok:false, reason:'msgid_busy'}`：
 - 某條連線上遊戲確定外送、未答的請求超過 256 筆。Naki 無法再追蹤，這條連線關閉之前一律拒發，即使之後全部答覆也一樣。最後送出時才被擋下的那一筆不會造成這個狀態；但它被擋下前若同一條連線又有請求送出或回應抵達，Naki 保守維持這個狀態。
@@ -481,6 +481,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
     - `outbound_disabled`：L3 總開關關著。
     - `too_late`：hook 已返回（例如保存 ctx 後在計時器裡呼叫）。
     - `not_guardian`：大廳上這個方法有守衛者，而你不是。只有守衛者能在守衛方法上提案。
+    - `local_busy`：這條連線已有 256 筆本地回應還沒交給遊戲。不淘汰舊的；下一個 task 交付後恢復。
     - `bad_bytes`：不是 TypedArray，或超過 1 MiB（啟發式，未以 live 量測）。
     - `bad_envelope`：不是 RESPONSE、msgId 不是這筆請求的，或欄位越界。field 1（method）可有可無。
     - `rewritten`：這筆請求已被前面的插件或你自己改過（`replace` 或就地改）。
@@ -503,8 +504,9 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
     | `ambiguity_overflow` | 歧義號碼超過 256 個，整條連線只觀察 | connection | `responses_observe_only` | reconnect |
     | `reshape_locked` | 變長交付故障鎖死 | page | `reshape_disabled` | reload |
 
+  - 讀取或呼叫你的 `onConnectionDegraded` 拋錯（含 getter 拋錯）只記你自己的一次失敗，其他插件與同批其他事件照常收到。
   - 每條連線每個 reason 只發一次。恢復方式是連線關閉後重連（與 `response_lost` 一致）；`reshape_locked` 要重載頁面。重連是新的 socketId，之後再退化會再發。
-  - 交付時機：觸發後的下一個 task（`setTimeout 0`）。交付當下沒有任何插件 hook 在執行，也不在一筆送出的判決與上 wire 之間，所以你在回呼裡做的事（例如用保存的 ctx 呼叫 `taint()`）只影響之後的送出。代價是順序：同一個 task 裡排在它後面的訊息（例如接收佇列裡的觀察項）可能先派發；那些訊息的限制（只觀察）在觸發當下就已生效。同時寫一行插件 id `naki` 的 log。
+  - 交付時機：觸發後的下一個 task（`setTimeout 0`），一次交付當時已排入的那一批；你在回呼裡造成的新退化排到再下一個 task，不會插進這一批。交付當下沒有任何插件 hook 在執行，也不在一筆送出的判決與上 wire 之間，所以你在回呼裡做的事（例如用保存的 ctx 呼叫 `taint()`）只影響之後的送出。代價是順序：同一個 task 裡排在它後面的訊息（例如接收佇列裡的觀察項）可能先派發；那些訊息的限制（只觀察）在觸發當下就已生效。同時寫一行插件 id `naki` 的 log。
   - `injections_refused` 的 scope 是 page：沿用現行規則，任一連線失準或以 Blob 送出，所有連線的 `sendRequest` 都回 `msgid_busy`。
 
 ## 附錄：與設計文件的對應
