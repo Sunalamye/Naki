@@ -37,9 +37,11 @@
 | 18 | — | 第一輪 `deliverInjected` 在 `naki-websocket.js` 直接送 `plugin_event` 並帶 `id`，違反 bridge 欄位契約（`BridgeMessageContractTests` 紅）；改經插件層 `injectDropped` 記 log | 第一、二輪的 Swift 指定測試沒納入 `BridgeMessageContractTests`，第三輪擴大範圍才抓到。log 行為不變（`IR-4`、`IR-24`），變異 R3-5 守住 |
 | 19 | — | `PluginSendGuardTests.testLogSaysBlockedForGuardedLocalExchangeAndSentOtherwise` 單獨跑 | 它以 `LogManager.entries` 的筆數切片，大批執行寫滿 5000 筆上限後切不到新行而紅；單獨跑 12/12 綠。這是既有測試的順序相依，與本包無關，本包不修 |
 | 20 | 第四輪第 1、2 條：保留以交易為單位 | 保留改為物件集合 `localHolds`，物件記在送出交易 `tx.hold`；`respondLocally` 接受時建立，`blockSend` 沿用或建立，`localOk` 只轉移（不建立）。判決帶出 `hold`，`naki-websocket.js` 交付與排程失敗時原樣交回 `localResponse`／`localDropped`（兩個內部 API 的參數因此改變） | 冪等靠集合成員：移出後再移出無作用，交易上已有保留就不再建立。`localOk` 若也建立會是殺不掉的等價變異（接受時必已建立），所以只轉移。排程失敗只可能發生在 `handleMessage` 返回之後，同一筆交易不會再經 `failSafe` 結案，所以「移出後不再建立」不會造成未保留的交付 |
-| 21 | 第四輪第 4 條：掃描擴到 `command/Services`、例外整行比對 | 照做；builder 本體依裁決只由「集合完整性」那條覆蓋，不掃內容（它的 16 行 `LiqiRequestSpec(method:)` 是送出定義）。完整性以原始碼比對：每個 `static let` 名稱必須出現在 `consumed`／`all` 的定義中，集合定義裡的字面值與 builder 常數值都要在 `all` | Swift 的 static 屬性無法反射列舉，只能讀原始碼。整行比對下，集合新增方法時原本的例外行可能不再命中而「過期」紅（V6 同時觸發這條），這是刻意的：例外要跟著集合重審 |
+| 21 | 第四輪第 4 條：掃描擴到 `command/Services`、例外整行比對（builder 本體部分由 Deviation 25 取代） | 照做；builder 本體依裁決只由「集合完整性」那條覆蓋，不掃內容（它的 16 行 `LiqiRequestSpec(method:)` 是送出定義）。完整性以原始碼比對：每個 `static let` 名稱必須出現在 `consumed`／`all` 的定義中，集合定義裡的字面值與 builder 常數值都要在 `all` | Swift 的 static 屬性無法反射列舉，只能讀原始碼。整行比對下，集合新增方法時原本的例外行可能不再命中而「過期」紅（V6 同時觸發這條），這是刻意的：例外要跟著集合重審 |
 | 22 | 第四輪第 5 條：關閉丟棄寫 `injectDropped` reason `closed` | log 原因寫「連線已關閉」 | 與交付當下 CLOSING 丟棄同一句（`IR-24` 既有斷言），插件看到的是同一種結局；每則一行（`IR-4` 斷言恰好一行） |
 | 23 | — | `blockSend` 沒有回應可交付時（例如 bridge 出錯時 bytes 已無法解析、有守衛者）釋放接受提案時的保留 | 接受即占容量後，這條路徑若不釋放會永久占位到連線關閉。故障模型：派發完成後 bytes 變成無法解析再拋錯（`IR-34`），變異 R4-2b 守住 |
+| 24 | 第五輪第 1 條：同 key 再觸發要能喚醒排程 | 去重只包住入隊；之後只要有待交付事件且未排程就重排。「沒有待交付就不排」這個條件不列變異 | 拿掉它只會多排一個空 task（`deliverDegraded` 對空批次什麼都不做），行為不可觀察。保留是因為同 key 的觸發很頻繁（例如每筆 Blob 送出都呼叫 `markUntrusted`） |
+| 25 | 第五輪第 2 條：完整性也掃 builder 本體 | builder 本體併進 `testServicesBranchOnlyOnTheSideEffectMethodSet` 的逐行掃描，只略過常數宣告行與 `LiqiRequestSpec(method: 名稱, fields: …)` 送出定義行；宣告形式另由 `testEverySideEffectConstantIsInTheSet` 檢查 | 送出定義是 builder 的本職，不是分支；其他任何一行提到集合外的方法（例如 W10 在 builder 裡新增比較函式）都會紅。這取代 Deviation 21「builder 本體不掃內容」 |
 
 ## 實作摘要
 
@@ -109,6 +111,18 @@
 
 可重現的故障測試：計時器拋錯（`IR-28`、`IR-31`、`IR-32`）、派發完成後拋錯（`IR-9`、`IR-30`、`IR-34`）、hook 內重入（`IR-29`）。
 
+
+### 第五輪（Astra 第四輪）
+
+| 階段 | 結果 | log |
+|---|---|---|
+| 先紅（新測試對 02fd3dc） | 1 fail：`IR-32` 新增的同連線同 reason 路徑（首次排程拋錯、恢復計時器、同 reason 再觸發，零通知） | `r5-red.log` |
+| 實作後 | b2 278／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail。`IR-35`（守衛者被 `local_busy` 拒絕是本地錯誤）鎖住新契約，修前即綠 | `r5-final-*.log` |
+| 變異（新增 R5-1＋DG2 改錨點） | 2/2 killed | `r5-mutate-new.log`、`r5-mutate-dg2.log` |
+| 變異（全量 255） | 253/255，只剩等價 T7、U10 | `r5-mutate-full-1.log`、`-2.log` |
+| Swift 變異（新規則） | W7（常數加 `: String` 型別註記＋集合外分支）、W8（改 `static var`＋分支）、W9（computed 形式，報「認不出的宣告形式」）、W10（builder 本體新增比較函式）全紅；W1～W6、V1～V7 在新規則下重跑仍全紅；每條還原後 sha256 相同 | `r5-swift-mut-*.log` |
+| Swift 指定（還原後重建） | 20 個類別 276 tests 0 failures；`PluginSendGuardTests` 單獨 12/0；bundle 內兩個 JS 與 worktree 逐 byte 相同 | `r5-swift-build-final.log`、`r5-swift-targeted.log`、`r5-swift-sendguard-alone.log` |
+
 ## 審查回應（Astra 第一輪，主線 2026-10-18 裁決：4 擋 7 應修全採納、根治；4 建議照做）
 
 | # | 等級 | 回應 | 修正 | 反例測試（先紅） | 變異 |
@@ -150,6 +164,14 @@
 | 5 | 應修 | 採納（裁決：補交付） | 關閉時排隊的合成項各寫一行 log（Deviation 22）；b2 RESPONSE field 1 改「可省略」、API 名單來源改 `LiqiSideEffectMethods`、b2「超過 256」改「已有 256」 | `IR-4` 改為恰好一行 | R4-5、IR11 |
 | 6 | 建議 | 照做 | `IR-10` 保留分批版，另加同 task 300 筆 `IR-33`；契約改寫守衛擋下不受上限、不是有界佇列、耗用資源屬 U4；live 補容量量測 | `IR-33` | — |
 
+第五輪（Astra 第四輪，主線裁決 0 擋 3 應修全採納）：
+
+| # | 等級 | 回應 | 修正 | 測試 | 變異 |
+|---|---|---|---|---|---|
+| 1 | 應修 | 採納 | 去重入隊與喚醒排程分開（Deviation 24） | `IR-32` 同連線同 reason 路徑 | R5-1、DG2 |
+| 2 | 應修 | 採納 | builder 解析支援型別註記與 `static var`，認不出的宣告形式明確報紅；builder 本體逐行掃描（Deviation 25） | Swift W7～W10 全紅 | W7～W10（Swift） |
+| 3 | 應修 | 採納 | API 與 b2 的拒絕結局限定為「非守衛方法、且整筆沒有已接受提案時照常送出」，守衛方法一律見 §4.2，已有提案交付先到者 | `IR-35`、`IR-7`、`IR-8` | — |
+
 ## live 另案（測試帳號，未做）
 
 - 合成 NOTIFY 相對當前這則的抵達順序（`setTimeout 0` 的推論：capture listener 內的 microtask 仍早於遊戲 handler，依 HTML 規範，node harness 重現不了）。
@@ -172,7 +194,7 @@
 - 三個功能都只有單測，未 live 驗證。
 - 退化事件在下一個 task 才交付：同一個 task 裡排在後面的訊息會先派發（限制在觸發當下已生效，只是通知較晚）。
 - 同一個 task 裡大量本地回應（守衛擋下不設上限）會暫時占住號段，注入可能回 `msgid_busy`，下一個 task 交付後恢復。守衛擋下的保留不是有界佇列，同 realm 刻意洪流耗用資源屬 U4。
-- 原始碼規則（Deviation 21）抓不到字串拼接或插值組出的方法名、以別名常數轉手的值；`command/Services` 以外（`App`、`Actions` 等）的 Swift 不掃；builder 本體只檢查集合完整性。
+- 原始碼規則（Deviation 21）抓不到字串拼接或插值組出的方法名、以別名常數轉手的值；`command/Services` 以外（`App`、`Actions` 等）的 Swift 不掃；builder 本體的常數宣告與送出定義行不逐行掃（宣告形式另有檢查）。
 - 退化事件排程失敗時不自行重試：若之後再也沒有新的退化觸發，那批事件不會交付。
 - `PluginSendGuardTests` 的 log 測試在大批執行時因 `LogManager` 5000 筆上限而紅（Deviation 19，既有問題）。
 - 合成能力被接受即污染不分連線（Deviation 14）：守衛插件在對局連線上用 `respondLocally` 也會污染，之後停用要重載頁面才解除守衛。

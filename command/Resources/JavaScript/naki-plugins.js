@@ -294,14 +294,16 @@
     var degradedSeen = new Set(), pendingDegraded = [], degradeScheduled = false;
     function degrade(socketId, reason) {
         var key = socketId + ':' + reason;
-        if (degradedSeen.has(key)) return;
-        degradedSeen.add(key);
-        var ws = window.__nakiWebSocket, conn = null;
-        try { conn = ws && ws.getConnections ? ws.getConnections().filter(function (c) { return c.id === socketId; })[0] : null; }
-        catch (e) { conn = null; }
-        var d = DEGRADED[reason];
-        pendingDegraded.push({ socketId: socketId, url: conn ? conn.url : '', reason: reason, scope: d[0], effects: d[1], recovery: d[2], at: Date.now() });
-        if (degradeScheduled) return;
+        // 去重只管入隊；同 key 再觸發仍會喚醒先前排程失敗、還在等的事件（第五輪第 1 條）
+        if (!degradedSeen.has(key)) {
+            degradedSeen.add(key);
+            var ws = window.__nakiWebSocket, conn = null;
+            try { conn = ws && ws.getConnections ? ws.getConnections().filter(function (c) { return c.id === socketId; })[0] : null; }
+            catch (e) { conn = null; }
+            var d = DEGRADED[reason];
+            pendingDegraded.push({ socketId: socketId, url: conn ? conn.url : '', reason: reason, scope: d[0], effects: d[1], recovery: d[2], at: Date.now() });
+        }
+        if (degradeScheduled || !pendingDegraded.length) return;
         // 排程成功才記已排；失敗不拋進觸發點、不主動重試，事件留在 pendingDegraded，下一次退化觸發時一併交付（第四輪第 3 條）
         try { setTimeout(deliverDegraded, 0); degradeScheduled = true; } catch (e) { /* 留待下次觸發 */ }
     }

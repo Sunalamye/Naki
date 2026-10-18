@@ -226,7 +226,7 @@ const MUTANTS = [
   ["RL14 failSafe 先於守衛判定交付提案", [["            var injected = liveTokens.has(sender);   // 這次注入：配對在注入登記，不寫 pendingMethods\n", "            var injected = liveTokens.has(sender);   // 這次注入：配對在注入登記，不寫 pendingMethods\n            if (tx && tx.local) return localOk({ bytes: data, wsId: socketId, tx: tx }, data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength), null);\n"]]],
   ["RL15 failSafe 本地成功不推進遊戲最後號碼", [["                    if (sender === undefined && ok.msgId != null) gameLast(socketId, ok.msgId, orderOf(tx));\n", ""]]],
   ["DG1 退化事件在 hook 中途同步交付（終判後外送前、onRecommendations 中途）", [["try { setTimeout(deliverDegraded, 0); degradeScheduled = true; }", "try { deliverDegraded(); }"]]],
-  ["DG2 退化事件重複發", [["        if (degradedSeen.has(key)) return;\n", ""]]],
+  ["DG2 退化事件重複發", [["        if (!degradedSeen.has(key)) {\n", "        if (true) {\n"]]],
   ["DG3 撤回的未答溢出也發（不看結算後是否仍失準）", [["if (c && c.lostSet && c.g.lost && gameSends", "if (c && c.lostSet && gameSends"]]],
   ["DG4 漏發 send_blob", [["untrustedSockets.add(socketId); degrade(socketId, 'send_blob'); },", "untrustedSockets.add(socketId); },"]]],
   ["DG5 佇列溢出記成讀取失敗", [["degrade(socketId, reason === 'receive_queue_overflow' ? reason : 'receive_blob_failed');", "degrade(socketId, 'receive_blob_failed');"]]],
@@ -272,6 +272,8 @@ const MUTANTS = [
   ["R4-3c 退化排程前就記已排", [["try { setTimeout(deliverDegraded, 0); degradeScheduled = true; }", "degradeScheduled = true; try { setTimeout(deliverDegraded, 0); }"]]],
   ["R4-3d 退化排程失敗拋進觸發點", [["catch (e) { /* 留待下次觸發 */ }", "catch (e) { throw e; }"]]],
   ["R4-5 關閉丟棄待交付不記 log", [["info.injected.splice(0).forEach(function(item) { injectDropped(item, '連線已關閉'); });", "info.injected.length = 0;"]], "naki-websocket.js"],
+  // inject-receive 第五輪（Astra 第四輪 1）
+  ["R5-1 同 key 再觸發不喚醒卡住的排程", [["        }\n        if (degradeScheduled || !pendingDegraded.length) return;", "        } else return;\n        if (degradeScheduled || !pendingDegraded.length) return;"]]],
 ];
 
 const read = file => fs.readFileSync(path.join(jsDir, file), 'utf8');

@@ -366,8 +366,8 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
   4. 只有守衛者能在守衛方法上提案（§4.2 第 3b 步）；非守衛者回 `not_guardian`，不算第 3 步失敗。守衛者身分以呼叫當時為準：被拒後退出（停用、未污染）的守衛者，拒絕仍算第 3 步失敗，與退出前拋錯一致。
   5. 宣告 `sendGuard` 的插件，`respondLocally` 或 `injectReceive` 一被接受就污染（§3.2），之後停用、熱重載都保留守衛。合成內容可能展示未擁有的項目，不靠插件自己呼叫 `taint()`。
   6. 每條連線已有 256 筆已接受、尚未交付的本地回應時回 `local_busy`（inject-receive 第三輪第 4 條；第四輪第 1 條起接受當下即占容量，含重入送出的提案）；守衛者在守衛方法上被這樣拒絕，同樣算第 3 步失敗。
-- 被拒：非守衛方法回 `{ ok:false, reason }`，REQUEST 照常送出（插件自行處理）；守衛方法上守衛者的呼叫被拒依 N2 改為本地錯誤，非守衛者的 `not_guardian` 不影響判定。
-- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）以共用來源為準（inject-receive 第三輪第 1 條）：Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`，`all` 全部要在 JS 禁用名單。另兩條原始碼規則（inject-receive 第四輪第 4 條）：`LiqiSideEffectMethods` 宣告的每個常數都要併進 `consumed`／`all`；`command/Services` 裡除 builder 本體外，每一行若有集合外的 `.lq.` 字面值，或提到值在集合外的 `LiqiRequestBuilder` 方法常數名（不論前綴、typealias、跨行），就必須是逐檔列出的例外行（整行比對、每個只用一次、過期也紅）。字串拼接或插值組出的方法名抓不到。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
+- 被拒：回 `{ ok:false, reason }`。非守衛方法、且整筆沒有已接受的提案時，REQUEST 照常送出（插件自行處理）；守衛方法的結局一律依 §4.2（守衛者的呼叫被拒依 N2 改為本地錯誤，含 `local_busy`；非守衛者的 `not_guardian` 不影響判定）；整筆已有被接受的提案時，交付先到者（inject-receive 第五輪第 3 條）。
+- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）以共用來源為準（inject-receive 第三輪第 1 條）：Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`，`all` 全部要在 JS 禁用名單。另兩條原始碼規則（inject-receive 第四輪第 4 條）：`LiqiSideEffectMethods` 宣告的每個常數都要併進 `consumed`／`all`；`command/Services` 裡每一行（builder 本體略過常數宣告與 `LiqiRequestSpec(method:)` 送出定義）若有集合外的 `.lq.` 字面值，或提到值在集合外的 `LiqiRequestBuilder` 方法常數名（不論前綴、typealias、跨行），就必須是逐檔列出的例外行（整行比對、每個只用一次、過期也紅）。builder 常數支援 `static let／var 名稱 [: String] = 值`，本體裡其他 `static let／var` 形式或不在宣告上的 `.lq.` 字面值明確報紅（第五輪第 2 條）。字串拼接或插值組出的方法名抓不到。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
 
 ### 5.4 `injectReceive`
 

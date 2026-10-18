@@ -4933,7 +4933,7 @@ test('IR-31 (Astra3 3): injectReceive whose task cannot be scheduled returns sch
   assert.equal(t.game.filter(b => b[0] === 1).length, 1);
 });
 
-test('IR-32 (Astra3 3): a degradation whose task cannot be scheduled does not throw into the send and stays pending — no retry of its own; the next degradation (another connection) schedules once and delivers both', async () => {
+test('IR-32 (Astra3 3, Astra4 1): a degradation whose task cannot be scheduled does not throw into the send and stays pending — no retry of its own; the next degradation (another connection, or the same connection and reason again) schedules once and delivers what is pending', async () => {
   const t = page();
   const log = degradeWatcher(t);
   const game = gameSocket(t.c);
@@ -4949,6 +4949,22 @@ test('IR-32 (Astra3 3): a degradation whose task cannot be scheduled does not th
   assert.deepEqual(got.map(e => e[1]), ['send_blob', 'send_blob']);
   assert.equal(got[0][2], lobbyId(t), 'the one that could not be scheduled first');
   assert.notEqual(got[1][2], got[0][2]);
+  { // 同連線同 reason 再觸發也要喚醒排程（第五輪第 1 條）：不重複入隊，但交付卡住的那一筆
+    const t2 = page();
+    const log2 = degradeWatcher(t2);
+    const timer2 = t2.c.setTimeout;
+    t2.c.setTimeout = () => { throw new Error('timer broke'); };
+    t2.lobby.send(new t2.c.Blob([request(1971, INFO)]));
+    t2.c.setTimeout = timer2;
+    await tick(); await tick();
+    assert.deepEqual(log2, [], 'still no retry of its own');
+    t2.lobby.send(new t2.c.Blob([request(1972, INFO)]));
+    await tick();
+    assert.deepEqual(plain(log2).map(e => [e[1], e[2]]), [['send_blob', lobbyId(t2)]], 'the stuck event is delivered once');
+    t2.lobby.send(new t2.c.Blob([request(1973, INFO)]));
+    await tick();
+    assert.equal(log2.length, 1, 'nothing pending: a repeat schedules nothing new to deliver');
+  }
 });
 
 test('IR-33 (Astra3 6): 300 local outcomes in one task — ordinary proposals are bounded (256 accepted, 44 local_busy and on the wire), guard local errors are not (300 local); after delivery an injection still avoids the game\'s next 256 numbers (64157)', async () => {
@@ -4992,4 +5008,19 @@ test('IR-34 (Astra3 2): an accepted proposal whose send ends blocked with nothin
   assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0, 'nothing will be delivered, so nothing stays reserved');
   await tick();
   assert.equal(t.game.filter(b => b[0] === 3).length, 0);
+});
+
+test('IR-35 (Astra4 3): a guard refused with local_busy on its guarded method ends in a local error (respond_rejected), never on the wire — the rejection outcome follows b2 §4.2, not "the request goes out"', async () => {
+  const t = page();
+  const got = [];
+  irPlugin(t, 'gA', { capabilities: ['observe', 'respondLocally'], methods: [SKIN], sendGuard: [SKIN] },
+    { onSend(ctx) { got.push(plain(ctx.respondLocally(response(ctx.msgId, [8, 7])))); } });
+  for (let i = 0; i < 257; i++) t.lobby.send(request(5000 + i, SKIN, [8, 1]));
+  assert.equal(got.filter(r => r.ok).length, 256);
+  assert.deepEqual(got[256], { ok: false, reason: 'local_busy' });
+  assert.deepEqual(t.lobby.sent, [], 'nothing goes out');
+  assert.deepEqual(lastGuard(t), [[5256, 'local_error', 'respond_rejected']]);
+  await tick();
+  assert.deepEqual(t.game.slice(-1), [errorResponse(5256)]);
+  assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0);
 });
