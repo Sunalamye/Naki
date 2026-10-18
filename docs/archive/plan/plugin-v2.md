@@ -175,7 +175,7 @@ Naki listener(event)   ← 改成 capture 階段註冊（at-target 時 capture l
   3c. DROP：event.stopImmediatePropagation()；不送 Swift
 ```
 
-**injectReceive**（`ctx.injectReceive(bytes)`，capability `injectReceive`，L3；**未實作**）：
+**injectReceive**（`ctx.injectReceive(bytes)`，capability `injectReceive`，L3；2026-10-18 已實作，與 `respondLocally` 一起，決策見 `inject-receive-design-2026-10-18.md`，契約以 `docs/plugin-api-v1.md` 為準）：
 
 ```
   1. 驗：parseEnvelope 完整、type === 1（NOTIFY）、method 存在且不在禁改名單、不是 .lq.ActionPrototype

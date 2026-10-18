@@ -10118,31 +10118,31 @@
         }
       }
     },
-    "開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request。預設關閉。只在測試帳號、且你信任插件時開。": {
+    "開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request；有 injectReceive/respondLocally 能力的插件可以合成遊戲收到的通知、或在本地回應遊戲的請求。預設關閉。只在測試帳號、且你信任插件時開。": {
       "comment": "信任頁 Toggle 說明",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "When on, plugins with the injectSend/rewriteSend capability can send Liqi requests with your account. Off by default. Turn it on only for a test account and plugins you trust."
+            "value": "When on, plugins with the injectSend/rewriteSend capability can send Liqi requests with your account, and plugins with injectReceive/respondLocally can synthesize notifications the game receives or answer the game's requests locally. Off by default. Turn it on only for a test account and plugins you trust."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "オンにすると、injectSend/rewriteSend 機能を持つプラグインがあなたのアカウントで Liqi request を送信できます。既定ではオフです。テスト用アカウントで、信頼できるプラグインの場合のみオンにしてください。"
+            "value": "オンにすると、injectSend/rewriteSend 機能を持つプラグインがあなたのアカウントで Liqi request を送信でき、injectReceive/respondLocally 機能を持つプラグインがゲームの受信する通知を合成したり、ゲームのリクエストにローカルで応答したりできます。既定ではオフです。テスト用アカウントで、信頼できるプラグインの場合のみオンにしてください。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "켜면 injectSend/rewriteSend 기능이 있는 플러그인이 내 계정으로 Liqi request를 보낼 수 있습니다. 기본값은 꺼짐입니다. 테스트 계정이고 플러그인을 신뢰할 때만 켜세요."
+            "value": "켜면 injectSend/rewriteSend 기능이 있는 플러그인이 내 계정으로 Liqi request를 보낼 수 있고, injectReceive/respondLocally 기능이 있는 플러그인이 게임이 받는 알림을 합성하거나 게임의 요청에 로컬로 응답할 수 있습니다. 기본값은 꺼짐입니다. 테스트 계정이고 플러그인을 신뢰할 때만 켜세요."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "开启后，具有 injectSend/rewriteSend 能力的插件可以用你的账号发送 Liqi request。默认关闭。仅在测试账号且你信任插件时开启。"
+            "value": "开启后，具有 injectSend/rewriteSend 能力的插件可以用你的账号发送 Liqi request；具有 injectReceive/respondLocally 能力的插件可以合成游戏收到的通知，或在本地回应游戏的请求。默认关闭。仅在测试账号且你信任插件时开启。"
           }
         }
       }

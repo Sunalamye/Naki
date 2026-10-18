@@ -197,6 +197,21 @@ final class JSContractTests: XCTestCase {
         XCTAssertEqual(missing, [], "Swift 會消費的 method 沒進 JS 的變長改寫禁改名單")
     }
 
+    /// respondLocally 的禁用名單來源是 LiqiParser 在送出方向有副作用的方法（匹配開始與取消）與登入回應方法：
+    /// 本地回應這些請求會讓 Swift 的匹配或帳號狀態與伺服器分岔，必須全部被 JS 禁用，缺一即紅（plugin-v2-b2.md §5.3）。
+    func testRespondForbiddenListCoversLiqiParserSideEffectMethods() throws {
+        var methods: Set<String> = [LiqiRequestBuilder.startUnifiedMatchMethod, LiqiRequestBuilder.cancelUnifiedMatchMethod,
+                                    LiqiRequestBuilder.cancelMatchMethod]
+        methods.formUnion(LiqiParser.loginResponseMethods)
+        let page = try loadedPage()
+        let missing = methods.sorted().filter {
+            page.evaluateScript("window.__nakiPlugins.isRespondForbidden('\($0)')")?.toBool() != true
+        }
+        XCTAssertEqual(missing, [], "LiqiParser 有副作用的方法沒進 JS 的 respondLocally 禁用名單")
+        XCTAssertEqual(page.evaluateScript("window.__nakiPlugins.isRespondForbidden('.lq.Lobby.fetchServerTime')")?.toBool(), false,
+                       "名單不能空轉成全禁")
+    }
+
     /// 抽取與查找都不能空轉：已知呼叫要抓得到，別的物件的同名方法不能算數。
     func testExtractionIsNotVacuous() throws {
         let calls = try swiftCalls()

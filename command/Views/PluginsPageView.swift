@@ -583,7 +583,7 @@ struct PluginsPageView: View {
                 )) {
                     VStack(alignment: .leading, spacing: PanelLayout.Spacing.s2) {
                         Text("允許插件送出遊戲動作（L3）").font(.body).bold()
-                        Text("開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request。預設關閉。只在測試帳號、且你信任插件時開。")
+                        Text("開啟後，有 injectSend/rewriteSend 能力的插件可以用你的帳號送出 Liqi request；有 injectReceive/respondLocally 能力的插件可以合成遊戲收到的通知、或在本地回應遊戲的請求。預設關閉。只在測試帳號、且你信任插件時開。")
                             .font(.caption)
                             .foregroundStyle(naki.settings.pluginsMayModifyOutbound ? PanelLayout.danger : PanelLayout.neutral)
                             .fixedSize(horizontal: false, vertical: true)

@@ -101,12 +101,18 @@
     // 接收不可信：接收 Blob 讀取失敗或接收佇列溢出的連線。讀不到不等於未匹配，之後的回應無法確定歸屬，
     // 所以回應一律只觀察（不認領注入、不進一般鏈、不給改寫），配對與未答照常消耗，直到關閉（pair-source 第十一輪第 39、42 條）
     var recvLostSockets = new Set();
-    // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
-    function gameSent(socketId, msgId) {
+    // 遊戲用掉的最後號碼。本地結局（守衛本地錯誤、respondLocally）不上 wire、不記未答，但遊戲計數器已經用掉這個號碼，
+    // 避號視窗要跟著前進（inject-receive 裁決 a，修 pair-source 遺留缺口）
+    function gameLast(socketId, msgId) {
         var g = gameSends.get(socketId);
         if (!g) gameSends.set(socketId, g = { last: msgId, inflight: new Map(), lost: false, version: 0 });
-        var c = { socketId: socketId, g: g, msgId: msgId, seq: nextSeq(), prev: g.inflight.get(msgId), evicted: null, lostSet: false };
         g.last = msgId;
+        return g;
+    }
+    // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
+    function gameSent(socketId, msgId) {
+        var g = gameLast(socketId, msgId);
+        var c = { socketId: socketId, g: g, msgId: msgId, seq: nextSeq(), prev: g.inflight.get(msgId), evicted: null, lostSet: false };
         g.inflight.delete(msgId);
         g.inflight.set(msgId, c.seq);
         if (g.inflight.size > GAME_INFLIGHT_LIMIT) {
@@ -178,6 +184,7 @@
         if (ambiguousPairs.size <= PENDING_LIMIT) return;
         ambiguousPairs.forEach(function (s, k) { ambiguousSockets.add(k.slice(0, k.lastIndexOf(':'))); });
         ambiguousPairs.clear();
+        ambiguousSockets.forEach(function (id) { degrade(Number(id), 'ambiguity_overflow'); });
     }
     // 延後回應只消耗抵達前就有的歧義鍵；整條連線的歧義不消耗，一律算歧義（保守）
     function consumeAmbiguous(socketId, key, watermark) {
@@ -241,6 +248,56 @@
         'useCommonView', 'setLoadingImage', 'sendGiftToCharacter', 'upgradeCharacter', 'addFinishedEnding',
         'receiveEndingReward', 'receiveCharacterRewards', 'mmoActivitySetCharacter', 'mmoActivitySetTeamMember'
     ].map(function (m) { return '.lq.Lobby.' + m; });
+
+    // injectReceive／respondLocally 的上限是啟發式，未以 live 量測（inject-receive 裁決 b）。宿主接收端沒有既有的位元組上限可對齊，取 1 MiB
+    var SYNTHETIC_MAX_BYTES = 1048576, INJECT_RECEIVE_MAX_PENDING = 32;
+    // hook 執行中的 ctx：respondLocally 只在 hook 同步期間有效，返回後呼叫回 too_late
+    var openCtx = new WeakSet();
+    function callHook(fn, ctx) {
+        openCtx.add(ctx);
+        try { return fn(ctx); } finally { openCtx.delete(ctx); }
+    }
+
+    // ---- 連線退化事件（Astra pair-source 第十二輪第 46 條，inject-receive §3）----
+    // 觸發點只記入 pendingDegraded；最外層 dispatch 結束、flush 兩項之間、送出交易結算、變長鎖死時才交付，不在別的 hook 中途呼叫插件。
+    // 每個 (連線, reason) 只發一次，連線關閉時清除；恢復方式是該連線關閉後重連（與 response_lost 一致），變長鎖死要重載頁面
+    var DEGRADED = {
+        receive_blob_failed: ['connection', ['responses_observe_only', 'notify_observe_only', 'injections_refused'], 'reconnect'],
+        receive_queue_overflow: ['connection', ['responses_observe_only', 'notify_observe_only', 'injections_refused'], 'reconnect'],
+        send_blob: ['page', ['injections_refused'], 'reconnect'],
+        send_inflight_overflow: ['page', ['injections_refused'], 'reconnect'],
+        ambiguity_overflow: ['connection', ['responses_observe_only'], 'reconnect'],
+        reshape_locked: ['page', ['reshape_disabled'], 'reload']
+    };
+    var degradedSeen = new Set(), pendingDegraded = [], dispatchDepth = 0, deliveringDegraded = false;
+    function degrade(socketId, reason) {
+        var key = socketId + ':' + reason;
+        if (degradedSeen.has(key)) return;
+        degradedSeen.add(key);
+        var ws = window.__nakiWebSocket, conn = null;
+        try { conn = ws && ws.getConnections ? ws.getConnections().filter(function (c) { return c.id === socketId; })[0] : null; }
+        catch (e) { conn = null; }
+        var d = DEGRADED[reason];
+        pendingDegraded.push({ socketId: socketId, url: conn ? conn.url : '', reason: reason, scope: d[0], effects: d[1], recovery: d[2], at: Date.now() });
+    }
+    function deliverDegraded() {
+        if (dispatchDepth || deliveringDegraded) return;
+        deliveringDegraded = true;
+        try {
+            while (pendingDegraded.length) {
+                var d = pendingDegraded.shift();
+                pluginLog('naki', '連線退化：socket ' + d.socketId + ' ' + d.reason + '（' + d.effects.join(',') + '，恢復：' + d.recovery + '）');
+                registry.forEach(function (entry) {
+                    if (typeof entry.spec.onConnectionDegraded !== 'function') return;
+                    var ctx = Object.freeze({ socketId: d.socketId, url: d.url, reason: d.reason, scope: d.scope,
+                        effects: Object.freeze(d.effects.slice()), recovery: d.recovery, at: d.at,
+                        log: function (msg) { pluginLog(entry.id, msg); } });
+                    try { entry.spec.onConnectionDegraded(ctx); noteSuccess(entry, 'onConnectionDegraded'); }
+                    catch (e) { noteFailure(entry, 'onConnectionDegraded', e); }
+                });
+            }
+        } finally { deliveringDegraded = false; }
+    }
 
     function encodeVarint(n) {
         var out = [];
@@ -359,9 +416,18 @@
     }
 
     // 守衛者全部有效放行才回 null。已污染者的放行另外要求：仍守衛這個方法、L3 開著（審查第 1 條）
-    function guardFailure(guard) {
+    // respondLocally（b2 §4.2）：守衛者的呼叫被拒是第 3 步失敗；第 3 步不成立而交易上有提案是 3b 本地成功，不再看第 4–7 步
+    function respondFailure(guard, tx) {
+        var refused = ((tx && tx.refused) || []).filter(function (r) { return guard.ids.indexOf(r.id) !== -1; });
+        if (refused.some(function (r) { return r.invalid; })) return 'response_invalid';
+        return refused.length ? 'respond_rejected' : null;
+    }
+    function guardFailure(guard, tx) {
         if (guard.threw.length) return 'hook_threw';
         if (guard.async.length) return 'async_hook';
+        var refused = respondFailure(guard, tx);
+        if (refused) return refused;
+        if (tx && tx.local) return null;
         var ids = guard.ids, m = guard.method, i, entry;
         for (i = 0; i < ids.length; i++) {
             entry = registry.get(ids[i]);
@@ -428,6 +494,19 @@
             socketId: raw.wsId, msgId: msgId, method: origMethod, injected: !!raw.injected };
     }
 
+    // respondLocally 被接受：與守衛擋下同一條交付路徑，交付提案回應。請求不上 wire，鏈首登記的配對撤銷；守衛方法記 local_ok
+    function localOk(raw, origObj, ids) {
+        var original = u8slice.call(origObj), env = parseEnvelope(original) || { msgId: null, method: null }, local = raw.tx.local;
+        try {
+            pendingMethods.delete(msgKey(raw.wsId, env.msgId));
+            restore(raw, origObj, original);
+            if (ids) recordGuard(env.msgId, env.method, 'local_ok', null, ids, raw.wsId);
+            pluginLog(local.id, 'respondLocally ' + env.method + ' msgId=' + env.msgId + '（本地回應，不送出）');
+        } catch (e) { /* 本地成功的決定不受記錄失敗影響 */ }
+        return { block: true, local: 'ok', reason: 'respond_locally', request: original, response: local.response,
+            socketId: raw.wsId, msgId: env.msgId, method: env.method, injected: false };
+    }
+
     // 只收已鎖定為大廳、非 FastTest 的送出（dispatch 先分流）。守衛方法只有三種結局：原樣送出、本地成功（respondLocally，PV2-B2）、本地錯誤。
     // 跑鏈與鏈後判定在 try 內（第二輪第 1 條）；無法解析的在 try 前就依有無守衛者決定。出錯時只擋守衛方法與
     // 原方法在 GUARDABLE_METHODS 者；其他還原原 bytes 照送（第四輪第 3 條）。實際送出的是原 bytes，所以只看原方法；
@@ -450,8 +529,9 @@
             // 鏈尾以目前的守衛者終判（第七、八輪）：守衛者名單重算，鏈中才出現的（註冊或經重入污染）沒有在鏈上放行，
             // 放行也只對當時的實例與污染版本有效，否則視同 not_on_chain
             var now = env.method ? guardFor(env.method) : null;
-            if (!now && guard && !guard.threw.length && !guard.async.length) {
-                // 守衛者在鏈中全部退出（未污染者停用）：本筆解除守衛，照送原請求（第八輪第 4 條）
+            if (!now && guard && !guard.threw.length && !guard.async.length && !respondFailure(guard, raw.tx)) {
+                // 守衛者在鏈中全部退出（未污染者停用）：本筆解除守衛，照送原請求（第八輪第 4 條）；有提案時本地成功
+                if (raw.tx && raw.tx.local) return localOk(raw, origObj, guard.ids);
                 restore(raw, origObj, original);
                 recordGuard(env.msgId, env.method, 'sent', 'guard_left', guard.ids, raw.wsId);
                 return undefined;
@@ -459,8 +539,10 @@
             if (now) guard = { method: env.method, ids: now.ids, approved: guard ? guard.approved : [],
                 threw: guard ? guard.threw : [], async: guard ? guard.async : [] };
             if (!guard) return out;
-            var reason = guardFailure(guard) || (!sameBytes(original, raw.bytes) ? 'rewritten' : null);
+            var local = raw.tx && raw.tx.local;
+            var reason = guardFailure(guard, raw.tx) || (!local && !sameBytes(original, raw.bytes) ? 'rewritten' : null);
             if (reason) return blockSend(raw, origObj, original, env.msgId, env.method, env.method, reason, guard.ids);
+            if (local) return localOk(raw, origObj, guard.ids);
             recordGuard(env.msgId, env.method, 'sent', null, guard.ids, raw.wsId);
             return out;
         } catch (e) {
@@ -591,6 +673,10 @@
         if (grant.settings && typeof grant.settings === 'object') {
             ctx.settings = grant.settings;
         }
+        if (raw.synthetic) {
+            ctx.synthetic = 'injectReceive';
+            ctx.syntheticBy = raw.synthetic;
+        }
 
         // rewriteReceive → ctx.replace（等長就地改寫）。
         // 只在「有 rewriteReceive capability + receive 方向 + 非 Naki 流量 + method 不在禁改名單」時掛。
@@ -645,7 +731,7 @@
             && caps.indexOf('rewriteSend') !== -1
             && !isSendForbidden(method)) {
             ctx.replace = function (newBytes) {
-                if (!window.__nakiPluginsMayModifyOutbound) return false;
+                if (!window.__nakiPluginsMayModifyOutbound || (raw.tx && raw.tx.local)) return false;   // 已有本地回應提案：請求不會送出
                 // 先物化成宿主自有副本再驗證，驗的與採用的是同一份；之後插件改它傳進來的物件（含共用的 ArrayBuffer）無效。
                 // 只收 TypedArray，ArrayBuffer／SAB／DataView／array-like／Proxy 回 false，不讀自有 length（第六輪第 1 條）
                 var next;
@@ -667,8 +753,8 @@
             };
         }
 
-        // L3：injectSend → ctx.sendRequest（送一筆 REQUEST）。受總開關把關。
-        if (caps.indexOf('injectSend') !== -1) {
+        // L3：injectSend → ctx.sendRequest（送一筆 REQUEST）。受總開關把關。合成 NOTIFY 的 ctx 沒有
+        if (caps.indexOf('injectSend') !== -1 && !raw.synthetic) {
             ctx.sendRequest = function (method, payloadBytes) {
                 // 總開關（§8.1）：預設 false，關著一律拒——對應「送 Liqi request 前先確認」。
                 if (!window.__nakiPluginsMayModifyOutbound) {
@@ -716,6 +802,52 @@
                 return { ok: true, msgId: msgId };
             };
         }
+
+        // L3：injectReceive → ctx.injectReceive（plugin-v2.md §4.2，inject-receive §1）。合成一則 NOTIFY 給 ctx 的連線：
+        // 下一個 task 先送 Swift 再交付遊戲（setTimeout 0，排在目前這則之後的推論未 live 驗證），交付當下觀察項排進接收佇列尾，
+        // 只給 observeNakiTraffic observer。isNaki 與合成 ctx 沒有它（切斷回授）。回 ok 只代表已排入；交付前連線關閉或接收不可信就丟棄
+        if (caps.indexOf('injectReceive') !== -1 && !isNaki) {
+            ctx.injectReceive = function (notifyBytes) {
+                if (!window.__nakiPluginsMayModifyOutbound) return { ok: false, reason: 'outbound_disabled' };
+                var next;
+                try { next = hostCopy(notifyBytes); } catch (e) { return { ok: false, reason: 'bad_bytes' }; }
+                if (taLength.call(next) > SYNTHETIC_MAX_BYTES) return { ok: false, reason: 'bad_bytes' };
+                var e = parseEnvelope(next);
+                if (!e || e.type !== TYPE_NOTIFY || !e.method || !isWellFormed(next)) return { ok: false, reason: 'bad_envelope' };
+                if (isReshapeForbidden(e.method) || FORBIDDEN_METHODS.indexOf(e.method) !== -1) return { ok: false, reason: 'forbidden_method' };
+                var ws = window.__nakiWebSocket;
+                var r = ws && ws.injectReceive ? ws.injectReceive(raw.wsId, next, grant.__id, INJECT_RECEIVE_MAX_PENDING) : { ok: false, reason: 'no_connection' };
+                if (!r.ok) return { ok: false, reason: r.reason };
+                pluginLog(grant.__id, 'injectReceive ' + e.method + '（已排入，下一個 task 交付）');
+                return { ok: true };
+            };
+        }
+
+        // L3：respondLocally → ctx.respondLocally（plugin-v2.md §4.3、b2 §5.3，inject-receive §2）。只在送出 hook 同步期間有效，
+        // 提案存在送出交易 tx.local，先到先得；鏈不停止。判決改為本地成功（與守衛擋下同一條交付路徑），請求不上 wire。
+        // 守衛方法依 b2 §4.2：守衛者的呼叫被拒是第 3 步失敗，接受是 3b
+        if (raw.direction === 'send' && !isNaki && raw.mutable !== false && raw.tx
+            && caps.indexOf('respondLocally') !== -1 && !isRespondForbidden(method)) {
+            ctx.respondLocally = function (responseBytes) {
+                var tx = raw.tx, next = null, reason = null;
+                if (!window.__nakiPluginsMayModifyOutbound) reason = 'outbound_disabled';
+                else if (!openCtx.has(ctx)) reason = 'too_late';
+                else {
+                    try { next = hostCopy(responseBytes); } catch (e) { next = null; }
+                    var after = next && taLength.call(next) <= SYNTHETIC_MAX_BYTES ? parseEnvelope(next) : null;
+                    if (!next || taLength.call(next) > SYNTHETIC_MAX_BYTES) reason = 'bad_bytes';
+                    else if (!after || after.type !== TYPE_RESPONSE || after.msgId !== env.msgId || !isWellFormed(next)) reason = 'bad_envelope';
+                    else if (!sameBytes(raw.bytes, raw.sendOriginal)) reason = 'rewritten';
+                    else if (tx.local) reason = 'already_responded';
+                }
+                if (reason) {
+                    if (reason !== 'too_late') (tx.refused = tx.refused || []).push({ id: grant.__id, invalid: reason === 'bad_bytes' || reason === 'bad_envelope' });
+                    return { ok: false, reason: reason };
+                }
+                tx.local = { id: grant.__id, response: next };
+                return { ok: true };
+            };
+        }
         return ctx;
     }
 
@@ -755,6 +887,10 @@
         return typeof method !== 'string' || method.indexOf('.lq.Lobby.') !== 0
             || SEND_FORBIDDEN_METHODS.indexOf(method) !== -1;
     }
+    // respondLocally 禁用名單：送出禁改名單，加 LiqiParser 在送出方向有副作用的兩個取消方法（plugin-v2.md §4.3）。
+    // JSContractTests 從 LiqiParser 反查，缺一即紅；rewriteAllow 解不開
+    var RESPOND_FORBIDDEN_METHODS = ['.lq.Lobby.cancelUnifiedMatch', '.lq.Lobby.cancelMatch'];
+    function isRespondForbidden(method) { return isSendForbidden(method) || RESPOND_FORBIDDEN_METHODS.indexOf(method) !== -1; }
 
     // Phase 4 變長 replace／drop 的禁改名單（docs/archive/plan/plugin-v2-phase4.md §4），rewriteAllow 解不開，canonical 全名比對。
     // 來源是 Swift 消費端清單：Swift 據以改牌局、帳號或匹配狀態的 NOTIFY／RESPONSE（MajsoulBridge、LiqiParser、
@@ -858,7 +994,8 @@
         diagnostics.lastMethod = method;
         // 未匹配的延後回應（抵達前沒有任何同鍵紀錄）走到這裡時 method 為 null：下面的鏈一個 hook 都不派，也不消耗、不建歧義
         // 注入登記還在就是插件自送，即使 sendRaw 登記已被淘汰（D22 第二輪第 1 條）
-        var isNaki = injected || ambiguous || (raw.direction === 'receive' && recvLostSockets.has(String(raw.wsId))) || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
+        // injectReceive 的合成 NOTIFY 一律算 Naki 流量：只給 observeNakiTraffic observer，沒有改寫類函式
+        var isNaki = !!raw.synthetic || injected || ambiguous || (raw.direction === 'receive' && recvLostSockets.has(String(raw.wsId))) || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
 
         // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
         // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
@@ -901,6 +1038,7 @@
         // 只碰得到過期的副本（第五輪）。receive 維持與遊戲共用 buffer 的就地改寫（契約 §4）
         var copy = raw.direction === 'send' && raw.mutable !== false;
         var original = raw.bytes, cur = copy ? hostCopy(original) : null, by = [], type = env.type, msgId = env.msgId;
+        if (copy) raw.sendOriginal = original;   // respondLocally 的 rewritten 判定：遊戲原 buffer 不交給插件
         var passed = [], last = null;   // 送出鏈：成功記帳等本筆終判（第八輪第 2 條）；last 是最後改動的註冊實例
         for (var k = 0; k < chain.length; k++) {
             var entry = chain[k];
@@ -918,7 +1056,7 @@
             var thenable = false, failure = null, staged = null, replaced = false;
             try {
                 diagnostics.hooks++;
-                var ret = fn(ctx);   // 改寫只能經 ctx.replace（見 makeCtx）；回傳 Promise／thenable 不算放行（審查第 2 條）
+                var ret = callHook(fn, ctx);   // 改寫只能經 ctx.replace（見 makeCtx）；回傳 Promise／thenable 不算放行（審查第 2 條）
                 thenable = !!ret && typeof ret.then === 'function';
                 if (thenable) {
                     if (isGuard) guard.async.push(entry.id);
@@ -1135,13 +1273,24 @@
         // 守衛方法的 REQUEST 被擋下時回 { block:true, reason, response }：呼叫端不得送出，改把 response 交給遊戲與 Swift。
         // 遊戲送出：派發期間保留號碼，判決確定外送後才記入未答（被擋的不算，第三輪第 12 條）；派發拋錯時由 failSafe 記。
         // 提交記在呼叫端為這筆送出建立的交易 raw.tx，同一筆的 failSafe 才撤得回（第五輪第 19 條）
+        // respondLocally 的提案（tx.local）在這裡把非守衛方法的判決改為本地成功：鏈跑完照送、判決出錯退回原請求時都一樣（守衛方法由 guardedVerdict 判）。
+        // 本地結局（守衛擋下、本地成功）不記未答，但遊戲最後號碼前進（裁決 a）
         dispatch: function (raw) {
             var game = !!raw && raw.direction === 'send' && raw.sender === undefined && !!raw.bytes && !raw.deferred;
             var mark = game && requestMsgId(raw.bytes) != null ? { msgId: requestMsgId(raw.bytes) } : null;
+            var origObj = raw && raw.bytes;
             if (mark) gameDispatching.push(mark);
-            try { var result = dispatchRaw(raw); }
-            finally { if (mark) gameDispatching.splice(gameDispatching.indexOf(mark), 1); }
+            dispatchDepth++;
+            try {
+                var result = dispatchRaw(raw);
+                if (raw && raw.tx && raw.tx.local && !(result && result.block)) result = localOk(raw, origObj, null);
+            } finally {
+                dispatchDepth--;
+                if (mark) gameDispatching.splice(gameDispatching.indexOf(mark), 1);
+            }
             if (game && !(result && result.block)) commitGameSend(raw.tx, raw.wsId, raw.bytes);
+            else if (mark) gameLast(raw.wsId, mark.msgId);
+            deliverDegraded();
             return result;
         },
 
@@ -1168,8 +1317,14 @@
         failSafe: function (data, socketId, sender, tx) {
             var b = null, original = null, env = null, ids = [];
             var injected = liveTokens.has(sender);   // 這次注入：配對在注入登記，不寫 pendingMethods
-            // 照送：遊戲的才登記配對並記入未答（派發已記過的同號只會刷新）
+            // 照送：遊戲的才登記配對並記入未答（派發已記過的同號只會刷新）。
+            // 已有 respondLocally 提案時改為本地成功：插件已拿到 ok，照送等於送出插件說不要送的請求（inject-receive §2.5）
             function sendOriginal() {
+                if (tx && tx.local) {
+                    var ok = localOk({ bytes: b, wsId: socketId, tx: tx }, b || new Uint8Array(0), null);
+                    if (sender === undefined && ok.msgId != null) gameLast(socketId, ok.msgId);
+                    return ok;
+                }
                 try { if (env && !injected) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ }
                 if (sender === undefined && original && !(tx && tx.commit)) commitGameSend(tx, socketId, original);
             }
@@ -1192,23 +1347,31 @@
             var verdict = blockSend({ bytes: b || empty, wsId: socketId, injected: injected }, b || empty, original || empty,
                 env ? env.msgId : null, env && env.method, env && env.method, 'bridge_error', ids);
             if (sender === undefined && tx) revertGameSend(tx.commit);
+            if (sender === undefined && verdict.msgId != null) gameLast(socketId, verdict.msgId);
             return verdict;
         },
 
         // naki-websocket 的 ws.send 包裝在每筆送出結束時呼叫（含底層 send 拋錯）：失敗撤回這筆的提交，成功只釋放撤回資料
+        // 未答溢出的退化事件在這裡才發：這筆造成溢出、結算後仍失準才算（乾淨撤回會解除失準；撤回時表已變動則保守維持失準，照實發）
         sendSettled: function (tx, failed) {
-            if (!tx) return;
-            if (failed) revertGameSend(tx.commit);
-            else openCommits.delete(tx.commit);
-            tx.commit = null;
+            if (tx) {
+                var c = tx.commit;
+                if (failed) revertGameSend(c);
+                else openCommits.delete(c);
+                if (c && c.lostSet && c.g.lost && gameSends.get(c.socketId) === c.g) degrade(c.socketId, 'send_inflight_overflow');
+                tx.commit = null;
+            }
+            deliverDegraded();
         },
 
         // naki-websocket 在 ws.send 入口看到遊戲的 Blob 送出時同步呼叫：這條連線的號碼不可信直到關閉
-        markUntrusted: function (socketId) { untrustedSockets.add(socketId); },
+        markUntrusted: function (socketId) { untrustedSockets.add(socketId); degrade(socketId, 'send_blob'); },
 
         // naki-websocket 在接收 Blob 讀取失敗、或接收佇列溢出時呼叫：該連線接收不可信到關閉，拒發新注入；
         // 既有注入登記立即以 response_lost 結案交回發起插件（第十一輪第 39 條）
-        receiveLost: function (socketId) {
+        // reason：receive_blob_failed 或 receive_queue_overflow（退化事件）
+        receiveLost: function (socketId, reason) {
+            degrade(socketId, reason === 'receive_queue_overflow' ? reason : 'receive_blob_failed');
             untrustedSockets.add(socketId);
             recvLostSockets.add(String(socketId));
             var prefix = socketId + ':';
@@ -1218,6 +1381,7 @@
                 injectedMsgIds.delete(k);
                 injectionLost(socketId, Number(k.slice(prefix.length)), injection, 'receive_untrusted');
             });
+            deliverDegraded();
         },
 
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
@@ -1232,16 +1396,21 @@
             gameSends.delete(socketId);
             untrustedSockets.delete(socketId);
             recvLostSockets.delete(String(socketId));
+            Array.from(degradedSeen).forEach(function (k) { if (k.indexOf(prefix) === 0) degradedSeen.delete(k); });
         },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
         reshapeLocked: function (kind, meta) {
             pluginLog('naki', '變長交付故障（' + kind + '，' + (meta.method || '?') + ' msgId=' + meta.msgId
                 + '，候選改寫者 ' + (meta.by || []).join(',') + '），本頁面停用變長 replace／drop');
+            degrade(meta.socketId, 'reshape_locked');
+            deliverDegraded();
         },
 
         // 唯讀：變長 replace／drop 是否禁改這個 method（契約測試從 Swift 消費端反查用）
         isReshapeForbidden: function (method) { return isReshapeForbidden(method); },
+        // 唯讀：respondLocally 是否禁用這個 method（契約測試從 LiqiParser 反查用）
+        isRespondForbidden: function (method) { return isRespondForbidden(method); },
 
         // 本地回應交給遊戲之後呼叫：插件注入的請求把本地結果交回發起插件（審查第 8 條）。
         // 配對已在擋下當時撤銷，這裡不碰 pendingMethods：遊戲在回呼內可能已用同 msgId 送出新請求（第十輪第 1 條）。

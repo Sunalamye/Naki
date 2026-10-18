@@ -322,3 +322,7 @@
 2. `injectReceive` 的 32 筆上限與 1 MiB 長度上限是啟發式，沒有 live 數據。
 3. `reshape_locked` 納入退化事件，會讓既有的鎖死多一個插件可見的通知。
 4. 實作會改 `naki-websocket.js`（WebSocket bridge），依 Naki CLAUDE.md 須先確認。本包的外送面只減不增（§4.1），裁決時請一併確認。
+
+## 8. 裁決（2026-10-18，主線）
+
+15 項全採納。待裁決四項：(1) 同包修，本地結局更新遊戲 `last`；(2) 32 筆與 1 MiB 接受為啟發式，具名常數集中放，未以 live 量測；(3) `reshape_locked` 納入；(4) 可改 `naki-websocket.js`，依據是用戶 2026-10-17「都自動」裁決，且三功能都不新增 Liqi 外送。另補：`setTimeout 0` 的順序推論標未 live 驗證並列入 live 另案；退化事件的恢復方式寫明為連線關閉後重連。實作與偏離見 `docs/archive/notes/inject-receive-implementation-notes.md`。
