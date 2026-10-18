@@ -40,7 +40,7 @@
 | 21 | 第四輪第 4 條：掃描擴到 `command/Services`、例外整行比對（builder 本體部分由 Deviation 25 取代） | 照做；builder 本體依裁決只由「集合完整性」那條覆蓋，不掃內容（它的 16 行 `LiqiRequestSpec(method:)` 是送出定義）。完整性以原始碼比對：每個 `static let` 名稱必須出現在 `consumed`／`all` 的定義中，集合定義裡的字面值與 builder 常數值都要在 `all` | Swift 的 static 屬性無法反射列舉，只能讀原始碼。整行比對下，集合新增方法時原本的例外行可能不再命中而「過期」紅（V6 同時觸發這條），這是刻意的：例外要跟著集合重審 |
 | 22 | 第四輪第 5 條：關閉丟棄寫 `injectDropped` reason `closed` | log 原因寫「連線已關閉」 | 與交付當下 CLOSING 丟棄同一句（`IR-24` 既有斷言），插件看到的是同一種結局；每則一行（`IR-4` 斷言恰好一行） |
 | 23 | — | `blockSend` 沒有回應可交付時（例如 bridge 出錯時 bytes 已無法解析、有守衛者）釋放接受提案時的保留 | 接受即占容量後，這條路徑若不釋放會永久占位到連線關閉。故障模型：派發完成後 bytes 變成無法解析再拋錯（`IR-34`），變異 R4-2b 守住 |
-| 24 | 第五輪第 1 條：同 key 再觸發要能喚醒排程 | 去重只包住入隊；之後只要有待交付事件且未排程就重排。「沒有待交付就不排」這個條件不列變異 | 拿掉它只會多排一個空 task（`deliverDegraded` 對空批次什麼都不做），行為不可觀察。保留是因為同 key 的觸發很頻繁（例如每筆 Blob 送出都呼叫 `markUntrusted`） |
+| 24 | 第五輪第 1 條：同 key 再觸發要能喚醒排程 | 去重只包住入隊；之後只要有待交付事件且未排程就重排。「沒有待交付就不排」這個條件保留，已以 `IR-36` 覆蓋（變異 R6-1） | ~~原論證「只多排空 task、不可觀察」~~ **撤回（第六輪第 1 條）**：拿掉條件時，重觸發已交付的退化會先排一個 task，之後的新退化搭上它，比它之後才排的計時器先交付（`B→marker`）；保留時是 `marker→B`。`IR-36` 斷言後者 |
 | 25 | 第五輪第 2 條：完整性也掃 builder 本體 | builder 本體併進 `testServicesBranchOnlyOnTheSideEffectMethodSet` 的逐行掃描，只略過常數宣告行與 `LiqiRequestSpec(method: 名稱, fields: …)` 送出定義行；宣告形式另由 `testEverySideEffectConstantIsInTheSet` 檢查 | 送出定義是 builder 的本職，不是分支；其他任何一行提到集合外的方法（例如 W10 在 builder 裡新增比較函式）都會紅。這取代 Deviation 21「builder 本體不掃內容」 |
 
 ## 實作摘要
@@ -123,6 +123,16 @@
 | Swift 變異（新規則） | W7（常數加 `: String` 型別註記＋集合外分支）、W8（改 `static var`＋分支）、W9（computed 形式，報「認不出的宣告形式」）、W10（builder 本體新增比較函式）全紅；W1～W6、V1～V7 在新規則下重跑仍全紅；每條還原後 sha256 相同 | `r5-swift-mut-*.log` |
 | Swift 指定（還原後重建） | 20 個類別 276 tests 0 failures；`PluginSendGuardTests` 單獨 12/0；bundle 內兩個 JS 與 worktree 逐 byte 相同 | `r5-swift-build-final.log`、`r5-swift-targeted.log`、`r5-swift-sendguard-alone.log` |
 
+
+### 第六輪（Astra 第五輪）
+
+| 階段 | 結果 | log |
+|---|---|---|
+| 新測試（只加測試與文件，程式未改） | `IR-36`（重觸發已交付的退化不排程：`marker` 先於新退化 B，無空批次回呼）、`IR-4` 送 Swift 失敗恰好一行「injectReceive 未交付：送 Swift 失敗」。兩者鎖住既有行為，對 d61b899 即綠；有效性由下列變異證明 | `r6-tests.log` |
+| 六套 node | b2 279／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r6-final-*.log` |
+| 變異（新增 2） | R6-1（拿掉「無待交付不排」）由 `IR-36` 殺、R6-2（送 Swift 失敗不記 log）由 `IR-4` 殺，2/2 | `r6-mutate-new.log` |
+| 全量變異、Swift | 依裁決免跑：JS 邏輯與 Swift 都未改（`git diff d61b899 -- command/` 為空） | — |
+
 ## 審查回應（Astra 第一輪，主線 2026-10-18 裁決：4 擋 7 應修全採納、根治；4 建議照做）
 
 | # | 等級 | 回應 | 修正 | 反例測試（先紅） | 變異 |
@@ -172,6 +182,14 @@
 | 2 | 應修 | 採納 | builder 解析支援型別註記與 `static var`，認不出的宣告形式明確報紅；builder 本體逐行掃描（Deviation 25） | Swift W7～W10 全紅 | W7～W10（Swift） |
 | 3 | 應修 | 採納 | API 與 b2 的拒絕結局限定為「非守衛方法、且整筆沒有已接受提案時照常送出」，守衛方法一律見 §4.2，已有提案交付先到者 | `IR-35`、`IR-7`、`IR-8` | — |
 
+第六輪（Astra 第五輪，主線裁決 0 擋 3 應修全採納）：
+
+| # | 等級 | 回應 | 修正 | 測試 | 變異 |
+|---|---|---|---|---|---|
+| 1 | 應修 | 採納（裁決：保留條件） | 撤回 Dev 24 的不可觀察論證，改述為已以 `IR-36` 覆蓋 | `IR-36` | R6-1 |
+| 2 | 應修 | 採納 | 契約改為送 Swift 失敗也寫一行插件 log（與實作一致） | `IR-4` 送 Swift 失敗模式 | R6-2 |
+| 3 | 應修 | 採納 | live 清單容量項改為非守衛／守衛兩組對照 | — | — |
+
 ## live 另案（測試帳號，未做）
 
 - 合成 NOTIFY 相對當前這則的抵達順序（`setTimeout 0` 的推論：capture listener 內的 microtask 仍早於遊戲 handler，依 HTML 規範，node harness 重現不了）。
@@ -186,7 +204,7 @@
 - WebKit 上退化通知的時機：相對造成它的送出與其 microtask，通知在之後的 task（第三輪建議 5）。
 - 回呼內再退化：`onConnectionDegraded` 內造成另一條連線退化，新事件在下一個 task 才到。
 - 對局合成後 kill-switch：守衛插件在對局連線上 `injectReceive`／`respondLocally` 被接受後關 L3，守衛方法仍不外送。
-- 本地回應容量：同一連線 256 筆待交付的 `respondLocally` 在 WebKit 上的記憶體與交付延遲，第 257 筆 `local_busy` 後照常外送（第四輪建議 6）。
+- 本地回應容量（第四輪建議 6、第六輪第 3 條），兩組對照：非守衛方法且整筆沒有已接受提案時，第 257 筆 `local_busy` 後照常外送；守衛方法上守衛者第 257 筆被拒為 `respond_rejected` 本地錯誤、零外送。兩組都量 WebKit 上的記憶體與交付延遲。
 - 守衛洪流：同一個 task 大量被擋的守衛方法送出（不受上限）期間注入回 `msgid_busy`、交付後恢復，量測保留筆數與恢復時間（第四輪建議 6）。
 
 ## 已知風險

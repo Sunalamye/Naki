@@ -4271,7 +4271,9 @@ test('IR-4: a pending synthetic NOTIFY is dropped when the connection closes or 
     assert.deepEqual(plain(seen).map(s => s[0]), delivered ? [NOTE] : [], mode + ': observation');
     assert.equal(t.c.__nakiWebSocket.diagnostics().reshapeLocked, false, mode);
     // 關閉時佇列中的合成項各寫一行（第四輪第 5 條裁決補交付）
-    if (!delivered && mode !== 'swift fails') assert.equal(t.events('log').filter(e => /injectReceive 未交付/.test(e.data.msg)).length, 1, mode + ': log');
+    // 送 Swift 失敗也經同一條丟棄路徑寫一行插件 log（第六輪第 2 條）
+    if (!delivered) assert.equal(t.events('log').filter(e => /injectReceive 未交付/.test(e.data.msg)).length, 1, mode + ': log');
+    if (mode === 'swift fails') assert.equal(t.events('log').some(e => /injectReceive 未交付：送 Swift 失敗/.test(e.data.msg)), true, mode + ': reason');
   }
 });
 
@@ -5023,4 +5025,19 @@ test('IR-35 (Astra4 3): a guard refused with local_busy on its guarded method en
   await tick();
   assert.deepEqual(t.game.slice(-1), [errorResponse(5256)]);
   assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0);
+});
+
+test('IR-36 (Astra5 1): re-triggering an already delivered degradation schedules nothing — a timer queued after it still runs before the next new degradation (marker, then B), and no callback gets an empty batch', async () => {
+  const t = page();
+  const log = degradeWatcher(t);
+  const game = gameSocket(t.c);
+  t.lobby.send(new t.c.Blob([request(1980, INFO)]));
+  await tick();
+  assert.deepEqual(plain(log).map(e => e[1]), ['send_blob'], 'A delivered');
+  t.lobby.send(new t.c.Blob([request(1981, INFO)]));   // A again: nothing pending, nothing scheduled
+  t.c.setTimeout(() => log.push(['marker']), 0);
+  game.send(new t.c.Blob([request(1982, INFO)]));      // B: a new degradation on another connection
+  await tick(); await tick();
+  const got = plain(log);
+  assert.deepEqual(got.map(e => e[0] === 'marker' ? 'marker' : e[1] + '@' + (e[2] === got[0][2] ? 'A' : 'B')), ['send_blob@A', 'marker', 'send_blob@B']);
 });

@@ -471,7 +471,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
   - 32 則與 1 MiB 都是啟發式，未以 live 量測。32 則是整條連線共用的名額，沒有公平性保證：同一頁的其他程式持續搶先填滿時，你可能一直拿到 `inject_busy`（同 realm 不防，§8）。
   - 入口當場複製你的 bytes，之後改你自己的 buffer 不影響交付。
   - 交付在下一個 task（`setTimeout 0`）：先送 Swift（LiqiParser 只看這一次），送不到就不交付遊戲；再交付遊戲。遊戲看到的順序是「當時正在處理的那則 → 合成通知」，中間可能插進其他網路訊息（弱順序）。「排在當時那則之後」是依 HTML 規範的推論（capture listener 內排的 microtask 仍早於遊戲的 handler），**未 live 驗證**。
-  - 交付當下連線已關閉、正在關閉（`readyState` 不是 OPEN）或進入接收不可信時，這則丟棄，遊戲、Swift 與觀察者都收不到，只在你的插件 log 寫一行（`injectReceive 未交付：<原因>`），不另外通知你；這些情況各有關閉事件或退化事件。連線關閉時還在排隊的每一則各寫一行（原因「連線已關閉」），送 Swift 失敗時不寫插件 log（只有 console）。
+  - 交付當下連線已關閉、正在關閉（`readyState` 不是 OPEN）或進入接收不可信時，這則丟棄，遊戲、Swift 與觀察者都收不到，只在你的插件 log 寫一行（`injectReceive 未交付：<原因>`），不另外通知你；這些情況各有關閉事件或退化事件。連線關閉時還在排隊的每一則各寫一行（原因「連線已關閉」）；送 Swift 失敗時同樣寫一行（原因「送 Swift 失敗」），遊戲與 Swift 都收不到。
   - 插件只透過觀察看到合成通知：只交給宣告 `observeNakiTraffic` 的 observer，`ctx.isNaki === true`、`ctx.synthetic === 'injectReceive'`、`ctx.syntheticBy` 是發起插件 id，沒有 `replace`、`drop`、`sendRequest`、`injectReceive`、`respondLocally`。觀察順序等於遊戲收到的順序：前面有 Blob 還在展開時，觀察跟著排隊。排隊的觀察項與網路接收共用同一個 256 則上限，超過時那條連線進入接收不可信（`receive_queue_overflow`），之後的 `injectReceive` 回 `receive_untrusted`。
   - 合成通知不碰配對、注入登記、歧義標記或遊戲未答。
   - 不新增外送路徑。遊戲收到合成通知後若自行送出請求，那是遊戲的送出，照常經守衛與送出禁改名單。

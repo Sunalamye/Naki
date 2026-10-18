@@ -274,6 +274,9 @@ const MUTANTS = [
   ["R4-5 關閉丟棄待交付不記 log", [["info.injected.splice(0).forEach(function(item) { injectDropped(item, '連線已關閉'); });", "info.injected.length = 0;"]], "naki-websocket.js"],
   // inject-receive 第五輪（Astra 第四輪 1）
   ["R5-1 同 key 再觸發不喚醒卡住的排程", [["        }\n        if (degradeScheduled || !pendingDegraded.length) return;", "        } else return;\n        if (degradeScheduled || !pendingDegraded.length) return;"]]],
+  // inject-receive 第六輪（Astra 第五輪 1、2）
+  ["R6-1 沒有待交付也排程（重觸發已交付的退化）", [["if (degradeScheduled || !pendingDegraded.length) return;", "if (degradeScheduled) return;"]]],
+  ["R6-2 送 Swift 失敗丟棄不記 log", [["if (!sent) return drop('送 Swift 失敗');", "if (!sent) return;"]], "naki-websocket.js"],
 ];
 
 const read = file => fs.readFileSync(path.join(jsDir, file), 'utf8');
