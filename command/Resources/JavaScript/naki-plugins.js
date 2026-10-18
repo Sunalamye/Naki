@@ -185,8 +185,21 @@
         if (s !== undefined && !newerThan(watermark, s)) { ambiguousPairs.delete(key); return true; }
         return ambiguousSockets.has(String(socketId));
     }
+    // 注入的回應已無法確定（接收不可信）：以 response_lost、空 bytes 交回發起插件
+    function injectionLost(socketId, msgId, injection) {
+        var origin = registry.get(injection.id);
+        if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
+        var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: new Uint8Array(0), mutable: false },
+            { type: TYPE_RESPONSE, msgId: msgId, method: injection.method, payload: null }, injection.method, true, origin);
+        rctx.inResponseTo = msgId;
+        rctx.timedOut = false;
+        rctx.error = 'response_lost';
+        try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
+        catch (e) { noteFailure(origin, 'onInjectResponse', e); }
+    }
     // 同鍵注入登記；延後回應只認抵達前就有的
     function injectionFor(key, watermark) {
+        if (key != null && recvLostSockets.has(key.slice(0, key.lastIndexOf(':')))) return undefined;   // 接收不可信的連線不認領（第十二輪第 43 條防線）
         var token = key != null ? injectedMsgIds.get(key) : undefined;
         return token !== undefined && !newerThan(watermark, token.seq) ? token : undefined;
     }
@@ -679,6 +692,11 @@
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
+                // sendRaw 期間（同步 hook 重入）連線已接收不可信：不登記，下一 tick 以 response_lost 結案（第十二輪第 43 條）
+                if (recvLostSockets.has(String(r.socketId))) {
+                    Promise.resolve().then(function () { injectionLost(r.socketId, msgId, token); });
+                    return { ok: true, msgId: msgId };
+                }
                 // 登記 (連線, msgId) → 發起插件（§7.7b 回應路由）；連線是 sendRaw 實際選到的那條
                 token.seq = nextSeq();
                 injectedMsgIds.set(msgKey(r.socketId, msgId), token);
@@ -831,7 +849,7 @@
         diagnostics.lastMethod = method;
         // 未匹配的延後回應（抵達前沒有任何同鍵紀錄）走到這裡時 method 為 null：下面的鏈一個 hook 都不派，也不消耗、不建歧義
         // 注入登記還在就是插件自送，即使 sendRaw 登記已被淘汰（D22 第二輪第 1 條）
-        var isNaki = injected || ambiguous || (injectedKey != null && recvLostSockets.has(String(raw.wsId))) || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
+        var isNaki = injected || ambiguous || (raw.direction === 'receive' && recvLostSockets.has(String(raw.wsId))) || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
 
         // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
         // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
@@ -1187,17 +1205,9 @@
             var prefix = socketId + ':';
             Array.from(injectedMsgIds.keys()).forEach(function (k) {
                 if (k.indexOf(prefix) !== 0) return;
-                var injection = injectedMsgIds.get(k), msgId = Number(k.slice(prefix.length));
+                var injection = injectedMsgIds.get(k);
                 injectedMsgIds.delete(k);
-                var origin = registry.get(injection.id);
-                if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
-                var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: new Uint8Array(0), mutable: false },
-                    { type: TYPE_RESPONSE, msgId: msgId, method: injection.method, payload: null }, injection.method, true, origin);
-                rctx.inResponseTo = msgId;
-                rctx.timedOut = false;
-                rctx.error = 'response_lost';
-                try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
-                catch (e) { noteFailure(origin, 'onInjectResponse', e); }
+                injectionLost(socketId, Number(k.slice(prefix.length)), injection);
             });
         },
 

@@ -590,9 +590,9 @@ PS-55 改寫：第十輪斷言「失敗項以未匹配處理、之後恢復一�
 
 ### 第十一輪 Deviations
 
-1. **`runChain` 不另擋接收不可信連線的注入認領**：`receiveLost` 已清空該連線注入登記，且同時標記不可信，之後 `nextPluginMsgId` 一律回 null，所以不會再有可認領的登記。另寫判斷是死碼，變異殺不掉。
+1. ~~**`runChain` 不另擋接收不可信連線的注入認領**：~~ 第十二輪撤回（Astra 43 條證明不成立：在途注入在 `sendRaw` 期間連線轉為接收不可信，返回後仍會登記）。原文：`receiveLost` 已清空該連線注入登記，且同時標記不可信，之後 `nextPluginMsgId` 一律回 null，所以不會再有可認領的登記。另寫判斷是死碼，變異殺不掉。
 2. **放棄項的晚到完成不另設守衛**：放棄時項目已就緒，下一次 flush 就移出佇列；之後才完成只改到已移出的物件，不派發。
-3. **NOTIFY 不套「只觀察」**：裁決寫的是「回應」；NOTIFY 沒有配對或注入可認領，歸屬不受讀取失敗影響。
+3. ~~**NOTIFY 不套「只觀察」**：~~ 第十二輪依 45 條改為 NOTIFY 也只觀察，理由見第十二輪。原文：裁決寫的是「回應」；NOTIFY 沒有配對或注入可認領，歸屬不受讀取失敗影響。
 
 ### 第十一輪已知風險
 
@@ -600,4 +600,54 @@ PS-55 改寫：第十輪斷言「失敗項以未匹配處理、之後恢復一�
 - `response_lost` 時請求可能已被伺服器處理，結果未知；插件須自行處理。
 - 容量 256 是啟發式；`headWaitMs` 沒有 live 數據。
 - Swift 端收到 Blob 的順序仍可能晚於後到的同步封包，不在本包範圍。
+- 未 live 驗證。
+
+## 第十二輪（Astra 第十一輪 43～45 條；主線裁決全採納）
+
+第十一輪 Dev 1 撤回（43 條反例），Dev 2 經 Astra 核對成立，Dev 3 依 45 條改寫。
+
+### 做了什麼
+
+- `naki-plugins.js`：
+  - 抽出 `injectionLost(socketId, msgId, injection)`，`receiveLost` 與 `sendRequest` 共用。
+  - `sendRequest`：`sendRaw` 成功後、登記之前，若該連線已接收不可信，不登記，回 `ok:true` 與 msgId，以 `Promise.resolve().then` 在下一個 microtask 呼叫 `injectionLost`（第 43 條）。
+  - `injectionFor`：鍵所屬連線接收不可信時一律回 undefined（防線）。一般鏈認領、零消耗者分支與遊戲未答消耗都經過它，所以遊戲未答在接收不可信時照常消耗。
+  - `runChain` 的接收不可信條件從「RESPONSE」改為「接收方向」，NOTIFY 也當成 Naki 流量（第 45 條），因此沒有 `replace`、`drop` 與變長改寫。
+- `naki-websocket.js`：排隊同步封包遮罩拋錯時 `view.set(original)` 還原共享內容，再以原內容快照（第 44 條）。
+
+| 條 | 處理 | 測試 |
+|---|---|---|
+| 擋 43 | 登記前檢查、microtask 結案；認領入口防線 | PS-63（讀取拋錯、第 257 項） |
+| 應修 44 | 還原共享 view | PS-61 新增「改後拋錯」 |
+| 建議 45 | NOTIFY 也只觀察；揭露狀態可能不完整、恢復＝重連 | PS-64；設計、契約 |
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-61～PS-64 套在 `726ca07` 的 JS | PS-61（改後拋錯：遊戲 `P1   ` 與插件 `Alice` 分歧）、PS-63（登記 1）、PS-64（一般 hook 收到失敗後的 NOTIFY）紅，皆為行為紅；PS-62 既有，綠 | `r12-red-on-726ca07.log` |
+| 實作後 | b2 239／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r12-{b2,v2,p4,keepalive,plugin-regression,local-unlock}.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| PS75～PS89（含本輪新增 PS85～PS89）與更新字串的 PS15 | PS89 存活，其餘全殺；本輪新增計入的 PS85～PS88 4/4 殺 | `r12-mutate-new.log` |
+| 全量 0–171（PS89 不列入） | 169/171；存活只有 U10、T7 | `r12-mutate-full.log` |
+
+替換字串隨程式更新：PS15、PS76、PS77。
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r12-swift-targeted.log`），全量 `NakiTests` 1184／0（`r12-swift-full.log`）。
+
+### 第十二輪 Deviations
+
+1. **認領入口防線保留，但變異 PS89 不列入**：裁決要求 `injectionFor` 加防線。現行能建立注入登記的只有 `sendRequest`；它在登記前已檢查接收不可信，`receiveLost` 也清空既有登記，登記與回傳之間沒有插件程式碼可重入。所以接收不可信連線上不存在可認領的登記，防線不可達。試跑 PS89 存活（`r12-mutate-new.log`）。保守起見保留程式碼，只把變異從清單移除，以維持「全量存活只 T7／U10」。若主線認為防線應可測，需要另一條登記入口才測得到。
+2. **在途注入結案用 microtask**：裁決允許同步或下一 tick。同步呼叫會讓插件在 `sendRequest` 回傳 msgId 之前就收到結案，對不上自己的請求，所以延到下一個 microtask。期間插件若已停用，就不回派（與 `receiveLost` 相同）。
+
+### 第十二輪已知風險
+
+- 接收不可信後 NOTIFY 也不能改寫，依賴改寫 NOTIFY 的插件在該連線關閉前失效（保守取捨）。
+- 讀取失敗後插件狀態可能不完整，只能靠重連恢復；Naki 不主動重連。
 - 未 live 驗證。

@@ -587,11 +587,11 @@
                 });
                 return;
             }
-            // 先遮罩再快照再就緒：插件、遊戲、Swift 看到同一份；遮罩拋錯就以原內容快照，不卡佇列（第 41 條）
+            // 先遮罩再快照再就緒：插件、遊戲、Swift 看到同一份；遮罩拋錯就把共享 view 還原成原內容再快照，不卡佇列（第 41、44 條）
             const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
             const original = view.slice();
             try { nakiNicknameMask.observe(view, 'receive'); entry.view = view.slice(); }
-            catch (e) { console.error('[Naki WS] 排隊接收遮罩失敗，以原內容快照:', e); entry.view = original; }
+            catch (e) { console.error('[Naki WS] 排隊接收遮罩失敗，還原為原內容:', e); view.set(original); entry.view = original; }   // 遊戲與 Swift 也拿原內容（第 44 條）
             entry.ready = true;
             sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(view), type: 'binary', size: view.byteLength });
         } finally {

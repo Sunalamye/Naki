@@ -3712,9 +3712,9 @@ test('PS-60 (r11 40): while the last queued item is being dispatched, observer A
   assert.deepEqual(plain(t.c.__nakiWebSocket.diagnostics().recvQueue), []);
 });
 
-test('PS-61 (r11 41): with the nickname mask on and a Blob unexpanded, an authGame RESPONSE arriving as a TypedArray is the same masked content for plugins, the game and Swift; if the mask throws the plugin gets the original bytes and the queue still drains', async () => {
-  for (const broken of [false, true]) {
-    const label = broken ? 'mask throws' : 'mask works';
+test('PS-61 (r11 41, r12 44): with the nickname mask on and a Blob unexpanded, an authGame RESPONSE arriving as a TypedArray is the same masked content for plugins, the game and Swift; if the mask throws (before or after changing the bytes) all three get the original bytes and the queue still drains', async () => {
+  for (const mode of ['mask works', 'mask throws before changing', 'mask throws after changing']) {
+    const label = mode, broken = mode !== 'mask works';
     const t = page();
     t.c.__nakiHideNames.setEnabled(true);
     const seen = [];
@@ -3725,7 +3725,9 @@ test('PS-61 (r11 41): with the nickname mask on and a Blob unexpanded, an authGa
     const held = heldBlob(t, response(2010, [8, 1]));
     arrive(t, held.blob);
     const name = [...Buffer.from('Alice')], view = [0x22, name.length, ...name];
-    if (broken) t.c.__nakiHideNames.observe = () => { throw new Error('mask broke'); };
+    const real = t.c.__nakiHideNames.observe;
+    if (mode === 'mask throws before changing') t.c.__nakiHideNames.observe = () => { throw new Error('mask broke'); };
+    if (mode === 'mask throws after changing') t.c.__nakiHideNames.observe = (v, d) => { real(v, d); throw new Error('mask broke late'); };
     t.lobby.receive(response(2011, [18, view.length, ...view]));
     held.open();
     await tick(); await tick();
@@ -3762,6 +3764,56 @@ test('PS-62 (r11 42): a Blob that never settles holds 256 queued items (diagnost
   t.lobby.close();
   assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 0, 'closing clears receive-untrusted');
   assert.equal(untrusted(t), 0);
+});
+
+// ---- pair-source 第十二輪：在途注入遇接收不可信、遮罩改後拋錯還原、NOTIFY 也只觀察 ----
+test('PS-63 (r12 43): an observer of the injected FST synchronously makes the connection receive-untrusted inside sendRaw (a Blob that throws on read, or the 257th queued item) — the injection is not registered, FST gets response_lost on the next tick, and the later RESPONSE (22) on the same number never reaches FST', async () => {
+  for (const how of ['read throws', 'queue overflow']) {
+    const t = page();
+    const { answers, answerErrors, answerPayloads, inject } = injector11(t);
+    let armed = false;
+    t.c.__nakiPlugins.setGrant('sab63', { capabilities: ['observe'], methods: [FST], priority: 700, observeNakiTraffic: true });
+    t.c.__nakiPlugins.register({ id: 'sab63', onSend() {
+      if (!armed) return;
+      armed = false;
+      if (how === 'read throws') { arrive(t, rejectingBlob(t, response(2030, [8, 1]), true).blob); return; }
+      arrive(t, heldBlob(t, response(2030, [8, 1])).blob);
+      for (let i = 0; i < 256; i++) t.lobby.receive(response(31000 + i, [8, 2]));
+    } });
+    armed = true;
+    const r = inject(FST);
+    assert.equal(r.ok, true, how);
+    assert.equal(r.msgId, 64000, how);
+    assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 1, how);
+    assert.equal(pendingInjections(t), 0, how + ': not registered');
+    assert.deepEqual(plain(answerErrors), [], how + ': not yet, the plugin first gets its msgId');
+    await tick();
+    assert.deepEqual(plain(answers), [[64000, FST]], how);
+    assert.deepEqual(plain(answerErrors), ['response_lost'], how);
+    t.lobby.receive(response(64000, [8, 22]));
+    assert.deepEqual(plain(answers), [[64000, FST]], how + ': the later RESPONSE never reaches FST');
+    assert.equal(answerPayloads.includes(22), false, how);
+  }
+});
+
+test('PS-64 (r12 45): after a NOTIFY Blob fails to read, the next NOTIFY on that connection is observe-only too — no general hook, no replace, no drop', async () => {
+  const t = page();
+  const NOTE = '.lq.NotifyAccountUpdate', m = Buffer.from(NOTE);
+  const note = p => new Uint8Array([1, 10, m.length, ...m, 18, 1, p]);
+  const general = [], seen = [];
+  t.c.__nakiPlugins.setGrant('gen64', { capabilities: ['observe', 'rewriteReceive'], methods: [NOTE], priority: 200 });
+  t.c.__nakiPlugins.register({ id: 'gen64', onReceive(ctx) { general.push(ctx.bytes[ctx.bytes.length - 1]); } });
+  t.c.__nakiPlugins.setGrant('naki64', { capabilities: ['observe', 'rewriteReceive'], methods: [NOTE], priority: 300, observeNakiTraffic: true });
+  t.c.__nakiPlugins.register({ id: 'naki64', onReceive(ctx) { seen.push([ctx.bytes[ctx.bytes.length - 1], ctx.isNaki, typeof ctx.replace === 'function', typeof ctx.drop === 'function']); } });
+  t.lobby.receive(note(1));
+  assert.deepEqual(plain(general), [1], 'before the failure NOTIFY goes to the general chain');
+  const bad = rejectingBlob(t, note(2));
+  arrive(t, bad.blob);
+  bad.fail();
+  await tick(); await tick();
+  t.lobby.receive(note(3));
+  assert.deepEqual(plain(general), [1], 'after the failure no general hook sees NOTIFY');
+  assert.deepEqual(plain(seen).slice(-1), [[3, true, false, false]]);
 });
 
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
