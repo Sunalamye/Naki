@@ -487,7 +487,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
     - `bad_envelope`：不是 RESPONSE、msgId 不是這筆請求的，或欄位越界。field 1（method）可有可無。
     - `rewritten`：這筆請求已被前面的插件或你自己改過（`replace` 或就地改）。
     - `already_responded`：已有別的插件的提案。先到先得。
-  - 接受時回 `{ ok:true }`，當場複製你的 bytes 存成提案。鏈不停止，其他插件照常執行；之後的 `ctx.replace` 回 `false`。
+  - 接受時回 `{ ok:true }`，當場複製你的 bytes 存成提案。`ok:true` 表示提案被接受，不保證交付：守衛拋錯或 bridge 出錯時結局為本地錯誤（拋錯優先），插件不會另外得知。鏈不停止，其他插件照常執行；之後的 `ctx.replace` 回 `false`。
   - 結局：請求不送出。Swift 在同一則訊息收到原請求與提案回應；遊戲在 `ws.send` 返回後的下一個 task 收到提案回應。只有呼叫的插件知道回應內容，其他插件看不到這則回應。被拒時的結局：非守衛方法、且整筆沒有已接受的提案時，請求照常送出，與沒呼叫相同；守衛方法的結局一律見 `plugin-v2-b2.md` §4.2（例如守衛者被 `local_busy` 拒絕是本地錯誤，不外送）；整筆已有別的插件被接受的提案時，交付先到者。
   - 判決出錯或 bridge 出錯時，有提案的非守衛方法仍交付提案，不會改送原請求：你已拿到 `ok:true`。
   - 守衛方法依 `plugin-v2-b2.md` §4.2：只收守衛者的提案。守衛者的 `respondLocally` 被拒算第 3 步失敗，整筆改為本地錯誤（`respond_rejected`；回應不合規是 `response_invalid`），之後它停用或退出也一樣。第 3 步不成立而有守衛者的提案時本地成功（守衛紀錄 `local_ok`），不需要其他守衛者放行。拋錯、回傳 thenable 與 bridge 出錯仍優先，改為本地錯誤。你呼叫時還沒有守衛者、提案被接受，鏈中才出現守衛者時，提案不交付，整筆改為本地錯誤（`not_guardian`），請求一樣不送出。
@@ -507,6 +507,7 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
 
   - 讀取或呼叫你的 `onConnectionDegraded` 拋錯（含 getter 拋錯）只記你自己的一次失敗，其他插件與同批其他事件照常收到。
   - 每條連線每個 reason 只發一次。恢復方式是連線關閉後重連（與 `response_lost` 一致）；`reshape_locked` 要重載頁面。重連是新的 socketId，之後再退化會再發。
+  - 事件可能在連線已關閉後才送達，此時 `ctx.socketId` 已失效；重連後的新連線另計。
   - 交付時機：觸發後的下一個 task（`setTimeout 0`），一次交付當時已排入的那一批。排不進 task（計時器拋錯）時不拋進觸發點、不自行重試，事件留著，等下一次有退化觸發（同一條連線同一個 reason 再觸發也算，不會重複發）且排程成功時一起交付；在那之前你不會收到。你在回呼裡造成的新退化排到再下一個 task，不會插進這一批。交付當下沒有任何插件 hook 在執行，也不在一筆送出的判決與上 wire 之間，所以你在回呼裡做的事（例如用保存的 ctx 呼叫 `taint()`）只影響之後的送出。代價是順序：同一個 task 裡排在它後面的訊息（例如接收佇列裡的觀察項）可能先派發；那些訊息的限制（只觀察）在觸發當下就已生效。同時寫一行插件 id `naki` 的 log。
   - `injections_refused` 的 scope 是 page：沿用現行規則，任一連線失準或以 Blob 送出，所有連線的 `sendRequest` 都回 `msgid_busy`。
 
