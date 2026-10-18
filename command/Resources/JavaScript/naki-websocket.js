@@ -572,6 +572,13 @@
         info.recvLost = true;
         if (window.__nakiPlugins && window.__nakiPlugins.receiveLost) window.__nakiPlugins.receiveLost(wsId, reason);
     }
+    // 所有入隊入口（網路接收、injectReceive 的觀察項）共用容量與溢出處理（inject-receive 第二輪第 6 條）
+    function checkOverflow(wsId, info) {
+        if (info.recvQueue.length <= RECV_QUEUE_LIMIT) return;
+        receiveLost(wsId, info, 'receive_queue_overflow');
+        info.recvQueue.forEach(function(e) { if (!e.ready) { e.ready = true; e.view = null; } });
+        flushReceive(wsId, info);
+    }
     function enqueueReceive(wsId, info, data) {
         const entry = { view: null, ready: false, failed: false, blob: data instanceof Blob, watermark: nakiSentSeq, at: Date.now() };
         info.recvQueue.push(entry);
@@ -598,11 +605,7 @@
             entry.ready = true;
             sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(view), type: 'binary', size: view.byteLength });
         } finally {
-            if (info.recvQueue.length > RECV_QUEUE_LIMIT) {
-                receiveLost(wsId, info, 'receive_queue_overflow');
-                info.recvQueue.forEach(function(e) { if (!e.ready) { e.ready = true; e.view = null; } });
-                flushReceive(wsId, info);
-            }
+            checkOverflow(wsId, info);
         }
     }
     function flushReceive(wsId, info) {
@@ -624,7 +627,8 @@
     // injectReceive（plugin-v2.md §4.2，inject-receive §1）：合成 NOTIFY 排在目前這則之後。下一個 task 才交付（setTimeout 0；
     // capture listener 內的 microtask 仍早於遊戲 handler，依 HTML 規範推論，未 live 驗證）：先送 Swift（LiqiParser 只看這一次），
     // 送不到就不交付遊戲；再交付遊戲（Naki listener 略過）；最後觀察項排進接收佇列尾，插件觀察順序等於遊戲收到的順序。
-    // 呼叫端（naki-plugins）已驗 L3、內容與禁改名單；這裡只管連線。釋放時清空待交付，之後才到的 task 找不到項目就什麼都不做
+    // 呼叫端（naki-plugins）已驗 L3、內容與禁改名單；這裡只管連線。釋放時清空待交付，之後才到的 task 找不到項目就什麼都不做；
+    // 交付當下再查一次連線仍是同一筆紀錄且 OPEN（CLOSING 尚未釋放也丟棄，第二輪第 7 條）。觀察項與網路接收共用佇列上限
     function injectReceive(socketId, bytes, pluginId, maxPending) {
         let ws = null, info = null;
         wsConnections.forEach(function(i, w) { if (i.id === socketId) { ws = w; info = i; } });
@@ -641,6 +645,7 @@
         if (at === -1) return;
         info.injected.splice(at, 1);
         const drop = function(why) { sendToSwift('plugin_event', { id: item.pluginId, kind: 'log', msg: 'injectReceive 未交付：' + why }); };
+        if (wsConnections.get(ws) !== info || ws.readyState !== OriginalWebSocket.OPEN) return drop('連線已關閉');
         if (info.recvLost) return drop('連線接收不可信');
         let sent = false;
         try {
@@ -655,6 +660,7 @@
         } catch (e) { console.error('[Naki WS] injectReceive 交付遊戲時 listener 拋錯:', e); }
         if (!wsConnections.has(ws)) return;
         info.recvQueue.push({ view: item.bytes.slice(), ready: true, failed: false, blob: false, watermark: undefined, synthetic: item.pluginId, at: Date.now() });
+        checkOverflow(info.id, info);
         flushReceive(info.id, info);
     }
 

@@ -197,17 +197,52 @@ final class JSContractTests: XCTestCase {
         XCTAssertEqual(missing, [], "Swift 會消費的 method 沒進 JS 的變長改寫禁改名單")
     }
 
-    /// respondLocally 的禁用名單來源是 LiqiParser 在送出方向有副作用的方法（匹配開始與取消）與登入回應方法：
-    /// 本地回應這些請求會讓 Swift 的匹配或帳號狀態與伺服器分岔，必須全部被 JS 禁用，缺一即紅（plugin-v2-b2.md §5.3）。
-    func testRespondForbiddenListCoversLiqiParserSideEffectMethods() throws {
-        var methods: Set<String> = [LiqiRequestBuilder.startUnifiedMatchMethod, LiqiRequestBuilder.cancelUnifiedMatchMethod,
-                                    LiqiRequestBuilder.cancelMatchMethod]
-        methods.formUnion(LiqiParser.loginResponseMethods)
+    /// respondLocally 的禁用名單從 Swift 實際分支反查，不手列：bridge 目錄每個拿 method 比較的分支（`method ==`／`!=`、
+    /// `X.contains(method)`），比較對象解析成字面值或 bridge 檔裡的靜態常數；另加 LiqiParser、MajsoulBridge 的全部 `.lq.` 字面值。
+    /// 本地回應這些請求會讓 Swift 的匹配、牌局或帳號狀態與伺服器分岔：新增分支沒更新 JS 名單即紅，比較對象解析不了也紅
+    /// （plugin-v2-b2.md §5.3，inject-receive 第二輪第 9 條）。
+    func testRespondForbiddenListCoversEverySwiftMethodBranch() throws {
+        let bridge = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("command/Services/Bridge")
+        func groups(_ pattern: String, _ text: String) throws -> [[String]] {
+            try NSRegularExpression(pattern: pattern).matches(in: text, range: NSRange(text.startIndex..., in: text)).map { match in
+                (1..<match.numberOfRanges).map { Range(match.range(at: $0), in: text).map { String(text[$0]) } ?? "" }
+            }
+        }
+        let literal = #""(\.lq\.[A-Za-z0-9_.]+)""#
+        var sources: [String: String] = [:]
+        for url in try FileManager.default.contentsOfDirectory(at: bridge, includingPropertiesForKeys: nil) where url.pathExtension == "swift" {
+            sources[url.lastPathComponent] = try String(contentsOf: url, encoding: .utf8)
+        }
+        var constants: [String: Set<String>] = [:]
+        for text in sources.values {
+            for g in try groups(#"static let (\w+)\s*=\s*"# + literal, text) { constants[g[0]] = [g[1]] }
+            for g in try groups(#"static let (\w+): Set<String> = \[([^\]]*)\]"#, text) {
+                constants[g[0]] = Set(try groups(literal, g[1]).map { $0[0] })
+            }
+        }
+        var methods: Set<String> = [], unresolved: [String] = []
+        for (file, text) in sources {
+            let operands = try groups(#"\b(?:method|methodName)\s*[!=]=\s*("[^"]*"|[\w.]+)"#, text).map { $0[0] }
+                + groups(#"([\w.]+)\.contains\((?:method|methodName)\)"#, text).map { $0[0] }
+            for operand in operands {
+                if operand.hasPrefix("\"") { methods.insert(String(operand.dropFirst().dropLast())); continue }
+                if let values = constants[String(operand.split(separator: ".").last ?? "")] { methods.formUnion(values) }
+                else { unresolved.append("\(file): \(operand)") }
+            }
+            if file == "LiqiParser.swift" || file == "MajsoulBridge.swift" { methods.formUnion(try groups(literal, text).map { $0[0] }) }
+        }
+        XCTAssertEqual(unresolved, [], "method 分支的比較對象解析不了，反查會漏")
+        for known in [LiqiRequestBuilder.startUnifiedMatchMethod, LiqiRequestBuilder.cancelUnifiedMatchMethod,
+                      LiqiRequestBuilder.cancelMatchMethod, ".lq.Lobby.oauth2Auth", ".lq.FastTest.authGame"] {
+            XCTAssertTrue(methods.contains(known), "反查抓不到 \(known)，regex 或掃描路徑壞了")
+        }
+        XCTAssertTrue(methods.isSuperset(of: LiqiParser.loginResponseMethods), "反查抓不到登入回應方法")
         let page = try loadedPage()
         let missing = methods.sorted().filter {
             page.evaluateScript("window.__nakiPlugins.isRespondForbidden('\($0)')")?.toBool() != true
         }
-        XCTAssertEqual(missing, [], "LiqiParser 有副作用的方法沒進 JS 的 respondLocally 禁用名單")
+        XCTAssertEqual(missing, [], "Swift 依 method 分支的方法沒進 JS 的 respondLocally 禁用名單")
         XCTAssertEqual(page.evaluateScript("window.__nakiPlugins.isRespondForbidden('.lq.Lobby.fetchServerTime')")?.toBool(), false,
                        "名單不能空轉成全禁")
     }

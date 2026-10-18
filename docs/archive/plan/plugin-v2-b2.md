@@ -277,7 +277,7 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 |---|---|---|---|
 | 1 | 流量是 isNaki（Naki 自送、插件號段）。**不跑鏈**，與 `observeNakiTraffic` 無關 | 本地錯誤 | `naki_traffic` |
 | 2 | 辨識、跑鏈或鏈後判定拋錯（`guardedSend` 的 catch），或 bridge 在派發前出錯（`failSafe`） | 本地錯誤 | `dispatch_error`／`guard_error`／`bridge_error` |
-| 3 | 守衛者有任何失敗：`onSend` 拋錯（只計守衛者）、回傳 Promise 或 thenable、[B2] `respondLocally` 被拒或回應不合規 | 本地錯誤 | `hook_threw`／`async_hook`／[B2] `respond_rejected`／`response_invalid` |
+| 3 | 守衛者有任何失敗：`onSend` 拋錯（只計守衛者）、回傳 Promise 或 thenable、[B2] `respondLocally` 被拒或回應不合規（守衛者身分以呼叫當時為準，之後退出仍算）；[B2] 被接受的提案來自非守衛者（呼叫時還不是守衛方法，鏈中才有守衛者） | 本地錯誤 | `hook_threw`／`async_hook`／[B2] `respond_rejected`／`response_invalid`／`not_guardian` |
 | 3b | [B2] 第 3 步不成立，且有守衛者的 `respondLocally` 被接受 | 本地成功（交付提案回應） | — |
 | 4 | 有守衛者沒有同步放行：已停用、沒有 `onSend`、`methods` 不含 m、鏈提早停止 | 本地錯誤 | `not_on_chain` |
 | 5 | 已污染的守衛者，目前 grant 的 `sendGuard` 已不含 m | 本地錯誤 | `guard_revoked` |
@@ -286,6 +286,7 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 | 8 | 以上皆否 | 原樣送出（原物件） | — |
 
 - 第 3b 步排在第 4–7 步之前：這四條只否決「送出」。本地成功時伺服器什麼都沒收到，不需要其他守衛者放行。
+- 第 3b 步只收守衛者的提案（inject-receive 第二輪第 10 條裁決）。呼叫當時已是守衛方法時，非守衛者的 `respondLocally` 當場回 `not_guardian`、不留提案，這一筆照本表判定，如同它沒有呼叫。呼叫時還沒有守衛者、提案被接受，鏈中才出現守衛者時，提案不交付、也不送出，改為本地錯誤 `not_guardian`。守衛者全部退出時（守衛退出分支）有提案仍本地成功。
 - 「放行」＝守衛者的 `onSend` 同步正常返回、回傳值不是 thenable、沒有呼叫 `respondLocally`。守衛 hook 是同步契約。回傳 thenable 時，成功或失敗等它有結果才計入，連續失敗照常累計到自動停用（第二輪第 6 條，測試 `R6b`）。
 - `rewritten` 一律擋下（Deviation D3）：守衛者放行的是原 bytes，排在後面的 `rewriteSend` 插件可能改掉被引用的 id。
 - 擋下時遊戲那份 buffer 還原成原樣，交給 Swift 的是完整原始快照（審查第 7 條）。
@@ -362,8 +363,10 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
   1. 呼叫被接受後鏈**不停止**，其餘插件照常執行。
   2. 第二個呼叫 `respondLocally` 的插件被拒（`already_responded`）。先到者的提案保留，被拒的那一方記為 `respond_rejected`，依 §4.2 第 3 步整筆改為本地錯誤。
   3. 結局與交付一律 `{ block:true, request: original, response, msgId, method }`，與守衛擋下同一條路徑（§1.3）。
-- 被拒：非守衛方法回 `{ ok:false, reason }`，REQUEST 照常送出（插件自行處理）；守衛方法依 N2 改為本地錯誤。
-- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。加一條契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）：`LiqiParser` 送出方向有副作用的方法常數（`startUnifiedMatchMethod`、`cancelUnifiedMatchMethod`、`cancelMatchMethod`）與 `loginResponseMethods` 全部出現在 JS 禁用名單。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
+  4. 只有守衛者能在守衛方法上提案（§4.2 第 3b 步）；非守衛者回 `not_guardian`，不算第 3 步失敗。守衛者身分以呼叫當時為準：被拒後退出（停用、未污染）的守衛者，拒絕仍算第 3 步失敗，與退出前拋錯一致。
+  5. 宣告 `sendGuard` 的插件，`respondLocally` 或 `injectReceive` 一被接受就污染（§3.2），之後停用、熱重載都保留守衛。合成內容可能展示未擁有的項目，不靠插件自己呼叫 `taint()`。
+- 被拒：非守衛方法回 `{ ok:false, reason }`，REQUEST 照常送出（插件自行處理）；守衛方法上守衛者的呼叫被拒依 N2 改為本地錯誤，非守衛者的 `not_guardian` 不影響判定。
+- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。加一條契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）：從 `command/Services/Bridge` 的 Swift 原始碼反查每個依 method 分支的比較（`method ==`／`!=`、`X.contains(method)`，比較對象解析成字面值或 bridge 檔的靜態常數，解析不了即紅），加上 `LiqiParser`、`MajsoulBridge` 的全部 `.lq.` 字面值，全部出現在 JS 禁用名單（inject-receive 第二輪第 9 條；原本手列三個常數，新增分支抓不到）。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
 
 ### 5.4 `injectReceive`
 
