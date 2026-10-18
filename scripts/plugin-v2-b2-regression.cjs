@@ -5027,14 +5027,20 @@ test('IR-35 (Astra4 3): a guard refused with local_busy on its guarded method en
   assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0);
 });
 
-test('IR-36 (Astra5 1): re-triggering an already delivered degradation schedules nothing — a timer queued after it still runs before the next new degradation (marker, then B), and no callback gets an empty batch', async () => {
+test('IR-36 (Astra5 1, Astra6): re-triggering an already delivered degradation adds no schedule (counted with a controlled setTimeout) — a timer queued after it still runs before the next new degradation (marker, then B)', async () => {
   const t = page();
   const log = degradeWatcher(t);
   const game = gameSocket(t.c);
   t.lobby.send(new t.c.Blob([request(1980, INFO)]));
   await tick();
   assert.deepEqual(plain(log).map(e => e[1]), ['send_blob'], 'A delivered');
+  // 可控 scheduler：重觸發已交付的 A 不新增任何排程（第七輪，Astra 第六輪建議）
+  const timer = t.c.setTimeout;
+  let scheduled = 0;
+  t.c.setTimeout = (fn, ms) => { scheduled++; return timer(fn, ms); };
   t.lobby.send(new t.c.Blob([request(1981, INFO)]));   // A again: nothing pending, nothing scheduled
+  t.c.setTimeout = timer;
+  assert.equal(scheduled, 0, 're-triggering a delivered A adds no schedule');
   t.c.setTimeout(() => log.push(['marker']), 0);
   game.send(new t.c.Blob([request(1982, INFO)]));      // B: a new degradation on another connection
   await tick(); await tick();

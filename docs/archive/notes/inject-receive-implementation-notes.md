@@ -128,10 +128,17 @@
 
 | 階段 | 結果 | log |
 |---|---|---|
-| 新測試（只加測試與文件，程式未改） | `IR-36`（重觸發已交付的退化不排程：`marker` 先於新退化 B，無空批次回呼）、`IR-4` 送 Swift 失敗恰好一行「injectReceive 未交付：送 Swift 失敗」。兩者鎖住既有行為，對 d61b899 即綠；有效性由下列變異證明 | `r6-tests.log` |
+| 新測試（只加測試與文件，程式未改） | `IR-36`（重觸發已交付的退化不新增排程：`marker` 先於新退化 B；第七輪起另以可控 `setTimeout` 計數直接斷言新增排程為 0）、`IR-4` 送 Swift 失敗恰好一行「injectReceive 未交付：送 Swift 失敗」。兩者鎖住既有行為，對 d61b899 即綠；有效性由下列變異證明 | `r6-tests.log` |
 | 六套 node | b2 279／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r6-final-*.log` |
 | 變異（新增 2） | R6-1（拿掉「無待交付不排」）由 `IR-36` 殺、R6-2（送 Swift 失敗不記 log）由 `IR-4` 殺，2/2 | `r6-mutate-new.log` |
 | 全量變異、Swift | 依裁決免跑：JS 邏輯與 Swift 都未改（`git diff d61b899 -- command/` 為空） | — |
+
+### 第七輪（Astra 第六輪建議，純測試）
+
+| 階段 | 結果 | log |
+|---|---|---|
+| b2 | 279/0；`IR-36` 新增可控 scheduler 計數，重觸發已交付的 A 新增排程 0 | `r7-b2.log` |
+| 變異 R6-1 | 仍殺（`IR-36` 的計數斷言：變異版新增排程 1） | `r7-mutate-r6-1.log` |
 
 ## 審查回應（Astra 第一輪，主線 2026-10-18 裁決：4 擋 7 應修全採納、根治；4 建議照做）
 
