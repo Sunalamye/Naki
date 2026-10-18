@@ -1,4 +1,4 @@
-# pair-source：跨來源 msgId 配對隔離（設計，2026-10-17；第三輪改為交易代號，第四輪記帳分兩段，第五輪逐筆交易撤回，第六輪交易涵蓋底層 send，第七輪 Blob 連線不可信，第八輪延後回應水位，第九輪水位統一套所有可消耗紀錄，第十輪接收依抵達順序認領，第十一輪接收不可信，第十二輪在途注入與 NOTIFY，第十三輪復驗小修）
+# pair-source：跨來源 msgId 配對隔離（設計，2026-10-17；第三輪改為交易代號，第四輪記帳分兩段，第五輪逐筆交易撤回，第六輪交易涵蓋底層 send，第七輪 Blob 連線不可信，第八輪延後回應水位，第九輪水位統一套所有可消耗紀錄，第十輪接收依抵達順序認領，第十一輪接收不可信，第十二輪在途注入與 NOTIFY，第十三、十四輪復驗小修）
 
 基準 main `13abe49`。改 `naki-plugins.js` 與 `naki-websocket.js`（送出者傳遞）。審查原文在主 repo `.swfd/logs/pair-source-review/`：第一輪 1～7 條、第二輪 8～14 條、第三輪 15～18 條、第四輪 19～20 條、第五輪 21～25 條、第六輪 26～30 條、第七輪 31～33 條、第八輪 34～35 條。
 
@@ -65,7 +65,7 @@
    - **接收不可信**（第十一輪第 39、42 條）。讀不到的 Blob 不能當成「確定未匹配」：它可能正是某個注入的回應，若照常往下認領，下一則同號回應會被交給注入者。所以：
      - 接收 Blob 讀取失敗（reject 或同步拋錯），處理到該項時，該連線進入接收不可信，直到關閉。
      - 進入時：該連線所有既有注入登記立即結案，發起插件的 `onInjectResponse` 收到 `ctx.error === 'response_lost'`（`bytes` 為空），登記清空。同時標記不可信，之後任一連線的注入都回 `msgid_busy`。
-     - 在途注入（第十二輪第 43 條）：注入已通過配號、正在 `sendRaw` 時，同步 hook 可能讓連線進入接收不可信（送進讀取拋錯的 Blob，或推到第 257 項）。`sendRequest` 在 `sendRaw` 返回、先取序號（`nextSeq` 經可包裝的 `window.__nakiWebSocket`，也可能重入，第十三輪）、登記之前再查一次；查完到登記之間不再呼叫外部程式。連線已接收不可信就不登記，照常回 `ok:true` 與 msgId，下一個 microtask 以 `response_lost` 結案（讓插件先拿到 msgId）。認領入口 `injectionFor` 另有防線：接收不可信連線上的鍵一律不認領。這道防線在現行路徑不可達（見 notes 第十三輪 Deviation 1）。
+     - 在途注入（第十二輪第 43 條）：注入已通過配號、正在 `sendRaw` 時，同步 hook 可能讓連線進入接收不可信（送進讀取拋錯的 Blob，或推到第 257 項）。`sendRequest` 在 `sendRaw` 返回、先做完所有可能執行頁面程式的步驟，再查一次：取序號（`nextSeq` 經可包裝的 `window.__nakiWebSocket`，第十三輪）、只讀一次 `sendRaw` 回傳的 `socketId` 存成字串快照（回傳值可被偽造成 getter，第十四輪）、代號欄位賦值（原型上可能有 setter，第十四輪）。查完到登記之間只剩原生 `Set.has`、原始值字串串接與 `Map.set`。連線已接收不可信就不登記，照常回 `ok:true` 與 msgId，下一個 microtask 以 `response_lost` 結案（讓插件先拿到 msgId）。認領入口 `injectionFor` 另有防線：接收不可信連線上的鍵一律不認領。這道防線在現行路徑不可達（見 notes 第十三輪 Deviation 1）。
      - 注入登記超過 256 筆時淘汰最舊一筆，下一個 microtask 以 `response_lost`、`reason: 'evicted'` 交回發起插件，不靜默遺失（第十三輪）。接收不可信結案的 `reason` 是 `receive_untrusted`。
      - 之後該連線的每一則 RESPONSE 與 NOTIFY（排在失敗項之後的，以及之後同步抵達的）都當成 Naki 流量：只給 `observeNakiTraffic` observer，不進一般鏈，沒有 `replace`、`drop` 或變長改寫（NOTIFY 是第十二輪第 45 條）。遊戲配對、未答與 D22 已答標記照常消耗，記帳不中斷。
      - 代價：讀不到的那則可能是狀態型插件需要的訊息，之後插件狀態可能不完整；所以禁止改寫，只留觀察。恢復方式是連線關閉後重連，新連線從乾淨狀態開始。
@@ -164,6 +164,8 @@
 | PS-64 | 45：NOTIFY Blob 讀取失敗後，下一則 NOTIFY 只觀察，沒有 `replace`／`drop` |
 | PS-65 | 復驗 cx1：包裝 `sendRaw` 與 `nextSeq`，登記前的 `nextSeq` 內送入讀取拋錯的 Blob，注入不登記、下一 tick `response_lost`，同號回應不交給 FST |
 | PS-66 | 復驗：第 257 筆注入淘汰最舊一筆，下一 tick 以 `response_lost`（`evicted`）結案，晚到回應不再回派 |
+| PS-67 | 復驗 cx4：`sendRaw` 回傳 `socketId` getter，第一次讀取重入時不登記並 `response_lost`；第二次讀取不存在；原型 setter 重入同樣不登記 |
+| PS-68 | 第十四輪：`sendRequest` 期間九個頁面程式可介入的點逐一觸發接收不可信，都沒有孤兒登記、`response_lost` 恰一次 |
 | PS-52 | 34：延後的注入回應遇到之後才送出的同號遊戲請求，不建歧義 |
 | PS-48 | 33：延後派發拋錯不走 `failSafe`、不記帳 |
 | PS-38 | 22：被淘汰的 #64000 在 failSafe 內收到回答，撤回不放回，之後不失準 |
@@ -171,4 +173,4 @@
 | PS-40 | 24：CONNECTING 時底層 send 拋錯 257 次，撤回並照拋 |
 | PS-41 | 25：滿容量時放回先前提交，仍為 256 |
 
-變異 `PS1`～`PS92`（PS59 併入 PS67）（PS11、PS41、PS42、PS46、PS47 隨程式移除；PS64 在接收佇列下等價，第十輪移除；PS89 認領入口防線不可達，第十二、十三輪試跑皆存活，不列入；PS53～PS55、PS60～PS62、PS68、PS69、PS71～PS75、PS79～PS83、PS87 套在 `naki-websocket.js`）見 `guard-gaps-mutate.cjs`。
+變異 `PS1`～`PS94`（PS59 併入 PS67）（PS11、PS41、PS42、PS46、PS47 隨程式移除；PS64 在接收佇列下等價，第十輪移除；PS89 認領入口防線不可達，第十二～十四輪試跑皆存活，以 PS-68 掃描替代，不列入；PS53～PS55、PS60～PS62、PS68、PS69、PS71～PS75、PS79～PS83、PS87 套在 `naki-websocket.js`）見 `guard-gaps-mutate.cjs`。

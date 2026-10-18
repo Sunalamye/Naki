@@ -692,7 +692,7 @@ PS-55 改寫：第十輪斷言「失敗項以未匹配處理、之後恢復一�
 
 ### 第十三輪 Deviations
 
-1. **PS89 仍殺不掉，未放回清單**：裁決要求放回並確認殺掉，實跑後存活（`r13-mutate-new.log`）。原因：取序號移到檢查之前以後，檢查到登記之間沒有外部呼叫，接收不可信連線上不會再出現注入登記；`receiveLost` 也會清空既有登記，連登記後 `pluginLog` 經 `sendToSwift` 的重入也一樣被清掉。認領入口的防線因此再度不可達。殺得掉的唯一方法是讓登記能在不可信連線上留存，那正是第 1 項要消除的缺陷。保守起見保留防線程式碼，PS89 不列入，由主線裁決。
+1. ~~**PS89 仍殺不掉，未放回清單**：~~ 第十四輪改述：「檢查到登記之間沒有外部呼叫」不成立。復驗 cx4 證明檢查後仍讀 `r.socketId` 兩次，`sendRaw` 回傳值可被偽造成 getter；代號欄位賦值也會觸發原型 setter。第十四輪把這些都移到檢查之前，並以 PS-68 掃描證明。原文：裁決要求放回並確認殺掉，實跑後存活（`r13-mutate-new.log`）。原因：取序號移到檢查之前以後，檢查到登記之間沒有外部呼叫，接收不可信連線上不會再出現注入登記；`receiveLost` 也會清空既有登記，連登記後 `pluginLog` 經 `sendToSwift` 的重入也一樣被清掉。認領入口的防線因此再度不可達。殺得掉的唯一方法是讓登記能在不可信連線上留存，那正是第 1 項要消除的缺陷。保守起見保留防線程式碼，PS89 不列入，由主線裁決。
 2. **`reason` 也給 `receive_untrusted`**：裁決只要求淘汰帶原因。兩種結案共用 `response_lost`，只在其中一種帶原因會讓插件無從分辨，所以兩種都帶。
 
 ### 第十三輪已知風險
@@ -700,3 +700,51 @@ PS-55 改寫：第十輪斷言「失敗項以未匹配處理、之後恢復一�
 - 包裝 `nextSeq` 的同 realm 程式可竄改序號，影響水位判定；屬 U4 不防範圍，已寫進契約。
 - 接收不可信後一般插件沒有退化通知，見第 46 條後續另案。
 - 未 live 驗證。
+
+## 第十四輪（復驗增量回饋：socketId 快照、PS89）
+
+### 做了什麼
+
+- `naki-plugins.js` 的 `sendRequest`：`sendRaw` 返回後依序取序號、只讀一次 `r.socketId`（`socketId` 原值與 `sid = String(socketId)` 兩份快照）、賦值 `token.socketId`／`token.msgId`，之後才檢查接收不可信。檢查、結案與登記都只用快照；檢查之後不再碰 `r`。`r.msgId` 從未被讀取：msgId 是宿主自己配發的區域變數。
+- 契約「代號不防惡意」段補上偽造 `sendRaw` 回傳值屬同 realm 不防，但宿主以快照確保不留孤兒登記。
+
+### 檢查到登記之間的逐行清單（復驗可對照 `naki-plugins.js` 的 `sendRequest`）
+
+| 行 | 內容 | 可能執行頁面程式？ |
+|---|---|---|
+| 1 | `if (recvLostSockets.has(sid)) {` | 否：`sid` 是字串原始值；`Set.prototype.has` 是原生 |
+| 2 | （分支內）`Promise.resolve().then(...)`、`return` | 只在不登記的分支，已決定不登記 |
+| 3 | `injectedMsgIds.set(msgKey(sid, msgId), token);` | 否：`msgKey` 是 `socketId + ':' + msgId`，兩邊都是原始值（字串、數字），不呼叫 `toString`／`valueOf`；`Map.prototype.set` 是原生 |
+
+檢查之前可執行頁面程式的點，與 PS-68 一一對應：`sendRaw` 內、`success` getter、`nextSeq`、`socketId` getter、`socketId` 的 `toString`、`seq`／`socketId`／`msgId` 原型 setter。登記之後的 `pluginLog` 走載入時擷取的 `sendToSwift`，在該處重入時 `receiveLost` 會清掉剛登記的這筆並同步結案，同樣不留孤兒（PS-68 第九點）。
+
+唯一剩下的介入方式是改寫原生內建（`Set.prototype.has`、`Map.prototype.set`）。那也能讓檢查本身說謊，認領入口的防線同樣用 `Set.has`，擋不住；屬 U4 同 realm 不防範圍。
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-67、PS-68 套在 `2dbb136` 的 JS | 兩條紅：PS-67 讀取三次並在第二次讀取重入後留下登記；PS-68 在 `socketId`、`msgId` setter 點留下孤兒登記 | `r14-red-on-2dbb136.log`、`r14-red-behavior-on-2dbb136.log` |
+| PS-68 逐點掃描 | `2dbb136`：`socketId setter`、`msgId setter` 各 1 fail，其餘 0；HEAD：九點全 0 fail | `r14-reentry-sweep-on-2dbb136.log`、`r14-reentry-sweep-head.log` |
+| 實作後 | b2 243／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r14-{b2,v2,p4,keepalive,plugin-regression,local-unlock}.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| PS85～PS94（含 PS89，本輪新增 PS93、PS94） | PS89 存活；PS93、PS94 殺；PS85、PS86、PS90 字串更新後補跑皆殺 | `r14-mutate-new.log` |
+| 全量 0–176（PS89 不列入） | 174/176；存活只有 U10、T7 | `r14-mutate-full.log` |
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r14-swift-targeted.log`）；本輪依裁決不跑全量。
+
+### 第十四輪 Deviations
+
+1. **PS89 仍存活，以可實跑證明替代**：封住所有非內建的重入點後，接收不可信連線上不再可能出現注入登記，認領入口防線不可達。證明為上方逐行清單加 PS-68 九點掃描（`r14-reentry-sweep-head.log`）。只有改寫原生內建能讓 PS89 被殺，那同時也讓檢查本身失效，屬 U4。防線程式碼保留，PS89 不列入全量。
+2. **快照用兩份**：`socketId` 原值給 `token.socketId` 與 `response_lost` 的 `ctx.socketId`，與其他回呼的型別（數字）一致；`sid` 字串給檢查與登記鍵。
+
+### 第十四輪已知風險
+
+- 改寫原生內建可繞過接收不可信檢查，屬 U4。
+- 未 live 驗證；Swift 全量本輪未跑（依裁決）。

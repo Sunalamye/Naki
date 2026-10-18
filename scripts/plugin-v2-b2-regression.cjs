@@ -3859,6 +3859,94 @@ test('PS-66 (r13): the 257th pending injection evicts the oldest — the evicted
   assert.deepEqual(plain(answerErrors).slice(-1), [null]);
 });
 
+test('PS-67 (r14 verify cx4): a wrapped sendRaw returns socketId as a getter (or a prototype setter catches token.socketId) that delivers a Blob throwing on read — the host reads socketId once; whenever the connection turns receive-untrusted before the check, the injection is not registered and FST gets response_lost; a reentry the host never triggers leaves a normal injection, never an orphan', async () => {
+  for (const mode of ['getter reentry on read 1', 'getter reentry on read 2', 'prototype setter reentry']) {
+    const t = page();
+    const { answers, answerErrors, answerReasons, answerPayloads, inject } = injector11(t);
+    const ws = t.c.__nakiWebSocket, origRaw = ws.sendRaw;
+    const breakReceive = () => arrive(t, rejectingBlob(t, response(2050, [8, 1]), true).blob);
+    let reads = 0;
+    const O = vm.runInContext('Object', t.c);
+    ws.sendRaw = function (b, s) {
+      const r = origRaw.call(this, b, s);
+      if (mode === 'prototype setter reentry') return r;
+      return { success: r.success, get socketId() {
+        reads++;
+        if (reads === (mode === 'getter reentry on read 1' ? 1 : 2)) breakReceive();
+        return r.socketId;
+      } };
+    };
+    if (mode === 'prototype setter reentry') {
+      O.defineProperty(O.prototype, 'socketId', { configurable: true, set(v) {
+        O.defineProperty(this, 'socketId', { value: v, writable: true, enumerable: true, configurable: true });
+        breakReceive();
+      } });
+    }
+    let r;
+    try { r = inject(FST); } finally { ws.sendRaw = origRaw; delete O.prototype.socketId; }
+    assert.equal(r.ok, true, mode);
+    if (mode !== 'prototype setter reentry') assert.equal(reads, 1, mode + ': socketId is read exactly once');
+    await tick();
+    if (mode === 'getter reentry on read 2') {
+      assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 0, mode + ': never triggered');
+      assert.equal(pendingInjections(t), 1, mode);
+      t.lobby.receive(response(r.msgId, [8, 22]));
+      assert.deepEqual(plain(answerPayloads), [22], mode + ': a normal injection answered normally');
+      continue;
+    }
+    assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 1, mode);
+    assert.equal(pendingInjections(t), 0, mode + ': not registered');
+    assert.deepEqual(plain(answers), [[r.msgId, FST]], mode);
+    assert.deepEqual(plain(answerErrors), ['response_lost'], mode);
+    assert.deepEqual(plain(answerReasons), ['receive_untrusted'], mode);
+    t.lobby.receive(response(r.msgId, [8, 22]));
+    assert.equal(answerPayloads.includes(22), false, mode);
+  }
+});
+
+// 第十四輪：sendRequest 期間每個頁面程式可介入的點逐一讓連線接收不可信，斷言沒有孤兒登記（PS89 存活的可實跑證明）
+const REENTRY_POINTS = ['inside sendRaw', 'success getter', 'nextSeq', 'socketId getter', 'socketId toString', 'seq setter', 'socketId setter', 'msgId setter', 'log bridge after registration'];
+test('PS-68 (r14): at every point where page code can run during sendRequest, making the connection receive-untrusted never leaves an orphan injection — not registered, response_lost exactly once, the later RESPONSE never reaches FST', async () => {
+  for (const point of REENTRY_POINTS) {
+    let fire = null;
+    const t = page(source('naki-websocket.js'), { swiftFails: (type, d) => {
+      if (point === 'log bridge after registration' && fire && type === 'plugin_event' && /sendRequest .*fetchServerTime/.test(d.msg)) fire();
+      return false;
+    } });
+    const { answers, answerErrors, answerPayloads, inject } = injector11(t);
+    const O = vm.runInContext('Object', t.c);
+    const ws = t.c.__nakiWebSocket, origRaw = ws.sendRaw, origSeq = ws.nextSeq;
+    let fired = false;
+    fire = () => { if (fired) return; fired = true; arrive(t, rejectingBlob(t, response(2060, [8, 1]), true).blob); };
+    ws.sendRaw = function (b, s) {
+      const r = origRaw.call(this, b, s);
+      if (point === 'inside sendRaw') fire();
+      return { get success() { if (point === 'success getter') fire(); return r.success; },
+        get socketId() {
+          if (point === 'socketId getter') fire();
+          if (point === 'socketId toString') return { toString() { fire(); return String(r.socketId); } };
+          return r.socketId;
+        } };
+    };
+    ws.nextSeq = function () { if (point === 'nextSeq') fire(); return origSeq.call(this); };
+    const prop = { 'seq setter': 'seq', 'socketId setter': 'socketId', 'msgId setter': 'msgId' }[point];
+    if (prop) O.defineProperty(O.prototype, prop, { configurable: true, set(v) {
+      O.defineProperty(this, prop, { value: v, writable: true, enumerable: true, configurable: true });
+      fire();
+    } });
+    let r;
+    try { r = inject(FST); } finally { ws.sendRaw = origRaw; ws.nextSeq = origSeq; if (prop) delete O.prototype[prop]; }
+    assert.equal(fired, true, point + ': the reentry point was reached');
+    assert.equal(r.ok, true, point);
+    assert.equal(pendingInjections(t), 0, point + ': no orphan registration');
+    await tick();
+    assert.deepEqual(plain(answerErrors), ['response_lost'], point + ': closed exactly once');
+    assert.equal(plain(answers)[0][0], r.msgId, point);
+    t.lobby.receive(response(r.msgId, [8, 22]));
+    assert.equal(answerPayloads.includes(22), false, point);
+  }
+});
+
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
   const t = page();
   const { answers, inject } = injector11(t);

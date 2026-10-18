@@ -182,13 +182,15 @@ const MUTANTS = [
   ["PS82 溢出不宣告接收不可信", [["                receiveLost(wsId);\n                info.recvQueue.forEach", "                info.recvQueue.forEach"]], "naki-websocket.js"],
   ["PS83 溢出不放棄待展開項", [["                info.recvQueue.forEach(function(e) { if (!e.ready) { e.ready = true; e.view = null; } });\n", ""]], "naki-websocket.js"],
   ["PS84 關閉不清接收不可信", [["            recvLostSockets.delete(String(socketId));\n", ""]]],
-  ["PS85 在途注入遇接收不可信仍登記", [["if (recvLostSockets.has(String(r.socketId))) {", "if (false) {"]]],
-  ["PS86 在途注入遇接收不可信不結案", [["Promise.resolve().then(function () { injectionLost(r.socketId, msgId, token, 'receive_untrusted'); });", ""]]],
+  ["PS85 在途注入遇接收不可信仍登記", [["if (recvLostSockets.has(sid)) {", "if (false) {"]]],
+  ["PS86 在途注入遇接收不可信不結案", [["Promise.resolve().then(function () { injectionLost(socketId, msgId, token, 'receive_untrusted'); });", ""]]],
   ["PS87 遮罩拋錯不還原共享內容", [["view.set(original); entry.view = original;", "entry.view = original;"]], "naki-websocket.js"],
   ["PS88 接收不可信只管 RESPONSE", [["(raw.direction === 'receive' && recvLostSockets", "(injectedKey != null && recvLostSockets"]]],
-  ["PS90 檢查後才取序號", [["                token.seq = nextSeq();\n                // sendRaw 或 nextSeq", "                // sendRaw 或 nextSeq"], ["                token.socketId = r.socketId;\n", "                token.seq = nextSeq();\n                token.socketId = r.socketId;\n"]]],
+  ["PS90 檢查後才取序號", [["                token.seq = nextSeq();\n", ""], ["                injectedMsgIds.set(msgKey(sid, msgId), token);\n", "                token.seq = nextSeq();\n                injectedMsgIds.set(msgKey(sid, msgId), token);\n"]]],
   ["PS91 淘汰注入靜默遺失", [["Promise.resolve().then(function () { injectionLost(evicted.socketId, evicted.msgId, evicted, 'evicted'); });", ""]]],
   ["PS92 淘汰結案不帶原因", [["rctx.reason = reason;", ""]]],
+  ["PS93 登記鍵再讀回傳值", [["injectedMsgIds.set(msgKey(sid, msgId), token);", "injectedMsgIds.set(msgKey(r.socketId, msgId), token);"]]],
+  ["PS94 代號欄位在檢查之後才賦值", [["                token.socketId = socketId;\n                token.msgId = msgId;\n", ""], ["                injectedMsgIds.set(msgKey(sid, msgId), token);\n", "                token.socketId = socketId;\n                token.msgId = msgId;\n                injectedMsgIds.set(msgKey(sid, msgId), token);\n"]]],
   ["PS35 擋下仍消耗遊戲未答", [["            if (msgId != null && !raw.injected) pendingMethods.delete(msgKey(raw.wsId, msgId));\n", "            if (msgId != null && !raw.injected) { pendingMethods.delete(msgKey(raw.wsId, msgId)); gameDone(raw.wsId, msgId); }\n"]]],
   ["VB2 同鍵覆寫不移到最新（只在零消耗者時刪舊鍵）", [["        var key = msgKey(socketId, msgId);\n        pendingMethods.delete(key);\n        if (noConsumers()) return;\n", "        var key = msgKey(socketId, msgId);\n        if (noConsumers()) { pendingMethods.delete(key); return; }\n"]]]
 ];

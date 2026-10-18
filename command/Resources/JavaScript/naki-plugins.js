@@ -693,17 +693,19 @@
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
-                // 序號先取：nextSeq 經可包裝的 window.__nakiWebSocket，可能重入（第十三輪）。檢查之後到登記之間不再呼叫外部程式
+                // 檢查之前做完所有可能呼叫外部程式的步驟（第十三、十四輪）：nextSeq 可被包裝；sendRaw 回傳值的 socketId 可能是 getter，
+                // 只讀一次存快照；token 欄位賦值可能觸發原型上的 setter。檢查之後到登記只剩 Set／Map 與字串運算
                 token.seq = nextSeq();
-                // sendRaw 或 nextSeq 期間（同步重入）連線已接收不可信：不登記，下一 tick 以 response_lost 結案（第十二輪第 43 條）
-                if (recvLostSockets.has(String(r.socketId))) {
-                    Promise.resolve().then(function () { injectionLost(r.socketId, msgId, token, 'receive_untrusted'); });
+                var socketId = r.socketId, sid = String(socketId);
+                token.socketId = socketId;
+                token.msgId = msgId;
+                // 上述期間（同步重入）連線已接收不可信：不登記，下一 tick 以 response_lost 結案（第十二輪第 43 條）
+                if (recvLostSockets.has(sid)) {
+                    Promise.resolve().then(function () { injectionLost(socketId, msgId, token, 'receive_untrusted'); });
                     return { ok: true, msgId: msgId };
                 }
                 // 登記 (連線, msgId) → 發起插件（§7.7b 回應路由）；連線是 sendRaw 實際選到的那條
-                token.socketId = r.socketId;
-                token.msgId = msgId;
-                injectedMsgIds.set(msgKey(r.socketId, msgId), token);
+                injectedMsgIds.set(msgKey(sid, msgId), token);
                 // 超過 256 筆淘汰最舊一筆，下一 tick 以 response_lost（evicted）結案，不靜默遺失（第十三輪）
                 if (injectedMsgIds.size > 256) {
                     var evictedKey = injectedMsgIds.keys().next().value, evicted = injectedMsgIds.get(evictedKey);
