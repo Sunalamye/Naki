@@ -80,19 +80,132 @@
 
     // ---- L3 送出側（injectSend，§7.6/§7.7b）----
     // 插件注入用 msgId 區段 64000–65500（Naki 自送收窄為 60000–63999）。
-    var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500;
+    // 遊戲計數器會進這個號段（pair-source）：輪用時跳過未答的注入、各連線未答的遊戲請求，以及各連線遊戲最後號碼之後 GAME_AHEAD 個。
+    // 遊戲請求另記，不靠 pendingMethods（零消耗者不登記、FIFO 會淘汰）：不論有沒有插件都記。遊戲＝沒有 sendRaw 送出者，
+    // 不看 D22 身分。記帳分兩段：派發一進入就保留號碼（同步 hook 內的注入要避開，第四輪第 15 條），判決外送後才提交進未答容量；
+    // 提交後 failSafe 或底層 send 失敗時，只撤回這筆送出交易的增量（第五輪第 19、20 條，第六輪第 24 條）。沒被注入登記認領的 RESPONSE 才消耗（第三輪第 8、12 條）。
+    // 每連線未答上限 GAME_INFLIGHT_LIMIT，超過就失準，該連線關閉前一律拒發（msgid_busy）；不可用號碼占滿號段也回 msgid_busy。
+    // 遊戲以 Blob 送出的連線，號碼在送出當下不可知：標成不可信直到關閉，任一連線不可信就回 msgid_busy。
+    // Blob 送出展開後照常派發，但不進遊戲記帳（第七輪主線裁決；live 未見遊戲 Blob 送出，Unity 走 TypedArray）
+    var PLUGIN_MSGID_FIRST = 64000, PLUGIN_MSGID_LAST = 65500, GAME_AHEAD = 256, GAME_INFLIGHT_LIMIT = 256;
     var pluginMsgId = PLUGIN_MSGID_FIRST;
-    function nextPluginMsgId() {
-        var v = pluginMsgId;
-        pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
-        return v;
+    var gameSends = new Map();   // socketId -> { last, inflight: Map(msgId -> 提交序號), lost, version }
+    var gameDispatching = [];    // 派發中的遊戲請求 { msgId }
+    // 可消耗紀錄（遊戲未答、配對、注入登記、歧義鍵）與 D22 登記共用 naki-websocket 的遞增序號（第九輪）。
+    // 延後派發的 RESPONSE 帶抵達時的水位；比水位新的紀錄屬於之後才送出的同號請求，不歸它
+    var localSeq = 0;
+    function nextSeq() { var ws = window.__nakiWebSocket; return ws && ws.nextSeq ? ws.nextSeq() : ++localSeq; }
+    function newerThan(watermark, seq) { return watermark != null && seq > watermark; }
+    var openCommits = new Set();   // 送出交易還沒結束的提交紀錄：撤回資料只活在交易期間，未答表只存序號（第六輪第 23 條）
+    var untrustedSockets = new Set();   // 遊戲送過 Blob 的連線
+    // 接收不可信：接收 Blob 讀取失敗或接收佇列溢出的連線。讀不到不等於未匹配，之後的回應無法確定歸屬，
+    // 所以回應一律只觀察（不認領注入、不進一般鏈、不給改寫），配對與未答照常消耗，直到關閉（pair-source 第十一輪第 39、42 條）
+    var recvLostSockets = new Set();
+    // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
+    function gameSent(socketId, msgId) {
+        var g = gameSends.get(socketId);
+        if (!g) gameSends.set(socketId, g = { last: msgId, inflight: new Map(), lost: false, version: 0 });
+        var c = { socketId: socketId, g: g, msgId: msgId, seq: nextSeq(), prev: g.inflight.get(msgId), evicted: null, lostSet: false };
+        g.last = msgId;
+        g.inflight.delete(msgId);
+        g.inflight.set(msgId, c.seq);
+        if (g.inflight.size > GAME_INFLIGHT_LIMIT) {
+            c.evicted = g.inflight.entries().next().value;
+            g.inflight.delete(c.evicted[0]);
+            c.lostSet = !g.lost;
+            g.lost = true;
+        }
+        c.version = ++g.version;
+        return c;
     }
-    // 插件注入的 (連線, msgId) -> 發起插件 id（回應路由，§7.7b）
-    var injectedMsgIds = new Map();
-    // sendRequest 呼叫 sendRaw 期間的注入標記：sendRaw 同步經包裝的 ws.send 回到 dispatch。
-    // 同 msgId 且 bytes 與注入的 envelope 完全相同才算這次注入（第三輪第 2 條）：注入前後其他派發的同號請求，
-    // 內容不同就不算，也不消耗標記（第二輪第 2 條）
+    // 已被進行中交易暫時淘汰的號碼收到回答：作廢那筆淘汰，撤回時不放回（第六輪第 22 條）
+    function gameDone(socketId, msgId, watermark) {
+        var g = gameSends.get(socketId);
+        if (!g) return;
+        if (g.inflight.has(msgId)) {
+            if (newerThan(watermark, g.inflight.get(msgId))) return;
+            g.inflight.delete(msgId);
+            g.version++;
+            return;
+        }
+        openCommits.forEach(function (c) { if (c.g === g && c.evicted && c.evicted[0] === msgId && !newerThan(watermark, c.evicted[1])) c.evicted = null; });
+    }
+    // 撤回只動自己：msgId 仍是這筆提交的才移除（先前提交放回，排到最新，不恢復原 FIFO 位置）。
+    // 之後表有變動（版本不符）就不回復淘汰與失準，寧可保守失準
+    function revertGameSend(c) {
+        if (!c || !openCommits.delete(c) || gameSends.get(c.socketId) !== c.g) return;
+        var g = c.g, clean = g.version === c.version;
+        if (g.inflight.get(c.msgId) === c.seq) { g.inflight.delete(c.msgId); if (c.prev !== undefined) g.inflight.set(c.msgId, c.prev); }
+        if (clean && c.evicted) g.inflight = new Map([c.evicted].concat(Array.from(g.inflight)));
+        if (clean && c.lostSet) g.lost = false;
+        g.version++;
+    }
+    function requestMsgId(b) { return b && b.length >= 3 && b[0] === TYPE_REQUEST ? b[1] | (b[2] << 8) : null; }
+    function noteGameSend(socketId, b) { var id = requestMsgId(b); return id == null ? null : gameSent(socketId, id); }
+    // 提交掛到這筆送出交易上（只在 ws.send 同步期間發生；Blob 的延後派發不提交）
+    function commitGameSend(tx, socketId, b) {
+        var c = noteGameSend(socketId, b);
+        if (!c || !tx) return;
+        tx.commit = c;
+        openCommits.add(c);
+    }
+    function nextPluginMsgId() {
+        var busy = new Set(), lasts = [], lost = false;
+        injectedMsgIds.forEach(function (v, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
+        gameSends.forEach(function (g) { lost = lost || g.lost; lasts.push(g.last); g.inflight.forEach(function (c, id) { busy.add(id); }); });
+        gameDispatching.forEach(function (d) { busy.add(d.msgId); lasts.push(d.msgId); });
+        if (lost || untrustedSockets.size) return null;
+        for (var n = PLUGIN_MSGID_LAST - PLUGIN_MSGID_FIRST + 1; n > 0; n--) {
+            var v = pluginMsgId;
+            pluginMsgId = (v >= PLUGIN_MSGID_LAST) ? PLUGIN_MSGID_FIRST : (v + 1);
+            if (!busy.has(v) && !lasts.some(function (last) { var a = (v - last + 65536) % 65536; return a > 0 && a <= GAME_AHEAD; })) return v;
+        }
+        return null;
+    }
+    // 插件注入的 (連線, msgId) -> 交易代號 { id: 發起插件, method }（回應路由，§7.7b）。注入的配對只存這裡，不進 pendingMethods。
+    // 代號由 sendRequest 配發、經 sendRaw 綁在送進 ws.send 的 buffer 上，派發時以 raw.sender 帶回；來源只看代號（pair-source 第三輪）
+    var injectedMsgIds = new Map(), liveTokens = new WeakSet();
+    // sendRequest 呼叫 sendRaw 期間的注入內容：只給守衛用。相同 bytes 的重入派發照 Deviation 11 一併做注入退回判定（兩筆都擋），
+    // 但配對來源仍看代號，遊戲那筆照常登記（第二輪第 13 條）
     var injecting = null;
+    // 注入與遊戲同鍵都在等的 (連線, msgId)：哪一則回應是誰的只能靠順序，下一則回應只給 Naki observer 看、不給改寫。
+    // 容量滿時不忘記：改標整條連線全部歧義，直到連線關閉（第三輪第 11 條）
+    // 標記記的是它保護的遊戲配對世代（該配對的序號），不是建立當下的新序號：延後回應以配對世代比水位（第十輪第 37 條）
+    var ambiguousPairs = new Map(), ambiguousSockets = new Set();   // 鍵 -> 所保護配對的序號
+    function markAmbiguous(socketId, key) {
+        if (ambiguousSockets.has(String(socketId))) return;
+        ambiguousPairs.set(key, pendingMethods.get(key).seq);
+        if (ambiguousPairs.size <= PENDING_LIMIT) return;
+        ambiguousPairs.forEach(function (s, k) { ambiguousSockets.add(k.slice(0, k.lastIndexOf(':'))); });
+        ambiguousPairs.clear();
+    }
+    // 延後回應只消耗抵達前就有的歧義鍵；整條連線的歧義不消耗，一律算歧義（保守）
+    function consumeAmbiguous(socketId, key, watermark) {
+        var s = ambiguousPairs.get(key);
+        if (s !== undefined && !newerThan(watermark, s)) { ambiguousPairs.delete(key); return true; }
+        return ambiguousSockets.has(String(socketId));
+    }
+    // 注入的回應已無法確定（接收不可信，或登記被淘汰）：以 response_lost、空 bytes、原因交回發起插件
+    function injectionLost(socketId, msgId, injection, reason) {
+        var origin = registry.get(injection.id);
+        if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
+        var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: new Uint8Array(0), mutable: false },
+            { type: TYPE_RESPONSE, msgId: msgId, method: injection.method, payload: null }, injection.method, true, origin);
+        rctx.inResponseTo = msgId;
+        rctx.timedOut = false;
+        rctx.error = 'response_lost';
+        rctx.reason = reason;
+        try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
+        catch (e) { noteFailure(origin, 'onInjectResponse', e); }
+    }
+    // 同鍵注入登記；延後回應只認抵達前就有的
+    function injectionFor(key, watermark) {
+        if (key != null && recvLostSockets.has(key.slice(0, key.lastIndexOf(':')))) return undefined;   // 接收不可信的連線不認領（第十二輪第 43 條防線）
+        var token = key != null ? injectedMsgIds.get(key) : undefined;
+        return token !== undefined && !newerThan(watermark, token.seq) ? token : undefined;
+    }
+    // 同鍵配對也在等（延後回應只看抵達前就有的）
+    function pairWaiting(key, watermark) { var p = pendingMethods.get(key); return !!p && !newerThan(watermark, p.seq); }
 
     // 連線角色由協定握手鎖定，URL 不參與（審查第四輪第 1 條）：每條連線第一個請求是 .lq.Route.requestConnection，
     // 第二個才揭露角色（大廳 oauth2Login／prepareLogin，對局 authGame；live 2026-10-17）。
@@ -303,14 +416,16 @@
         var response = null;
         try {
             // 擋下的請求不上 wire，它在鏈首登記的配對當場撤銷；本地結案不再刪配對，遊戲回呼內新送的同 msgId 請求才保得住（第十輪第 1 條）
-            if (msgId != null) pendingMethods.delete(msgKey(raw.wsId, msgId));
+            // 注入被擋不撤銷同鍵配對：那是遊戲的（第三輪第 9 條）。遊戲未答不在這裡動：派發後 failSafe 才擋的由 failSafe 整個還原，
+            // 先前同號、真的已外送的未答留著（第四輪第 16 條）
+            if (msgId != null && !raw.injected) pendingMethods.delete(msgKey(raw.wsId, msgId));
             restore(raw, origObj, original);
             recordGuard(msgId, method, 'local_error', reason, ids, raw.wsId);
             pluginLog(ids.join(','), '守衛擋下 ' + method + ' msgId=' + msgId + '（' + reason + '），改回本地錯誤');
             if (msgId != null && GUARDABLE_METHODS.indexOf(origMethod) !== -1) response = guardErrorResponse(msgId);
         } catch (e) { /* 擋下的決定不受記錄或建構失敗影響 */ }
         return { block: true, reason: reason, request: original, response: response,
-            socketId: raw.wsId, msgId: msgId, method: origMethod };
+            socketId: raw.wsId, msgId: msgId, method: origMethod, injected: !!raw.injected };
     }
 
     // 只收已鎖定為大廳、非 FastTest 的送出（dispatch 先分流）。守衛方法只有三種結局：原樣送出、本地成功（respondLocally，PV2-B2）、本地錯誤。
@@ -320,7 +435,7 @@
     // 回應配對在守衛判決之後才提交，依最後真的上 wire 的內容（擋下、解除守衛、退回原內容時都是原請求）（第九輪第 1 條）
     function guardedSend(raw, env) {
         var result = guardedVerdict(raw, env);
-        if (!(result && result.block)) pairWith(raw.wsId, raw.bytes);
+        if (!(result && result.block) && !raw.injected) pairWith(raw.wsId, raw.bytes);
         return result;
     }
     function guardedVerdict(raw, env) {
@@ -372,6 +487,46 @@
         return blockSend(raw, raw.bytes, u8slice.call(raw.bytes), env.msgId, env.method, env.method, 'tainted_fallback', ids);
     }
 
+    // naki-websocket.js 的 handleMessage 在中段呼叫（經 api.dispatch）。
+    // raw = { direction:'send'|'receive', wsId:Number, url:String, bytes:Uint8Array, sender }
+    function dispatchRaw(raw) {
+        diagnostics.dispatches++;
+        if (!raw || !raw.bytes) return;
+        var send = raw.direction === 'send';
+        // 沒有插件也鎖定角色（每條連線只解析到鎖定為止），之後才啟用的守衛一開始就認得大廳
+        var env = send && !roles.has(raw.wsId) ? parseEnvelope(raw.bytes) : undefined;
+        if (send) lockRole(raw.wsId, env);
+        // 來源只看 sendRaw 帶回的代號：存活的注入代號才是注入；沒有送出者的是遊戲（第三輪）
+        raw.injected = send && liveTokens.has(raw.sender);
+        // 遊戲的回答：沒被同鍵注入登記認領的 RESPONSE 才消耗遊戲未答（與 runChain、零消耗者同序，第三輪第 8 條）
+        var b = raw.bytes;
+        if (!send && b.length >= 3 && b[0] === TYPE_RESPONSE && !injectionFor(msgKey(raw.wsId, b[1] | (b[2] << 8)), raw.watermark)) gameDone(raw.wsId, b[1] | (b[2] << 8), raw.watermark);
+        if (noConsumers()) {
+            // 配對的新增看有沒有人消耗，消耗不看：RESPONSE 到達、或同鍵送出新請求，舊配對一律清掉（第十四輪第 1 條）。
+            // 注入登記與歧義標記同樣消耗：RESPONSE 先歸同鍵的注入，遊戲配對留給下一則（與 runChain 同序，第二輪第 4 條、第三輪第 14 條）
+            if (pendingMethods.size || injectedMsgIds.size || ambiguousPairs.size) {
+                var e = env === undefined ? parseEnvelope(raw.bytes) : env;
+                var k = e && e.msgId != null ? msgKey(raw.wsId, e.msgId) : null;
+                if (k && !send && e.type === TYPE_RESPONSE && injectionFor(k, raw.watermark)) { injectedMsgIds.delete(k); if (pairWaiting(k, raw.watermark)) markAmbiguous(raw.wsId, k); }
+                else if (k && e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) {
+                    if (send || pairWaiting(k, raw.watermark)) pendingMethods.delete(k);
+                    if (!send) consumeAmbiguous(raw.wsId, k, raw.watermark);
+                }
+            }
+            return;
+        }
+        if (env === undefined) env = parseEnvelope(raw.bytes);
+        // 注入本身，或注入期間相同 bytes 的重入派發（Deviation 11：兩筆都做注入退回判定）
+        if (send && env && (raw.injected || (injecting && sameBytes(raw.bytes, injecting.bytes)))) {
+            var fallback = isLobby(raw.wsId) ? undefined : injectedFallback(raw, env);
+            if (fallback) return fallback;
+        }
+        // 對局、未定角色、大廳上的 FastTest：現行鏈原樣，例外與鏈後檢查都不經守衛（第四輪第 2 條）。
+        // Blob 的非同步副本已送出，守衛無從判定，只觀察
+        if (send && raw.mutable !== false && isLobby(raw.wsId) && !isFastTest(env)) return guardedSend(raw, env);
+        return env ? runChain(raw, env, null, false) : undefined;
+    }
+
     function restore(raw, origObj, original) {
         raw.bytes = origObj;
         if (origObj.length === original.length) u8set.call(origObj, original);
@@ -386,7 +541,7 @@
         var key = msgKey(socketId, msgId);
         pendingMethods.delete(key);
         if (noConsumers()) return;
-        pendingMethods.set(key, method);
+        pendingMethods.set(key, { method: method, seq: nextSeq() });
         if (pendingMethods.size > PENDING_LIMIT) pendingMethods.delete(pendingMethods.keys().next().value);
     }
 
@@ -401,11 +556,12 @@
     }
 
     // RESPONSE envelope 不帶 method，靠送出時記下的 msgId 對回（可能對不上 → null）
-    function resolveMethod(env, direction, socketId) {
+    // watermark：延後派發的回應只認抵達時已存在的配對
+    function resolveMethod(env, direction, socketId, watermark) {
         if (env.method) return env.method;
         if (direction === 'receive' && env.type === TYPE_RESPONSE && env.msgId != null) {
-            var m = pendingMethods.get(msgKey(socketId, env.msgId));
-            if (m != null) { pendingMethods.delete(msgKey(socketId, env.msgId)); return m; }
+            var p = pendingMethods.get(msgKey(socketId, env.msgId));
+            if (p && !newerThan(watermark, p.seq)) { pendingMethods.delete(msgKey(socketId, env.msgId)); return p.method; }
         }
         return null;
     }
@@ -523,22 +679,38 @@
                 }
                 var payload = payloadBytes || new Uint8Array(0);
                 var msgId = nextPluginMsgId();
+                if (msgId == null) return { ok: false, reason: 'msgid_busy' };
                 var envBytes = buildRequestEnvelope(msgId, method, payload);
                 var b64;
                 try { b64 = uint8ToBase64(envBytes); }
                 catch (e) { return { ok: false, reason: 'encode_failed' }; }
 
-                var ws = window.__nakiWebSocket, r, prev = injecting;
-                injecting = { msgId: msgId, bytes: envBytes };
-                try { r = (ws && ws.sendRaw) ? ws.sendRaw(b64) : { success: false, reason: 'no_sendRaw' }; }
-                finally { injecting = prev; }
+                var ws = window.__nakiWebSocket, r, prev = injecting, token = { id: grant.__id, method: method };
+                liveTokens.add(token);
+                injecting = { bytes: envBytes };
+                try { r = (ws && ws.sendRaw) ? ws.sendRaw(b64, token) : { success: false, reason: 'no_sendRaw' }; }
+                finally { injecting = prev; liveTokens.delete(token); }
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
+                // 檢查之前做完所有可能呼叫外部程式的步驟（第十三、十四輪）：nextSeq 可被包裝；sendRaw 回傳值的 socketId 可能是 getter，
+                // 只讀一次存快照；token 欄位賦值可能觸發原型上的 setter。檢查之後到登記只剩 Set／Map 與字串運算
+                token.seq = nextSeq();
+                var socketId = r.socketId, sid = String(socketId);
+                token.socketId = socketId;
+                token.msgId = msgId;
+                // 上述期間（同步重入）連線已接收不可信：不登記，下一 tick 以 response_lost 結案（第十二輪第 43 條）
+                if (recvLostSockets.has(sid)) {
+                    Promise.resolve().then(function () { injectionLost(socketId, msgId, token, 'receive_untrusted'); });
+                    return { ok: true, msgId: msgId };
+                }
                 // 登記 (連線, msgId) → 發起插件（§7.7b 回應路由）；連線是 sendRaw 實際選到的那條
-                injectedMsgIds.set(msgKey(r.socketId, msgId), grant.__id);
+                injectedMsgIds.set(msgKey(sid, msgId), token);
+                // 超過 256 筆淘汰最舊一筆，下一 tick 以 response_lost（evicted）結案，不靜默遺失（第十三輪）
                 if (injectedMsgIds.size > 256) {
-                    injectedMsgIds.delete(injectedMsgIds.keys().next().value);
+                    var evictedKey = injectedMsgIds.keys().next().value, evicted = injectedMsgIds.get(evictedKey);
+                    injectedMsgIds.delete(evictedKey);
+                    Promise.resolve().then(function () { injectionLost(evicted.socketId, evicted.msgId, evicted, 'evicted'); });
                 }
                 pluginLog(grant.__id, 'sendRequest ' + method + ' msgId=' + msgId + '（送出，成功要看 RESPONSE）');
                 return { ok: true, msgId: msgId };
@@ -671,20 +843,28 @@
     // lobby：由 guardedSend 呼叫（大廳上的非 FastTest 送出）才為 true；現行鏈不讀任何守衛狀態
     function runChain(raw, env, guard, lobby) {
         diagnostics.parsed++;
-        rememberIfRequest(env, raw.direction, raw.wsId);
-        var method = resolveMethod(env, raw.direction, raw.wsId);
-        diagnostics.lastMethod = method;
+        // 注入的配對只存在注入登記，不寫也不撤銷 pendingMethods（同號的遊戲配對保留，pair-source）
+        if (!raw.injected) rememberIfRequest(env, raw.direction, raw.wsId);
         var injectedKey = raw.direction === 'receive' && env.msgId != null ? msgKey(raw.wsId, env.msgId) : null;
-        var injected = injectedKey != null && injectedMsgIds.has(injectedKey);
+        // 延後回應（帶水位）的每一處匹配都只認抵達前就有的紀錄（第九輪）
+        var wm = raw.watermark;
+        var injection = injectionFor(injectedKey, wm);
+        var injected = injection !== undefined;
+        // 同鍵遊戲配對也在等：這一則歸注入（依送出順序），下一則對回遊戲方法但只觀察（第二輪第 6 條）
+        var ambiguous = injected ? pairWaiting(injectedKey, wm) : (injectedKey != null && consumeAmbiguous(raw.wsId, injectedKey, wm));
+        if (injected && ambiguous) markAmbiguous(raw.wsId, injectedKey);
+        // 注入回應用注入自己的方法、只消耗注入登記；同號的遊戲配對留給遊戲的回應
+        var method = injected ? injection.method : resolveMethod(env, raw.direction, raw.wsId, wm);
+        diagnostics.lastMethod = method;
+        // 未匹配的延後回應（抵達前沒有任何同鍵紀錄）走到這裡時 method 為 null：下面的鏈一個 hook 都不派，也不消耗、不建歧義
         // 注入登記還在就是插件自送，即使 sendRaw 登記已被淘汰（D22 第二輪第 1 條）
-        var isNaki = injected || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
+        var isNaki = injected || ambiguous || (raw.direction === 'receive' && recvLostSockets.has(String(raw.wsId))) || isNakiMsgId(env.msgId, raw.wsId, raw.direction === 'send');
 
         // §7.7b 回應路由：插件注入的 request（msgId 64000–65500）的 RESPONSE 回來時，
         // **只**回派給發起它的那一個插件（其餘看不到，§7.7 不變），走 onInjectResponse。
         if (injected) {
-            var originId = injectedMsgIds.get(injectedKey);
             injectedMsgIds.delete(injectedKey);
-            var origin = registry.get(originId);
+            var origin = registry.get(injection.id);
             if (origin && typeof origin.spec.onInjectResponse === 'function') {
                 var rctx = makeCtx(raw, env, method, isNaki, origin);
                 rctx.inResponseTo = env.msgId;
@@ -851,7 +1031,7 @@
         if (copy) raw.bytes = cur;
         if (raw.bytes === original || (copy && sameBytes(cur, original))) { raw.bytes = original; return undefined; }
         // RESPONSE 對回「實際送出」的 method，與 Swift 的 pendingRequests 一致。大廳鏈由 guardedSend 在守衛判決後提交（第九輪第 1 條）
-        if (!lobby) pairWith(raw.wsId, raw.bytes);
+        if (!lobby && !raw.injected) pairWith(raw.wsId, raw.bytes);
         return raw.bytes;
     }
 
@@ -950,33 +1130,19 @@
         },
 
         // naki-websocket.js 的 handleMessage 在中段呼叫。
-        // raw = { direction:'send'|'receive', wsId:Number, url:String, bytes:Uint8Array }
+        // raw = { direction:'send'|'receive', wsId:Number, url:String, bytes:Uint8Array, sender }
         // 回傳：send 方向被 rewriteSend 換掉時回新的 Uint8Array（呼叫端改送它），其餘一律 undefined。
         // 守衛方法的 REQUEST 被擋下時回 { block:true, reason, response }：呼叫端不得送出，改把 response 交給遊戲與 Swift。
+        // 遊戲送出：派發期間保留號碼，判決確定外送後才記入未答（被擋的不算，第三輪第 12 條）；派發拋錯時由 failSafe 記。
+        // 提交記在呼叫端為這筆送出建立的交易 raw.tx，同一筆的 failSafe 才撤得回（第五輪第 19 條）
         dispatch: function (raw) {
-            diagnostics.dispatches++;
-            if (!raw || !raw.bytes) return;
-            var send = raw.direction === 'send';
-            // 沒有插件也鎖定角色（每條連線只解析到鎖定為止），之後才啟用的守衛一開始就認得大廳
-            var env = send && !roles.has(raw.wsId) ? parseEnvelope(raw.bytes) : undefined;
-            if (send) lockRole(raw.wsId, env);
-            if (noConsumers()) {
-                // 配對的新增看有沒有人消耗，消耗不看：RESPONSE 到達、或同鍵送出新請求，舊配對一律清掉（第十四輪第 1 條）
-                if (pendingMethods.size) {
-                    var e = env === undefined ? parseEnvelope(raw.bytes) : env;
-                    if (e && e.msgId != null && e.type === (send ? TYPE_REQUEST : TYPE_RESPONSE)) pendingMethods.delete(msgKey(raw.wsId, e.msgId));
-                }
-                return;
-            }
-            if (env === undefined) env = parseEnvelope(raw.bytes);
-            if (send && env && injecting && env.msgId === injecting.msgId && sameBytes(raw.bytes, injecting.bytes)) {
-                var fallback = isLobby(raw.wsId) ? undefined : injectedFallback(raw, env);
-                if (fallback) return fallback;
-            }
-            // 對局、未定角色、大廳上的 FastTest：現行鏈原樣，例外與鏈後檢查都不經守衛（第四輪第 2 條）。
-            // Blob 的非同步副本已送出，守衛無從判定，只觀察
-            if (send && raw.mutable !== false && isLobby(raw.wsId) && !isFastTest(env)) return guardedSend(raw, env);
-            return env ? runChain(raw, env, null, false) : undefined;
+            var game = !!raw && raw.direction === 'send' && raw.sender === undefined && !!raw.bytes && !raw.deferred;
+            var mark = game && requestMsgId(raw.bytes) != null ? { msgId: requestMsgId(raw.bytes) } : null;
+            if (mark) gameDispatching.push(mark);
+            try { var result = dispatchRaw(raw); }
+            finally { if (mark) gameDispatching.splice(gameDispatching.indexOf(mark), 1); }
+            if (game && !(result && result.block)) commitGameSend(raw.tx, raw.wsId, raw.bytes);
+            return result;
         },
 
         // 有守衛者（已污染或已註冊 sendGuard）時拒送無法同步辨識的送出（Blob 等，審查第 4 條）。
@@ -998,9 +1164,15 @@
         // 大廳上：守衛方法擋下；已知非守衛方法照送；查找出錯時只擋 GUARDABLE_METHODS；無法解析時有守衛者才擋下。
         // 回 undefined ＝照舊送出。自己不得拋錯。
         // 照送時上 wire 的是遊戲原 bytes：派發已依改寫後內容提交的配對改回原請求（第十一輪第 1 條）；擋下時由 blockSend 撤銷
-        failSafe: function (data, socketId) {
+        // tx：handleMessage 為這筆送出建立的交易；派發已提交的遊戲未答在這裡擋下時只撤回它
+        failSafe: function (data, socketId, sender, tx) {
             var b = null, original = null, env = null, ids = [];
-            function sendOriginal() { try { if (env) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ } }
+            var injected = liveTokens.has(sender);   // 這次注入：配對在注入登記，不寫 pendingMethods
+            // 照送：遊戲的才登記配對並記入未答（派發已記過的同號只會刷新）
+            function sendOriginal() {
+                try { if (env && !injected) pairWith(socketId, original); } catch (x) { /* 照送不受配對失敗影響 */ }
+                if (sender === undefined && original && !(tx && tx.commit)) commitGameSend(tx, socketId, original);
+            }
             try {
                 b = data instanceof ArrayBuffer ? new Uint8Array(data)
                     : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
@@ -1017,8 +1189,35 @@
                 if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return sendOriginal();
             }
             var empty = new Uint8Array(0);
-            return blockSend({ bytes: b || empty, wsId: socketId }, b || empty, original || empty,
+            var verdict = blockSend({ bytes: b || empty, wsId: socketId, injected: injected }, b || empty, original || empty,
                 env ? env.msgId : null, env && env.method, env && env.method, 'bridge_error', ids);
+            if (sender === undefined && tx) revertGameSend(tx.commit);
+            return verdict;
+        },
+
+        // naki-websocket 的 ws.send 包裝在每筆送出結束時呼叫（含底層 send 拋錯）：失敗撤回這筆的提交，成功只釋放撤回資料
+        sendSettled: function (tx, failed) {
+            if (!tx) return;
+            if (failed) revertGameSend(tx.commit);
+            else openCommits.delete(tx.commit);
+            tx.commit = null;
+        },
+
+        // naki-websocket 在 ws.send 入口看到遊戲的 Blob 送出時同步呼叫：這條連線的號碼不可信直到關閉
+        markUntrusted: function (socketId) { untrustedSockets.add(socketId); },
+
+        // naki-websocket 在接收 Blob 讀取失敗、或接收佇列溢出時呼叫：該連線接收不可信到關閉，拒發新注入；
+        // 既有注入登記立即以 response_lost 結案交回發起插件（第十一輪第 39 條）
+        receiveLost: function (socketId) {
+            untrustedSockets.add(socketId);
+            recvLostSockets.add(String(socketId));
+            var prefix = socketId + ':';
+            Array.from(injectedMsgIds.keys()).forEach(function (k) {
+                if (k.indexOf(prefix) !== 0) return;
+                var injection = injectedMsgIds.get(k);
+                injectedMsgIds.delete(k);
+                injectionLost(socketId, Number(k.slice(prefix.length)), injection, 'receive_untrusted');
+            });
         },
 
         // naki-websocket 在連線關閉時呼叫：角色跟著連線走，重連是新的 socketId、重新握手
@@ -1027,6 +1226,12 @@
             roles.delete(socketId);
             var prefix = socketId + ':';
             Array.from(pendingMethods.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) pendingMethods.delete(k); });
+            Array.from(injectedMsgIds.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) injectedMsgIds.delete(k); });
+            Array.from(ambiguousPairs.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) ambiguousPairs.delete(k); });
+            ambiguousSockets.delete(String(socketId));
+            gameSends.delete(socketId);
+            untrustedSockets.delete(socketId);
+            recvLostSockets.delete(String(socketId));
         },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
@@ -1041,13 +1246,14 @@
         // 本地回應交給遊戲之後呼叫：插件注入的請求把本地結果交回發起插件（審查第 8 條）。
         // 配對已在擋下當時撤銷，這裡不碰 pendingMethods：遊戲在回呼內可能已用同 msgId 送出新請求（第十輪第 1 條）。
         // msgId 與原方法來自擋下當時的判定，bytes 是交付前另存的快照（第二輪第 5 條）。不跑改寫鏈、不送 Swift。
-        localResponse: function (socketId, msgId, method, bytes) {
-            if (msgId == null) return;
+        // injected：被擋的是這次注入本身；遊戲被擋的本地錯誤不認領同鍵注入（第二輪第 5 條）
+        localResponse: function (socketId, msgId, method, bytes, injected) {
+            if (msgId == null || !injected) return;
             var key = msgKey(socketId, msgId);
-            var originId = injectedMsgIds.get(key);
-            if (originId == null) return;
+            var injection = injectedMsgIds.get(key);
+            if (injection == null) return;
             injectedMsgIds.delete(key);
-            var origin = registry.get(originId);
+            var origin = registry.get(injection.id);
             if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
             var env = parseEnvelope(bytes) || { type: TYPE_RESPONSE, msgId: msgId, method: null, payload: null };
             var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: bytes, mutable: false },
@@ -1079,6 +1285,11 @@
         diagnostics: function () {
             return JSON.parse(JSON.stringify({ runtime: diagnostics, registered: api.list(), guard: api.guardState(),
                 pendingPairs: pendingMethods.size,
+                pendingInjections: injectedMsgIds.size,
+                gameInflight: Array.from(gameSends.values()).reduce(function (n, g) { return n + g.inflight.size; }, 0),
+                openCommits: openCommits.size,
+                untrustedSockets: untrustedSockets.size,
+                receiveLost: recvLostSockets.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,
