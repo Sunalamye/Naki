@@ -643,11 +643,60 @@ PS-55 改寫：第十輪斷言「失敗項以未匹配處理、之後恢復一�
 
 ### 第十二輪 Deviations
 
-1. **認領入口防線保留，但變異 PS89 不列入**：裁決要求 `injectionFor` 加防線。現行能建立注入登記的只有 `sendRequest`；它在登記前已檢查接收不可信，`receiveLost` 也清空既有登記，登記與回傳之間沒有插件程式碼可重入。所以接收不可信連線上不存在可認領的登記，防線不可達。試跑 PS89 存活（`r12-mutate-new.log`）。保守起見保留程式碼，只把變異從清單移除，以維持「全量存活只 T7／U10」。若主線認為防線應可測，需要另一條登記入口才測得到。
+1. ~~**認領入口防線保留，但變異 PS89 不列入**：~~ 第十三輪改述：「登記與回傳之間沒有插件程式碼可重入」不成立。復驗證明 `token.seq = nextSeq()` 經可包裝的 `window.__nakiWebSocket.nextSeq` 可在檢查之後、登記之前重入（`verify-pair-source/cx1-*`）。第十三輪把取序號移到檢查之前。原文：裁決要求 `injectionFor` 加防線。現行能建立注入登記的只有 `sendRequest`；它在登記前已檢查接收不可信，`receiveLost` 也清空既有登記，登記與回傳之間沒有插件程式碼可重入。所以接收不可信連線上不存在可認領的登記，防線不可達。試跑 PS89 存活（`r12-mutate-new.log`）。保守起見保留程式碼，只把變異從清單移除，以維持「全量存活只 T7／U10」。若主線認為防線應可測，需要另一條登記入口才測得到。
 2. **在途注入結案用 microtask**：裁決允許同步或下一 tick。同步呼叫會讓插件在 `sendRequest` 回傳 msgId 之前就收到結案，對不上自己的請求，所以延到下一個 microtask。期間插件若已停用，就不回派（與 `receiveLost` 相同）。
 
 ### 第十二輪已知風險
 
 - 接收不可信後 NOTIFY 也不能改寫，依賴改寫 NOTIFY 的插件在該連線關閉前失效（保守取捨）。
 - 讀取失敗後插件狀態可能不完整，只能靠重連恢復；Naki 不主動重連。
+- 未 live 驗證。
+
+## 第十三輪（復驗回饋小修；主線裁決四項）
+
+### 做了什麼
+
+- `naki-plugins.js`：
+  - `sendRequest`：`token.seq = nextSeq()` 移到接收不可信檢查之前；檢查之後到登記之間不再呼叫任何可被包裝的外部函式（第 1 項）。
+  - 注入登記超過 256 筆時，被淘汰那筆在下一個 microtask 以 `response_lost`、`reason: 'evicted'` 結案（第 3 項）。為此登記時在代號上記 `socketId` 與 `msgId`。
+  - `injectionLost` 增加 `reason` 參數；接收不可信結案的 `reason` 是 `receive_untrusted`。
+- 文件：
+  - 契約「代號不防惡意」段把 `nextSeq` 與 `sendRaw`、`dispatch` 並列（第 2 項）。
+  - 契約補上 `reason` 的兩個值與淘汰結案。
+  - Astra 第十二輪第 46 條（接收不可信後一般插件無從得知退化，建議提供帶 socketId、原因與恢復提示的狀態事件）列為後續另案，寫進 `plugin-v2-b2.md` §1.4 第 5 項殘餘（第 4 項）。
+
+| 項 | 處理 | 測試 |
+|---|---|---|
+| 1 | 先取序號再檢查 | PS-65（復驗 cx1 情境） |
+| 2 | 契約 | — |
+| 3 | 淘汰以 `response_lost`／`evicted` 結案 | PS-66 |
+| 4 | 第 46 條列為後續另案 | — |
+
+### 先紅後綠
+
+| 階段 | 結果 | log |
+|---|---|---|
+| PS-65、PS-66 套在 `5a95ffc` 的 JS | 2 紅，皆為行為紅：nextSeq 重入後仍登記（1）、淘汰無回呼 | `r13-red-on-5a95ffc.log` |
+| 實作後 | b2 241／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r13-{b2,v2,p4,keepalive,plugin-regression,local-unlock}.log` |
+
+### 變異
+
+| 範圍 | 結果 | log |
+|---|---|---|
+| PS85～PS92（含 PS89 與本輪新增 PS90～PS92） | PS89 存活，其餘全殺；PS90～PS92 3/3 殺；PS86 字串更新後補跑已殺 | `r13-mutate-new.log` |
+| 全量 0–174（PS89 不列入） | 172/174；存活只有 U10、T7 | `r13-mutate-full.log` |
+
+### Swift
+
+`JSContractTests`＋`PluginSendGuardTests` 19／0（`r13-swift-targeted.log`），全量 `NakiTests` 1184／0（`r13-swift-full.log`）。
+
+### 第十三輪 Deviations
+
+1. **PS89 仍殺不掉，未放回清單**：裁決要求放回並確認殺掉，實跑後存活（`r13-mutate-new.log`）。原因：取序號移到檢查之前以後，檢查到登記之間沒有外部呼叫，接收不可信連線上不會再出現注入登記；`receiveLost` 也會清空既有登記，連登記後 `pluginLog` 經 `sendToSwift` 的重入也一樣被清掉。認領入口的防線因此再度不可達。殺得掉的唯一方法是讓登記能在不可信連線上留存，那正是第 1 項要消除的缺陷。保守起見保留防線程式碼，PS89 不列入，由主線裁決。
+2. **`reason` 也給 `receive_untrusted`**：裁決只要求淘汰帶原因。兩種結案共用 `response_lost`，只在其中一種帶原因會讓插件無從分辨，所以兩種都帶。
+
+### 第十三輪已知風險
+
+- 包裝 `nextSeq` 的同 realm 程式可竄改序號，影響水位判定；屬 U4 不防範圍，已寫進契約。
+- 接收不可信後一般插件沒有退化通知，見第 46 條後續另案。
 - 未 live 驗證。

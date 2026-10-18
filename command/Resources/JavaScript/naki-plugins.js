@@ -185,8 +185,8 @@
         if (s !== undefined && !newerThan(watermark, s)) { ambiguousPairs.delete(key); return true; }
         return ambiguousSockets.has(String(socketId));
     }
-    // 注入的回應已無法確定（接收不可信）：以 response_lost、空 bytes 交回發起插件
-    function injectionLost(socketId, msgId, injection) {
+    // 注入的回應已無法確定（接收不可信，或登記被淘汰）：以 response_lost、空 bytes、原因交回發起插件
+    function injectionLost(socketId, msgId, injection, reason) {
         var origin = registry.get(injection.id);
         if (!origin || typeof origin.spec.onInjectResponse !== 'function') return;
         var rctx = makeCtx({ direction: 'receive', wsId: socketId, url: '', bytes: new Uint8Array(0), mutable: false },
@@ -194,6 +194,7 @@
         rctx.inResponseTo = msgId;
         rctx.timedOut = false;
         rctx.error = 'response_lost';
+        rctx.reason = reason;
         try { origin.spec.onInjectResponse(rctx); noteSuccess(origin, 'onInjectResponse'); }
         catch (e) { noteFailure(origin, 'onInjectResponse', e); }
     }
@@ -692,16 +693,22 @@
                 if (!r || !r.success) {
                     return { ok: false, reason: (r && r.reason) || 'send_failed' };
                 }
-                // sendRaw 期間（同步 hook 重入）連線已接收不可信：不登記，下一 tick 以 response_lost 結案（第十二輪第 43 條）
+                // 序號先取：nextSeq 經可包裝的 window.__nakiWebSocket，可能重入（第十三輪）。檢查之後到登記之間不再呼叫外部程式
+                token.seq = nextSeq();
+                // sendRaw 或 nextSeq 期間（同步重入）連線已接收不可信：不登記，下一 tick 以 response_lost 結案（第十二輪第 43 條）
                 if (recvLostSockets.has(String(r.socketId))) {
-                    Promise.resolve().then(function () { injectionLost(r.socketId, msgId, token); });
+                    Promise.resolve().then(function () { injectionLost(r.socketId, msgId, token, 'receive_untrusted'); });
                     return { ok: true, msgId: msgId };
                 }
                 // 登記 (連線, msgId) → 發起插件（§7.7b 回應路由）；連線是 sendRaw 實際選到的那條
-                token.seq = nextSeq();
+                token.socketId = r.socketId;
+                token.msgId = msgId;
                 injectedMsgIds.set(msgKey(r.socketId, msgId), token);
+                // 超過 256 筆淘汰最舊一筆，下一 tick 以 response_lost（evicted）結案，不靜默遺失（第十三輪）
                 if (injectedMsgIds.size > 256) {
-                    injectedMsgIds.delete(injectedMsgIds.keys().next().value);
+                    var evictedKey = injectedMsgIds.keys().next().value, evicted = injectedMsgIds.get(evictedKey);
+                    injectedMsgIds.delete(evictedKey);
+                    Promise.resolve().then(function () { injectionLost(evicted.socketId, evicted.msgId, evicted, 'evicted'); });
                 }
                 pluginLog(grant.__id, 'sendRequest ' + method + ' msgId=' + msgId + '（送出，成功要看 RESPONSE）');
                 return { ok: true, msgId: msgId };
@@ -1207,7 +1214,7 @@
                 if (k.indexOf(prefix) !== 0) return;
                 var injection = injectedMsgIds.get(k);
                 injectedMsgIds.delete(k);
-                injectionLost(socketId, Number(k.slice(prefix.length)), injection);
+                injectionLost(socketId, Number(k.slice(prefix.length)), injection, 'receive_untrusted');
             });
         },
 

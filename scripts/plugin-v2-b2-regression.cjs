@@ -2670,14 +2670,14 @@ test('GG11-3 (Astra10 2): onDisable that only swaps the grant without registerin
 const FST = '.lq.Lobby.fetchServerTime';
 function injector11(t) {
   t.c.__nakiPluginsMayModifyOutbound = true;
-  const answers = [], answerPayloads = [], answerErrors = [];
+  const answers = [], answerPayloads = [], answerErrors = [], answerReasons = [];
   let send;
   t.c.__nakiPlugins.setGrant('inj11', { capabilities: ['observe', 'injectSend'], methods: [BEAT] });
   t.c.__nakiPlugins.register({ id: 'inj11', onSend(ctx) { send = ctx.sendRequest; },
-    onInjectResponse(ctx) { answers.push([ctx.inResponseTo, ctx.method]); answerPayloads.push(ctx.bytes[ctx.bytes.length - 1]); answerErrors.push(ctx.error || null); } });
+    onInjectResponse(ctx) { answers.push([ctx.inResponseTo, ctx.method]); answerPayloads.push(ctx.bytes[ctx.bytes.length - 1]); answerErrors.push(ctx.error || null); answerReasons.push(ctx.reason || null); } });
   t.lobby.send(request(1840, BEAT));
   t.lobby.receive(response(1840, [8, 1]));
-  return { answers, answerPayloads, answerErrors, inject: (m, p = [8, 1]) => send(m, new t.c.Uint8Array(p)) };
+  return { answers, answerPayloads, answerErrors, answerReasons, inject: (m, p = [8, 1]) => send(m, new t.c.Uint8Array(p)) };
 }
 const pendingPairs = t => t.c.__nakiPlugins.diagnostics().pendingPairs;
 const pendingInjections = t => t.c.__nakiPlugins.diagnostics().pendingInjections;
@@ -3814,6 +3814,49 @@ test('PS-64 (r12 45): after a NOTIFY Blob fails to read, the next NOTIFY on that
   t.lobby.receive(note(3));
   assert.deepEqual(plain(general), [1], 'after the failure no general hook sees NOTIFY');
   assert.deepEqual(plain(seen).slice(-1), [[3, true, false, false]]);
+});
+
+// ---- pair-source 第十三輪（復驗回饋）：nextSeq 重入、注入登記淘汰結案 ----
+test('PS-65 (r13 verify cx1): same-realm code wraps sendRaw and nextSeq and, inside the first nextSeq after sendRaw, delivers a Blob that throws on read — the injection is not registered, FST gets response_lost on the next tick, and the later RESPONSE (22) never reaches FST', async () => {
+  const t = page();
+  const { answers, answerErrors, answerReasons, answerPayloads, inject } = injector11(t);
+  const ws = t.c.__nakiWebSocket, origRaw = ws.sendRaw, origSeq = ws.nextSeq;
+  let armed = false;
+  ws.sendRaw = function (b, s) { const r = origRaw.call(this, b, s); armed = true; return r; };
+  ws.nextSeq = function () {
+    if (armed) { armed = false; arrive(t, rejectingBlob(t, response(2040, [8, 1]), true).blob); }
+    return origSeq.call(this);
+  };
+  const r = inject(FST);
+  ws.sendRaw = origRaw; ws.nextSeq = origSeq;
+  assert.equal(r.ok, true);
+  assert.equal(t.c.__nakiPlugins.diagnostics().receiveLost, 1);
+  assert.equal(pendingInjections(t), 0, 'not registered');
+  await tick();
+  assert.deepEqual(plain(answers), [[r.msgId, FST]]);
+  assert.deepEqual(plain(answerErrors), ['response_lost']);
+  assert.deepEqual(plain(answerReasons), ['receive_untrusted']);
+  t.lobby.receive(response(r.msgId, [8, 22]));
+  assert.deepEqual(plain(answers), [[r.msgId, FST]]);
+  assert.equal(answerPayloads.includes(22), false);
+});
+
+test('PS-66 (r13): the 257th pending injection evicts the oldest — the evicted one is closed with response_lost (reason evicted) on the next tick instead of disappearing, and its late RESPONSE is not an injection answer', async () => {
+  const t = page();
+  const { answers, answerErrors, answerReasons, inject } = injector11(t);
+  const ids = [];
+  for (let i = 0; i < 257; i++) { const r = inject(FST); assert.equal(r.ok, true, 'injection ' + i); ids.push(r.msgId); }
+  assert.equal(pendingInjections(t), 256);
+  assert.deepEqual(plain(answers), [], 'not synchronously inside sendRequest');
+  await tick();
+  assert.deepEqual(plain(answers), [[ids[0], FST]]);
+  assert.deepEqual(plain(answerErrors), ['response_lost']);
+  assert.deepEqual(plain(answerReasons), ['evicted']);
+  t.lobby.receive(response(ids[0], [8, 1]));
+  assert.equal(plain(answers).length, 1, 'the evicted injection\'s late RESPONSE is not delivered again');
+  t.lobby.receive(response(ids[1], [8, 1]));
+  assert.deepEqual(plain(answers).slice(-1), [[ids[1], FST]]);
+  assert.deepEqual(plain(answerErrors).slice(-1), [null]);
 });
 
 test('PS-25 (r4 17): a token captured by wrapping sendRaw is dead once the call returns — replaying it goes out as plain Naki traffic in the shared table, not as an injection', () => {
