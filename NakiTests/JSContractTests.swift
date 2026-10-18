@@ -173,28 +173,141 @@ final class JSContractTests: XCTestCase {
             "registered.filter(function (r) { return r.indexOf('message:') === 0; }).join()")?.toString(), "message:true,message:false")
     }
 
-    /// Phase 4 變長 replace／drop 的禁改名單來源是 Swift 消費端：Swift 據以改牌局、帳號或匹配狀態的 method
-    /// （`MajsoulBridge`、`LiqiParser` 的字面值，加上回應路徑的 startUnifiedMatch、登入回應與表情廣播）必須全部被 JS 禁改，缺一即紅。
-    func testReshapeForbiddenListCoversEverySwiftConsumedMethod() throws {
-        let bridge = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("command/Services/Bridge")
-        let regex = try NSRegularExpression(pattern: #""(\.lq\.[A-Za-z0-9_.]+)""#)
-        var methods: Set<String> = [LiqiRequestBuilder.startUnifiedMatchMethod, LiqiResponseStore.broadcastMethod]
-        methods.formUnion(LiqiParser.loginResponseMethods)
-        for file in ["MajsoulBridge.swift", "LiqiParser.swift"] {
-            let text = try String(contentsOf: bridge.appendingPathComponent(file), encoding: .utf8)
-            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                if let range = Range(match.range(at: 1), in: text) { methods.insert(String(text[range])) }
+    private static let servicesRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("command/Services")
+    private static let builderFile = servicesRoot.appendingPathComponent("Bridge/LiqiRequestBuilder.swift")
+
+    private func captures(_ pattern: String, _ text: String) throws -> [String] {
+        try NSRegularExpression(pattern: pattern).matches(in: text, range: NSRange(text.startIndex..., in: text))
+            .compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
+    }
+
+    private static let builderDeclaration =
+        #"^(?:(?:private|fileprivate|internal|public|nonisolated)\s+)*static\s+(?:let|var)\s+(\w+)\s*(?::\s*String\s*)?=\s*([^{]+)$"#
+    private static let builderSend = #"^(?:return )?LiqiRequestSpec\(method: \w+, fields: [^)]*\)$"#
+
+    /// `enum LiqiRequestBuilder` 本體的常數名 → 值（第五輪第 2 條）。支援 `static let／var 名稱 [: String] = 值`；
+    /// 值不是字面值的（動作頻道）為 nil，一律當成不在集合內。本體裡其他 `static let／var` 宣告、或不在這種宣告上的
+    /// `.lq.` 字面值，列進 `unsupported`：解析器認不出的形式要明確報紅，不能靜默漏掉。
+    private func builderMethodValues() throws -> (table: [String: String?], unsupported: [String]) {
+        let text = try String(contentsOf: Self.builderFile, encoding: .utf8)
+        let lines = text.components(separatedBy: .newlines)
+        let start = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("enum LiqiRequestBuilder {") })
+        var table: [String: String?] = [:], unsupported: [String] = []
+        for line in lines[(start + 1)...] {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            let parts = try NSRegularExpression(pattern: Self.builderDeclaration).firstMatch(in: t, range: NSRange(t.startIndex..., in: t))
+            if let parts, let name = Range(parts.range(at: 1), in: t), let value = Range(parts.range(at: 2), in: t) {
+                table[String(t[name])] = try captures(#"^"([^"]*)"\s*$"#, String(t[value])).first
+            } else if t.range(of: #"^(?:\w+\s+)*static\s+(?:let|var)\b"#, options: .regularExpression) != nil
+                        || t.range(of: #""\.lq\."#, options: .regularExpression) != nil {
+                unsupported.append(t)
             }
         }
-        for known in [".lq.NotifyGameTerminate", ".lq.ActionPrototype", ".lq.Lobby.oauth2Login", ".lq.Lobby.oauth2Auth"] {
-            XCTAssertTrue(methods.contains(known), "抽不到 \(known)，regex 或掃描路徑壞了")
+        return (table, unsupported)
+    }
+
+    /// `LiqiSideEffectMethods` 宣告的每個方法常數都併進 `consumed` 或 `all`（inject-receive 第四輪第 4 條）：
+    /// 新增常數卻漏加集合就紅。集合定義裡的字面值與引用的 builder 常數，值都必須在 `all`。
+    /// builder 本體的常數宣告形式也在這裡檢查（第五輪第 2 條），本體的逐行內容由下一條掃描。
+    func testEverySideEffectConstantIsInTheSet() throws {
+        let text = try String(contentsOf: Self.builderFile, encoding: .utf8)
+        let head = try XCTUnwrap(text.range(of: "enum LiqiSideEffectMethods {"))
+        let tail = try XCTUnwrap(text.range(of: "\n}\n", range: head.upperBound..<text.endIndex))
+        let body = String(text[head.upperBound..<tail.lowerBound])
+        let composition = String(body[try XCTUnwrap(body.range(of: "static let consumed")).lowerBound...])
+        let names = try captures(#"static\s+(?:let|var)\s+(\w+)"#, body).filter { $0 != "consumed" && $0 != "all" }
+        XCTAssertGreaterThan(names.count, 8, "解析壞了")
+        let missing: [String] = try names.filter { name in try captures("\\b(\(name))\\b", composition).isEmpty }
+        XCTAssertEqual(missing, [], "LiqiSideEffectMethods 的常數沒併進 consumed／all")
+        let (builder, unsupported) = try builderMethodValues()
+        XCTAssertEqual(unsupported, [], "LiqiRequestBuilder 有解析器認不出的宣告形式：改寫成 static let／var 名稱 [: String] = 值")
+        let strayLiterals = Set(try captures(#""(\.lq\.[^"]*)""#, body)).subtracting(LiqiSideEffectMethods.all)
+        let strayConstants = try captures(#"\b(\w+Method)\b"#, body).filter { name in
+            !(builder[name].flatMap { $0 }.map { LiqiSideEffectMethods.all.contains($0) } ?? false)
         }
+        XCTAssertEqual(strayLiterals.sorted(), [])
+        XCTAssertEqual(strayConstants, [])
+    }
+
+    /// Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`（inject-receive 第三輪第 1 條、第四輪第 4 條）。
+    /// 規則（不是「任何語法都抓得到」）：`command/Services` 下的每一行（builder 本體只略過常數宣告與 `LiqiRequestSpec(method:)`
+    /// 送出定義，第五輪第 2 條），若有值不在 `all` 的 `.lq.` 字面值，
+    /// 或提到值不在 `all` 的 `LiqiRequestBuilder` 方法常數名（不論前綴、typealias 或跨行），就必須是逐檔列出的例外行
+    /// （比對整行內容，每個例外只能用一次，用不到的例外也紅）。字面值寫在註解裡也算（寧可誤紅）。
+    /// 抓不到的：字串拼接或插值組出的方法名、以別名常數再轉手的值。
+    func testServicesBranchOnlyOnTheSideEffectMethodSet() throws {
+        let builder = try builderMethodValues().table
+        XCTAssertGreaterThan(builder.count, 15, "builder 常數解析壞了")
+        let names = try NSRegularExpression(pattern: "\\b(" + builder.keys.sorted().joined(separator: "|") + ")\\b")
+        func normalized(_ line: String) -> String {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            return t.hasSuffix(",") ? String(t.dropLast()) : t
+        }
+        var allowed: [String: [String]] = [
+            // error 欄位表：只用於 Naki 自送的回應
+            "LiqiResponseStore.swift": LiqiResponseRecord.errorFieldNumbers.map { "\"\($0.key)\": \($0.value)" },
+            // 動作頻道的方法名定義
+            "LiqiOperationStore.swift": [#"case .selfOperation: return ".lq.FastTest.inputOperation""#,
+                                         #"case .chiPengGang: return ".lq.FastTest.inputChiPengGang""#],
+            // 保活狀態回報的方法名
+            "LiqiActionSender.swift": [#""method": LiqiRequestBuilder.heatbeatMethod"#],
+            // MCP 輸出 schema 的說明值
+            "MCPToolOutputSchema.swift": [#""method": string(".lq.FastTest.broadcastInGame")"#],
+            // manifest 的 sendGuard 前綴檢查
+            "PluginRegistry.swift": [#"if let sendGuard, sendGuard.isEmpty || sendGuard.contains(where: { !$0.hasPrefix(".lq.Lobby.") || !methods.contains($0) }) {"#],
+        ]
+        var stray: [String] = [], scanned = 0
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: Self.servicesRoot, includingPropertiesForKeys: nil))
+        for case let url as URL in files where url.pathExtension == "swift" {
+            let file = url.lastPathComponent
+            scanned += 1
+            var inBuilder = false
+            for line in try String(contentsOf: url, encoding: .utf8).components(separatedBy: .newlines) {
+                if file == Self.builderFile.lastPathComponent {
+                    inBuilder = inBuilder || line.hasPrefix("enum LiqiRequestBuilder {")
+                    let t = line.trimmingCharacters(in: .whitespaces)
+                    if inBuilder && (t.range(of: Self.builderDeclaration, options: .regularExpression) != nil
+                                     || t.range(of: Self.builderSend, options: .regularExpression) != nil) { continue }
+                }
+                let literals = try captures(#""(\.lq\.[^"]*)""#, line).filter { !LiqiSideEffectMethods.all.contains($0) }
+                let constants = names.matches(in: line, range: NSRange(line.startIndex..., in: line))
+                    .compactMap { Range($0.range(at: 1), in: line).map { String(line[$0]) } }
+                    .filter { !(builder[$0].flatMap { $0 }.map { LiqiSideEffectMethods.all.contains($0) } ?? false) }
+                guard !literals.isEmpty || !constants.isEmpty else { continue }
+                if let at = allowed[file]?.firstIndex(of: normalized(line)) { allowed[file]?.remove(at: at); continue }
+                stray.append("\(file): \(normalized(line))")
+            }
+        }
+        XCTAssertGreaterThan(scanned, 40, "掃描路徑壞了")
+        XCTAssertEqual(stray, [], "用了 LiqiSideEffectMethods 以外的方法：有副作用就加進集合，否則列進該檔例外（整行）")
+        XCTAssertEqual(allowed.filter { !$0.value.isEmpty }.mapValues { $0.sorted() }, [:], "例外行已不存在：刪掉過期例外")
+    }
+
+    /// Phase 4 變長 replace／drop 的禁改名單涵蓋 Swift 會消費的回應與通知（`LiqiSideEffectMethods.consumed`），缺一即紅
+    /// （docs/archive/plan/plugin-v2-phase4.md §4）。
+    func testReshapeForbiddenListCoversEverySwiftConsumedMethod() throws {
+        XCTAssertTrue(LiqiSideEffectMethods.consumed.isSuperset(of: [".lq.NotifyGameTerminate", ".lq.ActionPrototype",
+                                                                     ".lq.Lobby.oauth2Login", ".lq.Lobby.oauth2Auth"]))
         let page = try loadedPage()
-        let missing = methods.sorted().filter {
+        let missing = LiqiSideEffectMethods.consumed.sorted().filter {
             page.evaluateScript("window.__nakiPlugins.isReshapeForbidden('\($0)')")?.toBool() != true
         }
         XCTAssertEqual(missing, [], "Swift 會消費的 method 沒進 JS 的變長改寫禁改名單")
+    }
+
+    /// respondLocally 的禁用名單涵蓋 Swift 依 method 分支的全部方法（`LiqiSideEffectMethods.all`）：本地回應這些請求
+    /// 會讓 Swift 的匹配、牌局或帳號狀態與伺服器分岔，缺一即紅（plugin-v2-b2.md §5.3）。
+    func testRespondForbiddenListCoversEverySwiftSideEffectMethod() throws {
+        XCTAssertTrue(LiqiSideEffectMethods.all.isSuperset(of: [LiqiRequestBuilder.startUnifiedMatchMethod,
+            LiqiRequestBuilder.cancelUnifiedMatchMethod, LiqiRequestBuilder.cancelMatchMethod, ".lq.Lobby.login"]))
+        let page = try loadedPage()
+        let missing = LiqiSideEffectMethods.all.sorted().filter {
+            page.evaluateScript("window.__nakiPlugins.isRespondForbidden('\($0)')")?.toBool() != true
+        }
+        XCTAssertEqual(missing, [], "Swift 依 method 分支的方法沒進 JS 的 respondLocally 禁用名單")
+        XCTAssertEqual(page.evaluateScript("window.__nakiPlugins.isRespondForbidden('.lq.Lobby.fetchServerTime')")?.toBool(), false,
+                       "名單不能空轉成全禁")
     }
 
     /// 抽取與查找都不能空轉：已知呼叫要抓得到，別的物件的同名方法不能算數。

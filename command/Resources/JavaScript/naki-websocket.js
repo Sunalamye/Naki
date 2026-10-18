@@ -97,7 +97,8 @@
             url: url,
             isMajsoul: isMajsoul,
             created: Date.now(),
-            recvQueue: []
+            recvQueue: [],
+            injected: []
         });
 
         // 通知 Swift 新連接（此刻還沒 open；沒有後續 websocket_connected 就是握手失敗）
@@ -138,7 +139,8 @@
             if (released) return;
             released = true;
             const info = wsConnections.get(ws);
-            if (info) info.recvQueue.length = 0;
+            // 待交付的合成項各記一行再清空（第四輪第 5 條）
+            if (info) { info.recvQueue.length = 0; info.injected.splice(0).forEach(function(item) { injectDropped(item, '連線已關閉'); }); }
             wsConnections.delete(ws);
             if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
         };
@@ -457,7 +459,8 @@
                 sender: sender,
                 tx: tx,
                 deferred: !!deferred,
-                watermark: deferred ? deferred.watermark : undefined
+                watermark: deferred ? deferred.watermark : undefined,
+                synthetic: deferred ? deferred.synthetic : undefined
             });
             if (direction === 'receive') return out && out.reshape ? out : undefined;
             return out instanceof Uint8Array || (out && out.block) ? out : undefined;
@@ -469,13 +472,15 @@
         }
     }
 
-    // 本地回應（守衛擋下；日後 respondLocally 共用）。
+    // 本地回應（守衛擋下、respondLocally 本地成功）。
     // Swift 成對交付：原 REQUEST 與 RESPONSE 放在同一則 bridge 訊息（localResponse 欄位），兩份都編碼成功才送；
     // postMessage 失敗時兩份一起不見，不會只到一半（審查第三輪第 3 條）。遊戲在 ws.send 回傳後才收到另一份複本，
     // Naki listener 略過它；交付後以擋下當時的連線、msgId、原方法與自己的快照結案。
+    // 有回應卻排不進交付（複製或排程拋錯）時，通知插件層釋放保留的號碼（inject-receive 第三輪第 4 條）；
+    // 結案與釋放都帶判決的保留（verdict.hold），插件層以交易為單位，重複釋放無作用（第四輪第 2 條）
     const syntheticEvents = new WeakSet();
     function respondLocal(ws, wsId, verdict) {
-        let response = null;
+        let response = null, scheduled = false;
         try {
             response = verdict.response ? verdict.response.slice() : null;
             if (verdict.request && response) {
@@ -487,19 +492,24 @@
                 }
             }
         } catch (e) { console.error('[Naki WS] 本地交易送 Swift 失敗（兩份都沒送）:', e); }
-        if (!response) return;
         try {
-            const forGame = response.slice();
-            setTimeout(function () {
-                try {
-                    const ev = new MessageEvent('message', { data: forGame.buffer });
-                    syntheticEvents.add(ev);
-                    ws.dispatchEvent(ev);
-                } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
-                try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response, verdict.injected); }
-                catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
-            }, 0);
+            if (response) {
+                const forGame = response.slice();
+                setTimeout(function () {
+                    try {
+                        const ev = new MessageEvent('message', { data: forGame.buffer });
+                        syntheticEvents.add(ev);
+                        ws.dispatchEvent(ev);
+                    } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
+                    try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response, verdict.injected, verdict.hold); }
+                    catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
+                }, 0);
+                scheduled = true;
+            }
         } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
+        if (scheduled || !verdict.response) return;
+        try { window.__nakiPlugins.localDropped(verdict.hold); }
+        catch (e) { console.error('[Naki WS] 本地回應釋放號碼失敗:', e); }
     }
 
     // receive 變長 replace／drop（Phase 4，docs/archive/plan/plugin-v2-phase4.md §1–§2、§5）。
@@ -566,8 +576,16 @@
     // 佇列超過 RECV_QUEUE_LIMIT 視同讀取失敗：未就緒的全部放棄、宣告接收不可信，再 flush（第 42 條）。
     // 不設時間逾時：Blob 讀取沒有完成期限，任何門檻都只是猜測；以容量界定累積，等待時間由 diagnostics 觀察
     const RECV_QUEUE_LIMIT = 256;
-    function receiveLost(wsId) {
-        if (window.__nakiPlugins && window.__nakiPlugins.receiveLost) window.__nakiPlugins.receiveLost(wsId);
+    function receiveLost(wsId, info, reason) {
+        info.recvLost = true;
+        if (window.__nakiPlugins && window.__nakiPlugins.receiveLost) window.__nakiPlugins.receiveLost(wsId, reason);
+    }
+    // 所有入隊入口（網路接收、injectReceive 的觀察項）共用容量與溢出處理（inject-receive 第二輪第 6 條）
+    function checkOverflow(wsId, info) {
+        if (info.recvQueue.length <= RECV_QUEUE_LIMIT) return;
+        receiveLost(wsId, info, 'receive_queue_overflow');
+        info.recvQueue.forEach(function(e) { if (!e.ready) { e.ready = true; e.view = null; } });
+        flushReceive(wsId, info);
     }
     function enqueueReceive(wsId, info, data) {
         const entry = { view: null, ready: false, failed: false, blob: data instanceof Blob, watermark: nakiSentSeq, at: Date.now() };
@@ -595,11 +613,7 @@
             entry.ready = true;
             sendToSwift('websocket_message', { socketId: wsId, direction: 'receive', data: arrayBufferToBase64(view), type: 'binary', size: view.byteLength });
         } finally {
-            if (info.recvQueue.length > RECV_QUEUE_LIMIT) {
-                receiveLost(wsId);
-                info.recvQueue.forEach(function(e) { if (!e.ready) { e.ready = true; e.view = null; } });
-                flushReceive(wsId, info);
-            }
+            checkOverflow(wsId, info);
         }
     }
     function flushReceive(wsId, info) {
@@ -609,13 +623,58 @@
             const q = info.recvQueue;
             while (q.length && q[0].ready) {
                 const entry = q.shift();
-                if (!entry.view) { if (entry.failed) receiveLost(wsId); continue; }
+                if (!entry.view) { if (entry.failed) receiveLost(wsId, info, 'receive_blob_failed'); continue; }
                 try {
                     if (entry.blob) markNakiAnswered(wsId, entry.view, entry.watermark);   // 記帳處讀不到 Blob，展開後補標記
-                    dispatchToPlugins('receive', wsId, info, entry.view, false, false, undefined, undefined, { watermark: entry.watermark });
+                    dispatchToPlugins('receive', wsId, info, entry.view, false, false, undefined, undefined, { watermark: entry.watermark, synthetic: entry.synthetic });
                 } catch (e) { console.error('[Naki WS] 排隊接收 dispatch 失敗:', e); }
             }
         } finally { info.flushing = false; }
+    }
+
+    // injectReceive（plugin-v2.md §4.2，inject-receive §1）：合成 NOTIFY 排在目前這則之後。下一個 task 才交付（setTimeout 0；
+    // capture listener 內的 microtask 仍早於遊戲 handler，依 HTML 規範推論，未 live 驗證）：先送 Swift（LiqiParser 只看這一次），
+    // 送不到就不交付遊戲；再交付遊戲（Naki listener 略過）；最後觀察項排進接收佇列尾，插件觀察順序等於遊戲收到的順序。
+    // 呼叫端（naki-plugins）已驗 L3、內容與禁改名單；這裡只管連線。釋放時清空待交付，之後才到的 task 找不到項目就什麼都不做；
+    // 交付當下再查一次連線仍是同一筆紀錄且 OPEN（CLOSING 尚未釋放也丟棄，第二輪第 7 條）。觀察項與網路接收共用佇列上限
+    function injectReceive(socketId, bytes, pluginId, maxPending) {
+        let ws = null, info = null;
+        wsConnections.forEach(function(i, w) { if (i.id === socketId) { ws = w; info = i; } });
+        if (!info || ws.readyState !== OriginalWebSocket.OPEN) return { ok: false, reason: 'no_connection' };
+        if (info.recvLost) return { ok: false, reason: 'receive_untrusted' };
+        if (info.injected.length >= maxPending) return { ok: false, reason: 'inject_busy' };
+        const item = { bytes: bytes, pluginId: pluginId };
+        info.injected.push(item);
+        // 排不進 task：撤回入隊，不占待交付名額（第四輪第 3 條）
+        try { setTimeout(function() { deliverInjected(ws, info, item); }, 0); }
+        catch (e) { info.injected.splice(info.injected.indexOf(item), 1); return { ok: false, reason: 'schedule_failed' }; }
+        return { ok: true };
+    }
+    function injectDropped(item, why) {
+        try { window.__nakiPlugins.injectDropped(item.pluginId, why); } catch (e) { console.error('[Naki WS] injectReceive 未交付：' + why, e); }
+    }
+    function deliverInjected(ws, info, item) {
+        const at = info.injected.indexOf(item);
+        if (at === -1) return;
+        info.injected.splice(at, 1);
+        const drop = function(why) { injectDropped(item, why); };
+        if (wsConnections.get(ws) !== info || ws.readyState !== OriginalWebSocket.OPEN) return drop('連線已關閉');
+        if (info.recvLost) return drop('連線接收不可信');
+        let sent = false;
+        try {
+            sent = sendToSwift('websocket_message', { socketId: info.id, direction: 'receive', data: arrayBufferToBase64(item.bytes),
+                type: 'binary', size: item.bytes.byteLength, synthetic: true }) !== false;
+        } catch (e) { sent = false; }
+        if (!sent) return drop('送 Swift 失敗');
+        try {
+            const ev = new MessageEvent('message', { data: item.bytes.slice().buffer });
+            syntheticEvents.add(ev);
+            ws.dispatchEvent(ev);
+        } catch (e) { console.error('[Naki WS] injectReceive 交付遊戲時 listener 拋錯:', e); }
+        if (!wsConnections.has(ws)) return;
+        info.recvQueue.push({ view: item.bytes.slice(), ready: true, failed: false, blob: false, watermark: undefined, synthetic: item.pluginId, at: Date.now() });
+        checkOverflow(info.id, info);
+        flushReceive(info.id, info);
     }
 
     function handleMessage(ws, wsId, data, direction, isMajsoul, event, tx) {
@@ -747,6 +806,7 @@
             return JSON.parse(JSON.stringify(Object.assign({ reshape: reshapeStats, reshapeLocked: reshapeLocked, reshapeFaults: reshapeFaults, recvQueue: recvQueue }, messageTypes)));
         },
         isNakiSent: isNakiSent,
+        injectReceive: injectReceive,
         // D22 登記與插件層可消耗紀錄共用的遞增序號（pair-source 第九輪）
         nextSeq: function () { return ++nakiSentSeq; },
         // 獲取連接信息

@@ -170,9 +170,6 @@ nonisolated final class LiqiResponseStore: @unchecked Sendable {
     /// 全域共用實例
     static let shared = LiqiResponseStore()
 
-    /// 表情廣播的方法全名
-    static let broadcastMethod = ".lq.NotifyGameBroadcast"
-
     /// 回應保留上限
     private let responseLimit = 32
     /// 廣播保留上限
@@ -207,7 +204,7 @@ nonisolated final class LiqiResponseStore: @unchecked Sendable {
             return true
         }
 
-        if type == "notify", method == LiqiResponseStore.broadcastMethod {
+        if type == "notify", method == LiqiSideEffectMethods.gameBroadcast {
             recordBroadcast(fields: data)
             return true
         }

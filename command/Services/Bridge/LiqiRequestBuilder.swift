@@ -92,6 +92,34 @@ struct LiqiFriendRoomConfig {
     }
 }
 
+// MARK: - Side-effect Methods
+
+/// Swift 依 method 分支的唯一來源：匹配、牌局、帳號狀態的副作用都從這裡取名。`command/Services` 其他檔案不得另寫
+/// 集合外的 `.lq.` 字面值或 `LiqiRequestBuilder` 方法常數（JSContractTests 反查，inject-receive 第三輪第 1 條、第四輪第 4 條）；
+/// 新增常數必須併進 `consumed` 或 `all`。
+/// 插件的 respondLocally 禁用名單必須涵蓋 `all`，變長改寫禁改名單必須涵蓋 `consumed`。
+nonisolated enum LiqiSideEffectMethods {
+    /// 送出方向：遊戲自己的段位場請求（學 match_sid；它的錯誤回應也會取消等待）
+    static let matchStart = LiqiRequestBuilder.startUnifiedMatchMethod
+    /// 送出方向：取消匹配（清掉等待中的對局種類）
+    static let matchCancel: Set<String> = [LiqiRequestBuilder.cancelUnifiedMatchMethod, LiqiRequestBuilder.cancelMatchMethod]
+    /// RESPONSE 帶 `account_id` 的登入方法（`ResLogin` 形狀）
+    static let loginResponses: Set<String> = [".lq.Lobby.login", ".lq.Lobby.oauth2Login", ".lq.Lobby.emailLogin"]
+    /// `ResOauth2Auth`：只有 error 與 access_token，token 不得進解析結果
+    static let oauth2Auth = ".lq.Lobby.oauth2Auth"
+    static let authGame = ".lq.FastTest.authGame"
+    static let actionPrototype = ".lq.ActionPrototype"
+    /// 對局同步（斷線重連、進場）
+    static let gameSync: Set<String> = [".lq.FastTest.syncGame", ".lq.FastTest.enterGame"]
+    static let gameEnd: Set<String> = [".lq.NotifyGameEndResult", ".lq.NotifyGameTerminate"]
+    /// 表情廣播
+    static let gameBroadcast = ".lq.NotifyGameBroadcast"
+    /// Swift 會消費其內容的回應與通知
+    static let consumed: Set<String> = loginResponses.union(gameSync).union(gameEnd)
+        .union([matchStart, oauth2Auth, authGame, actionPrototype, gameBroadcast])
+    static let all: Set<String> = consumed.union(matchCancel)
+}
+
 // MARK: - Request Builder
 
 /// 把語意動作組成 Liqi payload 欄位（純函式，無狀態，可單元測試）

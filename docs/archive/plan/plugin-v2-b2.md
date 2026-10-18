@@ -149,7 +149,7 @@ ws.send(data)
    - **重用 buffer**：不適用。遊戲的 buffer 從未交給插件，重用同一塊 buffer 送下一筆時，內容就是遊戲自己寫的（`GG5-4`）。
 3. **Naki 解析不出、伺服器解得開的守衛方法**：分兩種來源。(a) **原請求本身**在 unknown 連線上解析失敗：照送、不撤回（上方「unknown 連線上解析失敗」），這是保留的殘餘風險。(b) **hook 產生的改寫**解析不出或結構不完整：一律撤回（第八輪起）。就地改寫在 hook 結束時要 `parseEnvelope` 成功且過 `isWellFormed`，`replace` 在入口與 hook 結束都要過 `sendViolation`（含同樣兩項），鏈尾終判解析不出也整筆退回。殘餘的只剩解析差異：Naki 解析成非守衛方法、結構也完整，伺服器卻解成守衛方法的 bytes，這只能靠 parser 與伺服器一致來排除，未驗證。
 4. 角色在連線關閉時清除，只靠接線呼叫 `closed`。接線在 `close` 與 `error` 都經 `release` 呼叫，`released` 旗標讓兩者只生效一次（ws-error-cleanup，main `92dbe39`）。沒呼叫時角色只是記憶體不回收；socketId 每頁單調遞增、不重用，角色判定不受影響（變異 M7 只讓 `R5-1g` 失敗）。但 pair-source 的連線狀態會影響判定：未清的遊戲未答、失準與不可信標記會讓注入一律 `msgid_busy`。所以 `ws.send` 入口與 Blob 展開後的延後派發都先確認連線未釋放，已釋放的不再寫入任何連線狀態（pair-source 第七、八輪）。
-5. **跨來源 msgId 碰撞**（第十一輪提出；pair-source 修正，設計見 `pair-source-design-2026-10-17.md`，測試 `GG11-4`／`PS-1`～`PS-6`）：插件注入的配對改存注入登記，不進遊戲與 Naki 共用的配對表；遊戲送出每連線另記（最後號碼、未答集合，不論有無插件），配發避開未答注入、遊戲未答與遊戲接下來 256 個號碼，某連線遊戲未答超過 256 筆即拒發（`msgid_busy`）到該連線關閉。注入被擋不再撤銷遊戲的配對，注入回應以注入的方法派發，遊戲被擋的本地錯誤不認領注入登記，零消耗者時 RESPONSE 仍消耗注入登記（第二輪，`PS-7`～`PS-14`）。第三輪：注入身分改為宿主交易代號，由 `sendRaw` 綁在送出的 buffer 上（`WeakMap`），全程依代號判來源，不比 msgId、不比 bytes；遊戲未答在送出判決確定後才記、只由未被注入認領的 RESPONSE 消耗；歧義鍵超過 256 個改標整條連線只觀察到關閉（`PS-15`～`PS-22`）。第四輪：遊戲記帳分「派發中保留」與「確定外送提交」，同步 `onSend` 內的注入避開正在派發的遊戲號碼；提交後被 `failSafe` 擋下時撤回；代號在 `sendRaw` 返回後失效（`PS-23`～`PS-28`）。第五輪：撤回改為逐筆交易，`handleMessage` 為每筆送出建交易物件傳給 `dispatch` 與 `failSafe`，只撤自己的 msgId，淘汰與失準在表有變動時保守不回復（`PS-29`～`PS-36`）。第六輪：交易改由 `ws.send` 包裝建立並涵蓋底層 send，拋錯撤回後照拋；撤回資料只活在交易期間，未答表只存序號；交易期間被回答的淘汰項不放回；有待展開的遊戲 Blob 時注入回 `msgid_busy`（`PS-37`～`PS-43`）。第七輪：遊戲以 Blob 送出的連線改標不可信直到關閉，任一連線不可信就拒發注入；Blob 展開後照常派發但不記帳；連線釋放後才展開的 Blob 一律丟棄（`PS-37`、`PS-44`、`PS-45`）。第八輪：延後派發的 RESPONSE 只消耗抵達時已存在的未答與配對（水位）；已釋放連線的 `ws.send` 不標記不記帳；延後派發拋錯不走 `failSafe`（`PS-46`～`PS-49`）。第九輪：注入登記與歧義鍵也蓋序號，與配對、遊戲未答、D22 登記共用 `nakiSentSeq`；延後回應在六處都只匹配抵達前的紀錄，對不上的不派 hook、不消耗（`PS-50`～`PS-52`）。第十輪：每條連線的接收依抵達順序處理，前面有 Blob 待展開時後到的訊息排在其後、只能觀察，展開失敗以未匹配處理，連線釋放即丟棄佇列；歧義標記記所保護配對的序號（`PS-53`～`PS-58`）。第十一輪：接收 Blob 讀取失敗或佇列超過 256 項時，該連線接收不可信到關閉，既有注入以 `response_lost` 結案、之後回應只觀察；flush 中重入的接收也排隊；排隊快照取遮罩後內容（`PS-59`～`PS-62`）。第十二輪：在途注入遇接收不可信不登記、以 `response_lost` 結案，認領入口另設防線；遮罩改後拋錯時還原共享內容；接收不可信後 NOTIFY 也只觀察（`PS-61`、`PS-63`、`PS-64`）。第十三輪（復驗回饋）：注入先取序號再檢查接收不可信，`nextSeq` 重入也不登記；注入登記超過 256 筆時被淘汰那筆以 `response_lost`（`evicted`）結案（`PS-65`、`PS-66`）。第十四輪：`sendRaw` 回傳的 `socketId` 只讀一次存快照，代號欄位賦值移到檢查之前，`sendRequest` 期間九個重入點都不留孤兒登記（`PS-67`、`PS-68`）。代號不防惡意：頁面程式可直接呼叫 `sendRaw` 覆寫共用配對，包裝 `sendRaw` 可在呼叫期間冒用代號（同 realm 信任模型，U4）；外層包裝改傳新 view、複本或漏傳代號時，注入退化成共用配對、回應後殘留。殘餘：窗口是啟發式，遊戲計數器步進、繞回、重連與陌生 msgId 回應的客戶端行為都未驗證；遊戲仍走到注入未答的同號時，第一則 RESPONSE 歸注入、下一則只給 Naki observer 觀察、不可改寫；相同 bytes 的重入請求守衛照 Deviation 11 兩筆都擋；Naki 自送（60000–63999）與遊戲之間沒有隔離；接收不可信後一般插件收不到任何退化通知（只有有未答注入的插件收到 `response_lost`），帶連線、原因與恢復提示的狀態事件列為後續另案（Astra pair-source 第十二輪第 46 條）。
+5. **跨來源 msgId 碰撞**（第十一輪提出；pair-source 修正，設計見 `pair-source-design-2026-10-17.md`，測試 `GG11-4`／`PS-1`～`PS-6`）：插件注入的配對改存注入登記，不進遊戲與 Naki 共用的配對表；遊戲送出每連線另記（最後號碼、未答集合，不論有無插件），配發避開未答注入、遊戲未答與遊戲接下來 256 個號碼，某連線遊戲未答超過 256 筆即拒發（`msgid_busy`）到該連線關閉。注入被擋不再撤銷遊戲的配對，注入回應以注入的方法派發，遊戲被擋的本地錯誤不認領注入登記，零消耗者時 RESPONSE 仍消耗注入登記（第二輪，`PS-7`～`PS-14`）。第三輪：注入身分改為宿主交易代號，由 `sendRaw` 綁在送出的 buffer 上（`WeakMap`），全程依代號判來源，不比 msgId、不比 bytes；遊戲未答在送出判決確定後才記、只由未被注入認領的 RESPONSE 消耗；歧義鍵超過 256 個改標整條連線只觀察到關閉（`PS-15`～`PS-22`）。第四輪：遊戲記帳分「派發中保留」與「確定外送提交」，同步 `onSend` 內的注入避開正在派發的遊戲號碼；提交後被 `failSafe` 擋下時撤回；代號在 `sendRaw` 返回後失效（`PS-23`～`PS-28`）。第五輪：撤回改為逐筆交易，`handleMessage` 為每筆送出建交易物件傳給 `dispatch` 與 `failSafe`，只撤自己的 msgId，淘汰與失準在表有變動時保守不回復（`PS-29`～`PS-36`）。第六輪：交易改由 `ws.send` 包裝建立並涵蓋底層 send，拋錯撤回後照拋；撤回資料只活在交易期間，未答表只存序號；交易期間被回答的淘汰項不放回；有待展開的遊戲 Blob 時注入回 `msgid_busy`（`PS-37`～`PS-43`）。第七輪：遊戲以 Blob 送出的連線改標不可信直到關閉，任一連線不可信就拒發注入；Blob 展開後照常派發但不記帳；連線釋放後才展開的 Blob 一律丟棄（`PS-37`、`PS-44`、`PS-45`）。第八輪：延後派發的 RESPONSE 只消耗抵達時已存在的未答與配對（水位）；已釋放連線的 `ws.send` 不標記不記帳；延後派發拋錯不走 `failSafe`（`PS-46`～`PS-49`）。第九輪：注入登記與歧義鍵也蓋序號，與配對、遊戲未答、D22 登記共用 `nakiSentSeq`；延後回應在六處都只匹配抵達前的紀錄，對不上的不派 hook、不消耗（`PS-50`～`PS-52`）。第十輪：每條連線的接收依抵達順序處理，前面有 Blob 待展開時後到的訊息排在其後、只能觀察，展開失敗以未匹配處理，連線釋放即丟棄佇列；歧義標記記所保護配對的序號（`PS-53`～`PS-58`）。第十一輪：接收 Blob 讀取失敗或佇列超過 256 項時，該連線接收不可信到關閉，既有注入以 `response_lost` 結案、之後回應只觀察；flush 中重入的接收也排隊；排隊快照取遮罩後內容（`PS-59`～`PS-62`）。第十二輪：在途注入遇接收不可信不登記、以 `response_lost` 結案，認領入口另設防線；遮罩改後拋錯時還原共享內容；接收不可信後 NOTIFY 也只觀察（`PS-61`、`PS-63`、`PS-64`）。第十三輪（復驗回饋）：注入先取序號再檢查接收不可信，`nextSeq` 重入也不登記；注入登記超過 256 筆時被淘汰那筆以 `response_lost`（`evicted`）結案（`PS-65`、`PS-66`）。第十四輪：`sendRaw` 回傳的 `socketId` 只讀一次存快照，代號欄位賦值移到檢查之前，`sendRequest` 期間九個重入點都不留孤兒登記（`PS-67`、`PS-68`）。代號不防惡意：頁面程式可直接呼叫 `sendRaw` 覆寫共用配對，包裝 `sendRaw` 可在呼叫期間冒用代號（同 realm 信任模型，U4）；外層包裝改傳新 view、複本或漏傳代號時，注入退化成共用配對、回應後殘留。殘餘：窗口是啟發式，遊戲計數器步進、繞回、重連與陌生 msgId 回應的客戶端行為都未驗證；遊戲仍走到注入未答的同號時，第一則 RESPONSE 歸注入、下一則只給 Naki observer 觀察、不可改寫；相同 bytes 的重入請求守衛照 Deviation 11 兩筆都擋；Naki 自送（60000–63999）與遊戲之間沒有隔離；接收不可信後一般插件收不到任何退化通知（只有有未答注入的插件收到 `response_lost`），帶連線、原因與恢復提示的狀態事件列為後續另案（Astra pair-source 第十二輪第 46 條）；已由 inject-receive 的 `onConnectionDegraded` 補上（`inject-receive-design-2026-10-18.md` §3，測試 `IR-11`～`IR-17`）。
 
 ---
 
@@ -277,7 +277,7 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 |---|---|---|---|
 | 1 | 流量是 isNaki（Naki 自送、插件號段）。**不跑鏈**，與 `observeNakiTraffic` 無關 | 本地錯誤 | `naki_traffic` |
 | 2 | 辨識、跑鏈或鏈後判定拋錯（`guardedSend` 的 catch），或 bridge 在派發前出錯（`failSafe`） | 本地錯誤 | `dispatch_error`／`guard_error`／`bridge_error` |
-| 3 | 守衛者有任何失敗：`onSend` 拋錯（只計守衛者）、回傳 Promise 或 thenable、[B2] `respondLocally` 被拒或回應不合規 | 本地錯誤 | `hook_threw`／`async_hook`／[B2] `respond_rejected`／`response_invalid` |
+| 3 | 守衛者有任何失敗：`onSend` 拋錯（只計守衛者）、回傳 Promise 或 thenable、[B2] `respondLocally` 被拒或回應不合規（守衛者身分以呼叫當時為準，之後退出仍算）；[B2] 被接受的提案來自非守衛者（呼叫時還不是守衛方法，鏈中才有守衛者） | 本地錯誤 | `hook_threw`／`async_hook`／[B2] `respond_rejected`／`response_invalid`／`not_guardian` |
 | 3b | [B2] 第 3 步不成立，且有守衛者的 `respondLocally` 被接受 | 本地成功（交付提案回應） | — |
 | 4 | 有守衛者沒有同步放行：已停用、沒有 `onSend`、`methods` 不含 m、鏈提早停止 | 本地錯誤 | `not_on_chain` |
 | 5 | 已污染的守衛者，目前 grant 的 `sendGuard` 已不含 m | 本地錯誤 | `guard_revoked` |
@@ -286,6 +286,7 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 | 8 | 以上皆否 | 原樣送出（原物件） | — |
 
 - 第 3b 步排在第 4–7 步之前：這四條只否決「送出」。本地成功時伺服器什麼都沒收到，不需要其他守衛者放行。
+- 第 3b 步只收守衛者的提案（inject-receive 第二輪第 10 條裁決）。呼叫當時已是守衛方法時，非守衛者的 `respondLocally` 當場回 `not_guardian`、不留提案，這一筆照本表判定，如同它沒有呼叫。呼叫時還沒有守衛者、提案被接受，鏈中才出現守衛者時，提案不交付、也不送出，改為本地錯誤 `not_guardian`。守衛者全部退出時（守衛退出分支）有提案仍本地成功。
 - 「放行」＝守衛者的 `onSend` 同步正常返回、回傳值不是 thenable、沒有呼叫 `respondLocally`。守衛 hook 是同步契約。回傳 thenable 時，成功或失敗等它有結果才計入，連續失敗照常累計到自動停用（第二輪第 6 條，測試 `R6b`）。
 - `rewritten` 一律擋下（Deviation D3）：守衛者放行的是原 bytes，排在後面的 `rewriteSend` 插件可能改掉被引用的 id。
 - 擋下時遊戲那份 buffer 還原成原樣，交給 Swift 的是完整原始快照（審查第 7 條）。
@@ -357,13 +358,16 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 ### 5.3 `respondLocally`
 
 - capability `respondLocally`（L3）。`ctx.respondLocally(responseBytes)` 只在 send 方向、非 isNaki、method 不在禁用名單（送出禁改名單＋`cancelUnifiedMatch`、`cancelMatch`）時存在。
-- 檢查：L3 開、type 3、msgId 等於這筆 REQUEST、field 1 存在、envelope 在界內。通過時**當場複製精確範圍**存成提案回應，之後插件再改它的 buffer 也不影響交付（審查第 12 條；`respondLocal` 交付時再複製一次）。
+- 檢查：L3 開、type 3、msgId 等於這筆 REQUEST、envelope 在界內；field 1（method）可省略，與 API 契約一致（inject-receive 第四輪第 5 條）。通過時**當場複製精確範圍**存成提案回應，之後插件再改它的 buffer 也不影響交付（審查第 12 條；`respondLocal` 交付時再複製一次）。
 - **多守衛**（審查第 11 條）：判定只照 §4.2 的單一表格。這裡只補 `respondLocally` 自己的規則：
   1. 呼叫被接受後鏈**不停止**，其餘插件照常執行。
   2. 第二個呼叫 `respondLocally` 的插件被拒（`already_responded`）。先到者的提案保留，被拒的那一方記為 `respond_rejected`，依 §4.2 第 3 步整筆改為本地錯誤。
   3. 結局與交付一律 `{ block:true, request: original, response, msgId, method }`，與守衛擋下同一條路徑（§1.3）。
-- 被拒：非守衛方法回 `{ ok:false, reason }`，REQUEST 照常送出（插件自行處理）；守衛方法依 N2 改為本地錯誤。
-- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。加一條契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）：`LiqiParser` 送出方向有副作用的方法常數（`startUnifiedMatchMethod`、`cancelUnifiedMatchMethod`、`cancelMatchMethod`）與 `loginResponseMethods` 全部出現在 JS 禁用名單。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
+  4. 只有守衛者能在守衛方法上提案（§4.2 第 3b 步）；非守衛者回 `not_guardian`，不算第 3 步失敗。守衛者身分以呼叫當時為準：被拒後退出（停用、未污染）的守衛者，拒絕仍算第 3 步失敗，與退出前拋錯一致。
+  5. 宣告 `sendGuard` 的插件，`respondLocally` 或 `injectReceive` 一被接受就污染（§3.2），之後停用、熱重載都保留守衛。合成內容可能展示未擁有的項目，不靠插件自己呼叫 `taint()`。
+  6. 每條連線已有 256 筆已接受、尚未交付的本地回應時回 `local_busy`（inject-receive 第三輪第 4 條；第四輪第 1 條起接受當下即占容量，含重入送出的提案）；守衛者在守衛方法上被這樣拒絕，同樣算第 3 步失敗。
+- 被拒：回 `{ ok:false, reason }`。非守衛方法、且整筆沒有已接受的提案時，REQUEST 照常送出（插件自行處理）；守衛方法的結局一律依 §4.2（守衛者的呼叫被拒依 N2 改為本地錯誤，含 `local_busy`；非守衛者的 `not_guardian` 不影響判定）；整筆已有被接受的提案時，交付先到者（inject-receive 第五輪第 3 條）。
+- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）以共用來源為準（inject-receive 第三輪第 1 條）：Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`，`all` 全部要在 JS 禁用名單。另兩條原始碼規則（inject-receive 第四輪第 4 條）：`LiqiSideEffectMethods` 宣告的每個常數都要併進 `consumed`／`all`；`command/Services` 裡每一行（builder 本體略過常數宣告與 `LiqiRequestSpec(method:)` 送出定義）若有集合外的 `.lq.` 字面值，或提到值在集合外的 `LiqiRequestBuilder` 方法常數名（不論前綴、typealias、跨行），就必須是逐檔列出的例外行（整行比對、每個只用一次、過期也紅）。builder 常數支援 `static let／var 名稱 [: String] = 值`，本體裡其他 `static let／var` 形式或不在宣告上的 `.lq.` 字面值明確報紅（第五輪第 2 條）。字串拼接或插值組出的方法名抓不到。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
 
 ### 5.4 `injectReceive`
 

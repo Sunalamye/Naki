@@ -1,7 +1,7 @@
 # Naki 插件 API 契約（`apiVersion: 1`）
 
 **資料日期**：2026-08-09；2026-10-13 核對實作現況
-**狀態**：**對應實作已存在**（`PluginRegistry`、`naki-plugins.js`、熱插拔都已落地）。本文件描述 `apiVersion: 1` 的介面約定，供插件作者參照。**規格與實作有差**：下列項目只在文件裡，目前**未實作**（manifest 宣告了也沒有作用，呼叫也不存在）——`rewriteSend`、`dropSend`、`onSocketClose`。`dropReceive`、`ctx.drop()` 與長度不等的 receive `replace` 見文末「v2 Phase 4」，已通過 live 驗收（`docs/archive/plan/plugin-v2-phase4.md` §9.1）。其餘 capability 已實作：`observe`、`rewriteReceive`（`ctx.replace`，等長就地改寫）、`injectSend`（`ctx.sendRequest`，受 L3 總開關把關）；hook 已實作：`onReceive`、`onSend`、`onRecommendations`、`onInjectResponse`、`onDisable`。標「未驗證」的行為不得當保證使用。
+**狀態**：**對應實作已存在**（`PluginRegistry`、`naki-plugins.js`、熱插拔都已落地）。本文件描述 `apiVersion: 1` 的介面約定，供插件作者參照。**規格與實作有差**：下列項目只在文件裡，目前**未實作**（manifest 宣告了也沒有作用，呼叫也不存在）——`rewriteSend`、`dropSend`、`onSocketClose`。`dropReceive`、`ctx.drop()` 與長度不等的 receive `replace` 見文末「v2 Phase 4」，已通過 live 驗收（`docs/archive/plan/plugin-v2-phase4.md` §9.1）。其餘 capability 已實作：`observe`、`rewriteReceive`（`ctx.replace`，等長就地改寫）、`injectSend`（`ctx.sendRequest`，受 L3 總開關把關）；`injectReceive`、`respondLocally` 與 `onConnectionDegraded` 見文末「v2 Phase 4」，只有單測，未 live 驗證；hook 已實作：`onReceive`、`onSend`、`onRecommendations`、`onInjectResponse`、`onConnectionDegraded`、`onDisable`。標「未驗證」的行為不得當保證使用。
 **權威來源**：本文件從 `plugin-system-design.md` §6–§8 抽出，面向插件作者。兩份衝突時以設計文件為準；涉及實際行為時以**執行中的 Naki 與原始碼**為準（Naki 的文件漂移過，見 `CLAUDE.md`）。
 
 ---
@@ -197,7 +197,7 @@ if (!ok) ctx.log('長度不等，放棄');
 |---|---|---|---|
 | **L1 唯讀** | `observe` | 只看不改 | 啟用後即可用 |
 | **L2 改本機顯示** | `rewriteReceive` | 改遊戲客戶端看到的東西。**不影響伺服器、不影響其他玩家** | 啟用後可用，受 §7 禁改名單限制 |
-| **L3 改送出** | `injectSend`（已實作）；`rewriteSend` / `dropSend` / `dropReceive`（規格保留，**未實作**） | **能替使用者送遊戲動作** | **完全不可用**，除非使用者另開總開關 `pluginsMayModifyOutbound`（預設 false）並通過一次性確認 |
+| **L3 改送出** | `injectSend`、`injectReceive`、`respondLocally`（已實作，後兩者見文末）；`rewriteSend` / `dropSend` / `dropReceive`（規格保留，**未實作**） | **能替使用者送遊戲動作** | **完全不可用**，除非使用者另開總開關 `pluginsMayModifyOutbound`（預設 false）並通過一次性確認 |
 
 L3 只能在使用者的**測試帳號**上用（Naki 的既有邊界）。
 
@@ -209,7 +209,8 @@ L3 只能在使用者的**測試帳號**上用（Naki 的既有邊界）。
 - 你或其他插件注入、還沒收到 RESPONSE 的號碼。
 - 任一連線上遊戲還沒收到 RESPONSE 的請求號碼。Naki 不論頁面上有沒有插件都會記錄遊戲送出。只記確定外送的請求，被守衛擋下的不算。「遊戲」指不經 `sendRaw` 送出的請求，與 `ctx.isNaki` 的判斷無關。
 - 正在派發的遊戲請求號碼。你在 `onSend` 裡呼叫 `sendRequest` 時，觸發這次 `onSend` 的遊戲請求還沒外送，它的號碼與之後 256 個也會跳過。
-- 每條連線上遊戲最後一個號碼之後的 256 個號碼。
+- 每條連線上遊戲最後一個號碼之後的 256 個號碼。遊戲被守衛擋下或以 `respondLocally` 本地回應的請求不上 wire、不算未答，但它的號碼算遊戲已用過，最後一個號碼照樣前進。「最後」依遊戲進入送出的順序：hook 內重入的較新送出先結案，外層較早的請求之後才本地結案，最後號碼不會倒退。
+- 本地回應還沒交給遊戲的號碼。遊戲在 `ws.send` 返回後的下一個 task 才收到本地回應，在那之前這個號碼不配發。保留以送出為單位，每筆送出至多一筆：`respondLocally` 被接受的當下就保留並計入上限，之後不論守衛判決、bridge 出錯再結案，都沿用同一筆；交付後釋放，排不進交付（排程失敗）、最後沒有回應可交付時立即釋放，連線關閉時清掉該連線的。這些號碼不算未答，但同一個 task 裡大量本地回應占住號段時，注入可能暫時回 `msgid_busy`，交付後恢復。每條連線已接受、尚未交付的 `respondLocally` 上限 256 筆（見 `local_busy`），包含你在 hook 裡重入送出的提案。守衛擋下是強制結局，不受這個上限限制，也不淘汰任何遊戲在等的號碼：同一個 task 裡大量被擋的送出會全部保留，期間注入回 `msgid_busy`，交付後恢復。這不是有界佇列；同 realm 程式刻意大量送出守衛方法耗用記憶體與號段，不在防護範圍內（U4）。`diagnostics().localPending` 是目前保留的筆數。
 
 所以你拿到的 msgId 不一定連續。下列情況 `sendRequest` 回 `{ok:false, reason:'msgid_busy'}`：
 - 某條連線上遊戲確定外送、未答的請求超過 256 筆。Naki 無法再追蹤，這條連線關閉之前一律拒發，即使之後全部答覆也一樣。最後送出時才被擋下的那一筆不會造成這個狀態；但它被擋下前若同一條連線又有請求送出或回應抵達，Naki 保守維持這個狀態。
@@ -304,7 +305,7 @@ manifest 宣告 schema，Naki 設定頁按 schema 自動渲染 UI，值存在 Na
 - **isNaki 分流**：Naki／插件自送的封包（`isNaki===true`）走**另一條只含 observer 的鏈**——只有在 manifest 宣告 `observeNakiTraffic: true` 且**僅** `observe` 的插件收得到，永遠不給 rewrite。
   - **溢出邊界**：`isNaki` 依賴上述 256 筆登記表，所有連線共用。若 Naki 送出一筆後，又經 `sendRaw` 送了 ≥256 筆，那筆的回應才到，登記已被淘汰，該回應的 `isNaki` 會是 `false`，等於違反「isNaki 流量永不給 rewrite」。這需要回應延遲到數百次送出之後，實務上不可達（判定為推測，未實測）。你注入請求的回應不受這個邊界影響，它以注入登記判斷（另有 256 筆上限，只計插件注入）。
 - **錯誤隔離**：你的 hook throw ⇒ 這一則跳過你、記一行 log（同 id 同錯只記一次），**封包原樣通過**（fail-open）。其他插件不受影響。
-- **自動停用**：失敗計數**按 hook 分開**（`onReceive`／`onSend`／`onRecommendations`／`onInjectResponse`／`replace` 各算各的），某個 hook 連續失敗 10 次 ⇒ 該插件在本次頁面生命週期內整個停用；該 hook 成功一次（`replace` 以一次成功改寫算）就把它自己的計數歸零。
+- **自動停用**：失敗計數**按 hook 分開**（`onReceive`／`onSend`／`onRecommendations`／`onInjectResponse`／`onConnectionDegraded`／`replace` 各算各的），某個 hook 連續失敗 10 次 ⇒ 該插件在本次頁面生命週期內整個停用；該 hook 成功一次（`replace` 以一次成功改寫算）就把它自己的計數歸零。
 - **注入範圍**：插件 script 只注入 main frame，不跑進第三方 iframe。
 
 ### 禁改名單（即使你有 `rewriteReceive`）
@@ -444,10 +445,10 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
   - **`ctx.isTainted()`**：回傳自己是否已污染。曾污染的插件重新註冊後仍為 `true`，即使新的 grant 不再宣告 `sendGuard`。
   - **污染不可解除，頁面重載才清**：停用、熱重載、自動停用、`setGrant` 都不會解除。
   - **放行只對當下有效**：守衛者在 `onSend` 正常返回算放行，但只對「放行時的那次註冊」與「放行前的污染狀態」有效。同一筆送出還沒結束時，守衛者被污染（在任何大廳連線上、包括後面插件同步觸發的 receive），或同 id 停用後重新註冊，這次放行就作廢，這一筆擋下並改回本地錯誤（`not_on_chain`）。下一筆由新的狀態、新的 `onSend` 重新判定。已污染的插件重複呼叫 `ctx.taint()`、守衛方法沒變時，不影響放行。
-  - **守衛者中途退出**：這一筆送出期間，未污染的守衛者全部停用（自己停用或被停用）而且沒有拋錯、沒有回傳 thenable，這一筆就不再受守衛，送出遊戲的原請求，插件的改動一律不送，守衛紀錄是 `sent`／`guard_left`。還有其他守衛者時，由其餘守衛者照常判定；例外是退出前已經拋錯或回傳 thenable 的守衛者，它對這一筆的否決仍有效（N2），即使其餘守衛者放行，這一筆仍擋下。這一筆的回應配對跟著實際送出的原請求，`replace` 換過的 method 不算。
+  - **守衛者中途退出**：這一筆送出期間，未污染的守衛者全部停用（自己停用或被停用）而且沒有拋錯、沒有回傳 thenable、`respondLocally` 沒有被拒，這一筆就不再受守衛，送出遊戲的原請求，插件的改動一律不送，守衛紀錄是 `sent`／`guard_left`；已有 `respondLocally` 提案時改為本地成功（`local_ok`）。還有其他守衛者時，由其餘守衛者照常判定；例外是退出前已經拋錯或回傳 thenable 的守衛者，它對這一筆的否決仍有效（N2），即使其餘守衛者放行，這一筆仍擋下。這一筆的回應配對跟著實際送出的原請求，`replace` 換過的 method 不算。
   - **失敗歸責**：`onSend` 的成功要等這一筆的鏈尾判定通過才記，鏈尾違規照樣累計，連續 10 次自動停用。歸責與停用綁定 `register` 當下的那次註冊；之後再改自己 `spec.id` 不會轉嫁給別的插件。插件停用或同 id 重新註冊之後才記到的成功、失敗（含鏈尾判決、晚到的 thenable 結果，以及錯誤訊息 getter 執行期間換掉的情況）一律丟棄，不算在新的註冊上。`onDisable` 執行中若以同 id 重新註冊，停用結束時不清新註冊的失敗計數與 grant；新註冊照常累計，第 10 次停用。
   - **擋下請求的回應配對**：被擋下的請求不送出，它的回應配對在擋下當下就撤銷。遊戲收到本地錯誤回應後，即使在同一個回呼裡以同連線、同 msgId 送出新請求，新請求的配對也保留，伺服器的 RESPONSE 依新請求的 method 派發。送往 Swift 的路徑出錯、改送遊戲原請求時，配對也改回原請求的 method，`replace` 換過的 method 不算。
-  - **跨來源的配對隔離**（pair-source）：配對以 (連線, msgId) 為鍵。插件注入的配對另存在注入登記，不進這張表。注入以宿主交易代號辨識：`ctx.sendRequest` 為每筆注入配一個代號，`sendRaw` 把它綁在送出的 buffer 上，派發、守衛判決、本地結案與 RESPONSE 消耗都依代號判來源，不比 msgId 或內容。所以注入期間同號的遊戲請求，不論內容是否相同、在哪條連線，都照常登記配對。唯一例外是守衛：與注入內容完全相同的重入請求，守衛照樣當成注入一併判定（可能兩筆都擋）。注入被擋下或注入回應抵達，都不會撤銷或消耗遊戲與 Naki 的配對；注入回應以注入時的方法交給 `onInjectResponse`。被擋下的若是遊戲請求，本地錯誤不會交給注入插件。注入配發避開未答注入、各連線遊戲未答的請求與遊戲接下來 256 個號碼（見「msgId 號段」），所以遊戲未答的請求不會與注入同號，注入被擋時的本地錯誤回應也不會帶遊戲正在等的號碼。遊戲仍可能在注入未答時走到同號，結果見「仍會誤認的情況」的注入錯認領。Naki 自送（60000–63999）與遊戲之間沒有隔離，仍共用配對。以 Blob 抵達、非同步展開的 RESPONSE，只對得上它抵達前就送出的請求；對不上時方法為 `null`，不派給任何 hook，也不交給 `onInjectResponse`。同一連線上的接收依抵達順序交給插件：前面有 Blob 還在展開時，後到的訊息（含 ArrayBuffer／TypedArray）排在它之後，展開完成才依序派發。hook 內同步送進來的接收也排在目前這則之後。展開失敗（或同一連線排隊超過 256 則）時，那條連線進入「接收不可信」直到關閉：你在那條連線上還沒收到回應的注入，`onInjectResponse` 會收到 `ctx.error === 'response_lost'`（`bytes` 為空）；`ctx.sendRequest` 回 `ok:true` 時若那條連線剛好在送出期間進入接收不可信，這筆不登記，稍後（下一個 microtask）同樣收到 `response_lost`。之後那條連線的每一則 RESPONSE 與 NOTIFY 都只交給 Naki observer，沒有 `replace`、`drop` 或變長改寫；期間任何注入都回 `msgid_busy`。讀不到的那則可能正是你的插件需要的，之後你的狀態可能不完整；恢復方式是連線關閉後重連。排隊期間抵達的 ArrayBuffer／TypedArray 已交給遊戲，派發時只能觀察，沒有 `replace`、變長改寫或 `drop`；內容與遊戲收到的相同（含暱稱遮罩）。前面沒有待展開的 Blob 時，ArrayBuffer／TypedArray 照舊同步派發。
+  - **跨來源的配對隔離**（pair-source）：配對以 (連線, msgId) 為鍵。插件注入的配對另存在注入登記，不進這張表。注入以宿主交易代號辨識：`ctx.sendRequest` 為每筆注入配一個代號，`sendRaw` 把它綁在送出的 buffer 上，派發、守衛判決、本地結案與 RESPONSE 消耗都依代號判來源，不比 msgId 或內容。所以注入期間同號的遊戲請求，不論內容是否相同、在哪條連線，都照常登記配對。唯一例外是守衛：與注入內容完全相同的重入請求，守衛照樣當成注入一併判定（可能兩筆都擋）。注入被擋下或注入回應抵達，都不會撤銷或消耗遊戲與 Naki 的配對；注入回應以注入時的方法交給 `onInjectResponse`。被擋下的若是遊戲請求，本地錯誤不會交給注入插件。注入配發避開未答注入、各連線遊戲未答的請求與遊戲接下來 256 個號碼（見「msgId 號段」），所以遊戲未答的請求不會與注入同號，注入被擋時的本地錯誤回應也不會帶遊戲正在等的號碼。遊戲仍可能在注入未答時走到同號，結果見「仍會誤認的情況」的注入錯認領。Naki 自送（60000–63999）與遊戲之間沒有隔離，仍共用配對。以 Blob 抵達、非同步展開的 RESPONSE，只對得上它抵達前就送出的請求；對不上時方法為 `null`，不派給任何 hook，也不交給 `onInjectResponse`。同一連線上的接收依抵達順序交給插件：前面有 Blob 還在展開時，後到的訊息（含 ArrayBuffer／TypedArray）排在它之後，展開完成才依序派發。hook 內同步送進來的接收也排在目前這則之後。展開失敗（或同一連線排隊超過 256 則）時，那條連線進入「接收不可信」直到關閉：你在那條連線上還沒收到回應的注入，`onInjectResponse` 會收到 `ctx.error === 'response_lost'`（`bytes` 為空）；`ctx.sendRequest` 回 `ok:true` 時若那條連線剛好在送出期間進入接收不可信，這筆不登記，稍後（下一個 microtask）同樣收到 `response_lost`。之後那條連線的每一則 RESPONSE 與 NOTIFY 都只交給 Naki observer，沒有 `replace`、`drop` 或變長改寫；期間任何注入都回 `msgid_busy`。讀不到的那則可能正是你的插件需要的，之後你的狀態可能不完整；恢復方式是連線關閉後重連。進入這個狀態時，宣告 `onConnectionDegraded` 的插件會收到一次退化事件（見下方）。排隊期間抵達的 ArrayBuffer／TypedArray 已交給遊戲，派發時只能觀察，沒有 `replace`、變長改寫或 `drop`；內容與遊戲收到的相同（含暱稱遮罩）。前面沒有待展開的 Blob 時，ArrayBuffer／TypedArray 照舊同步派發。
     - **代號不防惡意**（同 realm 信任模型）：`window.__nakiWebSocket.sendRaw` 頁面上任何程式都能呼叫。不帶有效代號送出的請求算 Naki 自送，登記進共用配對表，會覆寫遊戲同號未答的配對，讓那則回應派成送出的方法。包裝 `sendRaw` 的程式能在呼叫期間取得代號；代號在 `sendRaw` 返回後失效，事後重放只算 Naki 自送。`window.__nakiWebSocket.nextSeq` 也可被包裝，包裝者能在注入登記前取得控制權、改變序號或同步送入訊息；Naki 在取得序號之後才判斷連線是否可信，但不防序號被竄改。包裝 `sendRaw` 並偽造回傳值（例如把 `socketId` 做成 getter，或回報另一條可信連線的 `socketId`）同屬同 realm 不防，注入會登記到被偽造的連線；但宿主只讀一次 `socketId` 存成快照，所有可能執行頁面程式的步驟都在接收不可信檢查之前做完，所以不會因此留下對不到結果的孤兒注入登記。包裝公開的 `__nakiPlugins.dispatch` 能改寫送出交易，讓 Naki 撤回別筆遊戲請求的未答紀錄；這同樣屬於同 realm 信任模型，不列為防護範圍。
     - **外層包裝會讓代號遺失**：代號綁在 `sendRaw` 送進 `ws.send` 的那個 `ArrayBuffer` 上。頁面上若有程式包裝 `ws.send` 改傳 `new Uint8Array(buffer)`、`buffer.slice(0)`，或包裝 `sendRaw` 時漏傳第二參數，你的注入會被當成遊戲或 Naki 自送：配對進共用表，回應抵達後仍殘留。這是功能退化，不新增外送；`ctx.isNaki` 照常依 (連線, msgId) 判定，`onInjectResponse` 照常收到回應。
   - **配對表容量**：所有連線共用一張表，上限 256 筆，滿了淘汰最舊的（同鍵重寫算最新）。連線關閉時清掉該連線的配對。配對的**新增**看頁面上有沒有插件或污染：都沒有時不登記，同鍵已有的配對一併撤銷。配對的**消耗**不看：RESPONSE 到達、或同一連線以同一個 msgId 送出新請求，舊配對一律清掉。所以同一來源依序重用 msgId 時，RESPONSE 只會派成最後送出那筆請求的 method，或對不回 method（送出時沒人消耗）。已知例外：Naki 自送與遊戲同號時共用配對（見上一條）；表滿被淘汰的配對，它的 RESPONSE 對不回 method。目前筆數見 `__nakiPlugins.diagnostics().pendingPairs`。注入登記另計，上限 256 筆，連線關閉時清掉該連線的，筆數見 `diagnostics().pendingInjections`。注入登記與歧義標記同樣遵守「消耗不看消耗者」：頁面上沒有插件時，RESPONSE 仍會消耗同鍵的注入登記，沒有注入登記時消耗遊戲配對與歧義標記。
@@ -455,7 +456,60 @@ gist 來源（`gist.github.com/<user>/<id>`）Naki 會自動釘 revision，取�
   - **送出方向不得就地改 `ctx.bytes`**：送出改寫只能經 `rewriteSend` 的 `ctx.replace`。大廳以外的連線上，不論就地改或經 `ctx.replace`，把請求改成可守衛方法（換裝、稱號、角色類），或改動既有可守衛方法的內容，都會撤回這個 hook 的改動並計一次該 hook 失敗；前面插件的合法改寫保留。hook 回傳 thenable 時，`then` 同步做的改寫一併檢查；違規那一次 thenable 的結果不再另計。送出方向的 `ctx.bytes` 是宿主給的副本，不是遊戲的 buffer：hook 結束當下的內容經檢查後由宿主複製送出，之後在錯誤處理、`onDisable` 或非同步時機改 `ctx.bytes`、呼叫 `ctx.replace`，都不會影響這一筆，也碰不到遊戲之後的送出。在副本上定義 `length`、`constructor` 等屬性不影響宿主讀到的內容。送出的 `ctx.replace(newBytes)` 只收 TypedArray：當下就複製成宿主自有的一份，驗證這份、採用這份，之後再改傳入物件或它的 buffer 都無效；`ArrayBuffer`、`SharedArrayBuffer`、`DataView`、普通陣列、Proxy、已分離或越界的 view 一律回 `false`，不計失敗；長度與內容只讀內部槽，自有 `length` 不讀。receive 方向長度不等的 `replace` 同樣先複製再驗證。每個 hook 結束時，宿主對要採用的快照再完整驗一次：經 `replace` 的照 `rewriteSend` 規則，就地改的不得改 type、msgId 或 method（要換 method 只能經 `rewriteSend` 的 `replace`），envelope 結構也要完整（每個欄位在界內），兩者都要過守衛規則；不合規就撤回這個 hook 的改動並計一次該 hook 失敗。整條鏈跑完後再對最終要送的內容判一次（type／msgId 不變、不在送出禁改名單、守衛規則，以當下的守衛者為準）；不過就整筆退回遊戲原內容，前面插件的改動一併不送，失敗記在最後改動的 hook。大廳上鏈跑到一半才出現的守衛者（新註冊或經同步 receive 重入污染）沒有在鏈上放行，這一筆照守衛規則擋下並改回本地錯誤。連續 10 次會自動停用。大廳上照舊：就地改成另一個有守衛者的方法會撤回，`replace` 成守衛方法當下回 `false`，改動有守衛者的方法本身會擋下並改回本地錯誤。
   - **角色未定的連線上的 Blob**：頁面上有守衛者時拒送，與大廳相同。只有已確定是對局的連線照送。若遊戲只在對局握手改用 Blob，對局連線會一直連不上。要停用宣告 `sendGuard` 的插件；已污染時還要重載頁面。
   - 沒有 `api.taint`：`register` 沒有回傳每個插件專屬的物件，全域 `__nakiPlugins` 不能辨識呼叫者。`guardState()` 是診斷用，不屬於契約，插件不得依賴。
-- **`injectReceive`**：只有設計，未實作。設計採弱順序：只保證排在當前這則之後交付，中間可能插進其他網路訊息。
+- **`ctx.injectReceive(bytes)`**（capability `injectReceive`，L3；設計見 `docs/archive/plan/inject-receive-design-2026-10-18.md` §1）：合成一則 NOTIFY 交給 ctx 所在連線上的遊戲。
+  - 只有非 Naki 流量的 ctx 有；`isNaki` 與合成通知的 ctx 都沒有，避免觀察合成再注入的迴圈。hook 返回後仍可呼叫，例如在計時器裡。
+  - 宣告 `sendGuard` 的插件呼叫被接受（回 `ok:true`）的當下就污染，之後停用、熱重載都保留守衛，與改寫大廳回應相同（`plugin-v2-b2.md` §5.3 第 5 點）。
+  - 回 `{ ok:true }` 只代表已排入，不代表已交付。被拒時回 `{ ok:false, reason }`：
+    - `outbound_disabled`：L3 總開關關著。
+    - `bad_bytes`：不是 TypedArray，或超過 1 MiB。
+    - `bad_envelope`：不是每個欄位都在界內的 NOTIFY，或 method 為空。
+    - `forbidden_method`：method 落在變長改寫禁改名單（見上方，含 `.lq.ActionPrototype`、全部 `.lq.FastTest.*`、`.lq.Route.*`）或 receive 禁改名單。`rewriteAllow` 解不開。
+    - `no_connection`：ctx 的連線已關閉或正在關閉。
+    - `receive_untrusted`：ctx 的連線處於接收不可信。
+    - `inject_busy`：這條連線已有 32 則待交付。不淘汰舊的。
+    - `schedule_failed`：排不進下一個 task（計時器拋錯）。這則不入隊、不占名額，也不污染你；之後計時器恢復就能再送。
+  - 32 則與 1 MiB 都是啟發式，未以 live 量測。32 則是整條連線共用的名額，沒有公平性保證：同一頁的其他程式持續搶先填滿時，你可能一直拿到 `inject_busy`（同 realm 不防，§8）。
+  - 入口當場複製你的 bytes，之後改你自己的 buffer 不影響交付。
+  - 交付在下一個 task（`setTimeout 0`）：先送 Swift（LiqiParser 只看這一次），送不到就不交付遊戲；再交付遊戲。遊戲看到的順序是「當時正在處理的那則 → 合成通知」，中間可能插進其他網路訊息（弱順序）。「排在當時那則之後」是依 HTML 規範的推論（capture listener 內排的 microtask 仍早於遊戲的 handler），**未 live 驗證**。
+  - 交付當下連線已關閉、正在關閉（`readyState` 不是 OPEN）或進入接收不可信時，這則丟棄，遊戲、Swift 與觀察者都收不到，只在你的插件 log 寫一行（`injectReceive 未交付：<原因>`），不另外通知你；這些情況各有關閉事件或退化事件。連線關閉時還在排隊的每一則各寫一行（原因「連線已關閉」）；送 Swift 失敗時同樣寫一行（原因「送 Swift 失敗」），遊戲與 Swift 都收不到。
+  - 插件只透過觀察看到合成通知：只交給宣告 `observeNakiTraffic` 的 observer，`ctx.isNaki === true`、`ctx.synthetic === 'injectReceive'`、`ctx.syntheticBy` 是發起插件 id，沒有 `replace`、`drop`、`sendRequest`、`injectReceive`、`respondLocally`。觀察順序等於遊戲收到的順序：前面有 Blob 還在展開時，觀察跟著排隊。排隊的觀察項與網路接收共用同一個 256 則上限，超過時那條連線進入接收不可信（`receive_queue_overflow`），之後的 `injectReceive` 回 `receive_untrusted`。
+  - 合成通知不碰配對、注入登記、歧義標記或遊戲未答。
+  - 不新增外送路徑。遊戲收到合成通知後若自行送出請求，那是遊戲的送出，照常經守衛與送出禁改名單。
+  - 同 realm 不防：`window.__nakiWebSocket.injectReceive` 頁面上任何程式都能直接呼叫，跳過 L3 與名單檢查；這與頁面程式本來就能 `dispatchEvent` 或直接呼叫 bridge 同級（§8）。
+- **`ctx.respondLocally(bytes)`**（capability `respondLocally`，L3；設計見同文件 §2）：在 `onSend` 裡以本地回應取代送出，伺服器收不到這筆請求。
+  - 只有送出方向、非 `isNaki`、同步派發（不是 Blob）的 ctx 有，而且 method 不在禁用名單：送出禁改名單（非 `.lq.Lobby.*` 一律禁，含登入類、`startUnifiedMatch`、`matchGame`），加 `.lq.Lobby.cancelUnifiedMatch`、`.lq.Lobby.cancelMatch`。`rewriteAllow` 解不開。名單涵蓋 Swift 依 method 分支的唯一來源 `LiqiSideEffectMethods.all`，由 `JSContractTests` 比對。
+  - 只在 hook 同步執行期間有效。被拒時回 `{ ok:false, reason }`：
+    - `outbound_disabled`：L3 總開關關著。
+    - `too_late`：hook 已返回（例如保存 ctx 後在計時器裡呼叫）。
+    - `not_guardian`：大廳上這個方法有守衛者，而你不是。只有守衛者能在守衛方法上提案。
+    - `local_busy`：這條連線已有 256 筆已接受、還沒交給遊戲的本地回應（含同一個 hook 裡重入送出的）。不淘汰舊的；被拒後的結局見下方「結局」；下一個 task 交付後恢復。
+    - `bad_bytes`：不是 TypedArray，或超過 1 MiB（啟發式，未以 live 量測）。
+    - `bad_envelope`：不是 RESPONSE、msgId 不是這筆請求的，或欄位越界。field 1（method）可有可無。
+    - `rewritten`：這筆請求已被前面的插件或你自己改過（`replace` 或就地改）。
+    - `already_responded`：已有別的插件的提案。先到先得。
+  - 接受時回 `{ ok:true }`，當場複製你的 bytes 存成提案。`ok:true` 表示提案被接受，不保證交付：守衛拋錯或 bridge 出錯時結局為本地錯誤（拋錯優先），插件不會另外得知。鏈不停止，其他插件照常執行；之後的 `ctx.replace` 回 `false`。
+  - 結局：請求不送出。Swift 在同一則訊息收到原請求與提案回應；遊戲在 `ws.send` 返回後的下一個 task 收到提案回應。只有呼叫的插件知道回應內容，其他插件看不到這則回應。被拒時的結局：非守衛方法、且整筆沒有已接受的提案時，請求照常送出，與沒呼叫相同；守衛方法的結局一律見 `plugin-v2-b2.md` §4.2（例如守衛者被 `local_busy` 拒絕是本地錯誤，不外送）；整筆已有別的插件被接受的提案時，交付先到者。
+  - 判決出錯或 bridge 出錯時，有提案的非守衛方法仍交付提案，不會改送原請求：你已拿到 `ok:true`。
+  - 守衛方法依 `plugin-v2-b2.md` §4.2：只收守衛者的提案。守衛者的 `respondLocally` 被拒算第 3 步失敗，整筆改為本地錯誤（`respond_rejected`；回應不合規是 `response_invalid`），之後它停用或退出也一樣。第 3 步不成立而有守衛者的提案時本地成功（守衛紀錄 `local_ok`），不需要其他守衛者放行。拋錯、回傳 thenable 與 bridge 出錯仍優先，改為本地錯誤。你呼叫時還沒有守衛者、提案被接受，鏈中才出現守衛者時，提案不交付，整筆改為本地錯誤（`not_guardian`），請求一樣不送出。
+  - 宣告 `sendGuard` 的插件提案被接受的當下就污染（同 `injectReceive`）。
+  - 本地回應的請求不算遊戲未答，但遊戲的最後號碼照樣前進；交給遊戲之前它的號碼另行保留，注入不會配到（見「msgId 號段」）。
+- **`onConnectionDegraded(ctx)`**（不需要 capability，不需要在 manifest 宣告；設計見同文件 §3）：Naki 對某條連線或整頁進入降級模式時，通知所有有這個 hook 的插件，不看 `methods`、`observeNakiTraffic`，也不看你有沒有未答的注入。
+  - ctx 唯讀（凍結），只有 `log` 一個函式：`socketId`、`url`、`reason`、`scope`（`'connection'` 或 `'page'`）、`effects`（字串陣列）、`recovery`（`'reconnect'` 或 `'reload'`）、`at`。沒有封包內容；`url` 是連線的原始網址、原樣傳入，網址本身帶的查詢參數會一併出現（與 `ctx.url` 同一份資訊，§8 同 realm 不防）。
+
+    | reason | 何時 | scope | effects | recovery |
+    |---|---|---|---|---|
+    | `receive_blob_failed` | 接收 Blob 讀不到 | connection | `responses_observe_only`、`notify_observe_only`、`injections_refused` | reconnect |
+    | `receive_queue_overflow` | 接收佇列超過 256 則 | connection | 同上 | reconnect |
+    | `send_blob` | 遊戲以 Blob 送出 | page | `injections_refused` | reconnect（該連線） |
+    | `send_inflight_overflow` | 遊戲未答超過 256 筆，且結算後仍失準 | page | `injections_refused` | reconnect（該連線） |
+    | `ambiguity_overflow` | 歧義號碼超過 256 個，整條連線只觀察 | connection | `responses_observe_only` | reconnect |
+    | `reshape_locked` | 變長交付故障鎖死 | page | `reshape_disabled` | reload |
+
+  - 讀取或呼叫你的 `onConnectionDegraded` 拋錯（含 getter 拋錯）只記你自己的一次失敗，其他插件與同批其他事件照常收到。
+  - 每條連線每個 reason 只發一次。恢復方式是連線關閉後重連（與 `response_lost` 一致）；`reshape_locked` 要重載頁面。重連是新的 socketId，之後再退化會再發。
+  - 事件可能在連線已關閉後才送達，此時 `ctx.socketId` 已失效；重連後的新連線另計。
+  - 交付時機：觸發後的下一個 task（`setTimeout 0`），一次交付當時已排入的那一批。排不進 task（計時器拋錯）時不拋進觸發點、不自行重試，事件留著，等下一次有退化觸發（同一條連線同一個 reason 再觸發也算，不會重複發）且排程成功時一起交付；在那之前你不會收到。你在回呼裡造成的新退化排到再下一個 task，不會插進這一批。交付當下沒有任何插件 hook 在執行，也不在一筆送出的判決與上 wire 之間，所以你在回呼裡做的事（例如用保存的 ctx 呼叫 `taint()`）只影響之後的送出。代價是順序：同一個 task 裡排在它後面的訊息（例如接收佇列裡的觀察項）可能先派發；那些訊息的限制（只觀察）在觸發當下就已生效。同時寫一行插件 id `naki` 的 log。
+  - `injections_refused` 的 scope 是 page：沿用現行規則，任一連線失準或以 Blob 送出，所有連線的 `sendRequest` 都回 `msgid_busy`。
 
 ## 附錄：與設計文件的對應
 
