@@ -112,24 +112,24 @@
         if (order >= g.lastOrder) { g.last = msgId; g.lastOrder = order; }
         return g;
     }
-    // 本地回應（守衛擋下、respondLocally）交付前，它的號碼另行保留：遊戲還在等這個號碼，注入不得配發，
-    // 但不算伺服器未答；交付後（localResponse）或排程失敗（localDropped）釋放，連線關閉時清掉（第二輪第 4 條）。鍵 -> 待交付筆數。
+    // 本地回應（守衛擋下、respondLocally）交付前，它的號碼另行保留：遊戲還在等這個號碼，注入不得配發，但不算伺服器未答（第二輪第 4 條）。
+    // 保留以送出交易為單位（第四輪第 1、2 條）：respondLocally 接受當下就建立並計入上限，之後守衛擋下、本地成功、failSafe 再結案都沿用同一筆；
+    // 交付（localResponse）、排程失敗（localDropped）、沒有回應可交付、連線關閉時移出。每筆交易至多一筆，移出後不再建立，重複釋放無作用。
     // 每連線上限 LOCAL_PENDING_LIMIT 只限 respondLocally（滿了回 local_busy，不淘汰）；守衛擋下是強制結局，一律保留（第三輪第 4 條）
-    var localPending = new Map(), LOCAL_PENDING_LIMIT = 256;
+    var localHolds = new Set(), LOCAL_PENDING_LIMIT = 256;
     function localCount(socketId) {
-        var prefix = socketId + ':', n = 0;
-        localPending.forEach(function (c, k) { if (k.indexOf(prefix) === 0) n += c; });
+        var n = 0;
+        localHolds.forEach(function (h) { if (h.socketId === socketId) n++; });
         return n;
     }
-    function holdLocal(socketId, msgId) {
-        if (msgId == null) return;
-        var key = msgKey(socketId, msgId);
-        localPending.set(key, (localPending.get(key) || 0) + 1);
+    function holdLocal(tx, socketId, msgId) {
+        if (tx && tx.hold !== undefined) return tx.hold;
+        var h = msgId == null ? null : { socketId: socketId, msgId: msgId };
+        if (h) localHolds.add(h);
+        if (tx) tx.hold = h;
+        return h;
     }
-    function releaseLocal(socketId, msgId) {
-        var key = msgKey(socketId, msgId), n = localPending.get(key);
-        if (n > 1) localPending.set(key, n - 1); else localPending.delete(key);
-    }
+    function releaseLocal(h) { if (h) localHolds.delete(h); }
     // 提交回傳這筆的增量：自己的 msgId（及它取代的先前提交序號）、造成的淘汰與失準、提交後的版本
     function gameSent(socketId, msgId, order) {
         var g = gameLast(socketId, msgId, order);
@@ -178,7 +178,7 @@
     function nextPluginMsgId() {
         var busy = new Set(), lasts = [], lost = false;
         injectedMsgIds.forEach(function (v, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
-        localPending.forEach(function (n, k) { busy.add(Number(k.slice(k.lastIndexOf(':') + 1))); });
+        localHolds.forEach(function (h) { busy.add(h.msgId); });
         gameSends.forEach(function (g) { lost = lost || g.lost; lasts.push(g.last); g.inflight.forEach(function (c, id) { busy.add(id); }); });
         gameDispatching.forEach(function (d) { busy.add(d.msgId); lasts.push(d.msgId); });
         if (lost || untrustedSockets.size) return null;
@@ -302,8 +302,8 @@
         var d = DEGRADED[reason];
         pendingDegraded.push({ socketId: socketId, url: conn ? conn.url : '', reason: reason, scope: d[0], effects: d[1], recovery: d[2], at: Date.now() });
         if (degradeScheduled) return;
-        degradeScheduled = true;
-        setTimeout(deliverDegraded, 0);
+        // 排程成功才記已排；失敗不拋進觸發點、不主動重試，事件留在 pendingDegraded，下一次退化觸發時一併交付（第四輪第 3 條）
+        try { setTimeout(deliverDegraded, 0); degradeScheduled = true; } catch (e) { /* 留待下次觸發 */ }
     }
     // 只交付本輪快照：回呼內新觸發的退化排到下一個 task（第三輪第 2 條）。hook 的取得與呼叫一起隔離、只讀一次，
     // 單一插件失敗（含 getter 拋錯）只記它自己的失敗，不中斷其他插件與同批其他事件（第三輪第 3 條）
@@ -506,7 +506,7 @@
     // 錯誤回應依「原 REQUEST 的方法」建：只有它在 GUARDABLE_METHODS（回應型別 field 1 是 Error）才合成，
     // 否則不回應（審查第二輪第 4 條）。msgId 與原方法另外帶出，本地結案不再讀交付後的 bytes（第二輪第 5 條）。
     function blockSend(raw, origObj, original, msgId, method, origMethod, reason, ids) {
-        var response = null;
+        var response = null, hold = null;
         try {
             // 擋下的請求不上 wire，它在鏈首登記的配對當場撤銷；本地結案不再刪配對，遊戲回呼內新送的同 msgId 請求才保得住（第十輪第 1 條）
             // 注入被擋不撤銷同鍵配對：那是遊戲的（第三輪第 9 條）。遊戲未答不在這裡動：派發後 failSafe 才擋的由 failSafe 整個還原，
@@ -515,23 +515,25 @@
             restore(raw, origObj, original);
             recordGuard(msgId, method, 'local_error', reason, ids, raw.wsId);
             pluginLog(ids.join(','), '守衛擋下 ' + method + ' msgId=' + msgId + '（' + reason + '），改回本地錯誤');
-            if (msgId != null && GUARDABLE_METHODS.indexOf(origMethod) !== -1) { response = guardErrorResponse(msgId); holdLocal(raw.wsId, msgId); }
+            if (msgId != null && GUARDABLE_METHODS.indexOf(origMethod) !== -1) response = guardErrorResponse(msgId);
         } catch (e) { /* 擋下的決定不受記錄或建構失敗影響 */ }
-        return { block: true, reason: reason, request: original, response: response,
+        if (response) hold = holdLocal(raw.tx, raw.wsId, msgId);
+        else if (raw.tx) releaseLocal(raw.tx.hold);   // 沒有回應可交付：接受提案時的保留就此結束
+        return { block: true, reason: reason, request: original, response: response, hold: hold,
             socketId: raw.wsId, msgId: msgId, method: origMethod, injected: !!raw.injected };
     }
 
     // respondLocally 被接受：與守衛擋下同一條交付路徑，交付提案回應。請求不上 wire，鏈首登記的配對撤銷；守衛方法記 local_ok
     function localOk(raw, origObj, ids) {
         var original = u8slice.call(origObj), env = parseEnvelope(original) || { msgId: null, method: null }, local = raw.tx.local;
+        var hold = raw.tx.hold || null;   // 接受提案時已建立，這裡只轉移（第四輪第 1 條）
         try {
-            holdLocal(raw.wsId, env.msgId);
             pendingMethods.delete(msgKey(raw.wsId, env.msgId));
             restore(raw, origObj, original);
             if (ids) recordGuard(env.msgId, env.method, 'local_ok', null, ids, raw.wsId);
             pluginLog(local.id, 'respondLocally ' + env.method + ' msgId=' + env.msgId + '（本地回應，不送出）');
         } catch (e) { /* 本地成功的決定不受記錄失敗影響 */ }
-        return { block: true, local: 'ok', reason: 'respond_locally', request: original, response: local.response,
+        return { block: true, local: 'ok', reason: 'respond_locally', request: original, response: local.response, hold: hold,
             socketId: raw.wsId, msgId: env.msgId, method: env.method, injected: false };
     }
 
@@ -878,6 +880,7 @@
                     return { ok: false, reason: reason };
                 }
                 tx.local = { id: grant.__id, response: next, guardian: guardian };
+                holdLocal(tx, raw.wsId, env.msgId);   // 接受即占容量，結案沿用這一筆（第四輪第 1 條）
                 if ((grant.sendGuard || []).length) taint(grant.__id, grant);   // 同 injectReceive：接受即污染（第二輪第 1 條）
                 return { ok: true };
             };
@@ -1376,7 +1379,7 @@
                 if (!isLobby(socketId) || isFastTest(env) || (env && !isGuardable(original)) || (!env && !guardActive())) return sendOriginal();
             }
             var empty = new Uint8Array(0);
-            var verdict = blockSend({ bytes: b || empty, wsId: socketId, injected: injected }, b || empty, original || empty,
+            var verdict = blockSend({ bytes: b || empty, wsId: socketId, injected: injected, tx: tx }, b || empty, original || empty,
                 env ? env.msgId : null, env && env.method, env && env.method, 'bridge_error', ids);
             if (sender === undefined && tx) revertGameSend(tx.commit);
             if (sender === undefined && verdict.msgId != null) gameLast(socketId, verdict.msgId, orderOf(tx));
@@ -1426,7 +1429,7 @@
             untrustedSockets.delete(socketId);
             recvLostSockets.delete(String(socketId));
             Array.from(degradedSeen).forEach(function (k) { if (k.indexOf(prefix) === 0) degradedSeen.delete(k); });
-            Array.from(localPending.keys()).forEach(function (k) { if (k.indexOf(prefix) === 0) localPending.delete(k); });
+            localHolds.forEach(function (h) { if (h.socketId === socketId) localHolds.delete(h); });
         },
 
         // naki-websocket 在變長交付出故障、鎖死變長改寫時呼叫（只記 log；改寫者只是候選，可能是多個插件共同的結果）
@@ -1448,12 +1451,12 @@
         // naki-websocket 丟棄待交付的 injectReceive 時呼叫：記在發起插件的 log（bridge 訊息的欄位契約由本層的 pluginLog 負責）
         injectDropped: function (pluginId, why) { pluginLog(pluginId, 'injectReceive 未交付：' + why); },
 
-        // naki-websocket 排不進本地回應的交付時呼叫：遊戲收不到這則，保留的號碼立即釋放（第三輪第 4 條）
-        localDropped: function (socketId, msgId) { if (msgId != null) releaseLocal(socketId, msgId); },
+        // naki-websocket 排不進本地回應的交付時呼叫：遊戲收不到這則，判決帶出的保留立即釋放（第三輪第 4 條）
+        localDropped: function (hold) { releaseLocal(hold); },
 
-        localResponse: function (socketId, msgId, method, bytes, injected) {
+        localResponse: function (socketId, msgId, method, bytes, injected, hold) {
+            releaseLocal(hold);   // 已交付給遊戲：判決帶出的保留釋放（第二輪第 4 條、第四輪第 2 條）
             if (msgId == null) return;
-            releaseLocal(socketId, msgId);   // 已交付給遊戲：保留的號碼釋放（第二輪第 4 條）
             if (!injected) return;
             var key = msgKey(socketId, msgId);
             var injection = injectedMsgIds.get(key);
@@ -1496,7 +1499,7 @@
                 openCommits: openCommits.size,
                 untrustedSockets: untrustedSockets.size,
                 receiveLost: recvLostSockets.size,
-                localPending: Array.from(localPending.values()).reduce(function (n, c) { return n + c; }, 0),
+                localPending: localHolds.size,
                 websocket: window.__nakiWebSocket && window.__nakiWebSocket.diagnostics
                     ? window.__nakiWebSocket.diagnostics() : null,
                 recommendations: (window.__nakiRecommendations || []).length,

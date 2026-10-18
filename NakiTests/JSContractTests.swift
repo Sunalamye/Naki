@@ -173,37 +173,92 @@ final class JSContractTests: XCTestCase {
             "registered.filter(function (r) { return r.indexOf('message:') === 0; }).join()")?.toString(), "message:true,message:false")
     }
 
-    /// Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`（inject-receive 第三輪第 1 條）：bridge 目錄裡，
-    /// 除了 `LiqiRequestBuilder.swift`（集合與 builder 常數的定義處），任何 `.lq.` 字面值都必須在集合內，也不得引用
-    /// `LiqiRequestBuilder` 的方法常數。新增分支不論寫成 `==`、反向比較、switch、Set 或字典，只要繞過集合就紅。
-    /// 例外逐檔列出且以實際值比對：`LiqiResponseStore` 的 error 欄位表（只用於 Naki 自送的回應）、動作頻道的兩個方法名、
-    /// `LiqiActionSender` 送心跳用的 builder 常數。字面值寫在註解裡也算（寧可誤紅）。
-    func testBridgeBranchesOnlyUseTheSideEffectMethodSet() throws {
-        let bridge = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("command/Services/Bridge")
-        func captures(_ pattern: String, _ text: String) throws -> [String] {
-            try NSRegularExpression(pattern: pattern).matches(in: text, range: NSRange(text.startIndex..., in: text))
-                .compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
+    private static let servicesRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("command/Services")
+    private static let builderFile = servicesRoot.appendingPathComponent("Bridge/LiqiRequestBuilder.swift")
+
+    private func captures(_ pattern: String, _ text: String) throws -> [String] {
+        try NSRegularExpression(pattern: pattern).matches(in: text, range: NSRange(text.startIndex..., in: text))
+            .compactMap { Range($0.range(at: 1), in: text).map { String(text[$0]) } }
+    }
+
+    /// `LiqiRequestBuilder` 的方法常數名 → 值；不是字面值的（動作頻道）為 nil，一律當成不在集合內
+    private func builderMethodValues() throws -> [String: String?] {
+        let text = try String(contentsOf: Self.builderFile, encoding: .utf8)
+        var table: [String: String?] = [:]
+        for line in text.components(separatedBy: .newlines) {
+            guard let name = try captures(#"static let (\w+Method) ="#, line).first else { continue }
+            table[name] = try captures(#"static let \w+Method = "([^"]*)"\s*$"#, line).first
         }
-        let allowedLiterals: [String: Set<String>] = [
-            "LiqiResponseStore.swift": Set(LiqiResponseRecord.errorFieldNumbers.keys),
-            "LiqiOperationStore.swift": [LiqiActionChannel.selfOperation.method, LiqiActionChannel.chiPengGang.method],
+        return table
+    }
+
+    /// `LiqiSideEffectMethods` 宣告的每個方法常數都併進 `consumed` 或 `all`（inject-receive 第四輪第 4 條）：
+    /// 新增常數卻漏加集合就紅。集合定義裡的字面值與引用的 builder 常數，值都必須在 `all`。
+    /// builder 本體不做內容掃描，以這條覆蓋。
+    func testEverySideEffectConstantIsInTheSet() throws {
+        let text = try String(contentsOf: Self.builderFile, encoding: .utf8)
+        let head = try XCTUnwrap(text.range(of: "enum LiqiSideEffectMethods {"))
+        let tail = try XCTUnwrap(text.range(of: "\n}\n", range: head.upperBound..<text.endIndex))
+        let body = String(text[head.upperBound..<tail.lowerBound])
+        let composition = String(body[try XCTUnwrap(body.range(of: "static let consumed")).lowerBound...])
+        let names = try captures(#"static let (\w+)"#, body).filter { $0 != "consumed" && $0 != "all" }
+        XCTAssertGreaterThan(names.count, 8, "解析壞了")
+        let missing: [String] = try names.filter { name in try captures("\\b(\(name))\\b", composition).isEmpty }
+        XCTAssertEqual(missing, [], "LiqiSideEffectMethods 的常數沒併進 consumed／all")
+        let builder = try builderMethodValues()
+        let strayLiterals = Set(try captures(#""(\.lq\.[^"]*)""#, body)).subtracting(LiqiSideEffectMethods.all)
+        let strayConstants = try captures(#"\b(\w+Method)\b"#, body).filter { name in
+            !(builder[name].flatMap { $0 }.map { LiqiSideEffectMethods.all.contains($0) } ?? false)
+        }
+        XCTAssertEqual(strayLiterals.sorted(), [])
+        XCTAssertEqual(strayConstants, [])
+    }
+
+    /// Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`（inject-receive 第三輪第 1 條、第四輪第 4 條）。
+    /// 規則（不是「任何語法都抓得到」）：`command/Services` 下除 builder 本體外的每一行，若有值不在 `all` 的 `.lq.` 字面值，
+    /// 或提到值不在 `all` 的 `LiqiRequestBuilder` 方法常數名（不論前綴、typealias 或跨行），就必須是逐檔列出的例外行
+    /// （比對整行內容，每個例外只能用一次，用不到的例外也紅）。字面值寫在註解裡也算（寧可誤紅）。
+    /// 抓不到的：字串拼接或插值組出的方法名、以別名常數再轉手的值。
+    func testServicesBranchOnlyOnTheSideEffectMethodSet() throws {
+        let builder = try builderMethodValues()
+        XCTAssertGreaterThan(builder.count, 15, "builder 常數解析壞了")
+        let names = try NSRegularExpression(pattern: "\\b(" + builder.keys.sorted().joined(separator: "|") + ")\\b")
+        func normalized(_ line: String) -> String {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            return t.hasSuffix(",") ? String(t.dropLast()) : t
+        }
+        var allowed: [String: [String]] = [
+            // error 欄位表：只用於 Naki 自送的回應
+            "LiqiResponseStore.swift": LiqiResponseRecord.errorFieldNumbers.map { "\"\($0.key)\": \($0.value)" },
+            // 動作頻道的方法名定義
+            "LiqiOperationStore.swift": [#"case .selfOperation: return ".lq.FastTest.inputOperation""#,
+                                         #"case .chiPengGang: return ".lq.FastTest.inputChiPengGang""#],
+            // 保活狀態回報的方法名
+            "LiqiActionSender.swift": [#""method": LiqiRequestBuilder.heatbeatMethod"#],
+            // MCP 輸出 schema 的說明值
+            "MCPToolOutputSchema.swift": [#""method": string(".lq.FastTest.broadcastInGame")"#],
+            // manifest 的 sendGuard 前綴檢查
+            "PluginRegistry.swift": [#"if let sendGuard, sendGuard.isEmpty || sendGuard.contains(where: { !$0.hasPrefix(".lq.Lobby.") || !methods.contains($0) }) {"#],
         ]
-        let allowedBuilderConstants: [String: Set<String>] = ["LiqiActionSender.swift": ["heatbeatMethod"]]
-        var strayLiterals: [String] = [], strayConstants: [String] = [], scanned = 0
-        for url in try FileManager.default.contentsOfDirectory(at: bridge, includingPropertiesForKeys: nil)
-        where url.pathExtension == "swift" && url.lastPathComponent != "LiqiRequestBuilder.swift" {
-            let file = url.lastPathComponent, text = try String(contentsOf: url, encoding: .utf8)
+        var stray: [String] = [], scanned = 0
+        let files = try XCTUnwrap(FileManager.default.enumerator(at: Self.servicesRoot, includingPropertiesForKeys: nil))
+        for case let url as URL in files where url.pathExtension == "swift" && url.lastPathComponent != Self.builderFile.lastPathComponent {
+            let file = url.lastPathComponent
             scanned += 1
-            let literals = Set(try captures(#""(\.lq\.[^"]*)""#, text))
-                .subtracting(LiqiSideEffectMethods.all).subtracting(allowedLiterals[file] ?? [])
-            strayLiterals += literals.sorted().map { "\(file): \($0)" }
-            let constants = Set(try captures(#"LiqiRequestBuilder\.(\w+Method)\b"#, text)).subtracting(allowedBuilderConstants[file] ?? [])
-            strayConstants += constants.sorted().map { "\(file): \($0)" }
+            for line in try String(contentsOf: url, encoding: .utf8).components(separatedBy: .newlines) {
+                let literals = try captures(#""(\.lq\.[^"]*)""#, line).filter { !LiqiSideEffectMethods.all.contains($0) }
+                let constants = names.matches(in: line, range: NSRange(line.startIndex..., in: line))
+                    .compactMap { Range($0.range(at: 1), in: line).map { String(line[$0]) } }
+                    .filter { !(builder[$0].flatMap { $0 }.map { LiqiSideEffectMethods.all.contains($0) } ?? false) }
+                guard !literals.isEmpty || !constants.isEmpty else { continue }
+                if let at = allowed[file]?.firstIndex(of: normalized(line)) { allowed[file]?.remove(at: at); continue }
+                stray.append("\(file): \(normalized(line))")
+            }
         }
-        XCTAssertGreaterThan(scanned, 10, "掃描路徑壞了")
-        XCTAssertEqual(strayLiterals, [], "bridge 用了 LiqiSideEffectMethods 以外的 .lq. 字面值：有副作用就加進集合，否則列進例外")
-        XCTAssertEqual(strayConstants, [], "bridge 以 LiqiRequestBuilder 方法常數比較：改用 LiqiSideEffectMethods")
+        XCTAssertGreaterThan(scanned, 40, "掃描路徑壞了")
+        XCTAssertEqual(stray, [], "用了 LiqiSideEffectMethods 以外的方法：有副作用就加進集合，否則列進該檔例外（整行）")
+        XCTAssertEqual(allowed.filter { !$0.value.isEmpty }.mapValues { $0.sorted() }, [:], "例外行已不存在：刪掉過期例外")
     }
 
     /// Phase 4 變長 replace／drop 的禁改名單涵蓋 Swift 會消費的回應與通知（`LiqiSideEffectMethods.consumed`），缺一即紅

@@ -4270,7 +4270,8 @@ test('IR-4: a pending synthetic NOTIFY is dropped when the connection closes or 
     assert.deepEqual(t.toSwift('receive').slice(sw0).filter(b => b[0] === 1), delivered ? [Array.from(notifyMsg(NOTE, [7]))] : [], mode + ': Swift');
     assert.deepEqual(plain(seen).map(s => s[0]), delivered ? [NOTE] : [], mode + ': observation');
     assert.equal(t.c.__nakiWebSocket.diagnostics().reshapeLocked, false, mode);
-    if (!delivered && mode !== 'swift fails') assert.equal(t.events('log').some(e => /injectReceive 未交付/.test(e.data.msg)), mode === 'untrusted', mode + ': log');
+    // 關閉時佇列中的合成項各寫一行（第四輪第 5 條裁決補交付）
+    if (!delivered && mode !== 'swift fails') assert.equal(t.events('log').filter(e => /injectReceive 未交付/.test(e.data.msg)).length, 1, mode + ': log');
   }
 });
 
@@ -4427,6 +4428,8 @@ test('IR-9: the bridge fails after a proposal (the dispatch throws) — failSafe
     assert.deepEqual(t.lobby.sent, [], method);
     assert.deepEqual(t.game.slice(-1), [guarded ? errorResponse(1580) : Array.from(response(1580, [8, 7]))], method);
     if (guarded) assert.deepEqual(lastGuard(t), [[1580, 'local_error', 'bridge_error']]);
+    // 派發已保留、failSafe 再結案的是同一筆交易：交付後不殘留（第四輪第 2 條）
+    assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0, method + ': nothing left reserved after delivery');
   }
 });
 
@@ -4853,20 +4856,140 @@ test('IR-28 (Astra2 4): reserved local numbers are bounded and released on every
     assert.deepEqual(got[256], { ok: false, reason: 'local_busy' });
     assert.deepEqual(sentIds(t), [3256], 'the refused request goes out');
     assert.equal(pending(t), 256);
+    const other = gameSocket(t.c);
+    other.send(request(3290, INFO));
+    assert.deepEqual(got[257], { ok: true }, 'the limit is per connection');
+    assert.equal(pending(t), 257);
     await tick();
     assert.equal(pending(t), 0, 'released after delivery');
-    assert.equal(t.game.filter(b => b[0] === 3).length, 256, 'every reserved number was answered locally');
+    assert.equal(t.game.filter(b => b[0] === 3).length, 256, 'every reserved lobby number was answered locally');
     t.lobby.send(request(3300, INFO));
-    assert.deepEqual(got[257], { ok: true }, 'room again');
+    assert.deepEqual(got[258], { ok: true }, 'room again');
   }
   { // 關閉連線清除
     const t = page();
     responder(t, 'ir28');
+    const other = gameSocket(t.c);
+    other.send(request(3401, INFO));
     t.lobby.send(request(3400, INFO));
-    assert.equal(pending(t), 1);
+    assert.equal(pending(t), 2);
     t.lobby.close();
-    assert.equal(pending(t), 0);
+    assert.equal(pending(t), 1, 'only the closed connection is cleared');
     await tick();
     assert.equal(pending(t), 0);
   }
+});
+
+test('IR-29 (Astra3 1): an accepted proposal holds its place until it is delivered — 256 sends re-entered from the accepting hook get 255 more acceptances, the next one local_busy and on the wire; 256 reserved, all released after delivery', async () => {
+  const t = page();
+  const pending = () => t.c.__nakiPlugins.diagnostics().localPending;
+  let outer = true;
+  const got = responder(t, 'ir29', { respond: ctx => {
+    const r = ctx.respondLocally(response(ctx.msgId, [8, 7]));
+    if (outer) { outer = false; for (let i = 1; i <= 256; i++) t.lobby.send(request(3500 + i, INFO)); }
+    return r;
+  } });
+  t.lobby.send(request(3500, INFO));
+  assert.equal(got.filter(r => r.ok).length, 256);
+  assert.deepEqual(got.filter(r => !r.ok), [{ ok: false, reason: 'local_busy' }]);
+  assert.deepEqual(sentIds(t), [3756], 'the 257th goes out');
+  assert.equal(pending(), 256);
+  await tick();
+  assert.equal(pending(), 0);
+  assert.equal(t.game.filter(b => b[0] === 3).length, 256);
+});
+
+test('IR-30 (Astra3 2): a reserved number is held once per send even when the dispatch finishes and the bridge then fails — 300 such sends one task apart never fill the reservation; a guarded block concluded twice is held once too', async () => {
+  for (const [method, guarded] of [[INFO, false], [SKIN, true]]) {
+    const t = page();
+    if (guarded) irPlugin(t, 'gA', { capabilities: ['observe', 'respondLocally'], methods: [SKIN], sendGuard: [SKIN] }, { onSend(ctx) { ctx.respondLocally(response(ctx.msgId, [8, 7])); } });
+    const got = guarded ? null : responder(t, 'ir30');
+    const orig = t.c.__nakiPlugins.dispatch;
+    t.c.__nakiPlugins.dispatch = raw => { const r = orig(raw); if (raw.direction === 'send') throw new Error('bridge broke'); return r; };
+    for (let i = 0; i < 300; i++) {
+      t.lobby.send(request(4000 + i, method, [8, 1]));
+      assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 1, method + ' #' + i + ': one reservation');
+      await tick();
+    }
+    assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0, method);
+    assert.deepEqual(t.lobby.sent, [], method);
+    if (got) assert.equal(got.every(r => r.ok), true, 'never local_busy');
+  }
+});
+
+test('IR-31 (Astra3 3): injectReceive whose task cannot be scheduled returns schedule_failed and leaves nothing queued — 40 failures, then the timer recovers and the next injection is accepted and delivered; a guard plugin is not tainted by a failed one', async () => {
+  const t = page();
+  const ctxs = ctxKeeper(t, 'ir31', ['injectReceive'], [INFO, SKIN], { sendGuard: [SKIN] });
+  const seen = nakiNoteObserver(t, 'obs31');
+  t.lobby.send(request(1960, INFO));
+  const timer = t.c.setTimeout;
+  t.c.setTimeout = () => { throw new Error('timer broke'); };
+  for (let i = 0; i < 40; i++) assert.deepEqual(plain(ctxs[0].injectReceive(notifyMsg(NOTE, [7]))), { ok: false, reason: 'schedule_failed' }, '#' + i);
+  t.c.setTimeout = timer;
+  assert.deepEqual(taintedIds(t), [], 'a failed injection does not taint');
+  assert.deepEqual(plain(ctxs[0].injectReceive(notifyMsg(NOTE, [7]))), { ok: true }, 'not inject_busy');
+  await tick(); await tick();
+  assert.deepEqual(plain(seen).map(s => s[0]), [NOTE]);
+  assert.equal(t.game.filter(b => b[0] === 1).length, 1);
+});
+
+test('IR-32 (Astra3 3): a degradation whose task cannot be scheduled does not throw into the send and stays pending — no retry of its own; the next degradation (another connection) schedules once and delivers both', async () => {
+  const t = page();
+  const log = degradeWatcher(t);
+  const game = gameSocket(t.c);
+  const timer = t.c.setTimeout;
+  t.c.setTimeout = () => { throw new Error('timer broke'); };
+  t.lobby.send(new t.c.Blob([request(1969, INFO)]));
+  t.c.setTimeout = timer;
+  await tick(); await tick();
+  assert.deepEqual(log, [], 'no retry of its own');
+  game.send(new t.c.Blob([request(1970, INFO)]));
+  await tick();
+  const got = plain(log);
+  assert.deepEqual(got.map(e => e[1]), ['send_blob', 'send_blob']);
+  assert.equal(got[0][2], lobbyId(t), 'the one that could not be scheduled first');
+  assert.notEqual(got[1][2], got[0][2]);
+});
+
+test('IR-33 (Astra3 6): 300 local outcomes in one task — ordinary proposals are bounded (256 accepted, 44 local_busy and on the wire), guard local errors are not (300 local); after delivery an injection still avoids the game\'s next 256 numbers (64157)', async () => {
+  for (const mode of ['respondLocally', 'guard local error']) {
+    const t = page();
+    const { inject } = injector11(t);
+    let method = INFO, got = null;
+    if (mode === 'respondLocally') got = responder(t, 'ir33');
+    else { guardPlugin(t.c); pollute(t); method = SKIN; }
+    t.lobby.send(request(63600, BEAT));
+    t.lobby.receive(response(63600, [8, 1]));
+    if (mode !== 'respondLocally') t.c.__nakiPluginsMayModifyOutbound = false;
+    for (let i = 1; i <= 300; i++) t.lobby.send(request(63600 + i, method, [8, 1]));
+    t.c.__nakiPluginsMayModifyOutbound = true;
+    const out = sentIds(t).filter(id => id > 63600);
+    if (got) {
+      assert.equal(got.filter(r => r.ok).length, 256, mode);
+      assert.equal(got.filter(r => r.reason === 'local_busy').length, 44, mode);
+      assert.deepEqual(out, Array.from({ length: 44 }, (_, i) => 63857 + i), mode + ': the refused ones go out');
+    } else {
+      assert.deepEqual(out, [], mode + ': all 300 stay local');
+      assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 300, mode + ': a guard block is never refused for room');
+    }
+    await tick();
+    assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0, mode);
+    const r = inject(FST);
+    assert.equal(r.ok, true, mode);
+    assert.equal(r.msgId, 64157, mode);
+  }
+});
+
+test('IR-34 (Astra3 2): an accepted proposal whose send ends blocked with nothing to deliver releases its reservation — the bridge fails after the bytes became unreadable, a guard is active, the request neither goes out nor is answered', async () => {
+  const t = page();
+  guardPlugin(t.c);
+  const got = responder(t, 'ir34');
+  const orig = t.c.__nakiPlugins.dispatch;
+  t.c.__nakiPlugins.dispatch = raw => { const r = orig(raw); if (raw.direction === 'send') { raw.bytes[0] = 9; throw new Error('bridge broke'); } return r; };
+  t.lobby.send(request(4400, INFO));
+  assert.deepEqual(got, [{ ok: true }]);
+  assert.deepEqual(t.lobby.sent, []);
+  assert.equal(t.c.__nakiPlugins.diagnostics().localPending, 0, 'nothing will be delivered, so nothing stays reserved');
+  await tick();
+  assert.equal(t.game.filter(b => b[0] === 3).length, 0);
 });

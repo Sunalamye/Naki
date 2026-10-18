@@ -32,10 +32,14 @@
 | 13 | 第二輪第 7 條：交付前重查連線身分與 OPEN | 兩項都查；身分檢查不列變異 | 連線釋放時先清空 `info.injected`，交付找不到項目就返回，身分不符的情況在身分檢查之前已攔下，拿掉身分檢查是等價變異。保留作為釋放順序改動時的防線 |
 | 14 | 第二輪第 1 條：合成能力成功後納入污染生命週期 | 宣告 `sendGuard` 的插件，`injectReceive`／`respondLocally` 被接受即污染，不分連線 | 既有的接收污染只看大廳；合成通知可能出現在任何連線，本地回應也可能在對局連線上。污染只讓守衛更嚴，不分連線比較保守 |
 | 15 | 第三輪第 1 條裁決：共用方法來源 | 新增 `LiqiSideEffectMethods`（放在 `LiqiRequestBuilder.swift`），改寫 `LiqiParser`、`MajsoulBridge`、`LiqiResponseStore`、`WebSocketInterceptor` 的分支改引用它，移除 `LiqiParser.loginResponseMethods`、`LiqiResponseStore.broadcastMethod` 兩個別名 | 改的是 Swift bridge 生產碼，但只換名稱來源、不改行為；涵蓋這四個檔的 21 個測試類別全綠（`r3-swift-targeted-final.log`）。集合放在 builder 檔，是因為它要引用 builder 的方法常數，而原始碼規則把 builder 檔當成唯一允許出現這些常數的地方 |
-| 16 | 第三輪第 1 條裁決：字面值比對 | 規則掃整個 `command/Services/Bridge`（builder 檔除外）的所有 `.lq.` 字面值，不只比較式；另禁止引用 builder 方法常數。例外逐檔以實際值比對：`LiqiResponseStore` 的 error 欄位表鍵、動作頻道兩個方法名、`LiqiActionSender` 的 `heatbeatMethod` | 只看字面值抓不到 Astra 列的四種寫法（它們都用 builder 常數），所以加常數規則。註解裡的字面值也算，寧可誤紅。範圍只到 bridge 目錄，其他目錄的 Swift 不掃（列已知風險） |
+| 16 | ~~第三輪第 1 條裁決：字面值比對~~（**第四輪第 4 條取代**，見 Deviation 21） | 規則掃整個 `command/Services/Bridge`（builder 檔除外）的所有 `.lq.` 字面值，不只比較式；另禁止引用 builder 方法常數。例外逐檔以實際值比對：`LiqiResponseStore` 的 error 欄位表鍵、動作頻道兩個方法名、`LiqiActionSender` 的 `heatbeatMethod` | 只看字面值抓不到 Astra 列的四種寫法（它們都用 builder 常數），所以加常數規則。註解裡的字面值也算，寧可誤紅。範圍只到 bridge 目錄，其他目錄的 Swift 不掃（列已知風險） |
 | 17 | 第三輪第 4 條：超限回 `local_busy` | 上限只限 `respondLocally`；守衛擋下一律保留、不計上限 | 守衛擋下是強制結局，不能改成送出；遊戲每筆送出各占一個號碼，交付在下一個 task，量由遊戲自己的送出決定 |
 | 18 | — | 第一輪 `deliverInjected` 在 `naki-websocket.js` 直接送 `plugin_event` 並帶 `id`，違反 bridge 欄位契約（`BridgeMessageContractTests` 紅）；改經插件層 `injectDropped` 記 log | 第一、二輪的 Swift 指定測試沒納入 `BridgeMessageContractTests`，第三輪擴大範圍才抓到。log 行為不變（`IR-4`、`IR-24`），變異 R3-5 守住 |
 | 19 | — | `PluginSendGuardTests.testLogSaysBlockedForGuardedLocalExchangeAndSentOtherwise` 單獨跑 | 它以 `LogManager.entries` 的筆數切片，大批執行寫滿 5000 筆上限後切不到新行而紅；單獨跑 12/12 綠。這是既有測試的順序相依，與本包無關，本包不修 |
+| 20 | 第四輪第 1、2 條：保留以交易為單位 | 保留改為物件集合 `localHolds`，物件記在送出交易 `tx.hold`；`respondLocally` 接受時建立，`blockSend` 沿用或建立，`localOk` 只轉移（不建立）。判決帶出 `hold`，`naki-websocket.js` 交付與排程失敗時原樣交回 `localResponse`／`localDropped`（兩個內部 API 的參數因此改變） | 冪等靠集合成員：移出後再移出無作用，交易上已有保留就不再建立。`localOk` 若也建立會是殺不掉的等價變異（接受時必已建立），所以只轉移。排程失敗只可能發生在 `handleMessage` 返回之後，同一筆交易不會再經 `failSafe` 結案，所以「移出後不再建立」不會造成未保留的交付 |
+| 21 | 第四輪第 4 條：掃描擴到 `command/Services`、例外整行比對 | 照做；builder 本體依裁決只由「集合完整性」那條覆蓋，不掃內容（它的 16 行 `LiqiRequestSpec(method:)` 是送出定義）。完整性以原始碼比對：每個 `static let` 名稱必須出現在 `consumed`／`all` 的定義中，集合定義裡的字面值與 builder 常數值都要在 `all` | Swift 的 static 屬性無法反射列舉，只能讀原始碼。整行比對下，集合新增方法時原本的例外行可能不再命中而「過期」紅（V6 同時觸發這條），這是刻意的：例外要跟著集合重審 |
+| 22 | 第四輪第 5 條：關閉丟棄寫 `injectDropped` reason `closed` | log 原因寫「連線已關閉」 | 與交付當下 CLOSING 丟棄同一句（`IR-24` 既有斷言），插件看到的是同一種結局；每則一行（`IR-4` 斷言恰好一行） |
+| 23 | — | `blockSend` 沒有回應可交付時（例如 bridge 出錯時 bytes 已無法解析、有守衛者）釋放接受提案時的保留 | 接受即占容量後，這條路徑若不釋放會永久占位到連線關閉。故障模型：派發完成後 bytes 變成無法解析再拋錯（`IR-34`），變異 R4-2b 守住 |
 
 ## 實作摘要
 
@@ -48,7 +52,7 @@
 - 守衛身分（第二輪）：`runChain` 記 `raw.lobbyChain`；`respondLocally` 以呼叫當時的 `guardFor(method)` 判定，非守衛者回 `not_guardian`；拒絕與提案都帶 `guardian`。`respondFailure` 計入 `guardian` 為真的拒絕（退出後仍算），`guardFailure` 對非守衛者的提案回 `not_guardian`。
 - 退化事件：`degrade` 只記入 `pendingDegraded`（每 (連線, reason) 一次）並排一個 `setTimeout 0`，`deliverDegraded` 在那個 task 交付（第二輪，取代第一輪的 `dispatchDepth` 與四個交付點）。第三輪：只交付 `splice(0)` 取出的批次，回呼內新觸發的排到下一個 task；每個插件的 hook 取得與呼叫在同一個 try 內、只讀一次，失敗記在該插件。ctx 凍結，`effects` 也凍結。
 - 接收佇列（第二輪）：`checkOverflow` 抽出，網路接收與 `deliverInjected` 的觀察項共用；`deliverInjected` 先查 `wsConnections.get(ws) === info` 且 `readyState === OPEN`。
-- Swift：第三輪改為共用來源 `LiqiSideEffectMethods`（Deviation 15、16）；`JSContractTests` 三條：`testBridgeBranchesOnlyUseTheSideEffectMethodSet`（原始碼規則）、`testReshapeForbiddenListCoversEverySwiftConsumedMethod`（`consumed`）、`testRespondForbiddenListCoversEverySwiftSideEffectMethod`（`all`）。第二輪的正則反查已移除。`PluginsPageView` L3 說明與 `Localizable.xcstrings` 四語系同步。AutoPlay 未改。
+- Swift：第三輪改為共用來源 `LiqiSideEffectMethods`（Deviation 15、16）；`JSContractTests` 第四輪起四條：`testEverySideEffectConstantIsInTheSet`（集合完整性）、`testServicesBranchOnlyOnTheSideEffectMethodSet`（原始碼規則，取代第三輪的 `testBridgeBranchesOnlyUseTheSideEffectMethodSet`）、`testReshapeForbiddenListCoversEverySwiftConsumedMethod`（`consumed`）、`testRespondForbiddenListCoversEverySwiftSideEffectMethod`（`all`）。第二輪的正則反查已移除。`PluginsPageView` L3 說明與 `Localizable.xcstrings` 四語系同步。AutoPlay 未改。
 
 ## 驗證
 
@@ -91,6 +95,20 @@
 
 可重現的故障測試（建議 5）：排程失敗（`IR-28` 以替換 `setTimeout` 注入）、getter 拋錯（`IR-27`）、號碼耗盡（`IR-28` 的 257 筆）。
 
+
+### 第四輪（Astra 第三輪）
+
+| 階段 | 結果 | log |
+|---|---|---|
+| 先紅（新測試對 640f60a） | 6 fail：`IR-4`（關閉丟棄零行 log）、`IR-9`（dispatch 後拋錯，交付後殘留 1 筆保留）、`IR-29`（hook 內重入 256 筆全部 `ok:true`）、`IR-30`（每筆送出保留 2 筆）、`IR-31`（排程失敗後永久 `inject_busy`）、`IR-32`（退化排程失敗拋進送出）。`IR-33`（同 task 300 筆，建議 6）修前即綠，是補覆蓋 | `r4-red.log` |
+| 實作後 | b2 277／v2 21／p4 24／keepalive 11／plugin-regression 39／local-unlock 9，全 0 fail | `r4-final-*.log` |
+| 變異（新增 12） | 首跑 10/12：R4-2b（無回應時不釋放）、R4-2c（關閉清掉所有連線）存活；補 `IR-34` 與 `IR-28` 跨連線斷言後 12/12 | `r4-mutate-new.log`、`r4-mutate-new-2.log` |
+| 變異（全量 254） | 252/254，只剩等價 T7、U10。過期錨點 10 條依新程式碼改寫（PS73、IR11、DG1、DG6、R2-4a～d、R3-4c、R3-4e）；R2-4b 改守「本地成功不帶出保留」 | `r4-mutate-full-1.log`、`-2.log` |
+| Swift 變異（新規則） | W1～W6 全紅：集合新增常數漏加 `all`（W1）、typealias＋跨行引用 builder 常數（W2）、例外字面值在同檔另一行重用（W3）、例外常數在同檔另一行重用（W4）、bridge 目錄外新增字面值（W5）、例外行已不存在（W6）。第三輪 V1～V7 重跑仍全紅。每條還原後 sha256 相同 | `r4-swift-mut-W1-*.log`～`W6-*.log`、`r4-swift-mut-V1-*.log`～`V7-*.log` |
+| Swift 指定（還原後重建） | 20 個類別 276 tests 0 failures；`PluginSendGuardTests` 單獨 12/0（Deviation 19）；bundle 內兩個 JS 與 worktree 逐 byte 相同 | `r4-swift-build-final.log`、`r4-swift-targeted.log`、`r4-swift-sendguard-alone.log` |
+
+可重現的故障測試：計時器拋錯（`IR-28`、`IR-31`、`IR-32`）、派發完成後拋錯（`IR-9`、`IR-30`、`IR-34`）、hook 內重入（`IR-29`）。
+
 ## 審查回應（Astra 第一輪，主線 2026-10-18 裁決：4 擋 7 應修全採納、根治；4 建議照做）
 
 | # | 等級 | 回應 | 修正 | 反例測試（先紅） | 變異 |
@@ -121,6 +139,17 @@
 | 4 | 應修 | 採納 | 每連線 256 上限與 `local_busy`、排程失敗立即釋放、`diagnostics().localPending`、契約改寫；撤回 Dev 12 | `IR-28` | R3-4a～R3-4e |
 | 5 | 建議 | 照做 | live 再補三項；三種故障本輪寫成可重現測試 | `IR-27`、`IR-28` | — |
 
+第四輪（Astra 第三輪，主線裁決 0 擋 5 應修 1 建議全採納）：
+
+| # | 等級 | 回應 | 修正 | 測試 | 變異 |
+|---|---|---|---|---|---|
+| 1 | 應修 | 採納 | 接受當下即按交易保留並計入上限（Deviation 20） | `IR-29`、`IR-28` 跨連線 | R4-1a～R4-1d |
+| 2 | 應修 | 採納 | 保留每交易至多一筆、移出冪等；無回應可交付時釋放（Deviation 20、23） | `IR-9` 清理斷言、`IR-30`、`IR-34` | R4-2a～R4-2c |
+| 3 | 應修 | 採納 | `injectReceive` 排程失敗撤回並回 `schedule_failed`；退化旗標排程成功才設，失敗留待下次觸發（政策寫進契約） | `IR-31`、`IR-32` | R4-3a～R4-3d |
+| 4 | 應修 | 採納 | 集合完整性測試；掃描擴到 `command/Services`、字面值與常數名兜底、例外整行比對且只用一次；契約收窄為實際規則（Deviation 21） | Swift W1～W6、V1～V7 全紅 | W1～W6、V1～V7（Swift） |
+| 5 | 應修 | 採納（裁決：補交付） | 關閉時排隊的合成項各寫一行 log（Deviation 22）；b2 RESPONSE field 1 改「可省略」、API 名單來源改 `LiqiSideEffectMethods`、b2「超過 256」改「已有 256」 | `IR-4` 改為恰好一行 | R4-5、IR11 |
+| 6 | 建議 | 照做 | `IR-10` 保留分批版，另加同 task 300 筆 `IR-33`；契約改寫守衛擋下不受上限、不是有界佇列、耗用資源屬 U4；live 補容量量測 | `IR-33` | — |
+
 ## live 另案（測試帳號，未做）
 
 - 合成 NOTIFY 相對當前這則的抵達順序（`setTimeout 0` 的推論：capture listener 內的 microtask 仍早於遊戲 handler，依 HTML 規範，node harness 重現不了）。
@@ -135,13 +164,16 @@
 - WebKit 上退化通知的時機：相對造成它的送出與其 microtask，通知在之後的 task（第三輪建議 5）。
 - 回呼內再退化：`onConnectionDegraded` 內造成另一條連線退化，新事件在下一個 task 才到。
 - 對局合成後 kill-switch：守衛插件在對局連線上 `injectReceive`／`respondLocally` 被接受後關 L3，守衛方法仍不外送。
+- 本地回應容量：同一連線 256 筆待交付的 `respondLocally` 在 WebKit 上的記憶體與交付延遲，第 257 筆 `local_busy` 後照常外送（第四輪建議 6）。
+- 守衛洪流：同一個 task 大量被擋的守衛方法送出（不受上限）期間注入回 `msgid_busy`、交付後恢復，量測保留筆數與恢復時間（第四輪建議 6）。
 
 ## 已知風險
 
 - 三個功能都只有單測，未 live 驗證。
 - 退化事件在下一個 task 才交付：同一個 task 裡排在後面的訊息會先派發（限制在觸發當下已生效，只是通知較晚）。
-- 同一個 task 裡大量本地回應（守衛擋下不設上限）會暫時占住號段，注入可能回 `msgid_busy`，下一個 task 交付後恢復。
-- 原始碼規則只掃 `command/Services/Bridge`（Deviation 16）：bridge 目錄以外的 Swift 若依 method 分支，不在檢查內。
+- 同一個 task 裡大量本地回應（守衛擋下不設上限）會暫時占住號段，注入可能回 `msgid_busy`，下一個 task 交付後恢復。守衛擋下的保留不是有界佇列，同 realm 刻意洪流耗用資源屬 U4。
+- 原始碼規則（Deviation 21）抓不到字串拼接或插值組出的方法名、以別名常數轉手的值；`command/Services` 以外（`App`、`Actions` 等）的 Swift 不掃；builder 本體只檢查集合完整性。
+- 退化事件排程失敗時不自行重試：若之後再也沒有新的退化觸發，那批事件不會交付。
 - `PluginSendGuardTests` 的 log 測試在大批執行時因 `LogManager` 5000 筆上限而紅（Deviation 19，既有問題）。
 - 合成能力被接受即污染不分連線（Deviation 14）：守衛插件在對局連線上用 `respondLocally` 也會污染，之後停用要重載頁面才解除守衛。
 - `window.__nakiWebSocket.injectReceive` 頁面程式可直接呼叫，跳過 L3 與名單（同 realm 不防，契約已寫）。

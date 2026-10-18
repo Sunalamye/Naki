@@ -358,16 +358,16 @@ CLAUDE.md：「修改 WebSocket bridge……前先確認」；ADR 主線決定�
 ### 5.3 `respondLocally`
 
 - capability `respondLocally`（L3）。`ctx.respondLocally(responseBytes)` 只在 send 方向、非 isNaki、method 不在禁用名單（送出禁改名單＋`cancelUnifiedMatch`、`cancelMatch`）時存在。
-- 檢查：L3 開、type 3、msgId 等於這筆 REQUEST、field 1 存在、envelope 在界內。通過時**當場複製精確範圍**存成提案回應，之後插件再改它的 buffer 也不影響交付（審查第 12 條；`respondLocal` 交付時再複製一次）。
+- 檢查：L3 開、type 3、msgId 等於這筆 REQUEST、envelope 在界內；field 1（method）可省略，與 API 契約一致（inject-receive 第四輪第 5 條）。通過時**當場複製精確範圍**存成提案回應，之後插件再改它的 buffer 也不影響交付（審查第 12 條；`respondLocal` 交付時再複製一次）。
 - **多守衛**（審查第 11 條）：判定只照 §4.2 的單一表格。這裡只補 `respondLocally` 自己的規則：
   1. 呼叫被接受後鏈**不停止**，其餘插件照常執行。
   2. 第二個呼叫 `respondLocally` 的插件被拒（`already_responded`）。先到者的提案保留，被拒的那一方記為 `respond_rejected`，依 §4.2 第 3 步整筆改為本地錯誤。
   3. 結局與交付一律 `{ block:true, request: original, response, msgId, method }`，與守衛擋下同一條路徑（§1.3）。
   4. 只有守衛者能在守衛方法上提案（§4.2 第 3b 步）；非守衛者回 `not_guardian`，不算第 3 步失敗。守衛者身分以呼叫當時為準：被拒後退出（停用、未污染）的守衛者，拒絕仍算第 3 步失敗，與退出前拋錯一致。
   5. 宣告 `sendGuard` 的插件，`respondLocally` 或 `injectReceive` 一被接受就污染（§3.2），之後停用、熱重載都保留守衛。合成內容可能展示未擁有的項目，不靠插件自己呼叫 `taint()`。
-  6. 每條連線待交付的本地回應超過 256 筆時回 `local_busy`（inject-receive 第三輪第 4 條）；守衛者在守衛方法上被這樣拒絕，同樣算第 3 步失敗。
+  6. 每條連線已有 256 筆已接受、尚未交付的本地回應時回 `local_busy`（inject-receive 第三輪第 4 條；第四輪第 1 條起接受當下即占容量，含重入送出的提案）；守衛者在守衛方法上被這樣拒絕，同樣算第 3 步失敗。
 - 被拒：非守衛方法回 `{ ok:false, reason }`，REQUEST 照常送出（插件自行處理）；守衛方法上守衛者的呼叫被拒依 N2 改為本地錯誤，非守衛者的 `not_guardian` 不影響判定。
-- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）以共用來源為準（inject-receive 第三輪第 1 條）：Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`，`all` 全部要在 JS 禁用名單。另一條原始碼規則：`command/Services/Bridge` 裡除定義處外，任何 `.lq.` 字面值都要在集合內（逐檔列出的例外以實際值比對），也不得引用 `LiqiRequestBuilder` 的方法常數，所以新增分支不論寫成哪種語法，繞過集合就紅。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
+- Swift 配對與 §1.3 相同：原 REQUEST 與 RESPONSE 在 `ws.send` 內同一個 task 成對送 Swift（以連線＋msgId 配對），只有交付遊戲延到 `ws.send` 回傳後。契約測試（Swift 單測讀 bundle 內 `naki-plugins.js`）以共用來源為準（inject-receive 第三輪第 1 條）：Swift 依 method 分支的方法只來自 `LiqiSideEffectMethods`，`all` 全部要在 JS 禁用名單。另兩條原始碼規則（inject-receive 第四輪第 4 條）：`LiqiSideEffectMethods` 宣告的每個常數都要併進 `consumed`／`all`；`command/Services` 裡除 builder 本體外，每一行若有集合外的 `.lq.` 字面值，或提到值在集合外的 `LiqiRequestBuilder` 方法常數名（不論前綴、typealias、跨行），就必須是逐檔列出的例外行（整行比對、每個只用一次、過期也紅）。字串拼接或插值組出的方法名抓不到。`LiqiResponseStore` 只收 Naki 配發的 msgId，遊戲的 msgId 不進去。
 
 ### 5.4 `injectReceive`
 

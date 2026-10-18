@@ -139,7 +139,8 @@
             if (released) return;
             released = true;
             const info = wsConnections.get(ws);
-            if (info) { info.recvQueue.length = 0; info.injected.length = 0; }
+            // 待交付的合成項各記一行再清空（第四輪第 5 條）
+            if (info) { info.recvQueue.length = 0; info.injected.splice(0).forEach(function(item) { injectDropped(item, '連線已關閉'); }); }
             wsConnections.delete(ws);
             if (window.__nakiPlugins && window.__nakiPlugins.closed) window.__nakiPlugins.closed(wsId);
         };
@@ -475,7 +476,8 @@
     // Swift 成對交付：原 REQUEST 與 RESPONSE 放在同一則 bridge 訊息（localResponse 欄位），兩份都編碼成功才送；
     // postMessage 失敗時兩份一起不見，不會只到一半（審查第三輪第 3 條）。遊戲在 ws.send 回傳後才收到另一份複本，
     // Naki listener 略過它；交付後以擋下當時的連線、msgId、原方法與自己的快照結案。
-    // 有回應卻排不進交付（複製或排程拋錯）時，通知插件層釋放保留的號碼（inject-receive 第三輪第 4 條）
+    // 有回應卻排不進交付（複製或排程拋錯）時，通知插件層釋放保留的號碼（inject-receive 第三輪第 4 條）；
+    // 結案與釋放都帶判決的保留（verdict.hold），插件層以交易為單位，重複釋放無作用（第四輪第 2 條）
     const syntheticEvents = new WeakSet();
     function respondLocal(ws, wsId, verdict) {
         let response = null, scheduled = false;
@@ -499,14 +501,14 @@
                         syntheticEvents.add(ev);
                         ws.dispatchEvent(ev);
                     } catch (e) { console.error('[Naki WS] 本地回應交付失敗:', e); }
-                    try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response, verdict.injected); }
+                    try { window.__nakiPlugins.localResponse(verdict.socketId, verdict.msgId, verdict.method, response, verdict.injected, verdict.hold); }
                     catch (e) { console.error('[Naki WS] 本地回應結案失敗:', e); }
                 }, 0);
                 scheduled = true;
             }
         } catch (e) { console.error('[Naki WS] 本地回應排程失敗:', e); }
         if (scheduled || !verdict.response) return;
-        try { window.__nakiPlugins.localDropped(verdict.socketId, verdict.msgId); }
+        try { window.__nakiPlugins.localDropped(verdict.hold); }
         catch (e) { console.error('[Naki WS] 本地回應釋放號碼失敗:', e); }
     }
 
@@ -643,16 +645,19 @@
         if (info.injected.length >= maxPending) return { ok: false, reason: 'inject_busy' };
         const item = { bytes: bytes, pluginId: pluginId };
         info.injected.push(item);
-        setTimeout(function() { deliverInjected(ws, info, item); }, 0);
+        // 排不進 task：撤回入隊，不占待交付名額（第四輪第 3 條）
+        try { setTimeout(function() { deliverInjected(ws, info, item); }, 0); }
+        catch (e) { info.injected.splice(info.injected.indexOf(item), 1); return { ok: false, reason: 'schedule_failed' }; }
         return { ok: true };
+    }
+    function injectDropped(item, why) {
+        try { window.__nakiPlugins.injectDropped(item.pluginId, why); } catch (e) { console.error('[Naki WS] injectReceive 未交付：' + why, e); }
     }
     function deliverInjected(ws, info, item) {
         const at = info.injected.indexOf(item);
         if (at === -1) return;
         info.injected.splice(at, 1);
-        const drop = function(why) {
-            try { window.__nakiPlugins.injectDropped(item.pluginId, why); } catch (e) { console.error('[Naki WS] injectReceive 未交付：' + why, e); }
-        };
+        const drop = function(why) { injectDropped(item, why); };
         if (wsConnections.get(ws) !== info || ws.readyState !== OriginalWebSocket.OPEN) return drop('連線已關閉');
         if (info.recvLost) return drop('連線接收不可信');
         let sent = false;

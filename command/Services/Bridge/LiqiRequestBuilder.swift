@@ -94,8 +94,9 @@ struct LiqiFriendRoomConfig {
 
 // MARK: - Side-effect Methods
 
-/// Swift 依 method 分支的唯一來源：匹配、牌局、帳號狀態的副作用都從這裡取名。bridge 其他檔案不得另寫 `.lq.` 字面值
-/// 或 `LiqiRequestBuilder` 方法常數來比較（JSContractTests 反查，inject-receive 第三輪第 1 條）。
+/// Swift 依 method 分支的唯一來源：匹配、牌局、帳號狀態的副作用都從這裡取名。`command/Services` 其他檔案不得另寫
+/// 集合外的 `.lq.` 字面值或 `LiqiRequestBuilder` 方法常數（JSContractTests 反查，inject-receive 第三輪第 1 條、第四輪第 4 條）；
+/// 新增常數必須併進 `consumed` 或 `all`。
 /// 插件的 respondLocally 禁用名單必須涵蓋 `all`，變長改寫禁改名單必須涵蓋 `consumed`。
 nonisolated enum LiqiSideEffectMethods {
     /// 送出方向：遊戲自己的段位場請求（學 match_sid；它的錯誤回應也會取消等待）
